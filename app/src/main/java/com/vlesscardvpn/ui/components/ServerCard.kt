@@ -1,15 +1,29 @@
 package com.vlesscardvpn.ui.components
 
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Security
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.vlesscardvpn.domain.VlessConfig
+import com.vlesscardvpn.ui.theme.*
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ServerCard(
     config: VlessConfig,
@@ -18,87 +32,184 @@ fun ServerCard(
     onDelete: (VlessConfig) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val borderColor = if (config.isActive) NeonCyan else Color(0xFF2A2E3F)
+    val cardBackground = if (config.isActive) Color(0xFF1E2438) else DarkSurface
+
     Card(
         modifier = modifier
             .fillMaxWidth()
-            .padding(8.dp),
-        elevation = CardDefaults.cardElevation(4.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = if (config.isActive) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface
-        )
+            .padding(vertical = 6.dp),
+        shape = RoundedCornerShape(16.dp),
+        border = BorderStroke(1.5.dp, borderColor),
+        colors = CardDefaults.cardColors(containerColor = cardBackground),
+        elevation = CardDefaults.cardElevation(defaultElevation = if (config.isActive) 8.dp else 2.dp)
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp)
+        ) {
+            // Top Row: Status Dot, Name, Badges
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Column(modifier = Modifier.weight(1f)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(10.dp)
+                            .clip(CircleShape)
+                            .background(if (config.isActive) NeonGreen else Color.Gray)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = config.name.ifBlank { config.remark },
+                        text = config.name.ifBlank { "${config.protocolType.uppercase()} Node" },
                         style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Text(
-                        text = "${config.address}:${config.port}",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = Color.Gray
-                    )
-                    Text(
-                        text = "SNI: ${config.sni} • Flow: ${config.flow}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = Color.Gray
+                        fontWeight = FontWeight.Bold,
+                        color = TextPrimary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
-                if (config.pingMs >= 0) {
-                    Text(
-                        text = "${config.pingMs}ms",
-                        color = when {
-                            config.pingMs < 150 -> Color(0xFF4CAF50)
-                            config.pingMs < 400 -> Color(0xFFFFC107)
-                            else -> Color(0xFFF44336)
-                        },
-                        style = MaterialTheme.typography.labelLarge
-                    )
+
+                // Badges: Protocol & Masking
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Surface(
+                        color = NeonPurple.copy(alpha = 0.2f),
+                        shape = RoundedCornerShape(6.dp),
+                        border = BorderStroke(1.dp, NeonPurple.copy(alpha = 0.5f))
+                    ) {
+                        Text(
+                            text = config.protocolType.uppercase(),
+                            color = NeonPurple,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        )
+                    }
+
+                    if (config.sni.contains("yandex", ignoreCase = true) || config.sni.contains("vk", ignoreCase = true)) {
+                        Surface(
+                            color = NeonAmber.copy(alpha = 0.2f),
+                            shape = RoundedCornerShape(6.dp),
+                            border = BorderStroke(1.dp, NeonAmber.copy(alpha = 0.5f))
+                        ) {
+                            Text(
+                                text = "🛡 MASK",
+                                color = NeonAmber,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
                 }
             }
 
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(8.dp))
 
+            // Address & SNI row
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Button(
-                    onClick = { onConnect(config) },
-                    modifier = Modifier.weight(1f),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = if (config.isActive) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
-                    )
-                ) {
-                    Text(if (config.isActive) "Disconnect" else "Connect")
-                }
-
-                OutlinedButton(
-                    onClick = { onPing(config) },
+                Text(
+                    text = "${config.address}:${config.port}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TextSecondary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f)
-                ) {
-                    Text("Ping")
+                )
+                Text(
+                    text = "SNI: ${config.sni}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = NeonCyan.copy(alpha = 0.8f),
+                    maxLines = 1
+                )
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+            Divider(color = Color(0xFF262B3D), thickness = 1.dp)
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Action Row: Ping indicator, Ping button, Delete button, Connect Toggle
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                // Ping Display Badge
+                val (pingColor, pingText) = when {
+                    config.pingMs in 1..100 -> Pair(NeonGreen, "${config.pingMs} ms")
+                    config.pingMs in 101..300 -> Pair(NeonAmber, "${config.pingMs} ms")
+                    config.pingMs > 300 -> Pair(NeonRed, "${config.pingMs} ms")
+                    config.pingMs == 0 -> Pair(Color.Gray, "testing...")
+                    else -> Pair(Color.Gray, "No ping")
                 }
 
-                if (config.isFree) {
+                Surface(
+                    color = pingColor.copy(alpha = 0.15f),
+                    shape = RoundedCornerShape(8.dp),
+                    border = BorderStroke(1.dp, pingColor.copy(alpha = 0.4f))
+                ) {
                     Text(
-                        "FREE",
-                        modifier = Modifier.align(Alignment.CenterVertically),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = Color(0xFF4CAF50)
+                        text = "● $pingText",
+                        color = pingColor,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                     )
                 }
 
-                OutlinedButton(
-                    onClick = { onDelete(config) }
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    Text("×")
+                    IconButton(
+                        onClick = { onPing(config) },
+                        modifier = Modifier.size(36.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.Refresh,
+                            contentDescription = "Test Ping",
+                            tint = TextSecondary,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+
+                    IconButton(
+                        onClick = { onDelete(config) },
+                        modifier = Modifier.size(36.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.Delete,
+                            contentDescription = "Delete",
+                            tint = NeonRed.copy(alpha = 0.7f),
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+
+                    Button(
+                        onClick = { onConnect(config) },
+                        shape = RoundedCornerShape(10.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (config.isActive) NeonRed else NeonCyan,
+                            contentColor = if (config.isActive) Color.White else Color(0xFF0F1117)
+                        ),
+                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
+                        modifier = Modifier.height(36.dp)
+                    ) {
+                        Text(
+                            text = if (config.isActive) "Disconnect" else "Connect",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
                 }
             }
         }

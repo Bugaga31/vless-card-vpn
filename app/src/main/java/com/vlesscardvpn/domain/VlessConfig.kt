@@ -6,22 +6,30 @@ data class VlessConfig(
     val address: String,
     val port: Int,
     val uuid: String,
+    val protocolType: String = "vless", // vless, vmess, trojan, ss
     val flow: String = "xtls-rprx-vision",
     val security: String = "reality",
-    val sni: String = "samsung.com",
+    val sni: String = "yandex.ru",
     val fingerprint: String = "chrome",
     val publicKey: String = "",
     val shortId: String = "",
     val remark: String = "",
     val isActive: Boolean = false,
     val pingMs: Int = -1,
-    val isFree: Boolean = false
+    val isFree: Boolean = false,
+    val country: String = "Unknown",
+    val addedAt: Long = System.currentTimeMillis()
 )
 
-object SampleConfigs {
-    val freeExamples = listOf(
-        "vless://11111111-1111-1111-1111-111111111111@free1.example.com:443?type=tcp&security=reality&pbk=publickey1&fp=chrome&sni=yandex.ru&sid=123456&spx=%2F&flow=xtls-rprx-vision#Free-Reality-1",
-        "vless://22222222-2222-2222-2222-222222222222@free2.example.net:443?type=tcp&security=reality&pbk=publickey2&fp=chrome&sni=samsung.com&sid=abcdef&spx=%2F&flow=xtls-rprx-vision#Free-Reality-2",
-        "vless://33333333-3333-3333-3333-333333333333@free3.public.org:443?type=tcp&security=reality&pbk=publickey3&fp=chrome&sni=apple.com&sid=7890ab&spx=%2F&flow=xtls-rprx-vision#Free-Reality-3"
+data class AppSettings(
+    val isDarkTheme: Boolean = true,
+    val autoSelectBestPing: Boolean = true,
+    val enableRuDirect: Boolean = true,
+    val customSniOverride: String = "yandex.ru",
+    val autoFetchSources: List<String> = listOf(
+        "https://raw.githubusercontent.com/GoldCaviar/vpn-configs-for-russia/refs/heads/main/Vless-Reality-White-Lists-Rus-Mobile.txt",
+        "https://raw.githubusercontent.com/zieng2/wl/main/vless_universal.txt",
+        "https://raw.githubusercontent.com/kort0881/vpn-vless-configs-russia/main/configs/vless_reality.txt",
+        "https://raw.githubusercontent.com/ebrasha/free-v2ray-public-list/main/all_configs.txt"
     )
-}
+)
