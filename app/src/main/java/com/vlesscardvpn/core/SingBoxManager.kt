@@ -35,7 +35,7 @@ object SingBoxManager {
         config: VlessConfig,
         settings: AppSettings = AppSettings()
     ): String {
-        // SNI / Masking logic: If user enabled custom masking, use it, otherwise use config SNI or smart network SNI
+        // Effective SNI: user custom override -> config SNI -> smart network detection
         val effectiveSni = when {
             settings.customSniOverride.isNotBlank() && settings.customSniOverride != "auto" -> settings.customSniOverride
             config.sni.isNotBlank() && config.sni != "samsung.com" && config.sni != "yandex.ru" -> config.sni
@@ -51,13 +51,20 @@ object SingBoxManager {
         }
 
         val rulesArray = JSONArray().apply {
-            // DNS hijack
+            // 1. DNS Hijacking
             put(JSONObject().apply {
                 put("protocol", "dns")
                 put("outbound", "dns-out")
             })
 
-            // RU Direct Routing (if enabled)
+            // 2. Fix YouTube buffering & throttling: Block QUIC (UDP 443) to force fast TCP/TLS stream
+            put(JSONObject().apply {
+                put("port", JSONArray(listOf(443, 80)))
+                put("network", "udp")
+                put("outbound", "block")
+            })
+
+            // 3. RU Direct Routing (Split Tunneling if enabled)
             if (settings.enableRuDirect) {
                 put(JSONObject().apply {
                     put("outbound", "direct")
@@ -69,7 +76,7 @@ object SingBoxManager {
                 })
             }
 
-            // Ads blocking
+            // 4. Block telemetry and ads
             put(JSONObject().apply {
                 put("outbound", "block")
                 put("domain", JSONArray(listOf("geosite:category-ads-all")))
@@ -117,7 +124,8 @@ object SingBoxManager {
                 put("tag", "tun-in")
                 put("interface_name", "tun0")
                 put("inet4_address", "172.19.0.1/30")
-                put("mtu", 9000)
+                // Optimal MTU 1400 prevents packet loss & fragmentation on LTE/Wi-Fi video streaming
+                put("mtu", 1400)
                 put("auto_route", true)
                 put("strict_route", true)
                 put("stack", "system")
@@ -153,7 +161,7 @@ object SingBoxManager {
             put("server", config.address)
             put("server_port", config.port)
             put("uuid", config.uuid)
-            put("flow", config.flow)
+            put("flow", config.flow.ifBlank { "xtls-rprx-vision" })
             put("tls", JSONObject().apply {
                 put("enabled", true)
                 put("server_name", effectiveSni)
@@ -165,7 +173,7 @@ object SingBoxManager {
                 if (config.security == "reality") {
                     put("reality", JSONObject().apply {
                         put("enabled", true)
-                        put("public_key", config.publicKey.ifBlank { "k8b3h..." })
+                        put("public_key", config.publicKey.ifBlank { "" })
                         put("short_id", config.shortId.ifBlank { "" })
                     })
                 }

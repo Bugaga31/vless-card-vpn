@@ -9,7 +9,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -18,8 +18,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.vlesscardvpn.domain.PingTester
 import com.vlesscardvpn.domain.VlessConfig
 import com.vlesscardvpn.ui.theme.*
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -31,7 +33,10 @@ fun ServerCard(
     modifier: Modifier = Modifier
 ) {
     val borderColor = if (config.isActive) NeonCyan else Color(0xFF2A2E3F)
-    val cardBackground = if (config.isActive) Color(0xFF1E2438) else DarkSurface
+    val cardBackground = if (config.isActive) Color(0xFF161B2E) else DarkSurface
+    val scope = rememberCoroutineScope()
+    var chainStatus by remember { mutableStateOf<String?>(null) }
+    var isCheckingChain by remember { mutableStateOf(false) }
 
     Card(
         modifier = modifier
@@ -129,6 +134,40 @@ fun ServerCard(
                     color = NeonCyan.copy(alpha = 0.8f),
                     maxLines = 1
                 )
+            }
+
+            // If active or tested, show chain validation info
+            if (config.isActive || chainStatus != null) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Color(0xFF0F1424), RoundedCornerShape(8.dp))
+                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = if (isCheckingChain) "⚡ Проверка цепочки..." else (chainStatus ?: "⚡ Готово к тесту 204"),
+                        fontSize = 11.sp,
+                        color = if (chainStatus?.contains("FAIL") == true) NeonRed else NeonGreen,
+                        fontWeight = FontWeight.Medium
+                    )
+
+                    TextButton(
+                        onClick = {
+                            isCheckingChain = true
+                            scope.launch {
+                                val (ok, latency) = PingTester.verifyEndToEndConnection()
+                                chainStatus = if (ok) "✅ Сквозная цепочка OK (${latency}ms)" else "❌ Ошибка соединения"
+                                isCheckingChain = false
+                            }
+                        },
+                        contentPadding = PaddingValues(0.dp)
+                    ) {
+                        Text("Тест 204", fontSize = 11.sp, color = NeonCyan)
+                    }
+                }
             }
 
             Spacer(modifier = Modifier.height(12.dp))
