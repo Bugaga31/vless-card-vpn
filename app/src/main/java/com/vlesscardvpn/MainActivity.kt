@@ -58,6 +58,7 @@ fun VlessCardVpnApp() {
         }
         composable("free_configs") {
             FreeConfigsScreen(
+                repo = repo,
                 onBack = { navController.popBackStack() }
             )
         }
