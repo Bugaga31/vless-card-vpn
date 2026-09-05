@@ -31,11 +31,13 @@ object NetworkMonitor {
                 operatorName = tm.networkOperatorName ?: "Unknown"
                 networkType = when (tm.networkType) {
                     TelephonyManager.NETWORK_TYPE_LTE -> "LTE"
-                    TelephonyManager.NETWORK_TYPE_5G -> "5G"
+                    TelephonyManager.NETWORK_TYPE_NR -> "5G"
                     else -> "Mobile"
                 }
             } catch (_: SecurityException) {
                 // Permission not granted
+            } catch (_: Exception) {
+                // Ignore
             }
         }
 
@@ -44,7 +46,6 @@ object NetworkMonitor {
 
     fun getSniForNetwork(context: Context): String {
         val info = getCurrentNetworkInfo(context)
-        // Network-aware SNI masking: mobile -> yandex.ru else samsung.com
         return if (info.isMobile) "yandex.ru" else "samsung.com"
     }
 }

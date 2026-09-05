@@ -47,52 +47,62 @@ object SingBoxManager {
             })
         }
 
-        val route = JSONObject().apply {
-            put("rules", JSONArray().apply {
-                add(JSONObject().apply {
-                    put("outbound", "direct")
-                    put("domain", JSONArray(splitRules))
-                })
-                add(JSONObject().apply {
-                    put("outbound", "proxy")
-                    put("domain", JSONArray(listOf("geosite:category-ads-all")))
-                    put("invert", true)
-                })
+        val rulesArray = JSONArray().apply {
+            put(JSONObject().apply {
+                put("outbound", "direct")
+                put("domain", JSONArray(splitRules))
             })
+            put(JSONObject().apply {
+                put("outbound", "proxy")
+                put("domain", JSONArray(listOf("geosite:category-ads-all")))
+                put("invert", true)
+            })
+        }
+
+        val route = JSONObject().apply {
+            put("rules", rulesArray)
             put("final", "proxy")
         }
 
+        val dnsServersArray = JSONArray().apply {
+            put(JSONObject().apply { put("address", "1.1.1.1"); put("tag", "remote") })
+            put(JSONObject().apply { put("address", "8.8.8.8"); put("tag", "local") })
+        }
+
+        val dnsRulesArray = JSONArray().apply {
+            put(JSONObject().apply { put("outbound", "direct"); put("server", "local") })
+        }
+
         val dns = JSONObject().apply {
-            put("servers", JSONArray().apply {
-                add(JSONObject().apply { put("address", "1.1.1.1"); put("tag", "remote") })
-                add(JSONObject().apply { put("address", "8.8.8.8"); put("tag", "local") })
-            })
-            put("rules", JSONArray().apply {
-                add(JSONObject().apply { put("outbound", "direct"); put("server", "local") })
-            })
+            put("servers", dnsServersArray)
+            put("rules", dnsRulesArray)
             put("final", "remote")
+        }
+
+        val inboundsArray = JSONArray().apply {
+            put(JSONObject().apply {
+                put("type", "tun")
+                put("tag", "tun-in")
+                put("interface_name", "tun0")
+                put("inet4_address", "172.19.0.1/30")
+                put("mtu", 9000)
+                put("auto_route", true)
+                put("strict_route", true)
+                put("stack", "system")
+                put("sniff", true)
+            })
+        }
+
+        val outboundsArray = JSONArray().apply {
+            put(outbound)
+            put(JSONObject().apply { put("type", "direct"); put("tag", "direct") })
+            put(JSONObject().apply { put("type", "block"); put("tag", "block") })
         }
 
         val fullConfig = JSONObject().apply {
             put("log", JSONObject().apply { put("level", "warn") })
-            put("inbounds", JSONArray().apply {
-                add(JSONObject().apply {
-                    put("type", "tun")
-                    put("tag", "tun-in")
-                    put("interface_name", "tun0")
-                    put("inet4_address", "172.19.0.1/30")
-                    put("mtu", 9000)
-                    put("auto_route", true)
-                    put("strict_route", true)
-                    put("stack", "system")
-                    put("sniff", true)
-                })
-            })
-            put("outbounds", JSONArray().apply {
-                add(outbound)
-                add(JSONObject().apply { put("type", "direct"); put("tag", "direct") })
-                add(JSONObject().apply { put("type", "block"); put("tag", "block") })
-            })
+            put("inbounds", inboundsArray)
+            put("outbounds", outboundsArray)
             put("route", route)
             put("dns", dns)
         }
