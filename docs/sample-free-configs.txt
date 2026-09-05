@@ -1,0 +1,20 @@
+# Sample Free / Public VLESS Reality Configs (sanitized examples - 2026 style)
+# These are placeholders. Replace with real active public Reality VLESS from trusted 2026 RU sources.
+# Only use configs you trust. App will validate Reality parameters only.
+
+# Format: one vless:// per line or subscription URLs
+
+# Example subscription URLs (paste these into "Add Free" - find current ones yourself):
+https://raw.githubusercontent.com/example/vpn-configs-for-russia/main/reality-vless.txt
+https://gitlab.com/vpn-configs-for-russia/public-subs/-/raw/main/vless-reality-2026.txt
+
+# Direct example VLESS (sanitized - DO NOT USE directly, for format only):
+vless://a1b2c3d4-e5f6-7890-abcd-ef1234567890@198.51.100.42:443?type=tcp&security=reality&sni=yandex.ru&fp=chrome&pbk=examplePublicKeyHere1234567890abcdef&sid=01&flow=xtls-rprx-vision#RU-Mobile-Free1
+
+vless://b2c3d4e5-f6a7-8901-bcde-f23456789012@203.0.113.55:443?type=tcp&security=reality&sni=music.yandex.ru&fp=chrome&pbk=anotherPublicKeyExample9876543210&sid=02&flow=xtls-rprx-vision#RU-WiFi-Free2
+
+# How to use:
+# 1. Find current public subs from open RU git repos or TG channels (Reality only).
+# 2. Paste subscription URL into "Add Free Configs".
+# 3. Or paste individual vless:// lines.
+# 4. App auto-filters and tests only valid Reality VLESS.

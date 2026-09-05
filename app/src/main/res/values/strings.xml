@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">VLESS Card VPN</string>
+    <string name="server_list">Servers</string>
+    <string name="free_configs">Free Configs</string>
+    <string name="connect">Connect</string>
+    <string name="disconnect">Disconnect</string>
+    <string name="test_ping">Test Ping</string>
+    <string name="import_config">Import</string>
+    <string name="add_free">Add Free Config</string>
+</resources>

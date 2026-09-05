@@ -2,10 +2,6 @@
 
 **VLESS + Reality клиент для Android с карточным интерфейсом**
 
-[![Android](https://img.shields.io/badge/Android-8.0+-green.svg)](https://developer.android.com)
-[![Sing-box](https://img.shields.io/badge/sing--box-Reality-blue.svg)](https://sing-box.sagernet.org)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-
 VLESS Card VPN — современное Android-приложение для обхода DPI с использованием протокола VLESS + Reality. Красивый карточный UI, автоматическое тестирование серверов, умная маршрутизация (российские ресурсы напрямую), адаптивная маскировка под сеть и поддержка бесплатных/публичных VLESS-конфигов.
 
 Приложение полностью открытое, без серверной инфраструктуры, использует стандартный sing-box в качестве ядра.
@@ -30,7 +26,7 @@ VLESS Card VPN — современное Android-приложение для о
 
 Сеть определяется через `ConnectivityManager` + `TelephonyManager` (оператор). SNI можно задать глобально или per-конфиг.
 
-Reality-хендшейк:
+**Reality-хендшейк**:
 1. Клиент отправляет обычный ClientHello с SNI yandex.ru.
 2. Сервер (используя приватный ключ Reality) подписывает временный сертификат.
 3. xtls-rprx-vision убирает второй слой TLS для скорости и меньшего fingerprint.
@@ -85,11 +81,8 @@ sing-box generate rand 8 --hex
 ### 2. Сборка APK
 
 ```bash
-# Клонируйте проект
 git clone <repo>
 cd vless-card-vpn
-
-# В Android Studio или:
 ./gradlew assembleRelease
 ```
 

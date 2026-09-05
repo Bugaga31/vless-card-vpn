@@ -134,6 +134,31 @@ val sni = if (config.sni.isNotBlank()) config.sni
 
 Per-config SNI override supported. Stored in DataStore. Improves success rate on mobile vs Wi-Fi.
 
+## Easy Adding Free/Public VLESS Configs
+
+New flow for importing curated public Reality VLESS subscriptions (2026 RU sources).
+
+**UI flow**:
+1. Top bar button "Add Free" opens `FreeConfigsDialog` or navigates to `FreeConfigImportScreen`.
+2. Shows curated list of known public subscription URLs (user pastes from gitlab vpn-configs-for-russia or TG channels).
+3. "Fetch & Import" downloads, base64-decodes, filters ONLY Reality VLESS URIs (validate security=reality, pbk, sid, flow=xtls-rprx-vision).
+4. Auto-run test on each via `PingTester` + TLS handshake.
+5. Add valid ones to DB as `VlessConfig` with remark from #tag.
+
+**Validation in `VlessUriParser.kt` + new `FreeConfigValidator`**:
+```kotlin
+fun isValidRealityVless(config: VlessConfig): Boolean =
+    config.security == "reality" &&
+    config.pbk.isNotBlank() &&
+    config.sid.isNotBlank() &&
+    config.flow == "xtls-rprx-vision"
+```
+
+Only Reality VLESS accepted. Non-matching ignored with warning. Subscription URLs stored in settings for refresh.
+
+Example sanitized public subscription (user finds current):
+`https://raw.githubusercontent.com/.../vless-reality-subs.txt`
+
 ## Client Core Choice (sing-box vs Xray)
 
 **Recommended: sing-box (primary)**
@@ -180,12 +205,13 @@ Clean architecture with strict separation.
   - `vpn/SingBoxManager.kt`
   - `import/VlessUriParser.kt`
   - `import/SubscriptionFetcher.kt`
-- `com.vlesscardvpn.worker`
-  - `AutoTestWorker.kt`
-  - `SubscriptionUpdateWorker.kt`
+  - `network/NetworkMonitor.kt`  // new: detects cellular/WiFi + operator for SNI choice
 - `com.vlesscardvpn.util`
   - `PingTester.kt`
   - `GeoAssetManager.kt`
+- `com.vlesscardvpn.worker`
+  - `AutoTestWorker.kt`
+  - `SubscriptionUpdateWorker.kt`
 
 ### Key Classes
 - `VlessConfig` (domain): Holds uuid, address, port=443, pbk, sid, sni="yandex.ru", fp="chrome", flow="xtls-rprx-vision", remark, id (Room PK).
@@ -339,6 +365,7 @@ fun ServerListScreen(viewModel: ServerListViewModel) {
             TopAppBar(
                 title = { Text("Servers") },
                 actions = {
+                    IconButton(onClick = { viewModel.addFreeConfigs() }) { Icon(Icons.Default.Public, "Add Free") }
                     IconButton(onClick = { /* import */ }) { Icon(Icons.Default.Add, "Add") }
                     IconButton(onClick = { viewModel.updateSubscriptions() }) { Icon(Icons.Default.Refresh, "Subs") }
                     IconButton(onClick = { viewModel.autoTestAll() }) { Icon(Icons.Default.Speed, "Test All") }
@@ -543,7 +570,22 @@ Include `proguard-rules.pro` to keep sing-box classes.
 
 ## Security & Masking Considerations 2026
 
-- **Masking**: Reality + xtls-rprx-vision + chrome fingerprint makes outbound TLS identical to real yandex.ru browser session (TLS 1.3, X25519, H2). DPI sees only yandex.ru handshake.
+### Reality Handshake Details
+
+- Client initiates standard TLS 1.3 ClientHello with chosen SNI (yandex.ru etc.).
+- Server uses its private key (`privateKey`) to sign a temporary certificate for the SNI domain on-the-fly.
+- Client verifies using the corresponding `publicKey` (pbk param).
+- xtls-rprx-vision flow removes the second TLS layer (no extra inner TLS after outer Reality handshake) → reduces overhead, lowers fingerprint, improves speed.
+- Result: DPI sees a completely ordinary HTTPS connection to yandex.ru:443 (or music.yandex.ru). No proxy markers, no extra layers.
+
+### Why it looks like real Yandex HTTPS
+- uTLS chrome fingerprint: exact TLS extensions, cipher suites, ALPN and HTTP/2 settings matching real Chrome on desktop.
+- shortId (sid): small random hex (2-8 bytes) used as additional Reality identifier.
+- pbk: server's public key from `sing-box generate reality-keypair`.
+- Full TLS 1.3 + X25519 + HTTP/2 mimicry.
+- No certificate sent from client; server proves ownership of domain via private key.
+
+### Additional Protections
 - Server target must be reachable with low latency (VPS in EU).
 - Client never sends real certificate; Reality uses server-side private key verification.
 - Use strong random UUID + short_id.
@@ -552,9 +594,15 @@ Include `proguard-rules.pro` to keep sing-box classes.
 - Kill switch: When proxy selected, block non-direct until connected.
 - Update sing-box regularly.
 
+### Network-specific Masking
+- Mobile operators (MTS, Beeline, Tele2, Megafon) often have stricter DPI → prefer yandex.ru / music.yandex.ru.
+- WiFi providers may fingerprint differently → samsung.com or similar popular domains work better.
+- Dynamic choice via NetworkMonitor + TelephonyManager operator name reduces block rate significantly.
+
 ## Risks & Mitigations
 
 - **DPI evolution**: Mitigate by rotating SNI (yandex.ru / music.yandex.ru / samsung.com) in settings + periodic server IP rotation.
+- **Network-specific blocking**: Mobile (MTS/Beeline/Tele2/Megafon) vs WiFi have different DPI fingerprints. Use NetworkMonitor.kt for dynamic SNI choice (yandex on mobile, samsung on WiFi); fallback to manual per-config override.
 - **Reality key compromise**: Rotate keys every 60-90 days. Store only in memory during runtime.
 - **All servers dead**: Auto-fallback to direct + user alert. Never force proxy if tests fail.
 - **Subscription poisoning**: Validate every imported URI strictly (only vless:// scheme, required Reality fields present).
