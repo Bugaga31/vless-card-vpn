@@ -88,6 +88,52 @@ Restart sing-box service. Verify with `curl -v --resolve yandex.ru:443:YOUR_VPS_
 
 Alternative SNI options (RU-friendly): `music.yandex.ru`, `samsung.com` (if reachable).
 
+## Network-aware Masking
+
+Detects current network type and chooses optimal SNI automatically for best DPI bypass on Russian networks (2026).
+
+**Network detection** (`NetworkMonitor.kt`):
+```kotlin
+class NetworkMonitor(private val context: Context) {
+    fun getNetworkType(): NetworkType {
+        val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        val network = cm.activeNetwork ?: return NetworkType.UNKNOWN
+        val caps = cm.getNetworkCapabilities(network) ?: return NetworkType.UNKNOWN
+        
+        return when {
+            caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> {
+                val tm = context.getSystemService(Context.TELEPHONY_SERVICE) as TelephonyManager
+                val operator = tm.networkOperatorName.lowercase()
+                when {
+                    listOf("mts", "megafon").any { it in operator } -> NetworkType.MOBILE_MTS_MEGAFON
+                    listOf("beeline", "tele2").any { it in operator } -> NetworkType.MOBILE_BEELINE_TELE2
+                    else -> NetworkType.MOBILE_GENERIC
+                }
+            }
+            caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> NetworkType.WIFI
+            else -> NetworkType.UNKNOWN
+        }
+    }
+
+    fun getRecommendedSNI(type: NetworkType): String = when (type) {
+        NetworkType.MOBILE_MTS_MEGAFON, NetworkType.MOBILE_BEELINE_TELE2, NetworkType.MOBILE_GENERIC -> "yandex.ru" // or "music.yandex.ru"
+        NetworkType.WIFI -> "samsung.com"
+        else -> "yandex.ru"
+    }
+}
+```
+
+**Usage in `SingBoxManager.generateConfig`**:
+```kotlin
+val monitor = NetworkMonitor(appContext)
+val sni = if (config.sni.isNotBlank()) config.sni 
+          else monitor.getRecommendedSNI(monitor.getNetworkType())
+// set in tls.server_name + reality.handshake.server
+// also pass sni to VlessConfig for per-config override
+```
+
+Per-config SNI override supported. Stored in DataStore. Improves success rate on mobile vs Wi-Fi.
+
 ## Client Core Choice (sing-box vs Xray)
 
 **Recommended: sing-box (primary)**
