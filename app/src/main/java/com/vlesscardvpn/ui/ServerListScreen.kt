@@ -7,7 +7,9 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -27,7 +29,6 @@ import com.vlesscardvpn.util.UniversalConfigParser
 import com.vlesscardvpn.worker.VlessVpnService
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -94,7 +95,7 @@ fun ServerListScreen(
                             }
                         }
                     ) {
-                        Icon(Icons.Default.Speed, contentDescription = "Test All Pings", tint = NeonGreen)
+                        Icon(Icons.Default.Refresh, contentDescription = "Test All Pings", tint = NeonGreen)
                     }
 
                     // Settings
@@ -211,9 +212,9 @@ fun ServerListScreen(
                         .padding(16.dp),
                     contentAlignment = Alignment.Center
                 ) {
-                    Column(horizontalAlignment = Alignment.CenterVertically) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Icon(
-                            Icons.Default.CloudDownload,
+                            Icons.Default.Refresh,
                             contentDescription = null,
                             tint = TextSecondary,
                             modifier = Modifier.size(48.dp)

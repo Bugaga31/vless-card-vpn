@@ -8,23 +8,26 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.vlesscardvpn.data.InMemoryConfigRepo
-import com.vlesscardvpn.domain.SampleConfigs
+import com.vlesscardvpn.data.PublicConfigFetcher
 import com.vlesscardvpn.domain.VlessConfig
-import com.vlesscardvpn.util.VlessUriParser
+import com.vlesscardvpn.ui.theme.DarkBackground
+import com.vlesscardvpn.ui.theme.TextPrimary
+import com.vlesscardvpn.util.UniversalConfigParser
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun FreeConfigsScreen(
-    repo: InMemoryConfigRepo = remember { InMemoryConfigRepo() },
+    repo: InMemoryConfigRepo,
     onBack: () -> Unit = {}
 ) {
-    val freeUris = remember { SampleConfigs.freeExamples }
+    val freeSources = remember { PublicConfigFetcher.DEFAULT_SOURCES }
     var selected by remember { mutableStateOf("") }
 
     Scaffold(
+        containerColor = DarkBackground,
         topBar = {
             TopAppBar(
-                title = { Text("Free Reality Configs") },
+                title = { Text("Public Node Sources", color = TextPrimary) },
                 navigationIcon = {
                     TextButton(onClick = onBack) { Text("Back") }
                 }
@@ -33,52 +36,47 @@ fun FreeConfigsScreen(
     ) { padding ->
         Column(modifier = Modifier.padding(padding).padding(16.dp)) {
             Text(
-                "Add from example public Reality subs (change as needed):",
-                style = MaterialTheme.typography.bodyMedium
+                "Config sources automatically scanned by Auto-Parse:",
+                style = MaterialTheme.typography.bodyMedium,
+                color = TextPrimary
             )
             Spacer(Modifier.height(16.dp))
 
-            LazyColumn {
-                items(freeUris) { uri ->
+            LazyColumn(modifier = Modifier.weight(1f, fill = false)) {
+                items(freeSources) { sourceUrl ->
                     Card(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(vertical = 4.dp)
                     ) {
                         Column(Modifier.padding(12.dp)) {
-                            Text(uri.take(80) + "...", style = MaterialTheme.typography.bodySmall)
-                            Spacer(Modifier.height(8.dp))
-                            Button(onClick = {
-                                val parsed = VlessUriParser.parse(uri)
-                                if (parsed != null) {
-                                    repo.addConfig(parsed.copy(isFree = true, name = "Free: ${parsed.name}"))
-                                }
-                            }) {
-                                Text("Add to Servers")
-                            }
+                            Text(sourceUrl, style = MaterialTheme.typography.bodySmall)
                         }
                     }
                 }
             }
 
-            Spacer(Modifier.height(24.dp))
+            Spacer(Modifier.height(16.dp))
             OutlinedTextField(
                 value = selected,
                 onValueChange = { selected = it },
-                label = { Text("Or paste custom free VLESS") },
+                label = { Text("Custom source link or VLESS URI") },
                 modifier = Modifier.fillMaxWidth()
             )
+            Spacer(Modifier.height(8.dp))
             Button(
                 onClick = {
                     if (selected.isNotBlank()) {
-                        val p = VlessUriParser.parse(selected)
-                        if (p != null) repo.addConfig(p.copy(isFree = true))
+                        val parsed = UniversalConfigParser.parseAny(selected)
+                        if (parsed.isNotEmpty()) {
+                            repo.addConfigs(parsed)
+                        }
                         selected = ""
                     }
                 },
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Text("Add Custom Free")
+                Text("Add Custom")
             }
         }
     }
