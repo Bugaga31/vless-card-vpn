@@ -28,6 +28,20 @@ class AutoPilotEngine(
     private val database: AppDatabase
 ) {
     private val prefs: SharedPreferences = context.getSharedPreferences("autopilot_memory_prefs", Context.MODE_PRIVATE)
+    private val settingsPrefs = context.getSharedPreferences("vless_vpn_prefs", Context.MODE_PRIVATE)
+    private val lifecycleLock = Any()
+
+    private fun readPolicy() = AutoPilotPolicy(
+        enabled = settingsPrefs.getBoolean("autoSelect", false),
+        consentGiven = prefs.getBoolean("autopilot_consent", false) &&
+            settingsPrefs.getBoolean("autopilotConsentGiven", false),
+        failoverEnabled = settingsPrefs.getBoolean("failoverEnabled", true),
+        favoritesOnly = settingsPrefs.getBoolean("autopilotAllowedOnlyFavorites", false)
+    )
+
+    private fun cycleAllowed(seq: Long): Boolean =
+        seq == engineSessionSequence.get() && _state.value.isEnabled && readPolicy().canMonitor
+
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private val engineMutex = Mutex()
     private val engineSessionSequence = AtomicLong(0L)
@@ -55,9 +69,16 @@ class AutoPilotEngine(
     fun setConsent(given: Boolean) {
         prefs.edit().putBoolean("autopilot_consent", given).apply()
         _state.value = _state.value.copy(consentGiven = given)
+        if (!given) stopAutoPilot()
     }
 
-    fun startAutoPilot(intervalSeconds: Int = 30) {
+    fun startAutoPilot(intervalSeconds: Int = 30) = synchronized(lifecycleLock) {
+        if (!readPolicy().canMonitor) {
+            stopAutoPilot()
+            addLog("Автопилот не запущен: требуется включение и согласие на проверки")
+            return@synchronized
+        }
+        val safeInterval = intervalSeconds.coerceIn(10, 3600)
         prefs.edit().putBoolean("autopilot_enabled", true).apply()
         val seq = engineSessionSequence.incrementAndGet()
 
@@ -65,9 +86,9 @@ class AutoPilotEngine(
             isEnabled = true,
             status = AutopilotStateStatus.CHECKING,
             currentStep = PipelineStep.NETWORK,
-            lastChangeExplanation = "Автопилот активирован. Запуск цикла мониторинга (${intervalSeconds}с)"
+            lastChangeExplanation = "Автопилот активирован. Запуск цикла мониторинга (${safeInterval}с)"
         )
-        addLog("Автопилот сети запущен. Интервал проверки: ${intervalSeconds}с")
+        addLog("Автопилот сети запущен. Интервал проверки: ${safeInterval}с")
 
         loopJob?.cancel()
         loopJob = scope.launch {
@@ -79,12 +100,12 @@ class AutoPilotEngine(
                 } catch (e: Exception) {
                     Log.e("AutoPilotEngine", "Autopilot cycle error", e)
                 }
-                delay(intervalSeconds * 1000L)
+                delay(safeInterval * 1000L)
             }
         }
     }
 
-    fun stopAutoPilot() {
+    fun stopAutoPilot() = synchronized(lifecycleLock) {
         prefs.edit().putBoolean("autopilot_enabled", false).apply()
         engineSessionSequence.incrementAndGet()
         loopJob?.cancel()
@@ -162,7 +183,8 @@ class AutoPilotEngine(
      * Main autonomous state evaluation cycle.
      */
     private suspend fun performAutopilotCycle(seq: Long) = engineMutex.withLock {
-        if (!_state.value.isEnabled || seq != engineSessionSequence.get()) return@withLock
+        currentCoroutineContext().ensureActive()
+        if (!cycleAllowed(seq)) return@withLock
         _state.value = _state.value.copy(isBusy = true)
 
         val vpnState = VlessVpnService.vpnStats.value
@@ -235,6 +257,14 @@ class AutoPilotEngine(
 
         val currentConfig = vpnState.activeConfig ?: dao.getActiveConfig()?.toDomain()
         val (isWorking, latencyMs) = PingTester.verifyEndToEndConnection(timeoutMs = 3500)
+
+        currentCoroutineContext().ensureActive()
+        val latestVpn = VlessVpnService.vpnStats.value
+        if (!cycleAllowed(seq) || !AutoPilotPolicy.sameConnection(
+                vpnState.activeConfig?.id, vpnState.connectedSinceTimestamp,
+                latestVpn.activeConfig?.id, latestVpn.connectedSinceTimestamp,
+                latestVpn.status == VpnStatus.CONNECTED
+            )) return@withLock
 
         val newTotalProbes = _state.value.probeCountTotal + 1
         val newSuccessProbes = if (isWorking) _state.value.probeCountSuccess + 1 else _state.value.probeCountSuccess
@@ -311,7 +341,7 @@ class AutoPilotEngine(
 
             if (failures >= 3) {
                 // 3 consecutive failures -> Initiate disciplined adaptation/failover
-                handleFailoverSequence(allConfigs, currentConfig)
+                handleFailoverSequence(allConfigs, currentConfig, seq, vpnState.connectedSinceTimestamp)
             } else {
                 _state.value = _state.value.copy(
                     status = AutopilotStateStatus.STABLE,
@@ -322,67 +352,90 @@ class AutoPilotEngine(
         }
     }
 
-    /**
-     * Changes ONE parameter at a time or safely switches to the fastest permitted backup server.
-     */
+    /** Select only permitted backups; recheck policy and session before dispatch. */
     private suspend fun handleFailoverSequence(
         allConfigs: List<VlessConfig>,
-        failedConfig: VlessConfig?
+        failedConfig: VlessConfig?,
+        seq: Long,
+        connectedSince: Long
     ) {
-        _state.value = _state.value.copy(
-            status = AutopilotStateStatus.ADAPTING,
-            lastChangeExplanation = "3 сбоя подряд. Подбор совместимых параметров или резервного узла..."
-        )
-        addLog("Запуск восстановления: поиск резервного узла")
-
-        // Filter permitted candidates (favorites if user preference enabled)
-        val candidates = allConfigs.filter { it.id != failedConfig?.id }
-        var bestCandidate: VlessConfig? = null
-        var bestPing = Int.MAX_VALUE
-
-        for (candidate in candidates.take(10)) {
-            val breakdown = PingTester.testDetailedLatency(candidate, timeoutMs = 2000)
-            if (breakdown.success) {
-                val ping = if (breakdown.tlsMs > 0) breakdown.tlsMs else breakdown.tcpMs
-                if (ping in 1 until bestPing) {
-                    bestPing = ping
-                    bestCandidate = candidate.copy(
-                        pingMs = ping,
-                        tcpLatencyMs = breakdown.tcpMs,
-                        tlsLatencyMs = breakdown.tlsMs,
-                        healthState = "HEALTHY"
-                    )
-                }
+        fun allowed(): Boolean {
+            val current = VlessVpnService.vpnStats.value
+            return cycleAllowed(seq) && readPolicy().canFailover && AutoPilotPolicy.sameConnection(
+                failedConfig?.id, connectedSince,
+                current.activeConfig?.id, current.connectedSinceTimestamp,
+                current.status == VpnStatus.CONNECTED
+            )
+        }
+        fun pause(message: String) {
+            if (seq == engineSessionSequence.get() && _state.value.isEnabled) {
+                _state.value = _state.value.copy(
+                    status = AutopilotStateStatus.NEEDS_HELP, isBusy = false,
+                    lastChangeExplanation = message
+                )
+                addLog(message)
             }
         }
-
-        if (bestCandidate != null) {
-            val reconnects = _state.value.reconnectCount + 1
-            addLog("Выбран резервный узел: ${bestCandidate.name} (${bestPing} мс)")
-            database.vlessConfigDao().update(bestCandidate.toEntity())
-            database.vlessConfigDao().setActive(bestCandidate.id)
-
-            _state.value = _state.value.copy(
-                status = AutopilotStateStatus.RECOVERING,
-                activeConfig = bestCandidate,
-                consecutiveFailures = 0,
-                reconnectCount = reconnects,
-                isBusy = false,
-                lastSelectionReason = "Резервный узел ${bestCandidate.name} ($bestPing мс)",
-                lastChangeExplanation = "Предыдущий узел не отвечал. Автопилот переключил на резервный сервер."
-            )
-
-            VlessVpnService.startVpn(context, bestCandidate)
-        } else {
-            // All candidates unresponsive
-            _state.value = _state.value.copy(
-                status = AutopilotStateStatus.NEEDS_HELP,
-                failureCause = FailureCause.PROXY_HANDSHAKE_TIMEOUT,
-                isBusy = false,
-                lastChangeExplanation = "Все доступные серверы не ответили на проверочный запрос. Требуется ручная проверка."
-            )
-            addLog("Внимание: Ни один резервный узел не ответил. Перебор остановлен.")
+        if (!allowed()) {
+            pause("Автоматическое переключение запрещено настройками или сессия изменилась")
+            return
         }
+        _state.value = _state.value.copy(
+            status = AutopilotStateStatus.ADAPTING,
+            lastChangeExplanation = "Проверяем разрешённые резервные серверы"
+        )
+        // Apply the permission filter BEFORE the scan limit.
+        val candidates = allConfigs.filter { readPolicy().permits(it, failedConfig?.id) }.take(10)
+        val reachable = mutableListOf<Pair<VlessConfig, LatencyBreakdown>>()
+        for (candidate in candidates) {
+            currentCoroutineContext().ensureActive()
+            if (!allowed()) { pause("Подбор остановлен: разрешения или сессия изменились"); return }
+            // Favorites can change while a preceding probe is running.
+            val fresh = database.vlessConfigDao().getById(candidate.id)?.toDomain() ?: continue
+            if (!readPolicy().permits(fresh, failedConfig?.id)) continue
+            val result = PingTester.testDetailedLatency(fresh, timeoutMs = 2000)
+            currentCoroutineContext().ensureActive()
+            if (result.success) reachable += fresh to result
+        }
+        val ranked = reachable.sortedBy { (_, result) ->
+            if (result.tlsMs > 0) result.tlsMs else result.tcpMs
+        }
+        for ((candidate, result) in ranked) {
+            currentCoroutineContext().ensureActive()
+            val fresh = database.vlessConfigDao().getById(candidate.id)?.toDomain() ?: continue
+            if (!readPolicy().permits(fresh, failedConfig?.id)) continue
+            // Discard a latency result if connection parameters changed during the probe.
+            if (fresh.address != candidate.address || fresh.port != candidate.port ||
+                fresh.uuid != candidate.uuid || fresh.security != candidate.security ||
+                fresh.protocolType != candidate.protocolType || fresh.sni != candidate.sni ||
+                fresh.publicKey != candidate.publicKey || fresh.shortId != candidate.shortId ||
+                fresh.flow != candidate.flow || fresh.fingerprint != candidate.fingerprint) continue
+            val ping = if (result.tlsMs > 0) result.tlsMs else result.tcpMs
+            val target = fresh.copy(pingMs = ping, tcpLatencyMs = result.tcpMs,
+                tlsLatencyMs = result.tlsMs, healthState = "UNKNOWN", httpLatencyMs = -1)
+            val dispatched = withContext(Dispatchers.Main.immediate) {
+                synchronized(lifecycleLock) {
+                    if (!allowed() || !readPolicy().permits(target, failedConfig?.id)) false
+                    else {
+                        VlessVpnService.startVpn(context, target)
+                        _state.value = _state.value.copy(
+                            status = AutopilotStateStatus.RECOVERING,
+                            activeConfig = target, consecutiveFailures = 0,
+                            reconnectCount = _state.value.reconnectCount + 1, isBusy = false,
+                            lastSelectionReason = "Резервный сервер: ${target.name} ($ping мс)",
+                            lastChangeExplanation = "Запрошено подключение. Работа VPN ещё не подтверждена."
+                        )
+                        true
+                    }
+                }
+            }
+            if (!dispatched) { pause("Переключение отменено: разрешения или сессия изменились"); return }
+            // Persist selection only after a connect request was actually sent.
+            database.vlessConfigDao().setActive(target.id)
+            addLog("Запрошен резервный сервер ${target.name}; ожидается проверка туннеля")
+            return
+        }
+        pause("Нет доступных разрешённых резервных серверов. Добавьте сервер или проверьте избранное.")
     }
 
     private fun saveWorkingProfile(profile: SavedWorkingProfile) {
@@ -404,7 +457,9 @@ class AutoPilotEngine(
         _state.value = _state.value.copy(eventLogs = updated)
     }
 
-    fun release() {
+    fun release() = synchronized(lifecycleLock) {
+        engineSessionSequence.incrementAndGet()
+        _state.value = _state.value.copy(isEnabled = false, isBusy = false)
         loopJob?.cancel()
         scope.cancel()
     }

@@ -4,6 +4,9 @@ plugins {
     id("com.google.devtools.ksp")
 }
 
+// Match the existing release workflow's v1.0.<run_number> tag.
+val releaseNumber = providers.environmentVariable("GITHUB_RUN_NUMBER").orNull?.toIntOrNull() ?: 25
+
 android {
     namespace = "com.vlesscardvpn"
     compileSdk = 34
@@ -11,8 +14,8 @@ android {
         applicationId = "com.vlesscardvpn"
         minSdk = 24
         targetSdk = 34
-        versionCode = 23
-        versionName = "1.0.23"
+        versionCode = releaseNumber
+        versionName = "1.0.$releaseNumber"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables { useSupportLibrary = true }
         ndk { abiFilters.addAll(listOf("arm64-v8a", "armeabi-v7a", "x86_64", "x86")) }
@@ -61,4 +64,9 @@ dependencies {
     androidTestImplementation("androidx.compose.ui:ui-test-junit4")
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
+}
+
+// The existing publisher invokes assembleDebug. Fail that command if unit tests fail.
+tasks.matching { it.name == "assembleDebug" }.configureEach {
+    dependsOn("testDebugUnitTest")
 }

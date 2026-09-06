@@ -1,165 +1,140 @@
 package com.vlesscardvpn.ui
 
-import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.vlesscardvpn.data.AppRepository
 import com.vlesscardvpn.data.PublicConfigFetcher
 import com.vlesscardvpn.domain.VlessConfig
-import com.vlesscardvpn.ui.components.ServerCard
-import com.vlesscardvpn.ui.theme.*
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
-/**
- * Precision Free Community Nodes Screen:
- * Fetch & verify public community mirror pools.
- */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun FreeConfigsScreen(
-    repo: AppRepository,
-    onBack: () -> Unit
-) {
-    val context = LocalContext.current
+fun FreeConfigsScreen(repo: AppRepository, onBack: () -> Unit) {
     val scope = rememberCoroutineScope()
-    var isLoading by remember { mutableStateOf(false) }
-    var fetchedConfigs by remember { mutableStateOf<List<VlessConfig>>(emptyList()) }
+    val colors = MaterialTheme.colorScheme
+    val settings by repo.settingsFlow.collectAsState()
+    var loading by remember { mutableStateOf(false) }
+    var saving by remember { mutableStateOf(false) }
+    var searched by remember { mutableStateOf(false) }
+    var consent by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+    var configs by remember { mutableStateOf<List<VlessConfig>>(emptyList()) }
+
+    fun fetch() {
+        if (loading || saving) return
+        loading = true
+        error = null
+        configs = emptyList()
+        scope.launch {
+            try {
+                configs = PublicConfigFetcher.fetchAndFilterWorkingConfigs(
+                    maxWorkingCount = settings.maxFreeNodesToAdd.coerceIn(1, 150)
+                )
+                searched = true
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                error = "Не удалось загрузить список. Проверьте сеть и повторите попытку."
+            } finally {
+                loading = false
+            }
+        }
+    }
+
+    fun save(selected: List<VlessConfig>, activate: Boolean) {
+        if (saving || loading) return
+        saving = true
+        error = null
+        scope.launch {
+            try {
+                repo.addConfigs(selected)
+                if (activate) repo.setActive(selected.first().id)
+                onBack()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                error = "Не удалось завершить сохранение. Часть серверов могла сохраниться — проверьте список."
+            } finally {
+                saving = false
+            }
+        }
+    }
+
+    if (consent) {
+        AlertDialog(
+            onDismissRequest = { consent = false },
+            title = { Text("Загрузить публичные серверы?") },
+            text = { Text("Будут загружены сторонние списки и выполнены подключения к адресам серверов. Источники и серверы увидят адрес, с которого идут запросы. Доступность порта не подтверждает работу VPN или надёжность владельца.") },
+            confirmButton = { TextButton(onClick = { consent = false; fetch() }) { Text("Загрузить") } },
+            dismissButton = { TextButton(onClick = { consent = false }) { Text("Отмена") } }
+        )
+    }
 
     Scaffold(
-        containerColor = MaterialTheme.colorScheme.background,
+        containerColor = colors.background,
         topBar = {
-            TopAppBar(
-                title = {
-                    Text(
-                        text = "Публичные репозитории",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onBackground
-                    )
-                },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.Default.ArrowBack, contentDescription = "Назад", tint = MaterialTheme.colorScheme.onBackground)
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface)
-            )
+            TopAppBar(title = { Text("Серверы сообщества") }, navigationIcon = {
+                IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, contentDescription = "Назад") }
+            }, colors = TopAppBarDefaults.topAppBarColors(containerColor = colors.background))
         }
     ) { padding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .padding(horizontal = InstrumentDimens.space16, vertical = InstrumentDimens.space12),
-            verticalArrangement = Arrangement.spacedBy(InstrumentDimens.space16)
+        LazyColumn(
+            modifier = Modifier.fillMaxSize().padding(padding),
+            contentPadding = PaddingValues(24.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            Surface(
-                shape = RoundedCornerShape(InstrumentDimens.radiusMedium),
-                color = MaterialTheme.colorScheme.surface,
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
-            ) {
-                Column(modifier = Modifier.padding(InstrumentDimens.space16)) {
-                    Text(
-                        text = "Опрос открытых зеркал конфигураций",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onBackground
-                    )
-                    Spacer(modifier = Modifier.height(InstrumentDimens.space4))
-                    Text(
-                        text = "Сканирует репозитории сообщества и проверяет доступность узлов Reality / Vision без гарантий стабильности публичных серверов.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Spacer(modifier = Modifier.height(InstrumentDimens.space12))
-
-                    Row(horizontalArrangement = Arrangement.spacedBy(InstrumentDimens.space8)) {
-                        Button(
-                            onClick = {
-                                isLoading = true
-                                scope.launch {
-                                    val results = PublicConfigFetcher.fetchAndFilterWorkingConfigs()
-                                    fetchedConfigs = results
-                                    isLoading = false
-                                }
-                            },
-                            enabled = !isLoading,
-                            colors = ButtonDefaults.buttonColors(containerColor = SignalOrange)
-                        ) {
-                            if (isLoading) {
-                                CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Color.White, strokeWidth = 2.dp)
-                                Spacer(modifier = Modifier.width(InstrumentDimens.space8))
-                                Text("Проверка пула...")
-                            } else {
-                                Icon(Icons.Default.CloudSync, contentDescription = null)
-                                Spacer(modifier = Modifier.width(InstrumentDimens.space8))
-                                Text("Загрузить и проверить")
-                            }
+            item {
+                Surface(shape = RoundedCornerShape(24.dp), color = colors.surface,
+                    border = BorderStroke(1.dp, colors.outline)) {
+                    Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                        Text("Выбор остаётся за вами", style = MaterialTheme.typography.titleLarge)
+                        Text("Публичные узлы — не проверенные партнёры сервиса. Для конфиденциальных задач выбирайте собственный сервер или провайдера, которому доверяете.",
+                            style = MaterialTheme.typography.bodyMedium, color = colors.onSurfaceVariant)
+                        Button(onClick = { consent = true }, enabled = !loading && !saving,
+                            modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp)) {
+                            Text(if (loading) "Проверяем доступность…" else "Найти публичные серверы")
                         }
-
-                        if (fetchedConfigs.isNotEmpty()) {
-                            Button(
-                                onClick = {
-                                    scope.launch {
-                                        repo.addConfigs(fetchedConfigs)
-                                        Toast.makeText(context, "Добавлено серверов: ${fetchedConfigs.size}", Toast.LENGTH_SHORT).show()
-                                        onBack()
-                                    }
-                                },
-                                colors = ButtonDefaults.buttonColors(containerColor = SemanticGreen)
-                            ) {
-                                Text("Сохранить все (${fetchedConfigs.size})")
+                        if (loading) LinearProgressIndicator(modifier = Modifier.fillMaxWidth(), color = colors.primary,
+                            trackColor = colors.surfaceVariant)
+                        if (configs.isNotEmpty()) {
+                            OutlinedButton(onClick = { save(configs, false) }, enabled = !saving && !loading,
+                                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
+                                Text(if (saving) "Сохраняем…" else "Сохранить найденные (${configs.size})")
                             }
                         }
                     }
                 }
             }
-
-            if (fetchedConfigs.isEmpty() && !isLoading) {
-                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text(
-                        text = "Нажмите 'Загрузить и проверить' для опроса доступных зеркал.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+            error?.let { message -> item { Text(message, color = colors.error, style = MaterialTheme.typography.bodyMedium) } }
+            if (!loading && configs.isEmpty() && error == null) {
+                item {
+                    Text(if (searched) "Доступные узлы не найдены. Возможно, источники недоступны или проверка портов не прошла."
+                        else "Здесь появятся найденные серверы. Ничего не подключится автоматически.",
+                        color = colors.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
                 }
-            } else {
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
-                    verticalArrangement = Arrangement.spacedBy(InstrumentDimens.space4)
-                ) {
-                    items(fetchedConfigs, key = { it.id }) { config ->
-                        ServerCard(
-                            config = config,
-                            isConnected = false,
-                            isSelected = false,
-                            onSelect = {
-                                scope.launch {
-                                    repo.addConfig(config)
-                                    repo.setActive(config.id)
-                                    Toast.makeText(context, "Узел сохранён и выбран", Toast.LENGTH_SHORT).show()
-                                    onBack()
-                                }
-                            },
-                            onPing = {},
-                            onDelete = {
-                                fetchedConfigs = fetchedConfigs.filter { it.id != config.id }
-                            }
-                        )
+            }
+            items(configs, key = { it.id }) { config ->
+                Surface(shape = RoundedCornerShape(20.dp), color = colors.surface,
+                    border = BorderStroke(1.dp, colors.outline)) {
+                    Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Text(config.name, style = MaterialTheme.typography.titleMedium)
+                        Text("${config.address}:${config.port}", style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant)
+                        Text("Отклик порта: ${config.pingMs} мс · VPN не проверен",
+                            style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant)
+                        OutlinedButton(onClick = { save(listOf(config), true) }, enabled = !saving && !loading,
+                            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("Сохранить и выбрать") }
+                        TextButton(onClick = { configs = configs.filterNot { it.id == config.id } }, enabled = !saving && !loading,
+                            modifier = Modifier.heightIn(min = 48.dp)) { Text("Убрать из результатов") }
                     }
                 }
             }
