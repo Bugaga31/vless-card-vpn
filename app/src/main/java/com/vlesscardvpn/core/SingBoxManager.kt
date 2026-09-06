@@ -33,14 +33,19 @@ object SingBoxManager {
     fun generateConfig(
         context: Context,
         config: VlessConfig,
-        settings: AppSettings = AppSettings()
+        settings: AppSettings = AppSettings(),
+        networkProfile: EvaluatedNetworkProfile? = null
     ): String {
-        // Effective SNI: user custom override -> config SNI -> smart network detection
+        // SNI Resolution precedence: explicit non-generic config SNI -> user custom override -> networkProfile recommendation
         val effectiveSni = when {
-            settings.customSniOverride.isNotBlank() && settings.customSniOverride != "auto" -> settings.customSniOverride
             config.sni.isNotBlank() && config.sni != "samsung.com" && config.sni != "yandex.ru" -> config.sni
-            else -> NetworkMonitor.getSniForNetwork(context)
+            settings.customSniOverride.isNotBlank() && settings.customSniOverride != "auto" -> settings.customSniOverride
+            networkProfile != null -> networkProfile.recommendedSni
+            else -> "yandex.ru"
         }
+
+        val effectiveMtu = networkProfile?.optimalMtu ?: settings.mtuSize.coerceIn(1280, 1500)
+        val effectiveDns = networkProfile?.effectiveDns ?: "https://1.1.1.1/dns-query"
 
         val proxyOutbound = when (config.protocolType.lowercase()) {
             "vless" -> createVlessOutbound(config, effectiveSni)
@@ -51,18 +56,20 @@ object SingBoxManager {
         }
 
         val rulesArray = JSONArray().apply {
-            // 1. DNS Hijacking
+            // 1. DNS Interception
             put(JSONObject().apply {
                 put("protocol", "dns")
                 put("outbound", "dns-out")
             })
 
-            // 2. Fix YouTube buffering & throttling: Block QUIC (UDP 443) to force fast TCP/TLS stream
-            put(JSONObject().apply {
-                put("port", JSONArray(listOf(443, 80)))
-                put("network", "udp")
-                put("outbound", "block")
-            })
+            // 2. Fix YouTube buffering & throttling: Block QUIC (UDP 443, 80) if enabled
+            if (settings.blockQuicYouTube) {
+                put(JSONObject().apply {
+                    put("port", JSONArray(listOf(443, 80)))
+                    put("network", "udp")
+                    put("outbound", "block")
+                })
+            }
 
             // 3. RU Direct Routing (Split Tunneling if enabled)
             if (settings.enableRuDirect) {
@@ -76,7 +83,7 @@ object SingBoxManager {
                 })
             }
 
-            // 4. Block telemetry and ads
+            // 4. Block telemetry and malicious ads
             put(JSONObject().apply {
                 put("outbound", "block")
                 put("domain", JSONArray(listOf("geosite:category-ads-all")))
@@ -93,7 +100,7 @@ object SingBoxManager {
             put("servers", JSONArray().apply {
                 put(JSONObject().apply {
                     put("tag", "remote-dns")
-                    put("address", "https://1.1.1.1/dns-query")
+                    put("address", effectiveDns)
                     put("detour", "proxy")
                 })
                 put(JSONObject().apply {
@@ -124,8 +131,7 @@ object SingBoxManager {
                 put("tag", "tun-in")
                 put("interface_name", "tun0")
                 put("inet4_address", "172.19.0.1/30")
-                // Optimal MTU 1400 prevents packet loss & fragmentation on LTE/Wi-Fi video streaming
-                put("mtu", 1400)
+                put("mtu", effectiveMtu)
                 put("auto_route", true)
                 put("strict_route", true)
                 put("stack", "system")
@@ -161,7 +167,9 @@ object SingBoxManager {
             put("server", config.address)
             put("server_port", config.port)
             put("uuid", config.uuid)
-            put("flow", config.flow.ifBlank { "xtls-rprx-vision" })
+            if (config.flow.isNotBlank()) {
+                put("flow", config.flow)
+            }
             put("tls", JSONObject().apply {
                 put("enabled", true)
                 put("server_name", effectiveSni)
@@ -170,7 +178,7 @@ object SingBoxManager {
                     put("enabled", true)
                     put("fingerprint", config.fingerprint.ifBlank { "chrome" })
                 })
-                if (config.security == "reality") {
+                if (config.security.equals("reality", ignoreCase = true)) {
                     put("reality", JSONObject().apply {
                         put("enabled", true)
                         put("public_key", config.publicKey.ifBlank { "" })
@@ -192,7 +200,7 @@ object SingBoxManager {
             put("server_port", config.port)
             put("uuid", config.uuid)
             put("security", "auto")
-            if (config.security == "tls") {
+            if (config.security.equals("tls", ignoreCase = true)) {
                 put("tls", JSONObject().apply {
                     put("enabled", true)
                     put("server_name", effectiveSni)

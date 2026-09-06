@@ -24,7 +24,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.vlesscardvpn.data.InMemoryConfigRepo
+import com.vlesscardvpn.data.AppRepository
 import com.vlesscardvpn.domain.DiagnosticEngine
 import com.vlesscardvpn.domain.DiagnosticResult
 import com.vlesscardvpn.ui.components.CyberParticleBackground
@@ -34,12 +34,12 @@ import kotlinx.coroutines.launch
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DiagnosticScreen(
-    repo: InMemoryConfigRepo,
+    repo: AppRepository,
     onBack: () -> Unit = {}
 ) {
     val scope = rememberCoroutineScope()
-    val diagResult by repo.diagnosticResult.collectAsState(initial = DiagnosticResult())
-    val settings by repo.settings.collectAsState(initial = com.vlesscardvpn.domain.AppSettings())
+    var diagResult by remember { mutableStateOf(DiagnosticResult()) }
+    val settings by repo.settingsFlow.collectAsState()
     var isRunningAll by remember { mutableStateOf(false) }
     val snackbarHostState = remember { SnackbarHostState() }
 
@@ -85,53 +85,43 @@ fun DiagnosticScreen(
                                 if (!isRunningAll) {
                                     isRunningAll = true
                                     scope.launch {
-                                        repo.updateDiagnosticResult(
-                                            diagResult.copy(
-                                                tgStatus = DiagnosticResult.TestState.RUNNING,
-                                                ytStatus = DiagnosticResult.TestState.RUNNING,
-                                                rknStatus = DiagnosticResult.TestState.RUNNING
-                                            )
+                                        diagResult = diagResult.copy(
+                                            tgStatus = DiagnosticResult.TestState.RUNNING,
+                                            ytStatus = DiagnosticResult.TestState.RUNNING,
+                                            rknStatus = DiagnosticResult.TestState.RUNNING
                                         )
 
                                         // 1. Telegram
                                         val (tgState, tgData) = DiagnosticEngine.runTelegramPulseTest()
-                                        repo.updateDiagnosticResult(
-                                            repo.diagnosticResult.let {
-                                                diagResult.copy(
-                                                    tgStatus = tgState,
-                                                    tgPingMs = tgData.first,
-                                                    tgVerdict = tgData.second
-                                                )
-                                            }
+                                        diagResult = diagResult.copy(
+                                            tgStatus = tgState,
+                                            tgPingMs = tgData.first,
+                                            tgVerdict = tgData.second
                                         )
 
                                         // 2. YouTube
                                         val (ytState, ytMbps, ytVerdict) = DiagnosticEngine.runYouTubeStreamTest(settings.blockQuicYouTube)
-                                        repo.updateDiagnosticResult(
-                                            diagResult.copy(
-                                                tgStatus = tgState,
-                                                tgPingMs = tgData.first,
-                                                tgVerdict = tgData.second,
-                                                ytStatus = ytState,
-                                                ytSpeedMbps = ytMbps,
-                                                ytVerdict = ytVerdict
-                                            )
+                                        diagResult = diagResult.copy(
+                                            tgStatus = tgState,
+                                            tgPingMs = tgData.first,
+                                            tgVerdict = tgData.second,
+                                            ytStatus = ytState,
+                                            ytSpeedMbps = ytMbps,
+                                            ytVerdict = ytVerdict
                                         )
 
                                         // 3. RKN Echo
                                         val (rknState, passRate, rknVerdict) = DiagnosticEngine.runRknEchoTest()
-                                        repo.updateDiagnosticResult(
-                                            diagResult.copy(
-                                                tgStatus = tgState,
-                                                tgPingMs = tgData.first,
-                                                tgVerdict = tgData.second,
-                                                ytStatus = ytState,
-                                                ytSpeedMbps = ytMbps,
-                                                ytVerdict = ytVerdict,
-                                                rknStatus = rknState,
-                                                rknPassRatePercent = passRate,
-                                                rknVerdict = rknVerdict
-                                            )
+                                        diagResult = diagResult.copy(
+                                            tgStatus = tgState,
+                                            tgPingMs = tgData.first,
+                                            tgVerdict = tgData.second,
+                                            ytStatus = ytState,
+                                            ytSpeedMbps = ytMbps,
+                                            ytVerdict = ytVerdict,
+                                            rknStatus = rknState,
+                                            rknPassRatePercent = passRate,
+                                            rknVerdict = rknVerdict
                                         )
 
                                         isRunningAll = false
@@ -213,14 +203,12 @@ fun DiagnosticScreen(
                     icon = Icons.Default.Send,
                     onRunSingle = {
                         scope.launch {
-                            repo.updateDiagnosticResult(diagResult.copy(tgStatus = DiagnosticResult.TestState.RUNNING))
+                            diagResult = diagResult.copy(tgStatus = DiagnosticResult.TestState.RUNNING)
                             val (tgState, tgData) = DiagnosticEngine.runTelegramPulseTest()
-                            repo.updateDiagnosticResult(
-                                diagResult.copy(
-                                    tgStatus = tgState,
-                                    tgPingMs = tgData.first,
-                                    tgVerdict = tgData.second
-                                )
+                            diagResult = diagResult.copy(
+                                tgStatus = tgState,
+                                tgPingMs = tgData.first,
+                                tgVerdict = tgData.second
                             )
                         }
                     }
@@ -238,14 +226,12 @@ fun DiagnosticScreen(
                     icon = Icons.Default.VideoLibrary,
                     onRunSingle = {
                         scope.launch {
-                            repo.updateDiagnosticResult(diagResult.copy(ytStatus = DiagnosticResult.TestState.RUNNING))
+                            diagResult = diagResult.copy(ytStatus = DiagnosticResult.TestState.RUNNING)
                             val (ytState, ytMbps, ytVerdict) = DiagnosticEngine.runYouTubeStreamTest(settings.blockQuicYouTube)
-                            repo.updateDiagnosticResult(
-                                diagResult.copy(
-                                    ytStatus = ytState,
-                                    ytSpeedMbps = ytMbps,
-                                    ytVerdict = ytVerdict
-                                )
+                            diagResult = diagResult.copy(
+                                ytStatus = ytState,
+                                ytSpeedMbps = ytMbps,
+                                ytVerdict = ytVerdict
                             )
                         }
                     }
@@ -263,14 +249,12 @@ fun DiagnosticScreen(
                     icon = Icons.Default.Security,
                     onRunSingle = {
                         scope.launch {
-                            repo.updateDiagnosticResult(diagResult.copy(rknStatus = DiagnosticResult.TestState.RUNNING))
+                            diagResult = diagResult.copy(rknStatus = DiagnosticResult.TestState.RUNNING)
                             val (rknState, passRate, rknVerdict) = DiagnosticEngine.runRknEchoTest()
-                            repo.updateDiagnosticResult(
-                                diagResult.copy(
-                                    rknStatus = rknState,
-                                    rknPassRatePercent = passRate,
-                                    rknVerdict = rknVerdict
-                                )
+                            diagResult = diagResult.copy(
+                                rknStatus = rknState,
+                                rknPassRatePercent = passRate,
+                                rknVerdict = rknVerdict
                             )
                         }
                     }

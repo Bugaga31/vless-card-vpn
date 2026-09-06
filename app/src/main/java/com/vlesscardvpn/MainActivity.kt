@@ -21,18 +21,16 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
-import com.vlesscardvpn.data.InMemoryConfigRepo
+import com.vlesscardvpn.data.AppRepository
+import com.vlesscardvpn.domain.AutoPilotEngine
 import com.vlesscardvpn.domain.VlessConfig
-import com.vlesscardvpn.ui.DiagnosticScreen
-import com.vlesscardvpn.ui.FreeConfigsScreen
-import com.vlesscardvpn.ui.ServerListScreen
-import com.vlesscardvpn.ui.SettingsScreen
-import com.vlesscardvpn.ui.StealthProfileScreen
+import com.vlesscardvpn.ui.*
 import com.vlesscardvpn.ui.components.CyberSplashScreen
 import com.vlesscardvpn.ui.theme.VlessCardVpnTheme
 import com.vlesscardvpn.worker.VlessVpnService
 import com.vlesscardvpn.worker.VpnStatus
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -64,18 +62,27 @@ fun VlessCardVpnApp(
     onPanicExit: () -> Unit = {}
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val navController = rememberNavController()
-    val repo = remember { InMemoryConfigRepo() }
+
+    val repo = remember { AppRepository(context) }
+    val autoPilotEngine = remember { AutoPilotEngine(context, repo.getDatabase()) }
+
     val vpnStats by VlessVpnService.vpnStats.collectAsState()
-    val configs by repo.configs.collectAsState(initial = emptyList())
+    val configs by repo.configsFlow.collectAsState(initial = emptyList())
+    val settings by repo.settingsFlow.collectAsState()
 
     var showSplash by remember { mutableStateOf(true) }
     var pendingConfig by remember { mutableStateOf<VlessConfig?>(null) }
 
     LaunchedEffect(Unit) {
-        // Super quick 850ms cyber intro animation on launch
-        delay(850)
+        // Quick 800ms intro animation on startup
+        delay(800)
         showSplash = false
+
+        if (settings.autoSelect) {
+            autoPilotEngine.startAutoPilot(settings.healthCheckInterval)
+        }
     }
 
     val vpnPermissionLauncher = rememberLauncherForActivityResult(
@@ -83,8 +90,10 @@ fun VlessCardVpnApp(
     ) { result ->
         if (result.resultCode == Activity.RESULT_OK) {
             pendingConfig?.let { cfg ->
-                repo.setActive(cfg.id)
-                VlessVpnService.startVpn(context, cfg)
+                scope.launch {
+                    repo.setActive(cfg.id)
+                    VlessVpnService.startVpn(context, cfg)
+                }
             }
         } else {
             Toast.makeText(context, "VPN Permission is required to connect", Toast.LENGTH_SHORT).show()
@@ -96,15 +105,17 @@ fun VlessCardVpnApp(
         val cfgToConnect = targetConfig ?: configs.firstOrNull { it.isActive } ?: configs.firstOrNull()
         if (vpnStats.status == VpnStatus.CONNECTED || vpnStats.status == VpnStatus.CONNECTING) {
             VlessVpnService.stopVpn(context)
-            repo.setActive("")
+            scope.launch { repo.setActive("") }
         } else if (cfgToConnect != null) {
             val prepareIntent = VpnService.prepare(context)
             if (prepareIntent != null) {
                 pendingConfig = cfgToConnect
                 vpnPermissionLauncher.launch(prepareIntent)
             } else {
-                repo.setActive(cfgToConnect.id)
-                VlessVpnService.startVpn(context, cfgToConnect)
+                scope.launch {
+                    repo.setActive(cfgToConnect.id)
+                    VlessVpnService.startVpn(context, cfgToConnect)
+                }
             }
         } else {
             Toast.makeText(context, "Please add or select a server first", Toast.LENGTH_SHORT).show()
@@ -120,7 +131,7 @@ fun VlessCardVpnApp(
     AnimatedContent(
         targetState = showSplash,
         transitionSpec = {
-            fadeIn(animationSpec = tween(300)) togetherWith fadeOut(animationSpec = tween(300))
+            fadeIn(animationSpec = tween(280)) togetherWith fadeOut(animationSpec = tween(280))
         },
         label = "AppScreenTransition"
     ) { isSplash ->
@@ -129,18 +140,33 @@ fun VlessCardVpnApp(
         } else {
             NavHost(
                 navController = navController,
-                startDestination = "server_list"
+                startDestination = "home"
             ) {
-                composable("server_list") {
-                    ServerListScreen(
+                composable("home") {
+                    HomeScreen(
                         repo = repo,
+                        autoPilotEngine = autoPilotEngine,
                         vpnStats = vpnStats,
                         onToggleConnect = handleConnectToggle,
-                        onNavigateToSettings = { navController.navigate("settings") },
-                        onNavigateToFree = { navController.navigate("free_configs") },
+                        onNavigateToServers = { navController.navigate("servers") },
+                        onNavigateToAutopilot = { navController.navigate("autopilot") },
                         onNavigateToDiagnostic = { navController.navigate("diagnostic") },
-                        onNavigateToStealth = { navController.navigate("stealth") },
                         onPanicTrigger = onPanicExit
+                    )
+                }
+                composable("servers") {
+                    ServersScreen(
+                        repo = repo,
+                        onConnect = handleConnectToggle,
+                        onNavigateToFree = { navController.navigate("free_configs") },
+                        onBack = { navController.popBackStack() }
+                    )
+                }
+                composable("autopilot") {
+                    AutopilotScreen(
+                        repo = repo,
+                        autoPilotEngine = autoPilotEngine,
+                        onBack = { navController.popBackStack() }
                     )
                 }
                 composable("diagnostic") {

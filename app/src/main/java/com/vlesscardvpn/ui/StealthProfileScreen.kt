@@ -18,15 +18,12 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.scale
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.vlesscardvpn.data.InMemoryConfigRepo
+import com.vlesscardvpn.data.AppRepository
 import com.vlesscardvpn.domain.StealthProfileType
 import com.vlesscardvpn.domain.StealthSettings
 import com.vlesscardvpn.ui.components.CyberGlobeMapView
@@ -37,14 +34,12 @@ import kotlinx.coroutines.launch
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun StealthProfileScreen(
-    repo: InMemoryConfigRepo,
+    repo: AppRepository,
     onBack: () -> Unit = {}
 ) {
     val scope = rememberCoroutineScope()
-    val stealthSettings by repo.stealthSettings.collectAsState(initial = StealthSettings())
+    var stealthSettings by remember { mutableStateOf(StealthSettings()) }
     val snackbarHostState = remember { SnackbarHostState() }
-
-    var customSniInput by remember { mutableStateOf(stealthSettings.customSni) }
 
     Box(modifier = Modifier.fillMaxSize()) {
         CyberParticleBackground(particleCount = 24)
@@ -115,7 +110,6 @@ fun StealthProfileScreen(
 
                         Spacer(modifier = Modifier.height(10.dp))
 
-                        // Dynamic Neural Map View
                         CyberGlobeMapView(
                             fragmentationLevel = stealthSettings.fractalFragmentationLevel,
                             isConnected = true
@@ -123,7 +117,6 @@ fun StealthProfileScreen(
 
                         Spacer(modifier = Modifier.height(10.dp))
 
-                        // Fragmentation Slider
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically,
@@ -145,7 +138,7 @@ fun StealthProfileScreen(
                         Slider(
                             value = stealthSettings.fractalFragmentationLevel.toFloat(),
                             onValueChange = {
-                                repo.updateStealthSettings(stealthSettings.copy(fractalFragmentationLevel = it.toInt()))
+                                stealthSettings = stealthSettings.copy(fractalFragmentationLevel = it.toInt())
                             },
                             valueRange = 1f..10f,
                             steps = 8,
@@ -156,14 +149,11 @@ fun StealthProfileScreen(
                             )
                         )
 
-                        // Shuffle Route Button
                         Button(
                             onClick = {
-                                repo.updateStealthSettings(
-                                    stealthSettings.copy(
-                                        lastRouteShuffleTime = System.currentTimeMillis(),
-                                        tunnelIntegrityPercent = (98..100).random()
-                                    )
+                                stealthSettings = stealthSettings.copy(
+                                    lastRouteShuffleTime = System.currentTimeMillis(),
+                                    tunnelIntegrityPercent = (98..100).random()
                                 )
                                 scope.launch {
                                     snackbarHostState.showSnackbar("Маршруты перестроены: новые 5 прыжков активированы")
@@ -205,7 +195,8 @@ fun StealthProfileScreen(
                             modifier = Modifier
                                 .width(150.dp)
                                 .clickable {
-                                    repo.updateStealthSettings(stealthSettings.copy(activeProfile = profile))
+                                    stealthSettings = stealthSettings.copy(activeProfile = profile)
+                                    repo.updateSettings { s -> s.copy(customSniOverride = profile.defaultSni) }
                                 },
                             shape = RoundedCornerShape(14.dp),
                             colors = CardDefaults.cardColors(containerColor = if (isSelected) DarkSurfaceVariant else DarkSurface),
@@ -319,7 +310,7 @@ fun StealthProfileScreen(
                         Switch(
                             checked = stealthSettings.enableNoiseGenerator,
                             onCheckedChange = {
-                                repo.updateStealthSettings(stealthSettings.copy(enableNoiseGenerator = it))
+                                stealthSettings = stealthSettings.copy(enableNoiseGenerator = it)
                             },
                             colors = SwitchDefaults.colors(checkedThumbColor = NeonCyan, checkedTrackColor = NeonCyan.copy(alpha = 0.3f))
                         )
@@ -347,7 +338,7 @@ fun StealthProfileScreen(
                         Switch(
                             checked = stealthSettings.enableInstantFingerprintRotation,
                             onCheckedChange = {
-                                repo.updateStealthSettings(stealthSettings.copy(enableInstantFingerprintRotation = it))
+                                stealthSettings = stealthSettings.copy(enableInstantFingerprintRotation = it)
                             },
                             colors = SwitchDefaults.colors(checkedThumbColor = NeonPurple, checkedTrackColor = NeonPurple.copy(alpha = 0.3f))
                         )

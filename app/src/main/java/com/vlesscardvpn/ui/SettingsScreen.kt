@@ -16,16 +16,16 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.vlesscardvpn.data.InMemoryConfigRepo
+import com.vlesscardvpn.data.AppRepository
 import com.vlesscardvpn.ui.theme.*
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
-    repo: InMemoryConfigRepo,
+    repo: AppRepository,
     onBack: () -> Unit
 ) {
-    val settings by repo.settings.collectAsState(initial = com.vlesscardvpn.domain.AppSettings())
+    val settings by repo.settingsFlow.collectAsState()
     var customSni by remember(settings) { mutableStateOf(settings.customSniOverride) }
 
     Scaffold(
@@ -50,184 +50,64 @@ fun SettingsScreen(
                 .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // Section 1: Masking & Anti-DPI
-            SectionHeader("ANTIDPI & REALITY MASKING", NeonCyan)
+            // Group 1: Автопилот (Autopilot)
+            SectionHeader("1. АВТОПИЛОТ (FAILOVER & SMART ROTATION)", NeonCyan)
             Card(
                 colors = CardDefaults.cardColors(containerColor = DarkSurface),
                 shape = RoundedCornerShape(14.dp),
                 border = BorderStroke(1.dp, DarkBorder)
             ) {
                 Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text(
-                        text = "SNI Domain Obfuscation",
-                        fontWeight = FontWeight.SemiBold,
-                        color = TextPrimary
-                    )
-                    Text(
-                        text = "VLESS Reality mimics real HTTPS handshakes to trusted Russian white-listed services to bypass ISP DPI blocking.",
-                        fontSize = 12.sp,
-                        color = TextSecondary
-                    )
+                    SettingSwitch(
+                        title = "Автоматический выбор узла",
+                        description = "Выбирает самый быстрый доступный узел при подключении",
+                        checked = settings.autoSelect,
+                        accentColor = NeonCyan
+                    ) { repo.updateSettings { s -> s.copy(autoSelect = it) } }
 
-                    OutlinedTextField(
-                        value = customSni,
-                        onValueChange = {
-                            customSni = it
-                            repo.updateSettings(settings.copy(customSniOverride = it))
-                        },
-                        label = { Text("Custom SNI Mask") },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true,
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = NeonCyan,
-                            unfocusedBorderColor = DarkBorder,
-                            focusedTextColor = TextPrimary,
-                            unfocusedTextColor = TextPrimary
-                        )
-                    )
+                    HorizontalDivider(color = DarkBorder, thickness = 1.dp)
 
+                    SettingSwitch(
+                        title = "Авто-переключение при 3 ошибках",
+                        description = "Мгновенно переключает на резервный сервер при 3 подтвержденных потерях пакетов",
+                        checked = settings.failoverEnabled,
+                        accentColor = NeonCyan
+                    ) { repo.updateSettings { s -> s.copy(failoverEnabled = it) } }
+
+                    HorizontalDivider(color = DarkBorder, thickness = 1.dp)
+
+                    Text("Интервал проверки здоровья туннеля", fontSize = 13.sp, color = TextPrimary)
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        listOf("yandex.ru", "vk.com", "samsung.com", "apple.com").forEach { domain ->
+                        listOf(15, 30, 60).forEach { sec ->
                             FilterChip(
-                                selected = customSni == domain,
-                                onClick = {
-                                    customSni = domain
-                                    repo.updateSettings(settings.copy(customSniOverride = domain))
-                                },
-                                label = { Text(domain, fontSize = 11.sp) }
+                                selected = settings.healthCheckInterval == sec,
+                                onClick = { repo.updateSettings { s -> s.copy(healthCheckInterval = sec) } },
+                                label = { Text("${sec} сек", fontSize = 11.sp) }
                             )
                         }
                     }
                 }
             }
 
-            // Section 2: Routing & Russian Services
-            SectionHeader("ROUTING & BYPASS", NeonPurple)
-            Card(
-                colors = CardDefaults.cardColors(containerColor = DarkSurface),
-                shape = RoundedCornerShape(14.dp),
-                border = BorderStroke(1.dp, DarkBorder)
-            ) {
-                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    SettingSwitch(
-                        title = "Direct Access for Russian Services (.RU)",
-                        description = "Gosuslugi, Banking apps, Yandex, VK and *.ru sites work directly with 0 ms VPN overhead.",
-                        checked = settings.enableRuDirect,
-                        accentColor = NeonPurple
-                    ) { repo.updateSettings(settings.copy(enableRuDirect = it)) }
-
-                    HorizontalDivider(color = DarkBorder, thickness = 1.dp)
-
-                    SettingSwitch(
-                        title = "Block QUIC (Fix YouTube & Streaming)",
-                        description = "Blocks UDP 443 to prevent ISP throttle on YouTube and force high-speed TCP/TLS stream.",
-                        checked = settings.blockQuicYouTube,
-                        accentColor = NeonPurple
-                    ) { repo.updateSettings(settings.copy(blockQuicYouTube = it)) }
-                }
-            }
-
-            // Section 3: Tunnel & DNS
-            SectionHeader("TUNNEL & PERFORMANCE", NeonAmber)
+            // Group 2: Сеть (Network)
+            SectionHeader("2. СЕТЬ & MTU ОПТИМИЗАЦИЯ", NeonGreen)
             Card(
                 colors = CardDefaults.cardColors(containerColor = DarkSurface),
                 shape = RoundedCornerShape(14.dp),
                 border = BorderStroke(1.dp, DarkBorder)
             ) {
                 Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text(
-                        text = "Secure DNS Provider",
-                        fontWeight = FontWeight.SemiBold,
-                        color = TextPrimary
-                    )
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        listOf("Cloudflare (1.1.1.1)", "Quad9 (9.9.9.9)", "Google (8.8.8.8)").forEach { dns ->
-                            FilterChip(
-                                selected = settings.customDnsProvider == dns,
-                                onClick = { repo.updateSettings(settings.copy(customDnsProvider = dns)) },
-                                label = { Text(dns.substringBefore(" "), fontSize = 11.sp) }
-                            )
-                        }
-                    }
-
-                    HorizontalDivider(color = DarkBorder, thickness = 1.dp)
-
                     OutlinedTextField(
                         value = settings.mtuSize.toString(),
                         onValueChange = { value ->
                             value.toIntOrNull()?.coerceIn(1200, 1500)?.let {
-                                repo.updateSettings(settings.copy(mtuSize = it))
+                                repo.updateSettings { s -> s.copy(mtuSize = it) }
                             }
                         },
-                        label = { Text("TUN Interface MTU (1200 - 1500)") },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true,
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = NeonAmber,
-                            unfocusedBorderColor = DarkBorder,
-                            focusedTextColor = TextPrimary,
-                            unfocusedTextColor = TextPrimary
-                        )
-                    )
-
-                    SettingSwitch(
-                        title = "Auto-Reconnect on Network Switch",
-                        description = "Instantly restore tunnel when switching between Wi-Fi and LTE.",
-                        checked = settings.autoReconnectOnNetworkChange,
-                        accentColor = NeonAmber
-                    ) { repo.updateSettings(settings.copy(autoReconnectOnNetworkChange = it)) }
-                }
-            }
-
-            // Section 4: Auto-Parsing & Server List
-            SectionHeader("AUTOPARSE & SERVER LIST", NeonGreen)
-            Card(
-                colors = CardDefaults.cardColors(containerColor = DarkSurface),
-                shape = RoundedCornerShape(14.dp),
-                border = BorderStroke(1.dp, DarkBorder)
-            ) {
-                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    SettingSwitch(
-                        title = "Auto-sort by lowest Ping",
-                        description = "Shows the fastest and lowest latency servers at the top of the list.",
-                        checked = settings.autoSelectBestPing,
-                        accentColor = NeonGreen
-                    ) { repo.updateSettings(settings.copy(autoSelectBestPing = it)) }
-
-                    HorizontalDivider(color = DarkBorder, thickness = 1.dp)
-
-                    SettingSwitch(
-                        title = "Test latency after import",
-                        description = "Immediately ping imported nodes to verify availability.",
-                        checked = settings.autoTestAfterImport,
-                        accentColor = NeonGreen
-                    ) { repo.updateSettings(settings.copy(autoTestAfterImport = it)) }
-
-                    HorizontalDivider(color = DarkBorder, thickness = 1.dp)
-
-                    SettingSwitch(
-                        title = "Hide dead / unreachable nodes",
-                        description = "Display only working servers with positive response.",
-                        checked = settings.showOnlyWorkingNodes,
-                        accentColor = NeonGreen
-                    ) { repo.updateSettings(settings.copy(showOnlyWorkingNodes = it)) }
-
-                    HorizontalDivider(color = DarkBorder, thickness = 1.dp)
-
-                    OutlinedTextField(
-                        value = settings.maxFreeNodesToAdd.toString(),
-                        onValueChange = { value ->
-                            value.toIntOrNull()?.coerceIn(1, 200)?.let {
-                                repo.updateSettings(settings.copy(maxFreeNodesToAdd = it))
-                            }
-                        },
-                        label = { Text("Maximum free nodes to add on scan") },
+                        label = { Text("TUN MTU (1400 по умолчанию)") },
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = true,
                         colors = OutlinedTextFieldDefaults.colors(
@@ -237,10 +117,132 @@ fun SettingsScreen(
                             unfocusedTextColor = TextPrimary
                         )
                     )
+
+                    SettingSwitch(
+                        title = "Авто-переподключение при смене сети",
+                        description = "Мгновенное восстановление туннеля при переходе с Wi-Fi на LTE/5G",
+                        checked = settings.autoReconnectOnNetworkChange,
+                        accentColor = NeonGreen
+                    ) { repo.updateSettings { s -> s.copy(autoReconnectOnNetworkChange = it) } }
                 }
             }
 
-            Spacer(modifier = Modifier.height(20.dp))
+            // Group 3: Маршрутизация (Routing)
+            SectionHeader("3. МАРШРУТИЗАЦИЯ & АНТИ-БЛОКИРОВКИ", NeonPurple)
+            Card(
+                colors = CardDefaults.cardColors(containerColor = DarkSurface),
+                shape = RoundedCornerShape(14.dp),
+                border = BorderStroke(1.dp, DarkBorder)
+            ) {
+                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    SettingSwitch(
+                        title = "Прямой доступ для сайтов РФ (.RU)",
+                        description = "Госуслуги, Банки, Яндекс и VK идут напрямую без задержки VPN",
+                        checked = settings.enableRuDirect,
+                        accentColor = NeonPurple
+                    ) { repo.updateSettings { s -> s.copy(enableRuDirect = it) } }
+
+                    HorizontalDivider(color = DarkBorder, thickness = 1.dp)
+
+                    SettingSwitch(
+                        title = "Блокировка QUIC (Ускорение YouTube)",
+                        description = "Блокирует UDP 443 для обхода ТСПУ троттлинга видео",
+                        checked = settings.blockQuicYouTube,
+                        accentColor = NeonPurple
+                    ) { repo.updateSettings { s -> s.copy(blockQuicYouTube = it) } }
+
+                    HorizontalDivider(color = DarkBorder, thickness = 1.dp)
+
+                    OutlinedTextField(
+                        value = customSni,
+                        onValueChange = {
+                            customSni = it
+                            repo.updateSettings { s -> s.copy(customSniOverride = it) }
+                        },
+                        label = { Text("Кастомный SNI маскировки (или 'auto')") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = NeonPurple,
+                            unfocusedBorderColor = DarkBorder,
+                            focusedTextColor = TextPrimary,
+                            unfocusedTextColor = TextPrimary
+                        )
+                    )
+                }
+            }
+
+            // Group 4: Диагностика (Diagnostics)
+            SectionHeader("4. ДИАГНОСТИКА & DNS", NeonAmber)
+            Card(
+                colors = CardDefaults.cardColors(containerColor = DarkSurface),
+                shape = RoundedCornerShape(14.dp),
+                border = BorderStroke(1.dp, DarkBorder)
+            ) {
+                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("DNS-over-HTTPS провайдер", fontSize = 13.sp, color = TextPrimary)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        listOf("Cloudflare (1.1.1.1)", "Google (8.8.8.8)", "Yandex (77.88.8.8)").forEach { dns ->
+                            FilterChip(
+                                selected = settings.customDnsProvider == dns,
+                                onClick = { repo.updateSettings { s -> s.copy(customDnsProvider = dns) } },
+                                label = { Text(dns.substringBefore(" "), fontSize = 11.sp) }
+                            )
+                        }
+                    }
+
+                    HorizontalDivider(color = DarkBorder, thickness = 1.dp)
+
+                    SettingSwitch(
+                        title = "Тестировать пинг после импорта",
+                        description = "Автоматический замер TCP/TLS латентности новых серверов",
+                        checked = settings.autoTestAfterImport,
+                        accentColor = NeonAmber
+                    ) { repo.updateSettings { s -> s.copy(autoTestAfterImport = it) } }
+                }
+            }
+
+            // Group 5: Дополнительно (Additional)
+            SectionHeader("5. ДОПОЛНИТЕЛЬНО & ХРАНИЛИЩЕ", NeonMagenta)
+            Card(
+                colors = CardDefaults.cardColors(containerColor = DarkSurface),
+                shape = RoundedCornerShape(14.dp),
+                border = BorderStroke(1.dp, DarkBorder)
+            ) {
+                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    SettingSwitch(
+                        title = "Скрывать недоступные серверы",
+                        description = "Отображать только узлы с положительным пингом",
+                        checked = settings.showOnlyWorkingNodes,
+                        accentColor = NeonMagenta
+                    ) { repo.updateSettings { s -> s.copy(showOnlyWorkingNodes = it) } }
+
+                    HorizontalDivider(color = DarkBorder, thickness = 1.dp)
+
+                    OutlinedTextField(
+                        value = settings.maxFreeNodesToAdd.toString(),
+                        onValueChange = { value ->
+                            value.toIntOrNull()?.coerceIn(1, 300)?.let {
+                                repo.updateSettings { s -> s.copy(maxFreeNodesToAdd = it) }
+                            }
+                        },
+                        label = { Text("Лимит добавления бесплатных узлов") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = NeonMagenta,
+                            unfocusedBorderColor = DarkBorder,
+                            focusedTextColor = TextPrimary,
+                            unfocusedTextColor = TextPrimary
+                        )
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(24.dp))
         }
     }
 }

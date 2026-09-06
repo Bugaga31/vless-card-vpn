@@ -25,4 +25,6 @@ out/
 captures/
 output.json
 app/release/
-app/debug/.gradle-home/
+app/debug/
+.gradle-home/
+app/libs/*.jar

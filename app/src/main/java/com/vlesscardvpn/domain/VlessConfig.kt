@@ -18,15 +18,27 @@ data class VlessConfig(
     val pingMs: Int = -1,
     val isFree: Boolean = false,
     val country: String = "Unknown",
-    val addedAt: Long = System.currentTimeMillis()
+    val addedAt: Long = System.currentTimeMillis(),
+    val lastCheck: Long = 0L,
+    val healthState: String = "UNKNOWN", // UNKNOWN, HEALTHY, DEGRADED, DEAD
+    val failureCount: Int = 0,
+    val source: String = "manual",
+    val isFavorite: Boolean = false,
+    val tcpLatencyMs: Int = -1,
+    val tlsLatencyMs: Int = -1,
+    val httpLatencyMs: Int = -1
 )
 
 data class AppSettings(
     val isDarkTheme: Boolean = true,
+    val autoSelect: Boolean = false,
     val autoSelectBestPing: Boolean = true,
+    val healthCheckInterval: Int = 30, // seconds
+    val failoverEnabled: Boolean = true,
+    val lastWorkingConfigId: String = "",
     val enableRuDirect: Boolean = true,
     val blockQuicYouTube: Boolean = true,
-    val customSniOverride: String = "yandex.ru",
+    val customSniOverride: String = "auto",
     val customDnsProvider: String = "Cloudflare (1.1.1.1)",
     val mtuSize: Int = 1400,
     val autoReconnectOnNetworkChange: Boolean = true,
