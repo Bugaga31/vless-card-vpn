@@ -131,8 +131,7 @@ fun HomeScreen(
             // 3D Globe with Live Traffic Vectors
             CyberGlobeMapView(
                 isConnected = vpnStats.status == VpnStatus.CONNECTED,
-                sourceNodeName = "User [RU]",
-                targetNodeName = activeConfig?.name ?: "Global Gateway",
+                speedBps = vpnStats.downloadSpeedBps,
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(210.dp)

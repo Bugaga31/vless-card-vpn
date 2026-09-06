@@ -1,0 +1,20 @@
+R_DEF: Internal format may change without notice
+local
+color dark_bg
+color dark_surface
+color primary
+color primaryVariant
+color secondary
+drawable ic_launcher_background
+drawable ic_launcher_foreground
+mipmap ic_launcher
+mipmap ic_launcher_round
+string add_free
+string app_name
+string connect
+string disconnect
+string free_configs
+string import_config
+string server_list
+string test_ping
+style Theme.VlessCardVpn

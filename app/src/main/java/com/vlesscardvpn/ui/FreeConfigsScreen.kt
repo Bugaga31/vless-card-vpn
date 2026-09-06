@@ -77,7 +77,7 @@ fun FreeConfigsScreen(
                             onClick = {
                                 isLoading = true
                                 scope.launch {
-                                    val results = PublicConfigFetcher.fetchAllPublicConfigs(context)
+                                    val results = PublicConfigFetcher.fetchAndFilterWorkingConfigs()
                                     fetchedConfigs = results
                                     selectedCount = results.size
                                     isLoading = false

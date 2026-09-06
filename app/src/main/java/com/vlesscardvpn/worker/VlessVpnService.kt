@@ -276,7 +276,7 @@ class VlessVpnService : VpnService() {
             }
 
             val clientOptions = CommandClientOptions().apply {
-                command = Libbox.CommandStatus
+                addCommand(Libbox.CommandStatus)
                 statusInterval = 1000000000L // 1 second in ns
             }
 

@@ -26,7 +26,7 @@ class AutoTestWorker(
         stubConfigs.forEach { cfg ->
             val ping = PingTester.pingConfig(cfg)
             // TODO: persist ping result
-            println("AutoTest: ${cfg.name} ping = ${ping}ms")
+            // Latency checked safely without sensitive prints
         }
         return Result.success()
     }

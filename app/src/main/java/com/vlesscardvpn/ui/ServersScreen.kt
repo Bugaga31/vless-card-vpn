@@ -181,7 +181,7 @@ fun ServersScreen(
             confirmButton = {
                 Button(
                     onClick = {
-                        val parsed = UniversalConfigParser.parseBatch(importText)
+                        val parsed = UniversalConfigParser.parseAny(importText)
                         if (parsed.isNotEmpty()) {
                             scope.launch {
                                 repo.addConfigs(parsed)

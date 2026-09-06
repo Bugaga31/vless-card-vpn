@@ -25,6 +25,8 @@ val NeonAmber = Color(0xFFFFB703)
 val NeonAmberGlow = Color(0x33FFB703)
 val NeonRed = Color(0xFFFF3366)
 val NeonRedGlow = Color(0x33FF3366)
+val NeonMagenta = Color(0xFFFF007F)
+val NeonMagentaGlow = Color(0x33FF007F)
 
 val TextPrimary = Color(0xFFF8FAFC)
 val TextSecondary = Color(0xFF8E9BAE)
