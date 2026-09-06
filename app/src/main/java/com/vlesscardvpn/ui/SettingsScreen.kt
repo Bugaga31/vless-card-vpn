@@ -19,6 +19,14 @@ import androidx.compose.ui.unit.sp
 import com.vlesscardvpn.data.AppRepository
 import com.vlesscardvpn.ui.theme.*
 
+/**
+ * Precision Settings Screen:
+ * Structured into clean engineering groups:
+ * 1. Подключение (Auto-connect, MTU, Auto-reconnect)
+ * 2. Маршрутизация (RU direct, Block QUIC, SNI override)
+ * 3. Диагностика (DoH Provider, Latency tests)
+ * 4. Приложение (Display filters, pool limits)
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
@@ -29,16 +37,23 @@ fun SettingsScreen(
     var customSni by remember(settings) { mutableStateOf(settings.customSniOverride) }
 
     Scaffold(
-        containerColor = DarkBackground,
+        containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             TopAppBar(
-                title = { Text("Core & Tunnel Settings", fontWeight = FontWeight.Bold, color = TextPrimary) },
+                title = {
+                    Text(
+                        text = "Параметры связи",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onBackground
+                    )
+                },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = TextPrimary)
+                        Icon(Icons.Default.ArrowBack, contentDescription = "Назад", tint = MaterialTheme.colorScheme.onBackground)
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = DarkSurface)
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface)
             )
         }
     ) { padding ->
@@ -46,224 +61,181 @@ fun SettingsScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .padding(14.dp)
+                .padding(horizontal = InstrumentDimens.space16, vertical = InstrumentDimens.space12)
                 .verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+            verticalArrangement = Arrangement.spacedBy(InstrumentDimens.space16)
         ) {
-            // Group 1: Автопилот (Autopilot)
-            SectionHeader("1. АВТОПИЛОТ (FAILOVER & SMART ROTATION)", NeonCyan)
-            Card(
-                colors = CardDefaults.cardColors(containerColor = DarkSurface),
-                shape = RoundedCornerShape(14.dp),
-                border = BorderStroke(1.dp, DarkBorder)
-            ) {
-                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    SettingSwitch(
-                        title = "Автоматический выбор узла",
-                        description = "Выбирает самый быстрый доступный узел при подключении",
-                        checked = settings.autoSelect,
-                        accentColor = NeonCyan
-                    ) { repo.updateSettings { s -> s.copy(autoSelect = it) } }
+            // Group 1: Подключение & Ядро
+            GroupCard(title = "1. ПОДКЛЮЧЕНИЕ И ЯДРО") {
+                SettingSwitchItem(
+                    title = "Автовыбор лучшего узла",
+                    description = "Автоматически подключает сервер с наименьшей задержкой",
+                    checked = settings.autoSelect
+                ) { repo.updateSettings { s -> s.copy(autoSelect = it) } }
 
-                    HorizontalDivider(color = DarkBorder, thickness = 1.dp)
+                HorizontalDivider(color = MaterialTheme.colorScheme.outline, thickness = 1.dp)
 
-                    SettingSwitch(
-                        title = "Авто-переключение при 3 ошибках",
-                        description = "Мгновенно переключает на резервный сервер при 3 подтвержденных потерях пакетов",
-                        checked = settings.failoverEnabled,
-                        accentColor = NeonCyan
-                    ) { repo.updateSettings { s -> s.copy(failoverEnabled = it) } }
+                SettingSwitchItem(
+                    title = "Авто-восстановление сети",
+                    description = "Перезапуск туннеля при переходе между Wi-Fi и мобильной сетью",
+                    checked = settings.autoReconnectOnNetworkChange
+                ) { repo.updateSettings { s -> s.copy(autoReconnectOnNetworkChange = it) } }
 
-                    HorizontalDivider(color = DarkBorder, thickness = 1.dp)
+                HorizontalDivider(color = MaterialTheme.colorScheme.outline, thickness = 1.dp)
 
-                    Text("Интервал проверки здоровья туннеля", fontSize = 13.sp, color = TextPrimary)
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        listOf(15, 30, 60).forEach { sec ->
-                            FilterChip(
-                                selected = settings.healthCheckInterval == sec,
-                                onClick = { repo.updateSettings { s -> s.copy(healthCheckInterval = sec) } },
-                                label = { Text("${sec} сек", fontSize = 11.sp) }
-                            )
+                OutlinedTextField(
+                    value = settings.mtuSize.toString(),
+                    onValueChange = { value ->
+                        value.toIntOrNull()?.coerceIn(1280, 1500)?.let {
+                            repo.updateSettings { s -> s.copy(mtuSize = it) }
                         }
+                    },
+                    label = { Text("Размер MTU (по умолчанию 1400)") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = SignalOrange,
+                        unfocusedBorderColor = MaterialTheme.colorScheme.outline
+                    )
+                )
+            }
+
+            // Group 2: Маршрутизация & ТСПУ
+            GroupCard(title = "2. МАРШРУТИЗАЦИЯ И ОБХОД БЛОКИРОВОК") {
+                SettingSwitchItem(
+                    title = "Прямой доступ для РФ (.RU)",
+                    description = "Госуслуги, банки, Ozon, WB и .ru сайты идут напрямую с нулевой задержкой",
+                    checked = settings.enableRuDirect
+                ) { repo.updateSettings { s -> s.copy(enableRuDirect = it) } }
+
+                HorizontalDivider(color = MaterialTheme.colorScheme.outline, thickness = 1.dp)
+
+                SettingSwitchItem(
+                    title = "Блокировка QUIC (Ускорение YouTube)",
+                    description = "Сброс UDP 443 для предотвращения троттлинга видеопотока",
+                    checked = settings.blockQuicYouTube
+                ) { repo.updateSettings { s -> s.copy(blockQuicYouTube = it) } }
+
+                HorizontalDivider(color = MaterialTheme.colorScheme.outline, thickness = 1.dp)
+
+                OutlinedTextField(
+                    value = customSni,
+                    onValueChange = {
+                        customSni = it
+                        repo.updateSettings { s -> s.copy(customSniOverride = it) }
+                    },
+                    label = { Text("Пользовательский SNI маскировки ('auto')") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = SignalOrange,
+                        unfocusedBorderColor = MaterialTheme.colorScheme.outline
+                    )
+                )
+            }
+
+            // Group 3: Диагностика & Безопасность
+            GroupCard(title = "3. ДИАГНОСТИКА И DNS") {
+                Text(
+                    text = "Провайдер DNS-over-HTTPS (DoH)",
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onBackground
+                )
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(InstrumentDimens.space8)
+                ) {
+                    listOf("Cloudflare (1.1.1.1)", "Google (8.8.8.8)", "Yandex (77.88.8.8)").forEach { dns ->
+                        FilterChip(
+                            selected = settings.customDnsProvider == dns,
+                            onClick = { repo.updateSettings { s -> s.copy(customDnsProvider = dns) } },
+                            label = { Text(dns.substringBefore(" "), style = MaterialTheme.typography.bodySmall) },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = SignalOrangeContainer,
+                                selectedLabelColor = SignalOrangeContent
+                            )
+                        )
                     }
                 }
+
+                HorizontalDivider(color = MaterialTheme.colorScheme.outline, thickness = 1.dp)
+
+                SettingSwitchItem(
+                    title = "Проверка пинга после импорта",
+                    description = "Автоматический замер TCP/TLS латентности добавленных серверов",
+                    checked = settings.autoTestAfterImport
+                ) { repo.updateSettings { s -> s.copy(autoTestAfterImport = it) } }
             }
 
-            // Group 2: Сеть (Network)
-            SectionHeader("2. СЕТЬ & MTU ОПТИМИЗАЦИЯ", NeonGreen)
-            Card(
-                colors = CardDefaults.cardColors(containerColor = DarkSurface),
-                shape = RoundedCornerShape(14.dp),
-                border = BorderStroke(1.dp, DarkBorder)
-            ) {
-                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    OutlinedTextField(
-                        value = settings.mtuSize.toString(),
-                        onValueChange = { value ->
-                            value.toIntOrNull()?.coerceIn(1200, 1500)?.let {
-                                repo.updateSettings { s -> s.copy(mtuSize = it) }
-                            }
-                        },
-                        label = { Text("TUN MTU (1400 по умолчанию)") },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true,
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = NeonGreen,
-                            unfocusedBorderColor = DarkBorder,
-                            focusedTextColor = TextPrimary,
-                            unfocusedTextColor = TextPrimary
-                        )
-                    )
+            // Group 4: Приложение & Списки
+            GroupCard(title = "4. ПРИЛОЖЕНИЕ И ХРАНИЛИЩЕ") {
+                SettingSwitchItem(
+                    title = "Скрывать недоступные серверы",
+                    description = "Отображать только узлы с подтверждённым откликом",
+                    checked = settings.showOnlyWorkingNodes
+                ) { repo.updateSettings { s -> s.copy(showOnlyWorkingNodes = it) } }
 
-                    SettingSwitch(
-                        title = "Авто-переподключение при смене сети",
-                        description = "Мгновенное восстановление туннеля при переходе с Wi-Fi на LTE/5G",
-                        checked = settings.autoReconnectOnNetworkChange,
-                        accentColor = NeonGreen
-                    ) { repo.updateSettings { s -> s.copy(autoReconnectOnNetworkChange = it) } }
-                }
-            }
+                HorizontalDivider(color = MaterialTheme.colorScheme.outline, thickness = 1.dp)
 
-            // Group 3: Маршрутизация (Routing)
-            SectionHeader("3. МАРШРУТИЗАЦИЯ & АНТИ-БЛОКИРОВКИ", NeonPurple)
-            Card(
-                colors = CardDefaults.cardColors(containerColor = DarkSurface),
-                shape = RoundedCornerShape(14.dp),
-                border = BorderStroke(1.dp, DarkBorder)
-            ) {
-                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    SettingSwitch(
-                        title = "Прямой доступ для сайтов РФ (.RU)",
-                        description = "Госуслуги, Банки, Яндекс и VK идут напрямую без задержки VPN",
-                        checked = settings.enableRuDirect,
-                        accentColor = NeonPurple
-                    ) { repo.updateSettings { s -> s.copy(enableRuDirect = it) } }
-
-                    HorizontalDivider(color = DarkBorder, thickness = 1.dp)
-
-                    SettingSwitch(
-                        title = "Блокировка QUIC (Ускорение YouTube)",
-                        description = "Блокирует UDP 443 для обхода ТСПУ троттлинга видео",
-                        checked = settings.blockQuicYouTube,
-                        accentColor = NeonPurple
-                    ) { repo.updateSettings { s -> s.copy(blockQuicYouTube = it) } }
-
-                    HorizontalDivider(color = DarkBorder, thickness = 1.dp)
-
-                    OutlinedTextField(
-                        value = customSni,
-                        onValueChange = {
-                            customSni = it
-                            repo.updateSettings { s -> s.copy(customSniOverride = it) }
-                        },
-                        label = { Text("Кастомный SNI маскировки (или 'auto')") },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true,
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = NeonPurple,
-                            unfocusedBorderColor = DarkBorder,
-                            focusedTextColor = TextPrimary,
-                            unfocusedTextColor = TextPrimary
-                        )
-                    )
-                }
-            }
-
-            // Group 4: Диагностика (Diagnostics)
-            SectionHeader("4. ДИАГНОСТИКА & DNS", NeonAmber)
-            Card(
-                colors = CardDefaults.cardColors(containerColor = DarkSurface),
-                shape = RoundedCornerShape(14.dp),
-                border = BorderStroke(1.dp, DarkBorder)
-            ) {
-                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("DNS-over-HTTPS провайдер", fontSize = 13.sp, color = TextPrimary)
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        listOf("Cloudflare (1.1.1.1)", "Google (8.8.8.8)", "Yandex (77.88.8.8)").forEach { dns ->
-                            FilterChip(
-                                selected = settings.customDnsProvider == dns,
-                                onClick = { repo.updateSettings { s -> s.copy(customDnsProvider = dns) } },
-                                label = { Text(dns.substringBefore(" "), fontSize = 11.sp) }
-                            )
+                OutlinedTextField(
+                    value = settings.maxFreeNodesToAdd.toString(),
+                    onValueChange = { value ->
+                        value.toIntOrNull()?.coerceIn(1, 300)?.let {
+                            repo.updateSettings { s -> s.copy(maxFreeNodesToAdd = it) }
                         }
-                    }
-
-                    HorizontalDivider(color = DarkBorder, thickness = 1.dp)
-
-                    SettingSwitch(
-                        title = "Тестировать пинг после импорта",
-                        description = "Автоматический замер TCP/TLS латентности новых серверов",
-                        checked = settings.autoTestAfterImport,
-                        accentColor = NeonAmber
-                    ) { repo.updateSettings { s -> s.copy(autoTestAfterImport = it) } }
-                }
-            }
-
-            // Group 5: Дополнительно (Additional)
-            SectionHeader("5. ДОПОЛНИТЕЛЬНО & ХРАНИЛИЩЕ", NeonMagenta)
-            Card(
-                colors = CardDefaults.cardColors(containerColor = DarkSurface),
-                shape = RoundedCornerShape(14.dp),
-                border = BorderStroke(1.dp, DarkBorder)
-            ) {
-                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    SettingSwitch(
-                        title = "Скрывать недоступные серверы",
-                        description = "Отображать только узлы с положительным пингом",
-                        checked = settings.showOnlyWorkingNodes,
-                        accentColor = NeonMagenta
-                    ) { repo.updateSettings { s -> s.copy(showOnlyWorkingNodes = it) } }
-
-                    HorizontalDivider(color = DarkBorder, thickness = 1.dp)
-
-                    OutlinedTextField(
-                        value = settings.maxFreeNodesToAdd.toString(),
-                        onValueChange = { value ->
-                            value.toIntOrNull()?.coerceIn(1, 300)?.let {
-                                repo.updateSettings { s -> s.copy(maxFreeNodesToAdd = it) }
-                            }
-                        },
-                        label = { Text("Лимит добавления бесплатных узлов") },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true,
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = NeonMagenta,
-                            unfocusedBorderColor = DarkBorder,
-                            focusedTextColor = TextPrimary,
-                            unfocusedTextColor = TextPrimary
-                        )
+                    },
+                    label = { Text("Лимит импорта публичных узлов") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = SignalOrange,
+                        unfocusedBorderColor = MaterialTheme.colorScheme.outline
                     )
-                }
+                )
             }
 
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(InstrumentDimens.space24))
         }
     }
 }
 
 @Composable
-private fun SectionHeader(title: String, color: Color) {
-    Text(
-        text = title,
-        color = color,
-        fontSize = 11.sp,
-        fontWeight = FontWeight.Bold,
-        letterSpacing = 0.8.sp
-    )
+private fun GroupCard(
+    title: String,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    Column {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            fontWeight = FontWeight.Bold,
+            letterSpacing = 0.8.sp,
+            modifier = Modifier.padding(bottom = InstrumentDimens.space8)
+        )
+
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(InstrumentDimens.radiusMedium),
+            color = MaterialTheme.colorScheme.surface,
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+        ) {
+            Column(
+                modifier = Modifier.padding(InstrumentDimens.space16),
+                verticalArrangement = Arrangement.spacedBy(InstrumentDimens.space12),
+                content = content
+            )
+        }
+    }
 }
 
 @Composable
-private fun SettingSwitch(
+private fun SettingSwitchItem(
     title: String,
     description: String,
     checked: Boolean,
-    accentColor: Color,
     onCheckedChange: (Boolean) -> Unit
 ) {
     Row(
@@ -272,16 +244,25 @@ private fun SettingSwitch(
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
         Column(modifier = Modifier.weight(1f)) {
-            Text(title, fontWeight = FontWeight.SemiBold, color = TextPrimary, fontSize = 14.sp)
-            Text(description, fontSize = 12.sp, color = TextSecondary)
+            Text(
+                text = title,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onBackground
+            )
+            Text(
+                text = description,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
-        Spacer(modifier = Modifier.width(10.dp))
+        Spacer(modifier = Modifier.width(InstrumentDimens.space12))
         Switch(
             checked = checked,
             onCheckedChange = onCheckedChange,
             colors = SwitchDefaults.colors(
-                checkedThumbColor = accentColor,
-                checkedTrackColor = accentColor.copy(alpha = 0.4f)
+                checkedThumbColor = SignalOrange,
+                checkedTrackColor = SignalOrangeContainer
             )
         )
     }

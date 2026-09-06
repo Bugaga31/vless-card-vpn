@@ -25,7 +25,7 @@ import com.vlesscardvpn.data.AppRepository
 import com.vlesscardvpn.domain.AutoPilotEngine
 import com.vlesscardvpn.domain.VlessConfig
 import com.vlesscardvpn.ui.*
-import com.vlesscardvpn.ui.components.CyberSplashScreen
+import com.vlesscardvpn.ui.components.InstrumentSplashScreen
 import com.vlesscardvpn.ui.theme.VlessCardVpnTheme
 import com.vlesscardvpn.worker.VlessVpnService
 import com.vlesscardvpn.worker.VpnStatus
@@ -38,7 +38,7 @@ class MainActivity : ComponentActivity() {
         val shouldAutoConnect = intent.getBooleanExtra("EXTRA_AUTO_CONNECT", false)
 
         setContent {
-            VlessCardVpnTheme(darkTheme = true) {
+            VlessCardVpnTheme(darkTheme = false) {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
@@ -136,7 +136,7 @@ fun VlessCardVpnApp(
         label = "AppScreenTransition"
     ) { isSplash ->
         if (isSplash) {
-            CyberSplashScreen()
+            InstrumentSplashScreen()
         } else {
             NavHost(
                 navController = navController,

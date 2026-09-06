@@ -12,7 +12,6 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -25,6 +24,10 @@ import com.vlesscardvpn.ui.components.ServerCard
 import com.vlesscardvpn.ui.theme.*
 import kotlinx.coroutines.launch
 
+/**
+ * Precision Free Community Nodes Screen:
+ * Fetch & verify public community mirror pools.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun FreeConfigsScreen(
@@ -35,19 +38,25 @@ fun FreeConfigsScreen(
     val scope = rememberCoroutineScope()
     var isLoading by remember { mutableStateOf(false) }
     var fetchedConfigs by remember { mutableStateOf<List<VlessConfig>>(emptyList()) }
-    var selectedCount by remember { mutableStateOf(0) }
 
     Scaffold(
-        containerColor = DarkBackground,
+        containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             TopAppBar(
-                title = { Text("⚡ Free Community Reality Nodes", fontWeight = FontWeight.Bold, color = TextPrimary) },
+                title = {
+                    Text(
+                        text = "Публичные репозитории",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onBackground
+                    )
+                },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = TextPrimary)
+                        Icon(Icons.Default.ArrowBack, contentDescription = "Назад", tint = MaterialTheme.colorScheme.onBackground)
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = DarkSurface)
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface)
             )
         }
     ) { padding ->
@@ -55,46 +64,50 @@ fun FreeConfigsScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .padding(14.dp)
+                .padding(horizontal = InstrumentDimens.space16, vertical = InstrumentDimens.space12),
+            verticalArrangement = Arrangement.spacedBy(InstrumentDimens.space16)
         ) {
             Surface(
-                shape = RoundedCornerShape(14.dp),
-                color = DarkSurface,
-                border = BorderStroke(1.dp, DarkBorder)
+                shape = RoundedCornerShape(InstrumentDimens.radiusMedium),
+                color = MaterialTheme.colorScheme.surface,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
             ) {
-                Column(modifier = Modifier.padding(14.dp)) {
-                    Text("Auto-Scrape GitHub Mirror Pools", fontWeight = FontWeight.Bold, color = NeonCyan)
-                    Spacer(modifier = Modifier.height(4.dp))
+                Column(modifier = Modifier.padding(InstrumentDimens.space16)) {
                     Text(
-                        "Scans 15+ community repositories (kort0881, igareck, AvenCores, barry-far, ByeWhiteLists) and tests low-latency working Reality / Vision nodes.",
-                        fontSize = 12.sp,
-                        color = TextSecondary
+                        text = "Опрос открытых зеркал конфигураций",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onBackground
                     )
-                    Spacer(modifier = Modifier.height(10.dp))
+                    Spacer(modifier = Modifier.height(InstrumentDimens.space4))
+                    Text(
+                        text = "Сканирует репозитории сообщества и проверяет доступность узлов Reality / Vision без гарантий стабильности публичных серверов.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(InstrumentDimens.space12))
 
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(InstrumentDimens.space8)) {
                         Button(
                             onClick = {
                                 isLoading = true
                                 scope.launch {
                                     val results = PublicConfigFetcher.fetchAndFilterWorkingConfigs()
                                     fetchedConfigs = results
-                                    selectedCount = results.size
                                     isLoading = false
                                 }
                             },
                             enabled = !isLoading,
-                            colors = ButtonDefaults.buttonColors(containerColor = NeonCyan, contentColor = Color(0xFF090A0F)),
-                            shape = RoundedCornerShape(10.dp)
+                            colors = ButtonDefaults.buttonColors(containerColor = SignalOrange)
                         ) {
                             if (isLoading) {
-                                CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Color(0xFF090A0F), strokeWidth = 2.dp)
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("Scanning pools...")
+                                CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Color.White, strokeWidth = 2.dp)
+                                Spacer(modifier = Modifier.width(InstrumentDimens.space8))
+                                Text("Проверка пула...")
                             } else {
                                 Icon(Icons.Default.CloudSync, contentDescription = null)
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("Fetch & Test Nodes")
+                                Spacer(modifier = Modifier.width(InstrumentDimens.space8))
+                                Text("Загрузить и проверить")
                             }
                         }
 
@@ -103,41 +116,42 @@ fun FreeConfigsScreen(
                                 onClick = {
                                     scope.launch {
                                         repo.addConfigs(fetchedConfigs)
-                                        Toast.makeText(context, "Added ${fetchedConfigs.size} servers to your list", Toast.LENGTH_SHORT).show()
+                                        Toast.makeText(context, "Добавлено серверов: ${fetchedConfigs.size}", Toast.LENGTH_SHORT).show()
                                         onBack()
                                     }
                                 },
-                                colors = ButtonDefaults.buttonColors(containerColor = NeonGreen, contentColor = Color(0xFF090A0F)),
-                                shape = RoundedCornerShape(10.dp)
+                                colors = ButtonDefaults.buttonColors(containerColor = SemanticGreen)
                             ) {
-                                Icon(Icons.Default.DownloadDone, contentDescription = null)
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("Add All (${fetchedConfigs.size})")
+                                Text("Сохранить все (${fetchedConfigs.size})")
                             }
                         }
                     }
                 }
             }
 
-            Spacer(modifier = Modifier.height(14.dp))
-
             if (fetchedConfigs.isEmpty() && !isLoading) {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text("Tap 'Fetch & Test Nodes' to scrape live public servers.", color = TextTertiary, fontSize = 13.sp)
+                    Text(
+                        text = "Нажмите 'Загрузить и проверить' для опроса доступных зеркал.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
             } else {
                 LazyColumn(
                     modifier = Modifier.fillMaxSize(),
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                    verticalArrangement = Arrangement.spacedBy(InstrumentDimens.space4)
                 ) {
                     items(fetchedConfigs, key = { it.id }) { config ->
                         ServerCard(
                             config = config,
-                            onConnect = {
+                            isConnected = false,
+                            isSelected = false,
+                            onSelect = {
                                 scope.launch {
                                     repo.addConfig(config)
                                     repo.setActive(config.id)
-                                    Toast.makeText(context, "Node saved & set active", Toast.LENGTH_SHORT).show()
+                                    Toast.makeText(context, "Узел сохранён и выбран", Toast.LENGTH_SHORT).show()
                                     onBack()
                                 }
                             },

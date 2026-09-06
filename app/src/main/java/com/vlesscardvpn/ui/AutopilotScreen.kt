@@ -13,6 +13,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -22,6 +23,10 @@ import com.vlesscardvpn.domain.AutoPilotStatus
 import com.vlesscardvpn.ui.theme.*
 import kotlinx.coroutines.launch
 
+/**
+ * Precision Autopilot Screen:
+ * Autonomous failover engine configuration & live event telemetry.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AutopilotScreen(
@@ -34,16 +39,23 @@ fun AutopilotScreen(
     val scope = rememberCoroutineScope()
 
     Scaffold(
-        containerColor = DarkBackground,
+        containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             TopAppBar(
-                title = { Text("⚡ Autonomous Autopilot", fontWeight = FontWeight.Bold, color = TextPrimary) },
+                title = {
+                    Text(
+                        text = "Автопилот и восстановление",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onBackground
+                    )
+                },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = TextPrimary)
+                        Icon(Icons.Default.ArrowBack, contentDescription = "Назад", tint = MaterialTheme.colorScheme.onBackground)
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = DarkSurface)
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface)
             )
         }
     ) { padding ->
@@ -51,16 +63,16 @@ fun AutopilotScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .padding(14.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
+                .padding(horizontal = InstrumentDimens.space16, vertical = InstrumentDimens.space12),
+            verticalArrangement = Arrangement.spacedBy(InstrumentDimens.space16)
         ) {
-            // Main Autopilot Activation Card
+            // Main Switch Card
             Surface(
-                shape = RoundedCornerShape(16.dp),
-                color = DarkSurface,
-                border = BorderStroke(1.dp, if (state.isEnabled) NeonGreen.copy(alpha = 0.5f) else DarkBorder)
+                shape = RoundedCornerShape(InstrumentDimens.radiusMedium),
+                color = MaterialTheme.colorScheme.surface,
+                border = BorderStroke(1.dp, if (state.isEnabled) SemanticGreen.copy(alpha = 0.5f) else MaterialTheme.colorScheme.outline)
             ) {
-                Column(modifier = Modifier.padding(16.dp)) {
+                Column(modifier = Modifier.padding(InstrumentDimens.space16)) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
@@ -68,15 +80,15 @@ fun AutopilotScreen(
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = "Autopilot Engine",
+                                text = "Автономный мониторинг туннеля",
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.Bold,
-                                color = TextPrimary
+                                color = MaterialTheme.colorScheme.onBackground
                             )
                             Text(
-                                text = "Periodically checks servers, switches to fastest responsive node and auto-recovers on 3 errors.",
-                                fontSize = 12.sp,
-                                color = TextSecondary
+                                text = "Периодически проверяет целостность связи и переключает на резервный узел при 3 подтверждённых ошибках.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
 
@@ -92,13 +104,13 @@ fun AutopilotScreen(
                                 }
                             },
                             colors = SwitchDefaults.colors(
-                                checkedThumbColor = NeonGreen,
-                                checkedTrackColor = NeonGreen.copy(alpha = 0.3f)
+                                checkedThumbColor = SignalOrange,
+                                checkedTrackColor = SignalOrangeContainer
                             )
                         )
                     }
 
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(InstrumentDimens.space12))
 
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -106,112 +118,106 @@ fun AutopilotScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = "STATUS: ${state.status.name}",
-                            fontSize = 11.sp,
+                            text = "СОСТОЯНИЕ: ${state.status.name}",
+                            style = MaterialTheme.typography.bodySmall,
+                            fontFamily = FontFamily.Monospace,
                             fontWeight = FontWeight.Bold,
                             color = when (state.status) {
-                                AutoPilotStatus.ACTIVE -> NeonGreen
-                                AutoPilotStatus.SWITCHING, AutoPilotStatus.SCANNING -> NeonAmber
-                                AutoPilotStatus.ERROR -> NeonRed
-                                else -> TextTertiary
+                                AutoPilotStatus.ACTIVE -> SemanticGreen
+                                AutoPilotStatus.SWITCHING, AutoPilotStatus.SCANNING -> SignalOrange
+                                AutoPilotStatus.ERROR -> SemanticRed
+                                else -> GraphiteTertiary
                             }
                         )
 
                         Button(
-                            onClick = {
-                                scope.launch { autoPilotEngine.triggerManualScan() }
-                            },
+                            onClick = { scope.launch { autoPilotEngine.triggerManualScan() } },
                             enabled = !state.isEvaluating,
-                            shape = RoundedCornerShape(8.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = DarkSurfaceVariant),
+                            shape = RoundedCornerShape(InstrumentDimens.radiusSmall),
+                            colors = ButtonDefaults.buttonColors(containerColor = MineralSurfaceSubtle, contentColor = MaterialTheme.colorScheme.onBackground),
                             contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
                         ) {
-                            Text(if (state.isEvaluating) "Testing..." else "Run Check Now", fontSize = 11.sp, color = NeonCyan)
+                            Text(if (state.isEvaluating) "Проверка..." else "Проверить сейчас", style = MaterialTheme.typography.bodySmall)
                         }
                     }
                 }
             }
 
-            // Engine Controls & Interval Settings
+            // Interval Settings
             Surface(
-                shape = RoundedCornerShape(14.dp),
-                color = DarkSurface,
-                border = BorderStroke(1.dp, DarkBorder)
+                shape = RoundedCornerShape(InstrumentDimens.radiusMedium),
+                color = MaterialTheme.colorScheme.surface,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
             ) {
-                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("AUTOPILOT PARAMETERS", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = NeonCyan)
+                Column(modifier = Modifier.padding(InstrumentDimens.space16), verticalArrangement = Arrangement.spacedBy(InstrumentDimens.space12)) {
+                    Text(
+                        text = "ИНТЕРВАЛ ОПРОСА СЕРВЕРОВ",
+                        style = MaterialTheme.typography.bodySmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
 
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
+                        horizontalArrangement = Arrangement.spacedBy(InstrumentDimens.space8)
                     ) {
-                        Text("Health Check Interval", fontSize = 13.sp, color = TextPrimary)
-                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            listOf(15, 30, 60).forEach { sec ->
-                                FilterChip(
-                                    selected = settings.healthCheckInterval == sec,
-                                    onClick = {
-                                        repo.updateSettings { it.copy(healthCheckInterval = sec) }
-                                        if (state.isEnabled) {
-                                            autoPilotEngine.startAutoPilot(sec)
-                                        }
-                                    },
-                                    label = { Text("${sec}s", fontSize = 11.sp) }
+                        listOf(15, 30, 60).forEach { sec ->
+                            FilterChip(
+                                selected = settings.healthCheckInterval == sec,
+                                onClick = {
+                                    repo.updateSettings { it.copy(healthCheckInterval = sec) }
+                                    if (state.isEnabled) {
+                                        autoPilotEngine.startAutoPilot(sec)
+                                    }
+                                },
+                                label = { Text("${sec} сек", style = MaterialTheme.typography.bodySmall) },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = SignalOrangeContainer,
+                                    selectedLabelColor = SignalOrangeContent
                                 )
-                            }
+                            )
                         }
-                    }
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("Auto Failover (3 strikes rule)", fontSize = 13.sp, color = TextPrimary)
-                            Text("Automatically reconnects after 3 confirmed tunnel drops", fontSize = 11.sp, color = TextSecondary)
-                        }
-                        Switch(
-                            checked = settings.failoverEnabled,
-                            onCheckedChange = { repo.updateSettings { s -> s.copy(failoverEnabled = it) } },
-                            colors = SwitchDefaults.colors(checkedThumbColor = NeonCyan, checkedTrackColor = NeonCyan.copy(alpha = 0.3f))
-                        )
                     }
                 }
             }
 
-            // Real-time Event Console Log
-            Text("LIVE TELEMETRY LOGS", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = TextSecondary)
+            // Telemetry Log List
+            Text(
+                text = "ЖУРНАЛ СОБЫТИЙ",
+                style = MaterialTheme.typography.bodySmall,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
             Surface(
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(1f),
-                shape = RoundedCornerShape(12.dp),
-                color = Color(0xFF07090E),
-                border = BorderStroke(1.dp, DarkBorder)
+                shape = RoundedCornerShape(InstrumentDimens.radiusMedium),
+                color = MaterialTheme.colorScheme.surface,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
             ) {
                 if (state.logs.isEmpty()) {
                     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Text("No autopilot events recorded yet.", fontSize = 12.sp, color = TextTertiary)
+                        Text("Событий не зафиксировано.", style = MaterialTheme.typography.bodySmall, color = GraphiteTertiary)
                     }
                 } else {
                     LazyColumn(
                         modifier = Modifier
                             .fillMaxSize()
-                            .padding(10.dp),
+                            .padding(InstrumentDimens.space12),
                         reverseLayout = true
                     ) {
                         items(state.logs.reversed()) { logEntry ->
                             Text(
                                 text = logEntry,
-                                fontSize = 11.sp,
-                                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                                style = MaterialTheme.typography.bodySmall,
+                                fontFamily = FontFamily.Monospace,
                                 color = when {
-                                    logEntry.contains("[FAIL]") || logEntry.contains("[FAILOVER]") -> NeonRed
-                                    logEntry.contains("[SWITCH]") -> NeonCyan
-                                    logEntry.contains("[AUTOPILOT]") -> NeonGreen
-                                    else -> TextSecondary
+                                    logEntry.contains("[FAIL]") || logEntry.contains("[FAILOVER]") -> SemanticRed
+                                    logEntry.contains("[SWITCH]") -> SignalOrange
+                                    logEntry.contains("[AUTOPILOT]") -> SemanticGreen
+                                    else -> MaterialTheme.colorScheme.onSurfaceVariant
                                 },
                                 modifier = Modifier.padding(vertical = 2.dp)
                             )

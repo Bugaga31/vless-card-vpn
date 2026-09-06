@@ -28,10 +28,17 @@ import androidx.compose.ui.unit.sp
 import com.vlesscardvpn.domain.VlessConfig
 import com.vlesscardvpn.ui.theme.*
 
+/**
+ * Precision Field Instrument Server Card:
+ * Clean, compact horizontal row with clear typographic hierarchy,
+ * active indicator, exact latency display and explicit touch targets.
+ */
 @Composable
 fun ServerCard(
     config: VlessConfig,
-    onConnect: (VlessConfig) -> Unit,
+    isConnected: Boolean = false,
+    isSelected: Boolean = false,
+    onSelect: (VlessConfig) -> Unit,
     onPing: (VlessConfig) -> Unit,
     onDelete: (VlessConfig) -> Unit,
     onToggleFavorite: (VlessConfig) -> Unit = {},
@@ -39,30 +46,34 @@ fun ServerCard(
 ) {
     val context = LocalContext.current
 
+    // Semantic border & surface styling
     val borderColor = when {
-        config.isActive -> NeonCyan
-        config.isFavorite -> NeonAmber.copy(alpha = 0.6f)
-        config.pingMs in 1..150 -> NeonGreen.copy(alpha = 0.35f)
-        config.pingMs > 0 -> DarkBorder
-        else -> DarkBorder.copy(alpha = 0.4f)
+        isConnected -> SemanticGreen
+        isSelected || config.isActive -> SignalOrange
+        config.isFavorite -> SemanticAmber.copy(alpha = 0.5f)
+        else -> MaterialTheme.colorScheme.outline
     }
 
-    val cardBg = if (config.isActive) DarkSurfaceVariant else DarkSurface
+    val cardBg = when {
+        isConnected -> SemanticGreenBg.copy(alpha = 0.4f)
+        isSelected || config.isActive -> SignalOrangeContainer.copy(alpha = 0.25f)
+        else -> MaterialTheme.colorScheme.surface
+    }
 
     Surface(
         modifier = modifier
             .fillMaxWidth()
-            .padding(vertical = 3.dp)
-            .clickable { onConnect(config) },
-        shape = RoundedCornerShape(12.dp),
-        border = BorderStroke(if (config.isActive) 1.5.dp else 1.dp, borderColor),
+            .padding(vertical = InstrumentDimens.space4)
+            .clickable { onSelect(config) },
+        shape = RoundedCornerShape(InstrumentDimens.radiusMedium),
+        border = BorderStroke(if (isConnected || isSelected || config.isActive) 1.5.dp else 1.dp, borderColor),
         color = cardBg,
-        tonalElevation = if (config.isActive) 4.dp else 0.dp
+        tonalElevation = 0.dp
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 9.dp),
+                .padding(horizontal = InstrumentDimens.space12, vertical = InstrumentDimens.space8),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
@@ -71,140 +82,137 @@ fun ServerCard(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.weight(1f)
             ) {
-                // Status dot
+                // Precise status dot
                 Box(
                     modifier = Modifier
                         .size(8.dp)
                         .clip(CircleShape)
                         .background(
                             when {
-                                config.isActive -> NeonCyan
-                                config.healthState == "HEALTHY" || config.pingMs in 1..180 -> NeonGreen
-                                config.healthState == "DEGRADED" || config.pingMs > 180 -> NeonAmber
-                                config.healthState == "DEAD" || config.pingMs == -1 -> Color(0xFF6B7280)
-                                else -> NeonRed
+                                isConnected -> SemanticGreen
+                                config.healthState == "HEALTHY" || config.pingMs in 1..200 -> SemanticGreen
+                                config.healthState == "DEGRADED" || config.pingMs > 200 -> SemanticAmber
+                                config.healthState == "DEAD" || config.pingMs == -1 -> GraphiteTertiary
+                                else -> SemanticRed
                             }
                         )
                 )
 
-                Spacer(modifier = Modifier.width(10.dp))
+                Spacer(modifier = Modifier.width(InstrumentDimens.space12))
 
                 Column(modifier = Modifier.weight(1f)) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        horizontalArrangement = Arrangement.spacedBy(InstrumentDimens.space8)
                     ) {
                         Text(
-                            text = config.name.ifBlank { "${config.protocolType.uppercase()} Node" },
+                            text = config.name.ifBlank { "${config.protocolType.uppercase()} Узел" },
                             style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = if (config.isActive) FontWeight.Bold else FontWeight.SemiBold,
-                            color = if (config.isActive) NeonCyan else TextPrimary,
+                            fontWeight = if (isConnected || isSelected || config.isActive) FontWeight.Bold else FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onBackground,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.weight(1f, fill = false)
                         )
 
-                        // Compact Protocol Badge
+                        // Protocol Tag
                         Text(
                             text = config.protocolType.uppercase(),
-                            fontSize = 9.sp,
+                            style = MaterialTheme.typography.bodySmall,
+                            fontFamily = FontFamily.Monospace,
                             fontWeight = FontWeight.Bold,
-                            color = when (config.protocolType.lowercase()) {
-                                "vless" -> NeonCyan
-                                "vmess" -> NeonPurple
-                                "trojan" -> NeonAmber
-                                else -> NeonGreen
-                            },
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier
-                                .background(DarkBackground, RoundedCornerShape(4.dp))
-                                .padding(horizontal = 4.dp, vertical = 1.dp)
+                                .background(MineralSurfaceSubtle, RoundedCornerShape(InstrumentDimens.radiusSmall))
+                                .padding(horizontal = 5.dp, vertical = 2.dp)
                         )
+
+                        if (isConnected) {
+                            Text(
+                                text = "ПОДКЛЮЧЕНО",
+                                style = MaterialTheme.typography.bodySmall,
+                                fontWeight = FontWeight.Bold,
+                                color = SemanticGreen,
+                                fontSize = 10.sp
+                            )
+                        } else if (isSelected || config.isActive) {
+                            Text(
+                                text = "ВЫБРАН",
+                                style = MaterialTheme.typography.bodySmall,
+                                fontWeight = FontWeight.Bold,
+                                color = SignalOrange,
+                                fontSize = 10.sp
+                            )
+                        }
                     }
 
                     Spacer(modifier = Modifier.height(2.dp))
 
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        horizontalArrangement = Arrangement.spacedBy(InstrumentDimens.space8)
                     ) {
                         Text(
                             text = "${config.address}:${config.port}",
-                            fontSize = 11.sp,
+                            style = MaterialTheme.typography.bodySmall,
                             fontFamily = FontFamily.Monospace,
-                            color = TextSecondary,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
                         if (config.sni.isNotBlank()) {
                             Text(
-                                text = "• ${config.sni}",
-                                fontSize = 11.sp,
-                                color = TextTertiary,
-                                maxLines = 1
+                                text = "• SNI: ${config.sni}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = GraphiteTertiary,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
                     }
                 }
             }
 
-            Spacer(modifier = Modifier.width(8.dp))
+            Spacer(modifier = Modifier.width(InstrumentDimens.space8))
 
-            // Right Actions: Favorite, Ping, Connect
+            // Right Metrics & Actions
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                horizontalArrangement = Arrangement.spacedBy(InstrumentDimens.space4)
             ) {
-                // Ping Badge
-                val (pingColor, pingText) = when {
-                    config.pingMs in 1..120 -> Pair(NeonGreen, "${config.pingMs}ms")
-                    config.pingMs in 121..350 -> Pair(NeonAmber, "${config.pingMs}ms")
-                    config.pingMs > 350 -> Pair(NeonRed, "${config.pingMs}ms")
-                    config.pingMs == 0 -> Pair(NeonCyan, "wait")
-                    else -> Pair(TextTertiary, "—")
+                // Latency Badge
+                val (pingColor, pingBg, pingText) = when {
+                    config.pingMs in 1..150 -> Triple(SemanticGreen, SemanticGreenBg, "${config.pingMs} мс")
+                    config.pingMs in 151..350 -> Triple(SemanticAmber, SemanticAmberBg, "${config.pingMs} мс")
+                    config.pingMs > 350 -> Triple(SemanticRed, SemanticRedBg, "${config.pingMs} мс")
+                    config.pingMs == 0 -> Triple(SignalOrange, SignalOrangeContainer, "тест...")
+                    else -> Triple(GraphiteTertiary, MineralSurfaceSubtle, "Не проверен")
                 }
 
                 Surface(
-                    color = pingColor.copy(alpha = 0.12f),
-                    shape = RoundedCornerShape(6.dp),
+                    color = pingBg,
+                    shape = RoundedCornerShape(InstrumentDimens.radiusSmall),
                     modifier = Modifier.clickable { onPing(config) }
                 ) {
                     Text(
                         text = pingText,
                         color = pingColor,
-                        fontSize = 11.sp,
+                        style = MaterialTheme.typography.bodySmall,
                         fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp)
                     )
                 }
 
-                // Favorite button
+                // Favorite toggle
                 IconButton(
                     onClick = { onToggleFavorite(config) },
-                    modifier = Modifier.size(28.dp)
+                    modifier = Modifier.size(36.dp)
                 ) {
                     Icon(
-                        if (config.isFavorite) Icons.Default.Star else Icons.Outlined.StarBorder,
-                        contentDescription = "Favorite",
-                        tint = if (config.isFavorite) NeonAmber else TextTertiary,
-                        modifier = Modifier.size(16.dp)
-                    )
-                }
-
-                // Connect / Disconnect button
-                IconButton(
-                    onClick = { onConnect(config) },
-                    modifier = Modifier
-                        .size(30.dp)
-                        .background(
-                            if (config.isActive) NeonRed.copy(alpha = 0.2f) else NeonCyan.copy(alpha = 0.15f),
-                            CircleShape
-                        )
-                ) {
-                    Icon(
-                        if (config.isActive) Icons.Default.Stop else Icons.Default.PlayArrow,
-                        contentDescription = if (config.isActive) "Disconnect" else "Connect",
-                        tint = if (config.isActive) NeonRed else NeonCyan,
-                        modifier = Modifier.size(16.dp)
+                        imageVector = if (config.isFavorite) Icons.Default.Star else Icons.Outlined.StarBorder,
+                        contentDescription = "Избранное",
+                        tint = if (config.isFavorite) SemanticAmber else GraphiteTertiary,
+                        modifier = Modifier.size(18.dp)
                     )
                 }
             }
