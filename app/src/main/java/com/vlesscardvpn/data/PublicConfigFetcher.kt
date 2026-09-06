@@ -12,7 +12,6 @@ import okhttp3.Request
 import java.util.concurrent.TimeUnit
 
 object PublicConfigFetcher {
-
     private val client = OkHttpClient.Builder()
         .connectTimeout(8, TimeUnit.SECONDS)
         .readTimeout(8, TimeUnit.SECONDS)
@@ -20,7 +19,6 @@ object PublicConfigFetcher {
         .build()
 
     val DEFAULT_PUBLIC_SOURCES = listOf(
-        // High quality Russia & Anti-Censorship lists (VLESS Reality & Fallbacks)
         "https://raw.githubusercontent.com/kort0881/vpn-vless-configs-russia/main/githubmirror/clean/vless.txt",
         "https://raw.githubusercontent.com/kort0881/vpn-vless-configs-russia/main/githubmirror/ru-sni/vless_ru.txt",
         "https://raw.githubusercontent.com/kort0881/vpn-vless-configs-russia/main/configs/vless_reality.txt",
@@ -43,77 +41,47 @@ object PublicConfigFetcher {
     suspend fun fetchAndFilterWorkingConfigs(
         sources: List<String> = DEFAULT_PUBLIC_SOURCES,
         maxWorkingCount: Int = 150,
-        onProgress: (scanned: Int, working: Int, currentSource: String) -> Unit = { _, _, _ -> }
+        onProgress: (Int, Int, String) -> Unit = { _, _, _ -> }
     ): List<VlessConfig> = withContext(Dispatchers.IO) {
-        val allParsedConfigs = mutableListOf<VlessConfig>()
-
+        val parsed = mutableListOf<VlessConfig>()
         for (sourceUrl in sources) {
             try {
-                val feedName = sourceUrl.substringAfterLast("/")
-                onProgress(allParsedConfigs.size, 0, "Loading $feedName...")
-                val request = Request.Builder().url(sourceUrl).build()
-                val response = client.newCall(request).execute()
-                if (response.isSuccessful) {
-                    val body = response.body?.string() ?: ""
-                    // Handle nested subscription links list
+                onProgress(parsed.size, 0, "Loading ${sourceUrl.substringAfterLast('/')}...")
+                client.newCall(Request.Builder().url(sourceUrl).build()).execute().use { response ->
+                    if (!response.isSuccessful) return@use
+                    val body = response.body?.string().orEmpty()
                     if (sourceUrl.endsWith("sources.txt")) {
-                        body.lines().filter { it.trim().startsWith("http") }.take(6).forEach { subUrl ->
+                        body.lines().map { it.trim() }.filter { it.startsWith("https://") }.take(6).forEach { nestedUrl ->
                             try {
-                                val subReq = Request.Builder().url(subUrl.trim()).build()
-                                val subResp = client.newCall(subReq).execute()
-                                if (subResp.isSuccessful) {
-                                    val subBody = subResp.body?.string() ?: ""
-                                    allParsedConfigs.addAll(UniversalConfigParser.parseAny(subBody))
+                                client.newCall(Request.Builder().url(nestedUrl).build()).execute().use { nested ->
+                                    if (nested.isSuccessful) parsed += UniversalConfigParser.parseAny(nested.body?.string().orEmpty())
                                 }
                             } catch (_: Exception) {}
                         }
-                    } else {
-                        val parsed = UniversalConfigParser.parseAny(body)
-                        allParsedConfigs.addAll(parsed)
-                    }
+                    } else parsed += UniversalConfigParser.parseAny(body)
                 }
-            } catch (e: Exception) {
-                // Ignore single source errors
-            }
+            } catch (_: Exception) {}
         }
 
-        // Deduplicate
-        val uniqueConfigs = allParsedConfigs
-            .distinctBy { "${it.address}:${it.port}" }
-            .take(500)
-
-        var testedCount = 0
-        val workingConfigs = mutableListOf<VlessConfig>()
-
-        // Concurrently ping configs in fast batches of 35
-        val chunks = uniqueConfigs.chunked(35)
-        for (chunk in chunks) {
-            val deferredList = chunk.map { cfg ->
-                async {
-                    val ping = PingTester.pingConfig(cfg)
-                    Pair(cfg, ping)
-                }
-            }
-
-            val results = deferredList.awaitAll()
-            for ((cfg, ping) in results) {
-                testedCount++
+        val unique = parsed.distinctBy {
+            "${it.protocolType}|${it.address}|${it.port}|${it.uuid}|${it.security}|${it.sni}|${it.publicKey}|${it.shortId}"
+        }.take(500)
+        var tested = 0
+        val working = mutableListOf<VlessConfig>()
+        for (chunk in unique.chunked(24)) {
+            chunk.map { cfg -> async { cfg to PingTester.pingConfig(cfg) } }.awaitAll().forEach { (cfg, ping) ->
+                tested++
                 if (ping in 1..2500) {
-                    val alive = cfg.copy(
+                    working += cfg.copy(
                         pingMs = ping,
                         isFree = true,
-                        name = if (cfg.name.contains("Node", ignoreCase = true) || cfg.name.isBlank()) {
-                            "⚡ ${cfg.protocolType.uppercase()} • ${cfg.address.take(16)}"
-                        } else cfg.name
+                        name = if (cfg.name.contains("Node", true) || cfg.name.isBlank()) "⚡ ${cfg.protocolType.uppercase()} • ${cfg.address.take(16)}" else cfg.name
                     )
-                    workingConfigs.add(alive)
                 }
-                onProgress(testedCount, workingConfigs.size, "Testing latency...")
+                onProgress(tested, working.size, "Testing reachability...")
             }
-
-            if (workingConfigs.size >= maxWorkingCount) break
+            if (working.size >= maxWorkingCount) break
         }
-
-        workingConfigs.sortedBy { it.pingMs }
+        working.sortedBy { it.pingMs }.take(maxWorkingCount)
     }
 }
