@@ -1,6 +1,5 @@
 package com.vlesscardvpn.ui.theme
 
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
@@ -13,51 +12,36 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
-/**
- * Design Concept: PRECISION / FIELD INSTRUMENT
- * Palette: Mineral light stone background, warm surface, deep graphite typography,
- * Signal Orange for primary actions (<= 10%), Semantic Green/Amber/Red indicators.
- */
+// Private Lounge palette: obsidian surfaces with restrained champagne accents.
+val MineralBackground = Color(0xFFF7F3EA)
+val MineralSurface = Color(0xFFFFFFFF)
+val MineralSurfaceSubtle = Color(0xFFEDE5D5)
+val MineralSurfaceElevated = Color(0xFFFCFBF9)
+val MineralBorder = Color(0xFFD8C9AA)
+val MineralBorderActive = Color(0xFFB99A5D)
+val InstrumentDarkBg = Color(0xFF0D0F14)
+val InstrumentDarkSurface = Color(0xFF151821)
+val InstrumentDarkSurfaceSubtle = Color(0xFF1D2230)
+val InstrumentDarkBorder = Color(0xFF3B3529)
+val GraphitePrimary = Color(0xFF1B1E1C)
+val GraphiteSecondary = Color(0xFF555C57)
+val GraphiteTertiary = Color(0xFF818A83)
+val GraphitePrimaryDark = Color(0xFFF7F2E8)
+val GraphiteSecondaryDark = Color(0xFFC9C1B2)
+val GraphiteTertiaryDark = Color(0xFF8F887C)
+val SignalOrange = Color(0xFFD6B36A)
+val SignalOrangeHover = Color(0xFFC29A4F)
+val SignalOrangeContainer = Color(0xFFF3E6C7)
+val SignalOrangeContent = Color(0xFF30230F)
+val SemanticGreen = Color(0xFF4FB887)
+val SemanticGreenBg = Color(0xFF102B24)
+val SemanticAmber = Color(0xFFD6A653)
+val SemanticAmberBg = Color(0xFF302612)
+val SemanticRed = Color(0xFFE06C75)
+val SemanticRedBg = Color(0xFF32181D)
+val SemanticNeutral = Color(0xFF9A958B)
+val SemanticNeutralBg = Color(0xFF242730)
 
-// Mineral Light Palette (Default)
-val MineralBackground = Color(0xFFF5F4F0)      // Mineral chalk gray-beige
-val MineralSurface = Color(0xFFFFFFFF)         // Pure clean white surface
-val MineralSurfaceSubtle = Color(0xFFEBEAE4)   // Neutral stone container
-val MineralSurfaceElevated = Color(0xFFFCFBF9) // Light surface overlay
-val MineralBorder = Color(0xFFDEDCD5)          // Precision mechanical border
-val MineralBorderActive = Color(0xFFB5B2A8)    // Border for focused/active components
-
-// Dark Instrument Palette (Night / Field Low-Light mode)
-val InstrumentDarkBg = Color(0xFF161817)
-val InstrumentDarkSurface = Color(0xFF1E211F)
-val InstrumentDarkSurfaceSubtle = Color(0xFF262A27)
-val InstrumentDarkBorder = Color(0xFF333835)
-
-// Typography Palette
-val GraphitePrimary = Color(0xFF1B1E1C)        // Deep graphite (high contrast > 10:1)
-val GraphiteSecondary = Color(0xFF555C57)      // Field label graphite (> 5:1)
-val GraphiteTertiary = Color(0xFF818A83)       // Muted technical notes
-
-val GraphitePrimaryDark = Color(0xFFECEEEB)
-val GraphiteSecondaryDark = Color(0xFFA0A8A2)
-val GraphiteTertiaryDark = Color(0xFF6E7570)
-
-// Signal & Semantic Accents
-val SignalOrange = Color(0xFFD95D0F)           // Industrial safety/control orange
-val SignalOrangeHover = Color(0xFFC04E07)
-val SignalOrangeContainer = Color(0xFFFFE8DC)
-val SignalOrangeContent = Color(0xFF4A1A00)
-
-val SemanticGreen = Color(0xFF1E7E46)          // Verified / Connected
-val SemanticGreenBg = Color(0xFFE7F5EC)
-val SemanticAmber = Color(0xFFB5740B)          // Degraded / Warning
-val SemanticAmberBg = Color(0xFFFEF4E3)
-val SemanticRed = Color(0xFFB82828)            // Error / Disconnected
-val SemanticRedBg = Color(0xFFFBEAEA)
-val SemanticNeutral = Color(0xFF707771)
-val SemanticNeutralBg = Color(0xFFEDEFEA)
-
-// Spacing & Radius Tokens
 object InstrumentDimens {
     val space4 = 4.dp
     val space8 = 8.dp
@@ -67,17 +51,15 @@ object InstrumentDimens {
     val space24 = 24.dp
     val space32 = 32.dp
     val space48 = 48.dp
-
     val radiusSmall = 8.dp
     val radiusMedium = 12.dp
     val radiusLarge = 16.dp
     val radiusPill = 999.dp
-
     val minTouchTarget = 48.dp
 }
 
 private val LightColorScheme = lightColorScheme(
-    primary = SignalOrange,
+    primary = Color(0xFF8B6A2F),
     onPrimary = Color.White,
     primaryContainer = SignalOrangeContainer,
     onPrimaryContainer = SignalOrangeContent,
@@ -90,14 +72,14 @@ private val LightColorScheme = lightColorScheme(
     surfaceVariant = MineralSurfaceSubtle,
     onSurfaceVariant = GraphiteSecondary,
     outline = MineralBorder,
-    error = SemanticRed
+    error = Color(0xFFB82828)
 )
 
 private val DarkColorScheme = darkColorScheme(
     primary = SignalOrange,
-    onPrimary = Color.White,
-    primaryContainer = Color(0xFF4E2003),
-    onPrimaryContainer = Color(0xFFFFDBC9),
+    onPrimary = Color(0xFF211A0D),
+    primaryContainer = Color(0xFF332B1B),
+    onPrimaryContainer = Color(0xFFF6E7C5),
     secondary = GraphiteSecondaryDark,
     onSecondary = Color(0xFF121413),
     background = InstrumentDarkBg,
@@ -111,62 +93,19 @@ private val DarkColorScheme = darkColorScheme(
 )
 
 val InstrumentTypography = Typography(
-    displayLarge = TextStyle(
-        fontFamily = FontFamily.Default,
-        fontWeight = FontWeight.Bold,
-        fontSize = 32.sp,
-        lineHeight = 38.sp,
-        letterSpacing = (-0.5).sp
-    ),
-    titleLarge = TextStyle(
-        fontFamily = FontFamily.Default,
-        fontWeight = FontWeight.SemiBold,
-        fontSize = 22.sp,
-        lineHeight = 28.sp,
-        letterSpacing = (-0.2).sp
-    ),
-    titleMedium = TextStyle(
-        fontFamily = FontFamily.Default,
-        fontWeight = FontWeight.SemiBold,
-        fontSize = 16.sp,
-        lineHeight = 22.sp
-    ),
-    bodyLarge = TextStyle(
-        fontFamily = FontFamily.Default,
-        fontWeight = FontWeight.Normal,
-        fontSize = 16.sp,
-        lineHeight = 24.sp
-    ),
-    bodyMedium = TextStyle(
-        fontFamily = FontFamily.Default,
-        fontWeight = FontWeight.Normal,
-        fontSize = 14.sp,
-        lineHeight = 20.sp
-    ),
-    bodySmall = TextStyle(
-        fontFamily = FontFamily.Default,
-        fontWeight = FontWeight.Normal,
-        fontSize = 12.sp,
-        lineHeight = 16.sp
-    ),
-    labelMedium = TextStyle(
-        fontFamily = FontFamily.Monospace,
-        fontWeight = FontWeight.Medium,
-        fontSize = 12.sp,
-        lineHeight = 16.sp,
-        letterSpacing = 0.5.sp
-    )
+    displayLarge = TextStyle(fontFamily = FontFamily.Default, fontWeight = FontWeight.Bold, fontSize = 32.sp, lineHeight = 38.sp, letterSpacing = (-0.5).sp),
+    titleLarge = TextStyle(fontFamily = FontFamily.Default, fontWeight = FontWeight.SemiBold, fontSize = 22.sp, lineHeight = 28.sp),
+    titleMedium = TextStyle(fontFamily = FontFamily.Default, fontWeight = FontWeight.SemiBold, fontSize = 16.sp, lineHeight = 22.sp),
+    bodyLarge = TextStyle(fontFamily = FontFamily.Default, fontWeight = FontWeight.Normal, fontSize = 16.sp, lineHeight = 24.sp),
+    bodyMedium = TextStyle(fontFamily = FontFamily.Default, fontWeight = FontWeight.Normal, fontSize = 14.sp, lineHeight = 20.sp),
+    bodySmall = TextStyle(fontFamily = FontFamily.Default, fontWeight = FontWeight.Normal, fontSize = 12.sp, lineHeight = 16.sp),
+    labelMedium = TextStyle(fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Medium, fontSize = 12.sp, lineHeight = 16.sp, letterSpacing = 0.5.sp)
 )
 
 @Composable
-fun VlessCardVpnTheme(
-    darkTheme: Boolean = false, // Light mineral theme by default as per specification
-    content: @Composable () -> Unit
-) {
-    val colors = if (darkTheme) DarkColorScheme else LightColorScheme
-
+fun VlessCardVpnTheme(darkTheme: Boolean = true, content: @Composable () -> Unit) {
     MaterialTheme(
-        colorScheme = colors,
+        colorScheme = if (darkTheme) DarkColorScheme else LightColorScheme,
         typography = InstrumentTypography,
         content = content
     )

@@ -38,7 +38,7 @@ class MainActivity : ComponentActivity() {
         val shouldAutoConnect = intent.getBooleanExtra("EXTRA_AUTO_CONNECT", false)
 
         setContent {
-            VlessCardVpnTheme(darkTheme = false) {
+            VlessCardVpnTheme(darkTheme = true) {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
@@ -65,8 +65,15 @@ fun VlessCardVpnApp(
     val scope = rememberCoroutineScope()
     val navController = rememberNavController()
 
-    val repo = remember { AppRepository(context) }
-    val autoPilotEngine = remember { AutoPilotEngine(context, repo.getDatabase()) }
+    val repo = remember { AppRepository(context.applicationContext) }
+    val autoPilotEngine = remember { AutoPilotEngine(context.applicationContext, repo.getDatabase()) }
+
+    DisposableEffect(repo, autoPilotEngine) {
+        onDispose {
+            autoPilotEngine.close()
+            repo.close()
+        }
+    }
 
     val vpnStats by VlessVpnService.vpnStats.collectAsState()
     val configs by repo.configsFlow.collectAsState(initial = emptyList())
@@ -76,13 +83,9 @@ fun VlessCardVpnApp(
     var pendingConfig by remember { mutableStateOf<VlessConfig?>(null) }
 
     LaunchedEffect(Unit) {
-        // Quick 800ms intro animation on startup
         delay(800)
         showSplash = false
-
-        if (settings.autoSelect) {
-            autoPilotEngine.startAutoPilot(settings.healthCheckInterval)
-        }
+        if (settings.autoSelect) autoPilotEngine.startAutoPilot(settings.healthCheckInterval)
     }
 
     val vpnPermissionLauncher = rememberLauncherForActivityResult(
@@ -96,7 +99,7 @@ fun VlessCardVpnApp(
                 }
             }
         } else {
-            Toast.makeText(context, "VPN Permission is required to connect", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, "Разрешение VPN необходимо для подключения", Toast.LENGTH_SHORT).show()
         }
         pendingConfig = null
     }
@@ -118,7 +121,7 @@ fun VlessCardVpnApp(
                 }
             }
         } else {
-            Toast.makeText(context, "Please add or select a server first", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, "Сначала импортируйте или выберите сервер", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -130,18 +133,13 @@ fun VlessCardVpnApp(
 
     AnimatedContent(
         targetState = showSplash,
-        transitionSpec = {
-            fadeIn(animationSpec = tween(280)) togetherWith fadeOut(animationSpec = tween(280))
-        },
+        transitionSpec = { fadeIn(animationSpec = tween(280)) togetherWith fadeOut(animationSpec = tween(280)) },
         label = "AppScreenTransition"
     ) { isSplash ->
         if (isSplash) {
             InstrumentSplashScreen()
         } else {
-            NavHost(
-                navController = navController,
-                startDestination = "home"
-            ) {
+            NavHost(navController = navController, startDestination = "home") {
                 composable("home") {
                     HomeScreen(
                         repo = repo,
@@ -155,44 +153,13 @@ fun VlessCardVpnApp(
                     )
                 }
                 composable("servers") {
-                    ServersScreen(
-                        repo = repo,
-                        onConnect = handleConnectToggle,
-                        onNavigateToFree = { navController.navigate("free_configs") },
-                        onBack = { navController.popBackStack() }
-                    )
+                    ServersScreen(repo, handleConnectToggle, { navController.navigate("free_configs") }) { navController.popBackStack() }
                 }
-                composable("autopilot") {
-                    AutopilotScreen(
-                        repo = repo,
-                        autoPilotEngine = autoPilotEngine,
-                        onBack = { navController.popBackStack() }
-                    )
-                }
-                composable("diagnostic") {
-                    DiagnosticScreen(
-                        repo = repo,
-                        onBack = { navController.popBackStack() }
-                    )
-                }
-                composable("stealth") {
-                    StealthProfileScreen(
-                        repo = repo,
-                        onBack = { navController.popBackStack() }
-                    )
-                }
-                composable("settings") {
-                    SettingsScreen(
-                        repo = repo,
-                        onBack = { navController.popBackStack() }
-                    )
-                }
-                composable("free_configs") {
-                    FreeConfigsScreen(
-                        repo = repo,
-                        onBack = { navController.popBackStack() }
-                    )
-                }
+                composable("autopilot") { AutopilotScreen(repo, autoPilotEngine) { navController.popBackStack() } }
+                composable("diagnostic") { DiagnosticScreen(repo) { navController.popBackStack() } }
+                composable("stealth") { StealthProfileScreen(repo) { navController.popBackStack() } }
+                composable("settings") { SettingsScreen(repo) { navController.popBackStack() } }
+                composable("free_configs") { FreeConfigsScreen(repo) { navController.popBackStack() } }
             }
         }
     }
