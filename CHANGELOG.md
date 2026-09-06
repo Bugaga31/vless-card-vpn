@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.0.23] - 2026-09-06
+
+### Security and reliability
+- Removed the three hard-coded demo VPN profiles from first launch.
+- Stopped treating generic Reality TLS errors as a successful handshake.
+- Removed the invalid TCP/send-buffer MTU heuristic.
+- Disabled cleartext traffic and Android backups.
+- Removed the unnecessary phone-state permission.
+- Closed public-feed HTTP responses and improved profile deduplication.
+
+### Experience
+- Added the obsidian-and-champagne Private Lounge visual foundation.
+- Added lifecycle cleanup for the repository and autopilot engine.
+
 ## [1.0.16] - 2026-09-06
 
 ### Core & Engine
