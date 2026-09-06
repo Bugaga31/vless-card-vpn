@@ -1,6 +1,7 @@
 package com.vlesscardvpn.domain
 
 import com.vlesscardvpn.core.NetworkType
+import org.json.JSONArray
 import org.json.JSONObject
 
 /**
@@ -30,7 +31,8 @@ enum class StepHealth {
     IN_PROGRESS,
     SUCCESS,
     WARNING,
-    FAILURE
+    FAILURE,
+    UNTESTED
 }
 
 /**
@@ -46,6 +48,193 @@ enum class FailureCause {
     PROBE_TARGET_UNREACHABLE,
     UNKNOWN
 }
+
+/**
+ * Stage statuses for "Почему не работает?" multi-stage diagnostics.
+ */
+enum class DiagStageStatus {
+    WAITING,       // «Ожидание»
+    CHECKING,      // «Проверяется»
+    SUCCESS,       // «Успешно»
+    WARNING,       // «Предупреждение»
+    ERROR,         // «Ошибка»
+    UNTESTED       // «Не проверено»
+}
+
+/**
+ * Stage result for "Почему не работает?"
+ */
+data class DiagStageResult(
+    val title: String,
+    val status: DiagStageStatus = DiagStageStatus.WAITING,
+    val methodUsed: String = "",
+    val route: String = "",
+    val latencyMs: Int = -1,
+    val details: String = "",
+    val errorDetails: String? = null
+)
+
+/**
+ * Comprehensive "Почему не работает?" result with confirmed facts, possible causes, and single recommended action.
+ */
+data class WhyNotWorkingReport(
+    val stages: List<DiagStageResult> = emptyList(),
+    val confirmedFact: String = "",
+    val possibleCause: String = "",
+    val recommendedActionTitle: String = "",
+    val recommendedActionType: RecommendedActionType = RecommendedActionType.NONE,
+    val timestamp: Long = System.currentTimeMillis()
+)
+
+enum class RecommendedActionType {
+    NONE,
+    RETRY_TUNNEL,
+    SWITCH_SERVER,
+    RESTORE_RESCUE_PROFILE,
+    CHECK_WIFI_CAPTIVE,
+    TOGGLE_RU_DIRECT,
+    OPEN_SETTINGS
+}
+
+/**
+ * Pre-call test measurement results («Проверить перед звонком»).
+ */
+data class CallQualityTestResult(
+    val isRunning: Boolean = false,
+    val totalProbes: Int = 0,
+    val successfulProbes: Int = 0,
+    val minLatencyMs: Int = -1,
+    val avgLatencyMs: Int = -1,
+    val maxLatencyMs: Int = -1,
+    val latencyVarianceMs: Int = 0, // Honest spread/variance, not fake jitter
+    val successRatePercent: Int = 0,
+    val sampleSize: Int = 0,
+    val durationSeconds: Int = 0,
+    val verdict: String = "Тест готов к запуску",
+    val limitationNote: String = "Методика: серия HTTPS-запросов через прокси (лимит < 50 КБ, до 15 сек). Не является гарантией реального аудио/видеокодека звонка.",
+    val isCancelled: Boolean = false
+)
+
+/**
+ * Persisted Rescue Profile snapshot («Спасательный профиль»).
+ */
+data class RescueProfile(
+    val id: String,
+    val configId: String,
+    val serverName: String,
+    val serverAddress: String,
+    val serverPort: Int,
+    val protocolType: String,
+    val optimalMtu: Int,
+    val effectiveDns: String,
+    val blockQuic: Boolean,
+    val enableRuDirect: Boolean,
+    val customSni: String,
+    val verifiedLatencyMs: Int,
+    val verifiedTimestamp: Long,
+    val isManualBookmark: Boolean = false,
+    val coreVersion: String = "sing-box 1.13-mod",
+    val configSchemaVersion: Int = 1
+) {
+    fun isExpired(ttlMillis: Long = 7 * 24 * 3600 * 1000L): Boolean {
+        return (System.currentTimeMillis() - verifiedTimestamp) > ttlMillis
+    }
+
+    fun toJson(): String {
+        return JSONObject().apply {
+            put("id", id)
+            put("configId", configId)
+            put("serverName", serverName)
+            put("serverAddress", serverAddress)
+            put("serverPort", serverPort)
+            put("protocolType", protocolType)
+            put("optimalMtu", optimalMtu)
+            put("effectiveDns", effectiveDns)
+            put("blockQuic", blockQuic)
+            put("enableRuDirect", enableRuDirect)
+            put("customSni", customSni)
+            put("verifiedLatencyMs", verifiedLatencyMs)
+            put("verifiedTimestamp", verifiedTimestamp)
+            put("isManualBookmark", isManualBookmark)
+            put("coreVersion", coreVersion)
+            put("configSchemaVersion", configSchemaVersion)
+        }.toString()
+    }
+
+    companion object {
+        fun fromJson(jsonStr: String): RescueProfile? {
+            return try {
+                val obj = JSONObject(jsonStr)
+                RescueProfile(
+                    id = obj.optString("id", obj.optString("configId", "")),
+                    configId = obj.getString("configId"),
+                    serverName = obj.optString("serverName", "Сервер"),
+                    serverAddress = obj.optString("serverAddress", ""),
+                    serverPort = obj.optInt("serverPort", 443),
+                    protocolType = obj.optString("protocolType", "vless"),
+                    optimalMtu = obj.optInt("optimalMtu", 1400),
+                    effectiveDns = obj.optString("effectiveDns", "https://1.1.1.1/dns-query"),
+                    blockQuic = obj.optBoolean("blockQuic", true),
+                    enableRuDirect = obj.optBoolean("enableRuDirect", true),
+                    customSni = obj.optString("customSni", "auto"),
+                    verifiedLatencyMs = obj.optInt("verifiedLatencyMs", -1),
+                    verifiedTimestamp = obj.optLong("verifiedTimestamp", System.currentTimeMillis()),
+                    isManualBookmark = obj.optBoolean("isManualBookmark", false),
+                    coreVersion = obj.optString("coreVersion", "sing-box 1.13-mod"),
+                    configSchemaVersion = obj.optInt("configSchemaVersion", 1)
+                )
+            } catch (_: Exception) {
+                null
+            }
+        }
+    }
+}
+
+/**
+ * Server Passport («Паспорт сервера»).
+ */
+data class ServerPassport(
+    val configId: String,
+    val serverName: String,
+    val serverAddress: String,
+    val serverPort: Int,
+    val protocolAndTransport: String,
+    val sourceOrigin: String,
+    val addedDateFormatted: String,
+    val subscriptionExpiryFormatted: String,
+    val signatureVerificationState: String,
+    val checkHistorySummary: String, // e.g., "Успешно 18 из 20 проверок"
+    val recentChecks: List<PassportCheckRecord> = emptyList(),
+    val recentRecoveries: List<String> = emptyList()
+)
+
+data class PassportCheckRecord(
+    val timestamp: Long,
+    val networkType: String,
+    val latencyMs: Int,
+    val isSuccess: Boolean,
+    val method: String
+)
+
+/**
+ * Routing inspection result («Что идёт мимо VPN?»).
+ */
+enum class RouteDecision {
+    PROXY,   // Через VPN
+    DIRECT,  // Напрямую
+    BLOCK,   // Заблокировано
+    UNKNOWN  // Маршрут не определён
+}
+
+data class RouteMatchResult(
+    val targetInput: String,
+    val decision: RouteDecision,
+    val matchedRuleName: String,
+    val rulePriority: Int,
+    val outboundTag: String,
+    val dnsResolver: String,
+    val explanation: String
+)
 
 /**
  * Persisted profile snapshot for a specific server and network context.

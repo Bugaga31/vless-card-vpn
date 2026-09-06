@@ -53,6 +53,7 @@ fun ServersScreen(
     var importText by remember { mutableStateOf("") }
     var importError by remember { mutableStateOf<String?>(null) }
     var isPingingAll by remember { mutableStateOf(false) }
+    var selectedPassportConfig by remember { mutableStateOf<VlessConfig?>(null) }
 
     val activeConfig = configs.firstOrNull { it.isActive }
 
@@ -239,12 +240,24 @@ fun ServersScreen(
                             },
                             onToggleFavorite = {
                                 scope.launch { repo.toggleFavorite(config.id) }
+                            },
+                            onOpenPassport = {
+                                selectedPassportConfig = it
                             }
                         )
                     }
                 }
             }
         }
+    }
+
+    // Server Passport Dialog
+    if (selectedPassportConfig != null) {
+        com.vlesscardvpn.ui.components.ServerPassportDialog(
+            config = selectedPassportConfig!!,
+            repo = repo,
+            onDismiss = { selectedPassportConfig = null }
+        )
     }
 
     // Import Dialog

@@ -214,6 +214,74 @@ class CoreUnitTests {
     }
 
     @Test
+    fun testRouteInspectionRules() {
+        val settingsWithRu = AppSettings(enableRuDirect = true, blockQuicYouTube = true)
+        val settingsWithoutRu = AppSettings(enableRuDirect = false, blockQuicYouTube = true)
+
+        // 1. Private IPs must always go DIRECT
+        val resPrivate = DiagnosticEngine.inspectRouteDecision("192.168.1.1", settingsWithRu)
+        assertEquals(RouteDecision.DIRECT, resPrivate.decision)
+        assertEquals("direct", resPrivate.outboundTag)
+
+        // 2. RU Domain with RU-Direct enabled -> DIRECT
+        val resRuOn = DiagnosticEngine.inspectRouteDecision("gosuslugi.ru", settingsWithRu)
+        assertEquals(RouteDecision.DIRECT, resRuOn.decision)
+        assertEquals("direct", resRuOn.outboundTag)
+
+        // 3. RU Domain with RU-Direct disabled -> PROXY
+        val resRuOff = DiagnosticEngine.inspectRouteDecision("gosuslugi.ru", settingsWithoutRu)
+        assertEquals(RouteDecision.PROXY, resRuOff.decision)
+        assertEquals("proxy", resRuOff.outboundTag)
+
+        // 4. Foreign website -> PROXY
+        val resForeign = DiagnosticEngine.inspectRouteDecision("github.com", settingsWithRu)
+        assertEquals(RouteDecision.PROXY, resForeign.decision)
+        assertEquals("proxy", resForeign.outboundTag)
+
+        // 5. QUIC UDP 443 -> BLOCK
+        val resQuic = DiagnosticEngine.inspectRouteDecision("youtube.com:443 (udp)", settingsWithRu)
+        assertEquals(RouteDecision.BLOCK, resQuic.decision)
+        assertEquals("block", resQuic.outboundTag)
+    }
+
+    @Test
+    fun testRescueProfileSerializationAndRestoration() {
+        val rescue = RescueProfile(
+            id = "rec-01",
+            configId = "node-alpha",
+            serverName = "Alpha Gateway",
+            serverAddress = "194.87.100.12",
+            serverPort = 443,
+            protocolType = "vless",
+            optimalMtu = 1360,
+            effectiveDns = "https://8.8.8.8/dns-query",
+            blockQuic = true,
+            enableRuDirect = true,
+            customSni = "yandex.ru",
+            verifiedLatencyMs = 34,
+            verifiedTimestamp = System.currentTimeMillis(),
+            isManualBookmark = true,
+            coreVersion = "sing-box 1.13-mod",
+            configSchemaVersion = 1
+        )
+
+        val jsonStr = rescue.toJson()
+        val restored = RescueProfile.fromJson(jsonStr)
+
+        assertNotNull(restored)
+        assertEquals("node-alpha", restored?.configId)
+        assertEquals("Alpha Gateway", restored?.serverName)
+        assertEquals(1360, restored?.optimalMtu)
+        assertEquals("https://8.8.8.8/dns-query", restored?.effectiveDns)
+        assertTrue(restored?.isManualBookmark ?: false)
+        assertFalse("Fresh profile must not be expired", restored?.isExpired() ?: true)
+
+        // Test expired rescue profile (e.g. 10 days old)
+        val oldRescue = rescue.copy(verifiedTimestamp = System.currentTimeMillis() - 10 * 24 * 3600 * 1000L)
+        assertTrue("10-day old rescue profile must be marked expired", oldRescue.isExpired())
+    }
+
+    @Test
     fun testPreserveErrorStateModel() {
         val initialStats = VpnSessionStats(status = VpnStatus.CONNECTING)
         assertEquals(VpnStatus.CONNECTING, initialStats.status)

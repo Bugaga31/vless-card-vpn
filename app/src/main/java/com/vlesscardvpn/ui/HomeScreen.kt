@@ -1,6 +1,5 @@
 package com.vlesscardvpn.ui
 
-import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -23,22 +22,23 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.vlesscardvpn.data.AppRepository
-import com.vlesscardvpn.domain.AutoPilotEngine
-import com.vlesscardvpn.domain.VlessConfig
+import com.vlesscardvpn.domain.*
 import com.vlesscardvpn.ui.components.RouteDiagramView
 import com.vlesscardvpn.ui.theme.*
 import com.vlesscardvpn.worker.VpnSessionStats
 import com.vlesscardvpn.worker.VpnStatus
+import kotlinx.coroutines.launch
 
 /**
  * Precision / Field Instrument Home Screen:
- * 1. Compact header with "VLESS CARD" & Settings.
- * 2. Prominent real status: "Не подключено", "Подключаем…", "Подключено", "Ошибка подключения".
- * 3. Exact schematic route diagram: "Устройство → Туннель → Сервер".
- * 4. Selected server details (Name, Address, Port, SNI, Latency).
- * 5. Primary Action Button (Connect / Disconnect / Cancel) in Signal Orange.
- * 6. Authentic real-time telemetry: Duration, Download, Upload.
- * 7. Active routing flags: "RU напрямую" and "Блок QUIC".
+ * 1. Compact header with "VLESS CARD", quick telemetry badge, and settings shortcut.
+ * 2. Prominent honest status header ("Не подключено", "Подключаем…", "Подключено", "Ошибка подключения").
+ * 3. Schematic route diagram: "Устройство → Туннель → Сервер".
+ * 4. Selected server card with quick passport launcher.
+ * 5. Primary action button in Signal Orange (<= 10% screen color accent).
+ * 6. Secondary action buttons: «Почему не работает?» and «Восстановить профиль».
+ * 7. Authentic real-time telemetry row (Duration, Download, Upload).
+ * 8. «Что идёт мимо VPN?» interactive routing rule inspector.
  */
 @Composable
 fun HomeScreen(
@@ -52,12 +52,17 @@ fun HomeScreen(
     onPanicTrigger: () -> Unit
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val configs by repo.configsFlow.collectAsState(initial = emptyList())
     val settings by repo.settingsFlow.collectAsState()
     val activeConfig = configs.firstOrNull { it.isActive } ?: configs.firstOrNull()
     val isConnected = vpnStats.status == VpnStatus.CONNECTED
     val isConnecting = vpnStats.status == VpnStatus.CONNECTING
-    val isError = vpnStats.status == VpnStatus.ERROR
+
+    var showRouteInspector by remember { mutableStateOf(false) }
+    var routeTargetInput by remember { mutableStateOf("") }
+    var routeMatchResult by remember { mutableStateOf<RouteMatchResult?>(null) }
+    var rescueProfileFeedback by remember { mutableStateOf<String?>(null) }
 
     Column(
         modifier = Modifier
@@ -67,7 +72,7 @@ fun HomeScreen(
             .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(InstrumentDimens.space16)
     ) {
-        // 1. Header: VLESS CARD brand mark + Quick Diagnostic / Autopilot
+        // 1. Header: VLESS CARD Brand Mark + Quick Autopilot / Diagnostic Badges
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -93,7 +98,6 @@ fun HomeScreen(
             }
 
             Row(horizontalArrangement = Arrangement.spacedBy(InstrumentDimens.space8)) {
-                // Autopilot Status Badge
                 Surface(
                     color = if (settings.autoSelect) SemanticGreenBg else MineralSurfaceSubtle,
                     shape = RoundedCornerShape(InstrumentDimens.radiusSmall),
@@ -122,8 +126,6 @@ fun HomeScreen(
                 }
             }
         }
-
-        Spacer(modifier = Modifier.height(InstrumentDimens.space4))
 
         // 2. Prominent Real Status Header
         Column {
@@ -261,7 +263,64 @@ fun HomeScreen(
             }
         }
 
-        // 6. Compact Authentic Telemetry (Duration, Download, Upload)
+        // 6. Secondary Actions: «Почему не работает?» and «Спасательный профиль»
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(InstrumentDimens.space8)
+        ) {
+            OutlinedButton(
+                onClick = onNavigateToDiagnostic,
+                modifier = Modifier.weight(1f),
+                shape = RoundedCornerShape(InstrumentDimens.radiusSmall),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.onBackground)
+            ) {
+                Icon(Icons.Default.HelpOutline, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("Почему не работает?", style = MaterialTheme.typography.bodySmall)
+            }
+
+            OutlinedButton(
+                onClick = {
+                    scope.launch {
+                        if (activeConfig != null) {
+                            val saved = repo.getRescueProfile(activeConfig.id)
+                            if (saved != null) {
+                                autoPilotEngine.restoreLastWorkingProfile()
+                                rescueProfileFeedback = "Настройки восстановлены из снимка (${saved.verifiedLatencyMs} мс)"
+                            } else {
+                                rescueProfileFeedback = "Снимок для этого узла ещё не сохранён"
+                            }
+                        } else {
+                            rescueProfileFeedback = "Сервер не выбран"
+                        }
+                    }
+                },
+                modifier = Modifier.weight(1f),
+                shape = RoundedCornerShape(InstrumentDimens.radiusSmall),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.onBackground)
+            ) {
+                Icon(Icons.Default.Restore, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("Спасательный профиль", style = MaterialTheme.typography.bodySmall)
+            }
+        }
+
+        if (rescueProfileFeedback != null) {
+            Surface(
+                color = MineralSurfaceSubtle,
+                shape = RoundedCornerShape(InstrumentDimens.radiusSmall),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(
+                    text = rescueProfileFeedback ?: "",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(InstrumentDimens.space8)
+                )
+            }
+        }
+
+        // 7. Compact Authentic Telemetry Row (Duration, Download, Upload)
         Surface(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(InstrumentDimens.radiusMedium),
@@ -292,49 +351,120 @@ fun HomeScreen(
             }
         }
 
-        // 7. Active Routing Rules Summary Bar
-        Row(
+        // 8. «ЧТО ИДЁТ МИМО VPN?» Summary & Interactive Inspector
+        Surface(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(InstrumentDimens.space8)
+            shape = RoundedCornerShape(InstrumentDimens.radiusMedium),
+            color = MaterialTheme.colorScheme.surface,
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
         ) {
-            if (settings.enableRuDirect) {
-                Surface(
-                    color = MineralSurfaceSubtle,
-                    shape = RoundedCornerShape(InstrumentDimens.radiusSmall),
-                    modifier = Modifier.weight(1f)
+            Column(modifier = Modifier.padding(InstrumentDimens.space12)) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { showRouteInspector = !showRouteInspector },
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(SemanticGreen))
-                        Spacer(modifier = Modifier.width(6.dp))
+                    Column {
                         Text(
-                            text = "RU напрямую (0 мс)",
+                            text = "ЧТО ИДЁТ МИМО VPN?",
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            letterSpacing = 0.5.sp
+                        )
+                        Text(
+                            text = if (settings.enableRuDirect) "RU сайты и локальные адреса идут напрямую" else "Весь внешний трафик направляется через туннель",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onBackground
+                        )
+                    }
+
+                    IconButton(onClick = { showRouteInspector = !showRouteInspector }) {
+                        Icon(
+                            imageVector = if (showRouteInspector) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 }
-            }
 
-            if (settings.blockQuicYouTube) {
-                Surface(
-                    color = MineralSurfaceSubtle,
-                    shape = RoundedCornerShape(InstrumentDimens.radiusSmall),
-                    modifier = Modifier.weight(1f)
-                ) {
+                if (showRouteInspector) {
+                    Spacer(modifier = Modifier.height(InstrumentDimens.space8))
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outline, thickness = 1.dp)
+                    Spacer(modifier = Modifier.height(InstrumentDimens.space8))
+
+                    Text(
+                        text = "Проверить маршрут для домена или IP:",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    Spacer(modifier = Modifier.height(InstrumentDimens.space4))
+
                     Row(
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(InstrumentDimens.space8),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(SignalOrange))
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = "QUIC блокировка (YouTube)",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        OutlinedTextField(
+                            value = routeTargetInput,
+                            onValueChange = {
+                                routeTargetInput = it
+                                if (it.isNotBlank()) {
+                                    routeMatchResult = DiagnosticEngine.inspectRouteDecision(it, settings)
+                                } else {
+                                    routeMatchResult = null
+                                }
+                            },
+                            placeholder = { Text("например, yandex.ru или 1.1.1.1", fontSize = 12.sp) },
+                            modifier = Modifier.weight(1f),
+                            singleLine = true,
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = SignalOrange,
+                                unfocusedBorderColor = MaterialTheme.colorScheme.outline
+                            )
                         )
+                    }
+
+                    if (routeMatchResult != null) {
+                        val res = routeMatchResult!!
+                        Spacer(modifier = Modifier.height(InstrumentDimens.space8))
+                        Surface(
+                            color = when (res.decision) {
+                                RouteDecision.DIRECT -> MineralSurfaceSubtle
+                                RouteDecision.PROXY -> SemanticGreenBg
+                                RouteDecision.BLOCK -> SemanticRedBg
+                                RouteDecision.UNKNOWN -> MineralSurfaceSubtle
+                            },
+                            shape = RoundedCornerShape(InstrumentDimens.radiusSmall),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.padding(InstrumentDimens.space8)) {
+                                Text(
+                                    text = "Направление: ${when(res.decision) {
+                                        RouteDecision.DIRECT -> "НАПРЯМУЮ (без VPN)"
+                                        RouteDecision.PROXY -> "ЧЕРЕЗ VPN (Туннель)"
+                                        RouteDecision.BLOCK -> "ЗАБЛОКИРОВАНО"
+                                        RouteDecision.UNKNOWN -> "Маршрут не определён"
+                                    }}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = when (res.decision) {
+                                        RouteDecision.DIRECT -> SignalOrange
+                                        RouteDecision.PROXY -> SemanticGreen
+                                        RouteDecision.BLOCK -> SemanticRed
+                                        RouteDecision.UNKNOWN -> GraphiteTertiary
+                                    }
+                                )
+                                Text(
+                                    text = res.explanation,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
                     }
                 }
             }

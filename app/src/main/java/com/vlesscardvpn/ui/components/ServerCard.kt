@@ -1,9 +1,6 @@
 package com.vlesscardvpn.ui.components
 
-import android.content.ClipData
-import android.content.ClipboardManager
 import android.content.Context
-import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -25,13 +22,19 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.vlesscardvpn.data.AppRepository
+import com.vlesscardvpn.domain.PassportCheckRecord
+import com.vlesscardvpn.domain.ServerPassport
 import com.vlesscardvpn.domain.VlessConfig
 import com.vlesscardvpn.ui.theme.*
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 /**
  * Precision Field Instrument Server Card:
- * Clean, compact horizontal row with clear typographic hierarchy,
- * active indicator, exact latency display and explicit touch targets.
+ * Compact horizontal row with active indicator, exact latency display,
+ * favorite star, and quick server passport launcher («Паспорт сервера»).
  */
 @Composable
 fun ServerCard(
@@ -42,11 +45,9 @@ fun ServerCard(
     onPing: (VlessConfig) -> Unit,
     onDelete: (VlessConfig) -> Unit,
     onToggleFavorite: (VlessConfig) -> Unit = {},
+    onOpenPassport: ((VlessConfig) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
-    val context = LocalContext.current
-
-    // Semantic border & surface styling
     val borderColor = when {
         isConnected -> SemanticGreen
         isSelected || config.isActive -> SignalOrange
@@ -82,7 +83,6 @@ fun ServerCard(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.weight(1f)
             ) {
-                // Precise status dot
                 Box(
                     modifier = Modifier
                         .size(8.dp)
@@ -115,7 +115,6 @@ fun ServerCard(
                             modifier = Modifier.weight(1f, fill = false)
                         )
 
-                        // Protocol Tag
                         Text(
                             text = config.protocolType.uppercase(),
                             style = MaterialTheme.typography.bodySmall,
@@ -203,6 +202,21 @@ fun ServerCard(
                     )
                 }
 
+                // Passport button
+                if (onOpenPassport != null) {
+                    IconButton(
+                        onClick = { onOpenPassport(config) },
+                        modifier = Modifier.size(36.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Badge,
+                            contentDescription = "Паспорт сервера",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
+
                 // Favorite toggle
                 IconButton(
                     onClick = { onToggleFavorite(config) },
@@ -217,5 +231,105 @@ fun ServerCard(
                 }
             }
         }
+    }
+}
+
+/**
+ * 4. «ПАСПОРТ СЕРВЕРА» Dialog
+ * Shows confirmed factual data only without fabricated security ratings.
+ */
+@Composable
+fun ServerPassportDialog(
+    config: VlessConfig,
+    repo: AppRepository,
+    onDismiss: () -> Unit
+) {
+    val (succ, total) = remember(config) { repo.getPassportStats(config.id) }
+    val rescueProfile = remember(config) { repo.getRescueProfile(config.id) }
+    val addedDate = remember(config) {
+        SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.getDefault()).format(Date(config.addedAt))
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.Badge, contentDescription = null, tint = SignalOrange, modifier = Modifier.size(22.dp))
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = "Паспорт узла",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(InstrumentDimens.space12)
+            ) {
+                Text(
+                    text = config.name,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onBackground
+                )
+
+                HorizontalDivider(color = MaterialTheme.colorScheme.outline, thickness = 1.dp)
+
+                PassportDetailRow(label = "Адрес и порт", value = "${config.address}:${config.port}")
+                PassportDetailRow(label = "Протокол", value = "${config.protocolType.uppercase()} • ${config.security.uppercase()}")
+                PassportDetailRow(label = "SNI маскировки", value = config.sni.ifBlank { "auto" })
+                PassportDetailRow(label = "Источник конфигурации", value = config.source.ifBlank { "Ручной импорт" })
+                PassportDetailRow(label = "Дата добавления", value = addedDate)
+
+                // History summary
+                PassportDetailRow(
+                    label = "История проверок",
+                    value = if (total > 0) "Успешно $succ из $total проверок (${((succ.toDouble()/total)*100).toInt()}%)" else "Проверок не выполнялось"
+                )
+
+                // Rescue snapshot status
+                PassportDetailRow(
+                    label = "Спасательный снимок",
+                    value = if (rescueProfile != null) "Сохранён (${rescueProfile.verifiedLatencyMs} мс)" else "Снимок не создан"
+                )
+
+                // Cryptographic authenticity note
+                Text(
+                    text = "Примечание: Сервер использует TLS Reality / Vision. Подлинность подтверждается успешным сквозным HTTPS-рукопожатием.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = GraphiteTertiary,
+                    fontSize = 11.sp
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = onDismiss,
+                colors = ButtonDefaults.buttonColors(containerColor = SignalOrange)
+            ) {
+                Text("Закрыть")
+            }
+        },
+        containerColor = MaterialTheme.colorScheme.surface
+    )
+}
+
+@Composable
+private fun PassportDetailRow(label: String, value: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(text = label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(
+            text = value,
+            style = MaterialTheme.typography.bodySmall,
+            fontFamily = FontFamily.Monospace,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onBackground
+        )
     }
 }

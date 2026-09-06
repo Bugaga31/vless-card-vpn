@@ -1,7 +1,9 @@
 package com.vlesscardvpn.ui
 
+import androidx.compose.animation.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -16,48 +18,53 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.vlesscardvpn.data.AppRepository
-import com.vlesscardvpn.domain.DiagnosticEngine
-import com.vlesscardvpn.domain.DiagnosticResult
+import com.vlesscardvpn.domain.*
 import com.vlesscardvpn.ui.theme.*
+import com.vlesscardvpn.worker.VlessVpnService
+import com.vlesscardvpn.worker.VpnStatus
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
-/**
- * Precision Field Instrument Diagnostic Screen:
- * Clean, readable inspection log verifying 3 authentic stages:
- * 1. Telegram MTProto Datacenter Response
- * 2. YouTube Video CDN Stream Speed & Throttling
- * 3. DNS-over-HTTPS & Anti-blocking Accessibility Pass Rate
- */
+enum class DiagnosticTab(val label: String) {
+    WHY_NOT_WORKING("Почему не работает?"),
+    PRE_CALL_TEST("Перед звонком"),
+    SERVICE_AUDIT("Службы")
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DiagnosticScreen(
     repo: AppRepository,
     onBack: () -> Unit = {}
 ) {
+    val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    var diagResult by remember { mutableStateOf(DiagnosticResult()) }
     val settings by repo.settingsFlow.collectAsState()
-    var isRunningAll by remember { mutableStateOf(false) }
+    val configs by repo.configsFlow.collectAsState(initial = emptyList())
+    val activeConfig = configs.firstOrNull { it.isActive } ?: configs.firstOrNull()
+
+    var selectedTab by remember { mutableStateOf(DiagnosticTab.WHY_NOT_WORKING) }
     val snackbarHostState = remember { SnackbarHostState() }
 
-    val adaptiveRecommendation = remember(diagResult) {
-        when {
-            diagResult.tgStatus == DiagnosticResult.TestState.FAILED ->
-                "Рекомендация: Протокол MTProto блокируется. Проверьте настройки Reality и выберите узел с активным TLS 1.3 Vision."
-            diagResult.ytStatus == DiagnosticResult.TestState.FAILED || (diagResult.ytSpeedMbps in 0.1..4.0) ->
-                "Рекомендация: Обнаружено замедление YouTube. Включите 'Блокировку QUIC' в настройках и проверьте MTU 1400."
-            diagResult.rknPassRatePercent in 1..60 ->
-                "Рекомендация: Частичная потеря доступности заблокированных ресурсов. Смените сервер выхода на европейский регион."
-            diagResult.tgStatus == DiagnosticResult.TestState.SUCCESS && diagResult.ytSpeedMbps >= 10.0 ->
-                "Статус: Туннель функционирует штатно. Маршрутизация и скорость соответствуют норме."
-            else -> "Запустите комплексное тестирование для проверки фактической проходимости пакетов."
-        }
-    }
+    // State for "Почему не работает?"
+    var isRunningWhyNotWorking by remember { mutableStateOf(false) }
+    var whyReport by remember { mutableStateOf<WhyNotWorkingReport?>(null) }
+    var customTargetDomain by remember { mutableStateOf("youtube.com") }
+
+    // State for "Проверить перед звонком"
+    var isRunningPreCall by remember { mutableStateOf(false) }
+    var preCallResult by remember { mutableStateOf(CallQualityTestResult()) }
+    var preCallJob by remember { mutableStateOf<Job?>(null) }
+
+    // State for Service Audit (Telegram, YouTube, RKN)
+    var diagResult by remember { mutableStateOf(DiagnosticResult()) }
+    var isRunningServices by remember { mutableStateOf(false) }
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
@@ -77,60 +84,6 @@ fun DiagnosticScreen(
                         Icon(Icons.Default.ArrowBack, contentDescription = "Назад", tint = MaterialTheme.colorScheme.onBackground)
                     }
                 },
-                actions = {
-                    Button(
-                        onClick = {
-                            if (!isRunningAll) {
-                                isRunningAll = true
-                                scope.launch {
-                                    diagResult = diagResult.copy(
-                                        tgStatus = DiagnosticResult.TestState.RUNNING,
-                                        ytStatus = DiagnosticResult.TestState.RUNNING,
-                                        rknStatus = DiagnosticResult.TestState.RUNNING
-                                    )
-
-                                    // 1. Telegram
-                                    val (tgState, tgData) = DiagnosticEngine.runTelegramPulseTest()
-                                    diagResult = diagResult.copy(
-                                        tgStatus = tgState,
-                                        tgPingMs = tgData.first,
-                                        tgVerdict = tgData.second
-                                    )
-
-                                    // 2. YouTube
-                                    val (ytState, ytMbps, ytVerdict) = DiagnosticEngine.runYouTubeStreamTest(settings.blockQuicYouTube)
-                                    diagResult = diagResult.copy(
-                                        ytStatus = ytState,
-                                        ytSpeedMbps = ytMbps,
-                                        ytVerdict = ytVerdict
-                                    )
-
-                                    // 3. RKN Echo
-                                    val (rknState, passRate, rknVerdict) = DiagnosticEngine.runRknEchoTest()
-                                    diagResult = diagResult.copy(
-                                        rknStatus = rknState,
-                                        rknPassRatePercent = passRate,
-                                        rknVerdict = rknVerdict
-                                    )
-
-                                    isRunningAll = false
-                                    snackbarHostState.showSnackbar("Тестирование завершено")
-                                }
-                            }
-                        },
-                        enabled = !isRunningAll,
-                        colors = ButtonDefaults.buttonColors(containerColor = SignalOrange),
-                        shape = RoundedCornerShape(InstrumentDimens.radiusSmall),
-                        contentPadding = PaddingValues(horizontal = InstrumentDimens.space12, vertical = InstrumentDimens.space4),
-                        modifier = Modifier.padding(end = InstrumentDimens.space8).height(36.dp)
-                    ) {
-                        if (isRunningAll) {
-                            CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Color.White, strokeWidth = 2.dp)
-                        } else {
-                            Text("Проверить всё", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold)
-                        }
-                    }
-                },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface)
             )
         }
@@ -139,119 +92,421 @@ fun DiagnosticScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = InstrumentDimens.space16, vertical = InstrumentDimens.space12),
-            verticalArrangement = Arrangement.spacedBy(InstrumentDimens.space16)
+                .padding(horizontal = InstrumentDimens.space16, vertical = InstrumentDimens.space8)
         ) {
-            // Recommendation Card
-            Surface(
+            // Tab Selector
+            Row(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(InstrumentDimens.radiusMedium),
-                color = MaterialTheme.colorScheme.surface,
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+                horizontalArrangement = Arrangement.spacedBy(InstrumentDimens.space8)
             ) {
-                Row(
-                    modifier = Modifier.padding(InstrumentDimens.space16),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(36.dp)
-                            .clip(CircleShape)
-                            .background(SignalOrangeContainer),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            Icons.Default.Info,
-                            contentDescription = null,
-                            tint = SignalOrange,
-                            modifier = Modifier.size(20.dp)
+                DiagnosticTab.values().forEach { tab ->
+                    FilterChip(
+                        selected = selectedTab == tab,
+                        onClick = { selectedTab = tab },
+                        label = { Text(tab.label, style = MaterialTheme.typography.bodySmall) },
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = SignalOrangeContainer,
+                            selectedLabelColor = SignalOrangeContent
                         )
-                    }
-                    Spacer(modifier = Modifier.width(InstrumentDimens.space12))
-                    Text(
-                        text = adaptiveRecommendation,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onBackground
                     )
                 }
             }
 
-            // Test 1: Telegram MTProto Response
-            DiagnosticLogRow(
-                title = "1. Telegram (MTProto)",
-                description = "Прямой опрос дата-центров Telegram (149.154.167.99 / 91.108.56.165)",
-                state = diagResult.tgStatus,
-                metric = if (diagResult.tgPingMs > 0) "${diagResult.tgPingMs} мс" else "—",
-                verdict = diagResult.tgVerdict,
-                icon = Icons.Default.Send,
-                onRun = {
-                    scope.launch {
-                        diagResult = diagResult.copy(tgStatus = DiagnosticResult.TestState.RUNNING)
-                        val (tgState, tgData) = DiagnosticEngine.runTelegramPulseTest()
-                        diagResult = diagResult.copy(
-                            tgStatus = tgState,
-                            tgPingMs = tgData.first,
-                            tgVerdict = tgData.second
-                        )
-                    }
-                }
-            )
+            Spacer(modifier = Modifier.height(InstrumentDimens.space12))
 
-            // Test 2: YouTube CDN Video Stream
-            DiagnosticLogRow(
-                title = "2. YouTube (QUIC / TLS)",
-                description = "Замер скорости запроса чанков youtubei.googleapis.com",
-                state = diagResult.ytStatus,
-                metric = if (diagResult.ytSpeedMbps > 0) "${diagResult.ytSpeedMbps} Мбит/с" else "—",
-                verdict = diagResult.ytVerdict,
-                icon = Icons.Default.PlayCircle,
-                onRun = {
-                    scope.launch {
-                        diagResult = diagResult.copy(ytStatus = DiagnosticResult.TestState.RUNNING)
-                        val (ytState, ytMbps, ytVerdict) = DiagnosticEngine.runYouTubeStreamTest(settings.blockQuicYouTube)
-                        diagResult = diagResult.copy(
-                            ytStatus = ytState,
-                            ytSpeedMbps = ytMbps,
-                            ytVerdict = ytVerdict
-                        )
-                    }
-                }
-            )
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(InstrumentDimens.space16)
+            ) {
+                when (selectedTab) {
+                    DiagnosticTab.WHY_NOT_WORKING -> {
+                        // 1. «ПОЧЕМУ НЕ РАБОТАЕТ?» Tab
+                        Surface(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(InstrumentDimens.radiusMedium),
+                            color = MaterialTheme.colorScheme.surface,
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+                        ) {
+                            Column(modifier = Modifier.padding(InstrumentDimens.space16), verticalArrangement = Arrangement.spacedBy(InstrumentDimens.space12)) {
+                                Text(
+                                    text = "ПОСЛЕДОВАТЕЛЬНАЯ ПРОВЕРКА СВЯЗИ",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    letterSpacing = 0.8.sp
+                                )
+                                Text(
+                                    text = "Пошагово проверяет все уровни: Сеть → DNS → Сервер → Туннель → Целевой сайт.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
 
-            // Test 3: Anti-Censorship & DoH Pass Rate
-            DiagnosticLogRow(
-                title = "3. Проходимость DoH и ресурсов",
-                description = "Сквозная проверка пула адресов через DNS-over-HTTPS туннель",
-                state = diagResult.rknStatus,
-                metric = if (diagResult.rknPassRatePercent > 0) "${diagResult.rknPassRatePercent}%" else "—",
-                verdict = diagResult.rknVerdict,
-                icon = Icons.Default.Security,
-                onRun = {
-                    scope.launch {
-                        diagResult = diagResult.copy(rknStatus = DiagnosticResult.TestState.RUNNING)
-                        val (rknState, passRate, rknVerdict) = DiagnosticEngine.runRknEchoTest()
-                        diagResult = diagResult.copy(
-                            rknStatus = rknState,
-                            rknPassRatePercent = passRate,
-                            rknVerdict = rknVerdict
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(InstrumentDimens.space8),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    OutlinedTextField(
+                                        value = customTargetDomain,
+                                        onValueChange = { customTargetDomain = it },
+                                        label = { Text("Целевой ресурс", fontSize = 12.sp) },
+                                        modifier = Modifier.weight(1f),
+                                        singleLine = true,
+                                        colors = OutlinedTextFieldDefaults.colors(
+                                            focusedBorderColor = SignalOrange,
+                                            unfocusedBorderColor = MaterialTheme.colorScheme.outline
+                                        )
+                                    )
+
+                                    Button(
+                                        onClick = {
+                                            if (!isRunningWhyNotWorking) {
+                                                isRunningWhyNotWorking = true
+                                                scope.launch {
+                                                    whyReport = DiagnosticEngine.runWhyNotWorkingDiagnostic(
+                                                        context = context,
+                                                        config = activeConfig,
+                                                        settings = settings,
+                                                        targetDomain = customTargetDomain.ifBlank { "youtube.com" }
+                                                    )
+                                                    isRunningWhyNotWorking = false
+                                                    snackbarHostState.showSnackbar("Диагностика завершена")
+                                                }
+                                            }
+                                        },
+                                        enabled = !isRunningWhyNotWorking,
+                                        colors = ButtonDefaults.buttonColors(containerColor = SignalOrange),
+                                        shape = RoundedCornerShape(InstrumentDimens.radiusSmall),
+                                        modifier = Modifier.height(52.dp)
+                                    ) {
+                                        if (isRunningWhyNotWorking) {
+                                            CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Color.White, strokeWidth = 2.dp)
+                                        } else {
+                                            Text("Запуск")
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        if (whyReport != null) {
+                            val report = whyReport!!
+
+                            // Confirmed Fact & Possible Cause Card
+                            Surface(
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(InstrumentDimens.radiusMedium),
+                                color = MaterialTheme.colorScheme.surface,
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+                            ) {
+                                Column(modifier = Modifier.padding(InstrumentDimens.space16), verticalArrangement = Arrangement.spacedBy(InstrumentDimens.space8)) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(Icons.Default.FactCheck, contentDescription = null, tint = SignalOrange, modifier = Modifier.size(18.dp))
+                                        Spacer(modifier = Modifier.width(InstrumentDimens.space8))
+                                        Text("ПОДТВЕРЖДЁННЫЙ ФАКТ", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold, color = SignalOrange)
+                                    }
+                                    Text(text = report.confirmedFact, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onBackground)
+
+                                    if (report.possibleCause.isNotBlank()) {
+                                        Spacer(modifier = Modifier.height(InstrumentDimens.space4))
+                                        Text(text = "Возможная причина: ${report.possibleCause}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+
+                                    if (report.recommendedActionTitle.isNotBlank()) {
+                                        Spacer(modifier = Modifier.height(InstrumentDimens.space8))
+                                        Button(
+                                            onClick = {
+                                                when (report.recommendedActionType) {
+                                                    RecommendedActionType.RESTORE_RESCUE_PROFILE -> {
+                                                        scope.launch {
+                                                            val engine = AutoPilotEngine(context, repo.getDatabase())
+                                                            engine.restoreLastWorkingProfile()
+                                                            snackbarHostState.showSnackbar("Спасательный профиль восстановлен")
+                                                        }
+                                                    }
+                                                    RecommendedActionType.RETRY_TUNNEL -> {
+                                                        activeConfig?.let { VlessVpnService.startVpn(context, it) }
+                                                    }
+                                                    else -> {}
+                                                }
+                                            },
+                                            shape = RoundedCornerShape(InstrumentDimens.radiusSmall),
+                                            colors = ButtonDefaults.buttonColors(containerColor = SignalOrange),
+                                            modifier = Modifier.fillMaxWidth()
+                                        ) {
+                                            Text(report.recommendedActionTitle)
+                                        }
+                                    }
+                                }
+                            }
+
+                            // 5 Distinct Diagnostic Stages
+                            report.stages.forEach { stage ->
+                                StageCardItem(stage = stage)
+                            }
+                        }
+                    }
+
+                    DiagnosticTab.PRE_CALL_TEST -> {
+                        // 2. «ПРОВЕРИТЬ ПЕРЕД ЗВОНКОМ» Tab
+                        Surface(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(InstrumentDimens.radiusMedium),
+                            color = MaterialTheme.colorScheme.surface,
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+                        ) {
+                            Column(modifier = Modifier.padding(InstrumentDimens.space16), verticalArrangement = Arrangement.spacedBy(InstrumentDimens.space12)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = "ПРОВЕРКА ПЕРЕД ЗВОНКОМ",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            letterSpacing = 0.8.sp
+                                        )
+                                        Text(
+                                            text = "Серия контрольных HTTPS-запросов (до 15 сек, трафик < 50 КБ) для оценки стабильности и разброса задержки.",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(InstrumentDimens.space8)
+                                ) {
+                                    Button(
+                                        onClick = {
+                                            if (isRunningPreCall) {
+                                                preCallJob?.cancel()
+                                                isRunningPreCall = false
+                                            } else {
+                                                isRunningPreCall = true
+                                                preCallJob = scope.launch {
+                                                    val res = DiagnosticEngine.runPreCallQualityTest { progress ->
+                                                        preCallResult = progress
+                                                    }
+                                                    preCallResult = res
+                                                    isRunningPreCall = false
+                                                }
+                                            }
+                                        },
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = if (isRunningPreCall) SemanticRed else SignalOrange
+                                        ),
+                                        shape = RoundedCornerShape(InstrumentDimens.radiusSmall),
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Text(if (isRunningPreCall) "Остановить тест" else "Начать тест (15 сек)")
+                                    }
+                                }
+                            }
+                        }
+
+                        // Pre-call measurement stats
+                        Surface(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(InstrumentDimens.radiusMedium),
+                            color = MaterialTheme.colorScheme.surface,
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+                        ) {
+                            Column(modifier = Modifier.padding(InstrumentDimens.space16), verticalArrangement = Arrangement.spacedBy(InstrumentDimens.space12)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceAround,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Text("УСПЕШНОСТЬ", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Bold)
+                                        Text(
+                                            text = if (preCallResult.totalProbes > 0) "${preCallResult.successRatePercent}%" else "—",
+                                            style = MaterialTheme.typography.titleMedium,
+                                            fontFamily = FontFamily.Monospace,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                    Box(modifier = Modifier.width(1.dp).height(24.dp).background(MaterialTheme.colorScheme.outline))
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Text("СРЕДНЯЯ ЗАДЕРЖКА", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Bold)
+                                        Text(
+                                            text = if (preCallResult.avgLatencyMs > 0) "${preCallResult.avgLatencyMs} мс" else "—",
+                                            style = MaterialTheme.typography.titleMedium,
+                                            fontFamily = FontFamily.Monospace,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                    Box(modifier = Modifier.width(1.dp).height(24.dp).background(MaterialTheme.colorScheme.outline))
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Text("РАЗБРОС", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Bold)
+                                        Text(
+                                            text = if (preCallResult.latencyVarianceMs > 0) "±${preCallResult.latencyVarianceMs} мс" else "0 мс",
+                                            style = MaterialTheme.typography.titleMedium,
+                                            fontFamily = FontFamily.Monospace,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                }
+
+                                HorizontalDivider(color = MaterialTheme.colorScheme.outline, thickness = 1.dp)
+
+                                Text(
+                                    text = preCallResult.verdict,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onBackground
+                                )
+
+                                Text(
+                                    text = preCallResult.limitationNote,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = GraphiteTertiary
+                                )
+                            }
+                        }
+                    }
+
+                    DiagnosticTab.SERVICE_AUDIT -> {
+                        // 3. Service Audit Tab (Telegram, YouTube, RKN)
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.End
+                        ) {
+                            Button(
+                                onClick = {
+                                    if (!isRunningServices) {
+                                        isRunningServices = true
+                                        scope.launch {
+                                            val (tgState, tgData) = DiagnosticEngine.runTelegramPulseTest()
+                                            diagResult = diagResult.copy(tgStatus = tgState, tgPingMs = tgData.first, tgVerdict = tgData.second)
+
+                                            val (ytState, ytMbps, ytVerdict) = DiagnosticEngine.runYouTubeStreamTest(settings.blockQuicYouTube)
+                                            diagResult = diagResult.copy(ytStatus = ytState, ytSpeedMbps = ytMbps, ytVerdict = ytVerdict)
+
+                                            val (rknState, passRate, rknVerdict) = DiagnosticEngine.runRknEchoTest()
+                                            diagResult = diagResult.copy(rknStatus = rknState, rknPassRatePercent = passRate, rknVerdict = rknVerdict)
+
+                                            isRunningServices = false
+                                        }
+                                    }
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = SignalOrange),
+                                shape = RoundedCornerShape(InstrumentDimens.radiusSmall)
+                            ) {
+                                Text("Проверить службы")
+                            }
+                        }
+
+                        DiagnosticServiceRow(
+                            title = "1. Telegram (MTProto)",
+                            description = "Опрос дата-центров 149.154.167.99 / 91.108.56.165",
+                            state = diagResult.tgStatus,
+                            metric = if (diagResult.tgPingMs > 0) "${diagResult.tgPingMs} мс" else "—",
+                            verdict = diagResult.tgVerdict,
+                            icon = Icons.Default.Send
+                        )
+
+                        DiagnosticServiceRow(
+                            title = "2. YouTube (Видеопоток)",
+                            description = "Замер скорости чанков youtubei.googleapis.com",
+                            state = diagResult.ytStatus,
+                            metric = if (diagResult.ytSpeedMbps > 0) "${diagResult.ytSpeedMbps} Мбит/с" else "—",
+                            verdict = diagResult.ytVerdict,
+                            icon = Icons.Default.PlayCircle
+                        )
+
+                        DiagnosticServiceRow(
+                            title = "3. Проходимость DoH и ресурсов",
+                            description = "Проверка пула адресов через туннель",
+                            state = diagResult.rknStatus,
+                            metric = if (diagResult.rknPassRatePercent > 0) "${diagResult.rknPassRatePercent}%" else "—",
+                            verdict = diagResult.rknVerdict,
+                            icon = Icons.Default.Security
                         )
                     }
                 }
-            )
+
+                Spacer(modifier = Modifier.height(InstrumentDimens.space16))
+            }
         }
     }
 }
 
 @Composable
-private fun DiagnosticLogRow(
+private fun StageCardItem(stage: DiagStageResult) {
+    val (statusColor, statusBg, statusText) = when (stage.status) {
+        DiagStageStatus.SUCCESS -> Triple(SemanticGreen, SemanticGreenBg, "УСПЕШНО")
+        DiagStageStatus.WARNING -> Triple(SemanticAmber, SemanticAmberBg, "ПРЕДУПРЕЖДЕНИЕ")
+        DiagStageStatus.ERROR -> Triple(SemanticRed, SemanticRedBg, "ОШИБКА")
+        DiagStageStatus.CHECKING -> Triple(SignalOrange, SignalOrangeContainer, "ПРОВЕРЯЕТСЯ")
+        DiagStageStatus.WAITING -> Triple(GraphiteTertiary, MineralSurfaceSubtle, "ОЖИДАНИЕ")
+        DiagStageStatus.UNTESTED -> Triple(GraphiteTertiary, MineralSurfaceSubtle, "НЕ ПРОВЕРЕНО")
+    }
+
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(InstrumentDimens.radiusMedium),
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+    ) {
+        Column(modifier = Modifier.padding(InstrumentDimens.space12)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    text = stage.title,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onBackground
+                )
+
+                Surface(
+                    color = statusBg,
+                    shape = RoundedCornerShape(InstrumentDimens.radiusSmall)
+                ) {
+                    Text(
+                        text = statusText,
+                        color = statusColor,
+                        style = MaterialTheme.typography.bodySmall,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 10.sp,
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(InstrumentDimens.space4))
+            Text(text = stage.details, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+
+            if (stage.route.isNotBlank()) {
+                Text(text = "Маршрут: ${stage.route} • Метод: ${stage.methodUsed}", style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, color = GraphiteTertiary)
+            }
+
+            if (stage.errorDetails != null) {
+                Spacer(modifier = Modifier.height(InstrumentDimens.space4))
+                Text(text = "Ошибка: ${stage.errorDetails}", style = MaterialTheme.typography.bodySmall, color = SemanticRed)
+            }
+        }
+    }
+}
+
+@Composable
+private fun DiagnosticServiceRow(
     title: String,
     description: String,
     state: DiagnosticResult.TestState,
     metric: String,
     verdict: String,
-    icon: ImageVector,
-    onRun: () -> Unit
+    icon: ImageVector
 ) {
     val (statusColor, statusBg) = when (state) {
         DiagnosticResult.TestState.SUCCESS -> Pair(SemanticGreen, SemanticGreenBg)
@@ -276,83 +531,35 @@ private fun DiagnosticLogRow(
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
                     Box(
                         modifier = Modifier
-                            .size(36.dp)
+                            .size(32.dp)
                             .clip(CircleShape)
                             .background(statusBg),
                         contentAlignment = Alignment.Center
                     ) {
-                        Icon(
-                            imageVector = icon,
-                            contentDescription = null,
-                            tint = statusColor,
-                            modifier = Modifier.size(18.dp)
-                        )
+                        Icon(imageVector = icon, contentDescription = null, tint = statusColor, modifier = Modifier.size(16.dp))
                     }
                     Spacer(modifier = Modifier.width(InstrumentDimens.space12))
                     Column {
-                        Text(
-                            text = title,
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onBackground
-                        )
-                        Text(
-                            text = description,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                        Text(text = title, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onBackground)
+                        Text(text = description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
 
-                Surface(
-                    color = statusBg,
-                    shape = RoundedCornerShape(InstrumentDimens.radiusSmall)
-                ) {
+                Surface(color = statusBg, shape = RoundedCornerShape(InstrumentDimens.radiusSmall)) {
                     Text(
                         text = metric,
                         color = statusColor,
                         style = MaterialTheme.typography.bodySmall,
                         fontFamily = FontFamily.Monospace,
                         fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                     )
                 }
             }
 
-            Spacer(modifier = Modifier.height(InstrumentDimens.space12))
-            HorizontalDivider(color = MaterialTheme.colorScheme.outline, thickness = 1.dp)
-            Spacer(modifier = Modifier.height(InstrumentDimens.space12))
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text(
-                    text = verdict,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = statusColor,
-                    fontWeight = FontWeight.Medium,
-                    modifier = Modifier.weight(1f)
-                )
-                Spacer(modifier = Modifier.width(InstrumentDimens.space8))
-                Button(
-                    onClick = onRun,
-                    enabled = state != DiagnosticResult.TestState.RUNNING,
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MineralSurfaceSubtle,
-                        contentColor = MaterialTheme.colorScheme.onBackground
-                    ),
-                    shape = RoundedCornerShape(InstrumentDimens.radiusSmall),
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-                    modifier = Modifier.height(32.dp)
-                ) {
-                    if (state == DiagnosticResult.TestState.RUNNING) {
-                        CircularProgressIndicator(modifier = Modifier.size(14.dp), color = SignalOrange, strokeWidth = 2.dp)
-                    } else {
-                        Text("Тест", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold)
-                    }
-                }
+            if (verdict.isNotBlank()) {
+                Spacer(modifier = Modifier.height(InstrumentDimens.space8))
+                Text(text = verdict, style = MaterialTheme.typography.bodySmall, color = statusColor)
             }
         }
     }

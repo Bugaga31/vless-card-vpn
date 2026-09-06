@@ -94,24 +94,4 @@ data class StealthSettings(
     val lastRouteShuffleTime: Long = System.currentTimeMillis()
 )
 
-data class DiagnosticResult(
-    val tgStatus: TestState = TestState.IDLE,
-    val tgPingMs: Int = -1,
-    val tgVerdict: String = "Готов к запуску",
-
-    val ytStatus: TestState = TestState.IDLE,
-    val ytSpeedMbps: Double = 0.0,
-    val ytLatencyMs: Int = -1,
-    val ytVerdict: String = "Готов к запуску",
-    val ytPacketLoss: Double = 0.0,
-
-    val rknStatus: TestState = TestState.IDLE,
-    val rknPassRatePercent: Int = 0,
-    val rknPassedCount: Int = 0,
-    val rknTotalTested: Int = 0,
-    val rknVerdict: String = "Готов к запуску"
-) {
-    enum class TestState {
-        IDLE, RUNNING, SUCCESS, WARNING, FAILED
-    }
-}
+// DiagnosticResult is consolidated in DiagnosticEngine.kt

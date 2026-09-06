@@ -29,6 +29,8 @@ class AppRepository(private val context: Context) {
     ).fallbackToDestructiveMigration().build()
 
     private val prefs: SharedPreferences = context.getSharedPreferences("vless_vpn_prefs", Context.MODE_PRIVATE)
+    private val rescuePrefs: SharedPreferences = context.getSharedPreferences("rescue_profiles_prefs", Context.MODE_PRIVATE)
+    private val passportPrefs: SharedPreferences = context.getSharedPreferences("server_passport_prefs", Context.MODE_PRIVATE)
     private val scope = CoroutineScope(Dispatchers.IO)
 
     private val _settingsFlow = MutableStateFlow(loadSettingsFromPrefs())
@@ -106,6 +108,48 @@ class AppRepository(private val context: Context) {
     }
 
     fun getDatabase(): AppDatabase = db
+
+    // --- Спасательный профиль (Rescue Profiles) ---
+    fun saveRescueProfile(profile: com.vlesscardvpn.domain.RescueProfile) {
+        val key = "rescue_${profile.configId}"
+        rescuePrefs.edit().putString(key, profile.toJson()).apply()
+    }
+
+    fun getRescueProfile(configId: String): com.vlesscardvpn.domain.RescueProfile? {
+        val key = "rescue_$configId"
+        val raw = rescuePrefs.getString(key, null) ?: return null
+        return com.vlesscardvpn.domain.RescueProfile.fromJson(raw)
+    }
+
+    fun getAllRescueProfiles(): List<com.vlesscardvpn.domain.RescueProfile> {
+        return rescuePrefs.all.values.mapNotNull {
+            if (it is String) com.vlesscardvpn.domain.RescueProfile.fromJson(it) else null
+        }
+    }
+
+    fun clearRescueProfile(configId: String) {
+        rescuePrefs.edit().remove("rescue_$configId").apply()
+    }
+
+    // --- Паспорт сервера (Server Passport History) ---
+    fun recordPassportCheck(configId: String, isSuccess: Boolean, latencyMs: Int, method: String) {
+        val countKey = "checks_count_$configId"
+        val successKey = "checks_success_$configId"
+        val total = passportPrefs.getInt(countKey, 0) + 1
+        val succ = passportPrefs.getInt(successKey, 0) + (if (isSuccess) 1 else 0)
+        passportPrefs.edit()
+            .putInt(countKey, total)
+            .putInt(successKey, succ)
+            .putLong("last_check_$configId", System.currentTimeMillis())
+            .putInt("last_latency_$configId", latencyMs)
+            .apply()
+    }
+
+    fun getPassportStats(configId: String): Pair<Int, Int> {
+        val total = passportPrefs.getInt("checks_count_$configId", 0)
+        val succ = passportPrefs.getInt("checks_success_$configId", 0)
+        return Pair(succ, total)
+    }
 
     fun updateSettings(transform: (AppSettings) -> AppSettings) {
         val current = _settingsFlow.value
