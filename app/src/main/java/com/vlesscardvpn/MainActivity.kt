@@ -10,6 +10,8 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.*
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -24,20 +26,24 @@ import com.vlesscardvpn.domain.VlessConfig
 import com.vlesscardvpn.ui.FreeConfigsScreen
 import com.vlesscardvpn.ui.ServerListScreen
 import com.vlesscardvpn.ui.SettingsScreen
+import com.vlesscardvpn.ui.components.CyberSplashScreen
 import com.vlesscardvpn.ui.theme.VlessCardVpnTheme
 import com.vlesscardvpn.worker.VlessVpnService
 import com.vlesscardvpn.worker.VpnStatus
+import kotlinx.coroutines.delay
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        val shouldAutoConnect = intent.getBooleanExtra("EXTRA_AUTO_CONNECT", false)
+
         setContent {
             VlessCardVpnTheme(darkTheme = true) {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    VlessCardVpnApp()
+                    VlessCardVpnApp(autoConnectOnStart = shouldAutoConnect)
                 }
             }
         }
@@ -45,14 +51,21 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun VlessCardVpnApp() {
+fun VlessCardVpnApp(autoConnectOnStart: Boolean = false) {
     val context = LocalContext.current
     val navController = rememberNavController()
     val repo = remember { InMemoryConfigRepo() }
     val vpnStats by VlessVpnService.vpnStats.collectAsState()
     val configs by repo.configs.collectAsState(initial = emptyList())
 
+    var showSplash by remember { mutableStateOf(true) }
     var pendingConfig by remember { mutableStateOf<VlessConfig?>(null) }
+
+    LaunchedEffect(Unit) {
+        // Super quick 850ms cyber intro animation on launch
+        delay(850)
+        showSplash = false
+    }
 
     val vpnPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
@@ -87,30 +100,48 @@ fun VlessCardVpnApp() {
         }
     }
 
-    NavHost(
-        navController = navController,
-        startDestination = "server_list"
-    ) {
-        composable("server_list") {
-            ServerListScreen(
-                repo = repo,
-                vpnStats = vpnStats,
-                onToggleConnect = handleConnectToggle,
-                onNavigateToSettings = { navController.navigate("settings") },
-                onNavigateToFree = { navController.navigate("free_configs") }
-            )
+    LaunchedEffect(autoConnectOnStart, showSplash) {
+        if (autoConnectOnStart && !showSplash && vpnStats.status == VpnStatus.DISCONNECTED) {
+            handleConnectToggle(null)
         }
-        composable("settings") {
-            SettingsScreen(
-                repo = repo,
-                onBack = { navController.popBackStack() }
-            )
-        }
-        composable("free_configs") {
-            FreeConfigsScreen(
-                repo = repo,
-                onBack = { navController.popBackStack() }
-            )
+    }
+
+    AnimatedContent(
+        targetState = showSplash,
+        transitionSpec = {
+            fadeIn(animationSpec = tween(300)) togetherWith fadeOut(animationSpec = tween(300))
+        },
+        label = "AppScreenTransition"
+    ) { isSplash ->
+        if (isSplash) {
+            CyberSplashScreen()
+        } else {
+            NavHost(
+                navController = navController,
+                startDestination = "server_list"
+            ) {
+                composable("server_list") {
+                    ServerListScreen(
+                        repo = repo,
+                        vpnStats = vpnStats,
+                        onToggleConnect = handleConnectToggle,
+                        onNavigateToSettings = { navController.navigate("settings") },
+                        onNavigateToFree = { navController.navigate("free_configs") }
+                    )
+                }
+                composable("settings") {
+                    SettingsScreen(
+                        repo = repo,
+                        onBack = { navController.popBackStack() }
+                    )
+                }
+                composable("free_configs") {
+                    FreeConfigsScreen(
+                        repo = repo,
+                        onBack = { navController.popBackStack() }
+                    )
+                }
+            }
         }
     }
 }

@@ -14,18 +14,27 @@ import java.util.concurrent.TimeUnit
 object PublicConfigFetcher {
 
     private val client = OkHttpClient.Builder()
-        .connectTimeout(10, TimeUnit.SECONDS)
-        .readTimeout(10, TimeUnit.SECONDS)
+        .connectTimeout(8, TimeUnit.SECONDS)
+        .readTimeout(8, TimeUnit.SECONDS)
         .followRedirects(true)
         .build()
 
     val DEFAULT_PUBLIC_SOURCES = listOf(
+        // High quality Russia & Anti-Censorship lists (VLESS Reality & Fallbacks)
+        "https://raw.githubusercontent.com/kort0881/vpn-vless-configs-russia/main/githubmirror/clean/vless.txt",
+        "https://raw.githubusercontent.com/kort0881/vpn-vless-configs-russia/main/githubmirror/ru-sni/vless_ru.txt",
+        "https://raw.githubusercontent.com/kort0881/vpn-vless-configs-russia/main/configs/vless_reality.txt",
         "https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/main/Vless-Reality-White-Lists-Rus-Mobile.txt",
+        "https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/refs/heads/main/BLACK_VLESS_RUS.txt",
+        "https://raw.githubusercontent.com/AvenCores/goida-vpn-configs/raw/refs/heads/main/githubmirror/26.txt",
+        "https://raw.githubusercontent.com/ByeWhiteLists/ByeWhiteLists2/refs/heads/main/ByeWhiteLists2.txt",
         "https://raw.githubusercontent.com/barry-far/V2ray-Config/main/Splitted-By-Protocol/vless.txt",
         "https://raw.githubusercontent.com/barry-far/V2ray-Config/main/Splitted-By-Protocol/vmess.txt",
         "https://raw.githubusercontent.com/barry-far/V2ray-Config/main/Splitted-By-Protocol/trojan.txt",
         "https://raw.githubusercontent.com/barry-far/V2ray-Config/main/Splitted-By-Protocol/ss.txt",
-        "https://raw.githubusercontent.com/kort0881/vpn-vless-configs-russia/main/configs/vless_reality.txt",
+        "https://raw.githubusercontent.com/Epodonios/v2ray-configs/main/Splitted-By-Protocol/vless.txt",
+        "https://raw.githubusercontent.com/MhdiTaheri/V2rayCollector/main/sub/vless",
+        "https://raw.githubusercontent.com/Mosifree/-FREE2CONFIG/refs/heads/main/Reality",
         "https://raw.githubusercontent.com/zieng2/wl/main/vless_universal.txt",
         "https://raw.githubusercontent.com/ebrasha/free-v2ray-public-list/main/all_configs.txt",
         "https://raw.githubusercontent.com/sakazxc1400-creator/free-vpn-sub/main/sources.txt"
@@ -33,7 +42,7 @@ object PublicConfigFetcher {
 
     suspend fun fetchAndFilterWorkingConfigs(
         sources: List<String> = DEFAULT_PUBLIC_SOURCES,
-        maxWorkingCount: Int = 100,
+        maxWorkingCount: Int = 150,
         onProgress: (scanned: Int, working: Int, currentSource: String) -> Unit = { _, _, _ -> }
     ): List<VlessConfig> = withContext(Dispatchers.IO) {
         val allParsedConfigs = mutableListOf<VlessConfig>()
@@ -48,7 +57,7 @@ object PublicConfigFetcher {
                     val body = response.body?.string() ?: ""
                     // Handle nested subscription links list
                     if (sourceUrl.endsWith("sources.txt")) {
-                        body.lines().filter { it.trim().startsWith("http") }.take(5).forEach { subUrl ->
+                        body.lines().filter { it.trim().startsWith("http") }.take(6).forEach { subUrl ->
                             try {
                                 val subReq = Request.Builder().url(subUrl.trim()).build()
                                 val subResp = client.newCall(subReq).execute()
@@ -71,13 +80,13 @@ object PublicConfigFetcher {
         // Deduplicate
         val uniqueConfigs = allParsedConfigs
             .distinctBy { "${it.address}:${it.port}" }
-            .take(300)
+            .take(500)
 
         var testedCount = 0
         val workingConfigs = mutableListOf<VlessConfig>()
 
-        // Concurrently ping configs in batches of 25
-        val chunks = uniqueConfigs.chunked(25)
+        // Concurrently ping configs in fast batches of 35
+        val chunks = uniqueConfigs.chunked(35)
         for (chunk in chunks) {
             val deferredList = chunk.map { cfg ->
                 async {
