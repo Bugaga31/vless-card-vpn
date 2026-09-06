@@ -90,17 +90,28 @@ fun ServerListScreen(
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Surface(
-                            color = NeonCyan.copy(alpha = 0.15f),
-                            shape = RoundedCornerShape(6.dp),
-                            border = BorderStroke(1.dp, NeonCyan.copy(alpha = 0.4f))
+                            color = NeonCyan.copy(alpha = 0.12f),
+                            shape = RoundedCornerShape(12.dp),
+                            border = BorderStroke(1.dp, NeonCyan.copy(alpha = 0.35f))
                         ) {
-                            Text(
-                                text = "${configs.size} NODES",
-                                color = NeonCyan,
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                            )
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(6.dp)
+                                        .clip(CircleShape)
+                                        .background(NeonCyan)
+                                )
+                                Spacer(modifier = Modifier.width(5.dp))
+                                Text(
+                                    text = "${configs.size}",
+                                    color = NeonCyan,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
                         }
                     }
                 },
@@ -259,10 +270,10 @@ fun ServerListScreen(
                             modifier = Modifier.size(56.dp)
                         )
                         Spacer(modifier = Modifier.height(12.dp))
-                        Text("No nodes available", color = TextPrimary, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                        Text("No servers available", color = TextPrimary, fontWeight = FontWeight.Bold, fontSize = 16.sp)
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
-                            "Tap 'Auto-Parse' or press '+' to add nodes",
+                            "Tap 'Auto-Parse' or press '+' to add servers",
                             color = TextSecondary,
                             fontSize = 13.sp
                         )

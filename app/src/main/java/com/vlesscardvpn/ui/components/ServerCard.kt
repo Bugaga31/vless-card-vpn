@@ -96,7 +96,7 @@ fun ServerCard(
                     )
                     Spacer(modifier = Modifier.width(10.dp))
                     Text(
-                        text = config.name.ifBlank { "${config.protocolType.uppercase()} Node" },
+                        text = config.name.ifBlank { "${config.protocolType.uppercase()} Server" },
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
                         color = TextPrimary,
