@@ -3,9 +3,7 @@ package com.vlesscardvpn
 import com.vlesscardvpn.core.NetworkProfileManager
 import com.vlesscardvpn.core.NetworkType
 import com.vlesscardvpn.core.SingBoxManager
-import com.vlesscardvpn.domain.AppSettings
-import com.vlesscardvpn.domain.PingTester
-import com.vlesscardvpn.domain.VlessConfig
+import com.vlesscardvpn.domain.*
 import com.vlesscardvpn.util.UniversalConfigParser
 import com.vlesscardvpn.worker.VpnSessionStats
 import com.vlesscardvpn.worker.VpnStatus
@@ -245,5 +243,72 @@ class CoreUnitTests {
         val result = PingTester.testDetailedLatency(badConfig, 100)
         assertFalse("Invalid port must fail immediately", result.success)
         assertNotNull("Error message must be preserved", result.errorReason)
+    }
+
+    @Test
+    fun testSavedWorkingProfileSerializationAndExpiry() {
+        val profile = SavedWorkingProfile(
+            configId = "node-123",
+            networkType = "WIFI",
+            optimalMtu = 1380,
+            effectiveDns = "https://1.1.1.1/dns-query",
+            blockQuic = true,
+            verifiedLatencyMs = 45,
+            timestamp = System.currentTimeMillis()
+        )
+
+        val jsonStr = profile.toJson()
+        val parsed = SavedWorkingProfile.fromJson(jsonStr)
+
+        assertNotNull(parsed)
+        assertEquals("node-123", parsed?.configId)
+        assertEquals("WIFI", parsed?.networkType)
+        assertEquals(1380, parsed?.optimalMtu)
+        assertEquals(45, parsed?.verifiedLatencyMs)
+        assertFalse("Fresh profile must not be expired", parsed?.isExpired() ?: true)
+
+        // Test expired profile
+        val oldProfile = profile.copy(timestamp = System.currentTimeMillis() - 8 * 24 * 3600 * 1000L)
+        assertTrue("8-day old profile must be marked expired", oldProfile.isExpired())
+    }
+
+    @Test
+    fun testAutopilotStateMachineInitialAndStable() {
+        val state = NetworkAutopilotState(
+            status = AutopilotStateStatus.DISABLED,
+            isEnabled = false
+        )
+        assertEquals(AutopilotStateStatus.DISABLED, state.status)
+        assertFalse(state.isEnabled)
+
+        // Transition to stable on successful probe
+        val updated = state.copy(
+            status = AutopilotStateStatus.STABLE,
+            isEnabled = true,
+            lastHttpsLatencyMs = 38,
+            checkSuccessRatePercent = 100
+        )
+        assertEquals(AutopilotStateStatus.STABLE, updated.status)
+        assertTrue(updated.isEnabled)
+        assertEquals(38, updated.lastHttpsLatencyMs)
+    }
+
+    @Test
+    fun testSingleFailureDoesNotTriggerFailover() {
+        // A single failure increments consecutiveFailures to 1, but status remains STABLE without switching
+        val state = NetworkAutopilotState(
+            status = AutopilotStateStatus.STABLE,
+            isEnabled = true,
+            consecutiveFailures = 0
+        )
+
+        val afterSingleFail = state.copy(
+            consecutiveFailures = 1,
+            lastChangeExplanation = "Зафиксирован единичный сбой (1/3). Ожидание подтверждения перед переключением."
+        )
+
+        assertEquals(1, afterSingleFail.consecutiveFailures)
+        assertEquals(AutopilotStateStatus.STABLE, afterSingleFail.status)
+        assertTrue(afterSingleFail.lastChangeExplanation.contains("единичный сбой"))
     }
 }

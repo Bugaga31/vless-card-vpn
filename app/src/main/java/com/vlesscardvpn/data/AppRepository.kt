@@ -132,7 +132,10 @@ class AppRepository(private val context: Context) {
             includeFreeNodesInMainList = prefs.getBoolean("includeFreeNodesInMainList", true),
             showOnlyWorkingNodes = prefs.getBoolean("showOnlyWorkingNodes", false),
             deduplicateNodes = prefs.getBoolean("deduplicateNodes", true),
-            maxFreeNodesToAdd = prefs.getInt("maxFreeNodesToAdd", 100)
+            maxFreeNodesToAdd = prefs.getInt("maxFreeNodesToAdd", 100),
+            autopilotConsentGiven = prefs.getBoolean("autopilotConsentGiven", false),
+            autopilotAllowedOnlyFavorites = prefs.getBoolean("autopilotAllowedOnlyFavorites", false),
+            autopilotAggressiveAdapting = prefs.getBoolean("autopilotAggressiveAdapting", false)
         )
     }
 
@@ -155,6 +158,9 @@ class AppRepository(private val context: Context) {
             putBoolean("showOnlyWorkingNodes", settings.showOnlyWorkingNodes)
             putBoolean("deduplicateNodes", settings.deduplicateNodes)
             putInt("maxFreeNodesToAdd", settings.maxFreeNodesToAdd)
+            putBoolean("autopilotConsentGiven", settings.autopilotConsentGiven)
+            putBoolean("autopilotAllowedOnlyFavorites", settings.autopilotAllowedOnlyFavorites)
+            putBoolean("autopilotAggressiveAdapting", settings.autopilotAggressiveAdapting)
             apply()
         }
     }

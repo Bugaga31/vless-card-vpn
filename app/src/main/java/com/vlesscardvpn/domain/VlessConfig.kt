@@ -47,6 +47,9 @@ data class AppSettings(
     val showOnlyWorkingNodes: Boolean = false,
     val deduplicateNodes: Boolean = true,
     val maxFreeNodesToAdd: Int = 100,
+    val autopilotConsentGiven: Boolean = false,
+    val autopilotAllowedOnlyFavorites: Boolean = false,
+    val autopilotAggressiveAdapting: Boolean = false,
     val autoFetchSources: List<String> = listOf(
         "https://raw.githubusercontent.com/kort0881/vpn-vless-configs-russia/main/githubmirror/clean/vless.txt",
         "https://raw.githubusercontent.com/kort0881/vpn-vless-configs-russia/main/githubmirror/ru-sni/vless_ru.txt",
