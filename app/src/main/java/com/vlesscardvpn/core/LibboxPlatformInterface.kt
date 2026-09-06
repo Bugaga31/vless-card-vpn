@@ -26,9 +26,14 @@ class LibboxPlatformInterface(
     private var defaultNetworkCallback: ConnectivityManager.NetworkCallback? = null
 
     override fun autoDetectInterfaceControl(fd: Int) {
-        val protectedOk = vpnService.protect(fd)
-        if (!protectedOk) {
-            Log.e("LibboxPlatform", "vpnService.protect(fd=$fd) returned false!")
+        try {
+            val protectedOk = vpnService.protect(fd)
+            if (!protectedOk) {
+                Log.e("LibboxPlatform", "vpnService.protect(fd=$fd) returned false - socket may not be protected!")
+            }
+        } catch (se: SecurityException) {
+            Log.e("LibboxPlatform", "SecurityException during protect(fd=$fd)", se)
+            throw se
         }
     }
 
@@ -246,7 +251,11 @@ class LibboxPlatformInterface(
             }
 
             try { currentPfd?.close() } catch (_: Exception) {}
-            val pfd = builder.establish() ?: throw IllegalStateException("VPN builder establish returned null")
+            val pfd = builder.establish()
+            if (pfd == null) {
+                Log.e("LibboxPlatform", "Builder.establish() returned null - TUN creation failed (possible permission or resource issue)")
+                throw IllegalStateException("VPN builder establish returned null")
+            }
             currentPfd = pfd
             onTunOpened(pfd)
             return pfd.fd

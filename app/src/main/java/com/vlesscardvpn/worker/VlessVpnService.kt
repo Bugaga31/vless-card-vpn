@@ -111,17 +111,18 @@ class VlessVpnService : VpnService() {
                 debug = false
             }
             Libbox.setup(options)
-        } catch (e: Exception) {
-            Log.w("VlessVpnService", "Libbox setup note: ${e.message}")
+        } catch (t: Throwable) {
+            // JNI / native setup can throw on bad AAR or ABI mismatch - do not crash the service
+            Log.e("VlessVpnService", "Libbox.setup failed (possible AAR/ABI issue)", t)
         }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent == null) {
-            // Null intent from START_STICKY recovery: verify active state
             serviceScope.launch {
                 operationMutex.withLock {
                     if (_vpnStats.value.status != VpnStatus.CONNECTED && _vpnStats.value.status != VpnStatus.CONNECTING) {
+                        stopForeground(STOP_FOREGROUND_REMOVE)
                         stopSelf()
                     }
                 }
@@ -133,6 +134,34 @@ class VlessVpnService : VpnService() {
             ACTION_CONNECT -> {
                 val configId = intent.getStringExtra(EXTRA_CONFIG_ID) ?: ""
                 val sessionId = sessionSequence.incrementAndGet()
+
+                // CRITICAL FIX: MUST call startForeground synchronously (Android 12+ / FGS rules)
+                // before ANY coroutine launch or heavy work. This was the primary cause of app exit/crash.
+                val initialNotification = try {
+                    createNotification(null, "Подключение...")
+                } catch (t: Throwable) {
+                    null
+                }
+                if (initialNotification != null) {
+                    try {
+                        startForeground(1, initialNotification)
+                    } catch (se: SecurityException) {
+                        _vpnStats.value = VpnSessionStats(status = VpnStatus.ERROR, errorMessage = "Нет разрешения на foreground service (VPN permission)")
+                        return START_NOT_STICKY
+                    } catch (t: Throwable) {
+                        _vpnStats.value = VpnSessionStats(status = VpnStatus.ERROR, errorMessage = "Не удалось запустить foreground: ${t.javaClass.simpleName}")
+                        return START_NOT_STICKY
+                    }
+                } else {
+                    // Fallback: still try to start foreground with minimal notification
+                    try {
+                        startForeground(1, createNotification(null, "Подключение"))
+                    } catch (_: Exception) {
+                        // If even this fails, we cannot continue as FGS
+                        return START_NOT_STICKY
+                    }
+                }
+
                 connectionJob?.cancel()
                 connectionJob = serviceScope.launch {
                     handleConnect(configId, sessionId)
@@ -153,7 +182,19 @@ class VlessVpnService : VpnService() {
     private suspend fun handleConnect(configId: String, sessionId: Long) = operationMutex.withLock {
         if (sessionId != sessionSequence.get()) return
 
-        // 1. Load validated config and snapshot of settings from repository
+        // 0. DEFENSIVE: Verify VPN permission BEFORE any heavy work (prevents crash on Connect)
+        val prepare = prepareVpnPermission()
+        if (prepare != null) {
+            cleanupResources()
+            _vpnStats.value = VpnSessionStats(
+                status = VpnStatus.ERROR,
+                errorMessage = "Нет разрешения VPN. Предоставьте разрешение в системных настройках."
+            )
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            return
+        }
+
+        // 1. Load validated config
         val config = if (configId.isNotBlank()) {
             repository.getAllConfigs().firstOrNull { it.id == configId }
         } else {
@@ -163,22 +204,16 @@ class VlessVpnService : VpnService() {
         if (config == null || config.address.isBlank() || config.port <= 0 || config.uuid.isBlank()) {
             val err = if (config == null) "Конфигурация сервера не найдена" else "Некорректные параметры сервера (UUID/Адрес)"
             cleanupResources()
-            _vpnStats.value = VpnSessionStats(
-                status = VpnStatus.ERROR,
-                activeConfig = config,
-                errorMessage = err
-            )
+            _vpnStats.value = VpnSessionStats(status = VpnStatus.ERROR, activeConfig = config, errorMessage = err)
             stopForeground(STOP_FOREGROUND_REMOVE)
             return
         }
 
         val settingsSnapshot: AppSettings = repository.settingsFlow.value
 
-        _vpnStats.value = VpnSessionStats(
-            status = VpnStatus.CONNECTING,
-            activeConfig = config
-        )
-        startForeground(1, createNotification(config, "Инициализация ядра связи..."))
+        _vpnStats.value = VpnSessionStats(status = VpnStatus.CONNECTING, activeConfig = config)
+        // Keep foreground alive (already started in onStartCommand)
+        try { startForeground(1, createNotification(config, "Инициализация ядра связи...")) } catch (_: Exception) {}
 
         try {
             // 2. Evaluate Network Profile with consistent settings snapshot
@@ -235,10 +270,24 @@ class VlessVpnService : VpnService() {
                 }
             }
 
-            val server = CommandServer(serverHandler, adapter)
+            // 5b. Start CommandServer and load config - protected boundary for libbox/JNI
+            val server = try {
+                val s = CommandServer(serverHandler, adapter)
+                s.start()
+                s.startOrReloadService(singBoxJson, OverrideOptions())
+                s
+            } catch (t: Throwable) {
+                Log.e("VlessVpnService", "CommandServer startOrReloadService failed (libbox/JNI)", t)
+                cleanupResources()
+                _vpnStats.value = VpnSessionStats(
+                    status = VpnStatus.ERROR,
+                    activeConfig = config,
+                    errorMessage = "Ошибка запуска ядра sing-box: ${sanitizeError(t.message)}"
+                )
+                stopForeground(STOP_FOREGROUND_REMOVE)
+                return
+            }
             commandServer = server
-            server.start()
-            server.startOrReloadService(singBoxJson, OverrideOptions())
 
             // 6. Connect CommandClient for real traffic metrics
             startCommandClientListener()
@@ -249,6 +298,7 @@ class VlessVpnService : VpnService() {
             }
 
             // 7. CRITICAL: End-to-End Verification Before setting CONNECTED status
+            // Never promote to CONNECTED on partial success (TUN open but no proxy traffic)
             startForeground(1, createNotification(config, "Проверка сквозного защищенного соединения..."))
 
             var verified = false
@@ -298,17 +348,49 @@ class VlessVpnService : VpnService() {
         } catch (e: CancellationException) {
             cleanupResources()
             throw e
-        } catch (e: Exception) {
-            Log.e("VlessVpnService", "Connection setup failed", e)
-            val err = e.localizedMessage ?: "Сбой инициализации ядра связи"
+        } catch (se: SecurityException) {
+            Log.e("VlessVpnService", "SecurityException during VPN setup", se)
             cleanupResources()
             _vpnStats.value = VpnSessionStats(
                 status = VpnStatus.ERROR,
                 activeConfig = config,
-                errorMessage = err
+                errorMessage = "SecurityException: ${sanitizeError(se.message)}"
+            )
+            stopForeground(STOP_FOREGROUND_REMOVE)
+        } catch (ise: IllegalStateException) {
+            Log.e("VlessVpnService", "IllegalState during VPN setup (possible TUN or libbox issue)", ise)
+            cleanupResources()
+            _vpnStats.value = VpnSessionStats(
+                status = VpnStatus.ERROR,
+                activeConfig = config,
+                errorMessage = "IllegalState: ${sanitizeError(ise.message)} (TUN creation or libbox failure)"
+            )
+            stopForeground(STOP_FOREGROUND_REMOVE)
+        } catch (ioe: java.io.IOException) {
+            Log.e("VlessVpnService", "IO error during VPN setup", ioe)
+            cleanupResources()
+            _vpnStats.value = VpnSessionStats(
+                status = VpnStatus.ERROR,
+                activeConfig = config,
+                errorMessage = "IO error: ${sanitizeError(ioe.message)}"
+            )
+            stopForeground(STOP_FOREGROUND_REMOVE)
+        } catch (t: Throwable) {
+            // Last resort catch for JNI / native libbox crashes
+            Log.e("VlessVpnService", "FATAL Throwable in VPN tunnel setup (JNI/libbox)", t)
+            cleanupResources()
+            _vpnStats.value = VpnSessionStats(
+                status = VpnStatus.ERROR,
+                activeConfig = config,
+                errorMessage = "Native error: ${sanitizeError(t.message ?: t.javaClass.simpleName)}"
             )
             stopForeground(STOP_FOREGROUND_REMOVE)
         }
+    }
+
+    private fun sanitizeError(msg: String?): String {
+        if (msg.isNullOrBlank()) return "unknown"
+        return msg.replace(Regex("[0-9a-fA-F-]{8,}"), "[REDACTED]").take(200)
     }
 
     private suspend fun handleDisconnect() = operationMutex.withLock {
@@ -373,12 +455,11 @@ class VlessVpnService : VpnService() {
      * Closes native objects, listeners and TUN file descriptors without resetting UI state.
      */
     private fun cleanupResources() {
+        // Idempotent, safe cleanup. Never call stopSelf inside here.
         statsJob?.cancel()
         statsJob = null
 
-        try {
-            commandClient?.disconnect()
-        } catch (_: Exception) {}
+        try { commandClient?.disconnect() } catch (_: Exception) {}
         commandClient = null
 
         try {
@@ -387,15 +468,13 @@ class VlessVpnService : VpnService() {
         } catch (_: Exception) {}
         commandServer = null
 
-        try {
-            platformAdapter?.closeDefaultInterfaceMonitor(null)
-        } catch (_: Exception) {}
+        try { platformAdapter?.closeDefaultInterfaceMonitor(null) } catch (_: Exception) {}
         platformAdapter = null
 
-        try {
-            vpnInterface?.close()
-        } catch (_: Exception) {}
+        try { vpnInterface?.close() } catch (_: Exception) {}
         vpnInterface = null
+
+        // Do NOT call stopSelf or change _vpnStats here — caller decides state
     }
 
     private fun createNotificationChannel() {
@@ -413,7 +492,10 @@ class VlessVpnService : VpnService() {
         }
     }
 
-    private fun createNotification(config: VlessConfig, statusText: String): Notification {
+    private fun prepareVpnPermission(): Intent? = VpnService.prepare(this)
+
+    private fun createNotification(config: VlessConfig?, statusText: String): Notification {
+        // Minimal safe notification to satisfy FGS requirement even if config is null during early start
         val launchIntent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
         }

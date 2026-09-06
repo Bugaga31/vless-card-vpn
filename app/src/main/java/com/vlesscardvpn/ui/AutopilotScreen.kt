@@ -385,7 +385,7 @@ private fun PipelineNode(name: String, health: StepHealth, isCurrent: Boolean) {
         StepHealth.IN_PROGRESS -> SignalOrange
         StepHealth.WARNING -> SemanticAmber
         StepHealth.FAILURE -> SemanticRed
-        StepHealth.IDLE -> GraphiteTertiary
+        StepHealth.IDLE, StepHealth.UNTESTED -> GraphiteTertiary
     }
 
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
