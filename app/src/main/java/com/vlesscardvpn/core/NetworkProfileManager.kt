@@ -10,7 +10,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.net.InetSocketAddress
 import java.net.Socket
-import kotlin.system.measureTimeMillis
 
 enum class NetworkType {
     WIFI,
@@ -64,9 +63,10 @@ object NetworkProfileManager {
     }
 
     /**
-     * Compute optimal MTU and profiles. Starts at 1400.
-     * Modifies MTU only upon confirmed packet fragmentation.
-     * Never overrides server-provided DNS/SNI if explicit.
+     * Evaluates network MTU and profile.
+     * Starts at settings.mtuSize (default 1400).
+     * Strictly preserves explicit server SNI. Never overrides configured SNI with carrier domains
+     * unless server SNI is empty or user explicitly set custom override.
      */
     suspend fun evaluateNetwork(
         context: Context,
@@ -76,49 +76,50 @@ object NetworkProfileManager {
     ): EvaluatedNetworkProfile = withContext(Dispatchers.IO) {
         val netType = detectNetworkType(context)
 
-        // Starting MTU default: 1400 (anti-fragmentation standard for VLESS/TLS)
         var testedMtu = settings.mtuSize.coerceIn(1280, 1500)
         var isFragmented = false
 
-        // Check if fragmentation occurs with large TCP payloads if server address is known
         if (serverAddress.isNotBlank()) {
             try {
                 Socket().use { socket ->
-                    socket.soTimeout = 2000
+                    socket.soTimeout = 1500
                     socket.sendBufferSize = testedMtu
-                    socket.connect(InetSocketAddress(serverAddress, 443), 2000)
+                    socket.connect(InetSocketAddress(serverAddress.trim(), 443), 1500)
                 }
             } catch (e: Exception) {
-                // If standard 1400 fails or shows fragmentation symptom, fallback safely to 1360
+                // Large packet buffer socket error indicates MTU reduction might be needed
                 testedMtu = 1360
                 isFragmented = true
             }
         }
 
-        val recommendedSni = when {
-            serverExplicitSni.isNotBlank() && serverExplicitSni != "samsung.com" && serverExplicitSni != "yandex.ru" -> serverExplicitSni
-            settings.customSniOverride.isNotBlank() && settings.customSniOverride != "auto" -> settings.customSniOverride
+        // SNI Precedence:
+        // 1. Explicit server configuration SNI (ALWAYS preserved - never replaced by carrier name)
+        // 2. User explicit custom SNI override in Settings (if not "auto" or blank)
+        // 3. Carrier/Network fallback only if server config has no SNI
+        val resolvedSni = when {
+            serverExplicitSni.isNotBlank() -> serverExplicitSni.trim()
+            settings.customSniOverride.isNotBlank() && !settings.customSniOverride.equals("auto", ignoreCase = true) -> settings.customSniOverride.trim()
             else -> when (netType) {
                 NetworkType.CELLULAR_MTS -> "mts.ru"
                 NetworkType.CELLULAR_BEELINE -> "beeline.ru"
                 NetworkType.CELLULAR_MEGAFON -> "megafon.ru"
                 NetworkType.CELLULAR_TELE2 -> "tele2.ru"
-                NetworkType.WIFI -> "yandex.ru"
                 else -> "yandex.ru"
             }
         }
 
         val effectiveDns = when {
-            settings.customDnsProvider.contains("Cloudflare") -> "https://1.1.1.1/dns-query"
-            settings.customDnsProvider.contains("Google") -> "https://8.8.8.8/dns-query"
-            settings.customDnsProvider.contains("Yandex") -> "77.88.8.8"
+            settings.customDnsProvider.contains("Cloudflare", ignoreCase = true) -> "https://1.1.1.1/dns-query"
+            settings.customDnsProvider.contains("Google", ignoreCase = true) -> "https://8.8.8.8/dns-query"
+            settings.customDnsProvider.contains("Yandex", ignoreCase = true) -> "https://77.88.8.8/dns-query"
             else -> "https://1.1.1.1/dns-query"
         }
 
         val profile = EvaluatedNetworkProfile(
             networkType = netType,
             optimalMtu = testedMtu,
-            recommendedSni = recommendedSni,
+            recommendedSni = resolvedSni,
             effectiveDns = effectiveDns,
             isFragmented = isFragmented
         )
@@ -130,9 +131,7 @@ object NetworkProfileManager {
         lastWorkingProfile = profile
     }
 
-    fun rollbackProfile(): EvaluatedNetworkProfile? {
-        return lastWorkingProfile
-    }
+    fun rollbackProfile(): EvaluatedNetworkProfile? = lastWorkingProfile
 
     fun getCachedProfile(): EvaluatedNetworkProfile? = cachedProfile
 }

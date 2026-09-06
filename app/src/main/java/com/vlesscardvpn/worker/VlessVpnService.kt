@@ -15,6 +15,7 @@ import com.vlesscardvpn.MainActivity
 import com.vlesscardvpn.core.LibboxPlatformInterface
 import com.vlesscardvpn.core.NetworkProfileManager
 import com.vlesscardvpn.core.SingBoxManager
+import com.vlesscardvpn.data.AppRepository
 import com.vlesscardvpn.domain.AppSettings
 import com.vlesscardvpn.domain.PingTester
 import com.vlesscardvpn.domain.VlessConfig
@@ -22,7 +23,10 @@ import io.nekohasekai.libbox.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.io.File
+import java.util.concurrent.atomic.AtomicLong
 
 enum class VpnStatus {
     DISCONNECTED,
@@ -50,14 +54,6 @@ class VlessVpnService : VpnService() {
         const val ACTION_CONNECT = "com.vlesscardvpn.CONNECT"
         const val ACTION_DISCONNECT = "com.vlesscardvpn.DISCONNECT"
         const val EXTRA_CONFIG_ID = "config_id"
-        const val EXTRA_CONFIG_NAME = "config_name"
-        const val EXTRA_CONFIG_ADDRESS = "config_address"
-        const val EXTRA_CONFIG_PORT = "config_port"
-        const val EXTRA_CONFIG_UUID = "config_uuid"
-        const val EXTRA_CONFIG_PROTO = "config_proto"
-        const val EXTRA_CONFIG_SNI = "config_sni"
-        const val EXTRA_CONFIG_PUBKEY = "config_pubkey"
-        const val EXTRA_CONFIG_SHORTID = "config_shortid"
 
         private val _vpnStats = MutableStateFlow(VpnSessionStats())
         val vpnStats = _vpnStats.asStateFlow()
@@ -66,14 +62,6 @@ class VlessVpnService : VpnService() {
             val intent = Intent(context, VlessVpnService::class.java).apply {
                 action = ACTION_CONNECT
                 putExtra(EXTRA_CONFIG_ID, config.id)
-                putExtra(EXTRA_CONFIG_NAME, config.name)
-                putExtra(EXTRA_CONFIG_ADDRESS, config.address)
-                putExtra(EXTRA_CONFIG_PORT, config.port)
-                putExtra(EXTRA_CONFIG_UUID, config.uuid)
-                putExtra(EXTRA_CONFIG_PROTO, config.protocolType)
-                putExtra(EXTRA_CONFIG_SNI, config.sni)
-                putExtra(EXTRA_CONFIG_PUBKEY, config.publicKey)
-                putExtra(EXTRA_CONFIG_SHORTID, config.shortId)
             }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 context.startForegroundService(intent)
@@ -92,13 +80,20 @@ class VlessVpnService : VpnService() {
 
     private var vpnInterface: ParcelFileDescriptor? = null
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private val operationMutex = Mutex()
+    private val sessionSequence = AtomicLong(0L)
+
+    private var connectionJob: Job? = null
+    private var statsJob: Job? = null
     private var commandServer: CommandServer? = null
     private var commandClient: CommandClient? = null
-    private var statsJob: Job? = null
-    private var currentConfig: VlessConfig? = null
+    private var platformAdapter: LibboxPlatformInterface? = null
+
+    private lateinit var repository: AppRepository
 
     override fun onCreate() {
         super.onCreate()
+        repository = AppRepository(applicationContext)
         createNotificationChannel()
         initLibboxEnvironment()
     }
@@ -117,137 +112,210 @@ class VlessVpnService : VpnService() {
             }
             Libbox.setup(options)
         } catch (e: Exception) {
-            Log.e("VlessVpnService", "Libbox setup warning / already setup", e)
+            Log.w("VlessVpnService", "Libbox setup note: ${e.message}")
         }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        when (intent?.action) {
+        if (intent == null) {
+            // Null intent from START_STICKY recovery: verify active state
+            serviceScope.launch {
+                operationMutex.withLock {
+                    if (_vpnStats.value.status != VpnStatus.CONNECTED && _vpnStats.value.status != VpnStatus.CONNECTING) {
+                        stopSelf()
+                    }
+                }
+            }
+            return START_NOT_STICKY
+        }
+
+        when (intent.action) {
             ACTION_CONNECT -> {
-                val cfg = VlessConfig(
-                    id = intent.getStringExtra(EXTRA_CONFIG_ID) ?: "active",
-                    name = intent.getStringExtra(EXTRA_CONFIG_NAME) ?: "VPN Server",
-                    address = intent.getStringExtra(EXTRA_CONFIG_ADDRESS) ?: "1.1.1.1",
-                    port = intent.getIntExtra(EXTRA_CONFIG_PORT, 443),
-                    uuid = intent.getStringExtra(EXTRA_CONFIG_UUID) ?: "",
-                    protocolType = intent.getStringExtra(EXTRA_CONFIG_PROTO) ?: "vless",
-                    sni = intent.getStringExtra(EXTRA_CONFIG_SNI) ?: "yandex.ru",
-                    publicKey = intent.getStringExtra(EXTRA_CONFIG_PUBKEY) ?: "",
-                    shortId = intent.getStringExtra(EXTRA_CONFIG_SHORTID) ?: "",
-                    isActive = true
-                )
-                currentConfig = cfg
-                startVpnTunnel(cfg)
+                val configId = intent.getStringExtra(EXTRA_CONFIG_ID) ?: ""
+                val sessionId = sessionSequence.incrementAndGet()
+                connectionJob?.cancel()
+                connectionJob = serviceScope.launch {
+                    handleConnect(configId, sessionId)
+                }
             }
             ACTION_DISCONNECT -> {
-                stopVpnTunnel()
-                stopSelf()
+                sessionSequence.incrementAndGet()
+                connectionJob?.cancel()
+                serviceScope.launch {
+                    handleDisconnect()
+                    stopSelf()
+                }
             }
         }
-        return START_STICKY
+        return START_NOT_STICKY
     }
 
-    private fun startVpnTunnel(config: VlessConfig) {
-        serviceScope.launch {
+    private suspend fun handleConnect(configId: String, sessionId: Long) = operationMutex.withLock {
+        if (sessionId != sessionSequence.get()) return
+
+        // 1. Load validated config and snapshot of settings from repository
+        val config = if (configId.isNotBlank()) {
+            repository.getAllConfigs().firstOrNull { it.id == configId }
+        } else {
+            repository.getActiveConfig() ?: repository.getAllConfigs().firstOrNull()
+        }
+
+        if (config == null || config.address.isBlank() || config.port <= 0 || config.uuid.isBlank()) {
+            val err = if (config == null) "Конфигурация сервера не найдена" else "Некорректные параметры сервера (UUID/Адрес)"
+            cleanupResources()
             _vpnStats.value = VpnSessionStats(
-                status = VpnStatus.CONNECTING,
-                activeConfig = config
+                status = VpnStatus.ERROR,
+                activeConfig = config,
+                errorMessage = err
             )
-            startForeground(1, createNotification(config, "Initializing sing-box core..."))
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            return
+        }
 
-            try {
-                // 1. Evaluate Network & MTU Profile
-                val netProfile = NetworkProfileManager.evaluateNetwork(
-                    context = this@VlessVpnService,
-                    settings = AppSettings(),
-                    serverExplicitSni = config.sni,
-                    serverAddress = config.address
-                )
+        val settingsSnapshot: AppSettings = repository.settingsFlow.value
 
-                // 2. Generate Sing-Box Core Config JSON
-                val singBoxJson = SingBoxManager.generateConfig(
-                    context = this@VlessVpnService,
-                    config = config,
-                    settings = AppSettings(),
-                    networkProfile = netProfile
-                )
+        _vpnStats.value = VpnSessionStats(
+            status = VpnStatus.CONNECTING,
+            activeConfig = config
+        )
+        startForeground(1, createNotification(config, "Инициализация ядра связи..."))
 
-                // 3. Setup CommandServer with LibboxPlatformInterface
-                val platformInterface = LibboxPlatformInterface(this@VlessVpnService) { pfd ->
-                    vpnInterface = pfd
-                }
+        try {
+            // 2. Evaluate Network Profile with consistent settings snapshot
+            val netProfile = NetworkProfileManager.evaluateNetwork(
+                context = this@VlessVpnService,
+                settings = settingsSnapshot,
+                serverExplicitSni = config.sni,
+                serverAddress = config.address
+            )
 
-                val serverHandler = object : CommandServerHandler {
-                    override fun getSystemProxyStatus(): SystemProxyStatus? = null
-                    override fun serviceReload() {}
-                    override fun serviceStop() {
-                        stopVpnTunnel()
-                    }
-                    override fun setSystemProxyEnabled(p0: Boolean) {}
-                    override fun writeDebugMessage(msg: String?) {
-                        Log.d("SingBoxCore", msg ?: "")
-                    }
-                }
+            if (sessionId != sessionSequence.get()) return
 
-                stopCommandServer()
+            // 3. Generate Sing-Box Core Config JSON and validate before applying
+            val singBoxJson = SingBoxManager.generateConfig(
+                context = this@VlessVpnService,
+                config = config,
+                settings = settingsSnapshot,
+                networkProfile = netProfile
+            )
 
-                val server = CommandServer(serverHandler, platformInterface)
-                commandServer = server
-                server.start()
-                server.startOrReloadService(singBoxJson, OverrideOptions())
+            SingBoxManager.validateGeneratedConfig(singBoxJson).getOrThrow()
 
-                // 4. Start Client to listen to actual traffic throughput from Sing-Box
-                startCommandClientListener()
+            // 4. Teardown any lingering core instance cleanly before spawning new
+            cleanupResources()
 
-                // 5. CRITICAL: End-to-End Verification Before setting CONNECTED status
-                startForeground(1, createNotification(config, "Verifying end-to-end routing..."))
-                var verified = false
-                var retryCount = 0
-                while (retryCount < 3 && !verified) {
-                    delay(1000)
-                    val (isOk, latency) = PingTester.verifyEndToEndConnection(timeoutMs = 3500)
-                    if (isOk) {
-                        verified = true
-                        NetworkProfileManager.markProfileWorking(netProfile)
-                        Log.i("VlessVpnService", "End-to-end verified successfully ($latency ms)")
-                    }
-                    retryCount++
-                }
+            // 5. Setup LibboxPlatformInterface and CommandServer
+            val adapter = LibboxPlatformInterface(this@VlessVpnService) { pfd ->
+                vpnInterface = pfd
+            }
+            platformAdapter = adapter
 
-                if (!verified) {
-                    // Fallback verify check with detailed latency
-                    val breakdown = PingTester.testDetailedLatency(config, 3000)
-                    if (!breakdown.success) {
-                        _vpnStats.value = _vpnStats.value.copy(
-                            status = VpnStatus.ERROR,
-                            errorMessage = breakdown.errorReason ?: "End-to-end routing failed (Target unreachable)"
-                        )
-                        stopForeground(STOP_FOREGROUND_REMOVE)
-                        stopVpnTunnel()
-                        return@launch
+            val serverHandler = object : CommandServerHandler {
+                override fun getSystemProxyStatus(): SystemProxyStatus? = null
+                override fun serviceReload() {}
+                override fun serviceStop() {
+                    // Core stopped unexpectedly
+                    serviceScope.launch {
+                        operationMutex.withLock {
+                            if (_vpnStats.value.status == VpnStatus.CONNECTED) {
+                                cleanupResources()
+                                _vpnStats.value = VpnSessionStats(
+                                    status = VpnStatus.ERROR,
+                                    activeConfig = config,
+                                    errorMessage = "Ядро туннеля было остановлено системой"
+                                )
+                                stopForeground(STOP_FOREGROUND_REMOVE)
+                            }
+                        }
                     }
                 }
+                override fun setSystemProxyEnabled(p0: Boolean) {}
+                override fun writeDebugMessage(msg: String?) {
+                    Log.d("SingBoxCore", msg ?: "")
+                }
+            }
 
-                val startTime = System.currentTimeMillis()
+            val server = CommandServer(serverHandler, adapter)
+            commandServer = server
+            server.start()
+            server.startOrReloadService(singBoxJson, OverrideOptions())
+
+            // 6. Connect CommandClient for real traffic metrics
+            startCommandClientListener()
+
+            if (sessionId != sessionSequence.get()) {
+                cleanupResources()
+                return
+            }
+
+            // 7. CRITICAL: End-to-End Verification Before setting CONNECTED status
+            startForeground(1, createNotification(config, "Проверка сквозного защищенного соединения..."))
+
+            var verified = false
+            var retryCount = 0
+            var lastVerifyLatency = -1
+
+            while (retryCount < 3 && !verified && currentCoroutineContext().isActive && sessionId == sessionSequence.get()) {
+                delay(900)
+                val (isOk, latency) = PingTester.verifyEndToEndConnection(timeoutMs = 3500)
+                if (isOk) {
+                    verified = true
+                    lastVerifyLatency = latency
+                    NetworkProfileManager.markProfileWorking(netProfile)
+                }
+                retryCount++
+            }
+
+            if (sessionId != sessionSequence.get()) {
+                cleanupResources()
+                return
+            }
+
+            if (!verified) {
+                // Verification failed through the proxy tunnel - NEVER mark CONNECTED!
+                val diagnosticReason = "Сквозной тест HTTPS не пройден: узел не маршрутизирует трафик (ошибка авторизации или сбой Reality)"
+                cleanupResources()
                 _vpnStats.value = VpnSessionStats(
-                    status = VpnStatus.CONNECTED,
-                    activeConfig = config,
-                    connectedSinceTimestamp = startTime
-                )
-
-                startForeground(1, createNotification(config, "Connected • Protected (${netProfile.recommendedSni})"))
-                startStatsUpdater(startTime)
-
-            } catch (e: Exception) {
-                Log.e("VlessVpnService", "Fatal error starting VPN core", e)
-                _vpnStats.value = _vpnStats.value.copy(
                     status = VpnStatus.ERROR,
-                    errorMessage = e.localizedMessage ?: "Core engine failed to initialize"
+                    activeConfig = config,
+                    errorMessage = diagnosticReason
                 )
                 stopForeground(STOP_FOREGROUND_REMOVE)
-                stopVpnTunnel()
+                return
             }
+
+            // 8. Connection successfully established and authenticated
+            val startTime = System.currentTimeMillis()
+            _vpnStats.value = VpnSessionStats(
+                status = VpnStatus.CONNECTED,
+                activeConfig = config,
+                connectedSinceTimestamp = startTime
+            )
+
+            startForeground(1, createNotification(config, "Подключено • Защищено (${lastVerifyLatency} мс)"))
+            startStatsUpdater(startTime)
+
+        } catch (e: CancellationException) {
+            cleanupResources()
+            throw e
+        } catch (e: Exception) {
+            Log.e("VlessVpnService", "Connection setup failed", e)
+            val err = e.localizedMessage ?: "Сбой инициализации ядра связи"
+            cleanupResources()
+            _vpnStats.value = VpnSessionStats(
+                status = VpnStatus.ERROR,
+                activeConfig = config,
+                errorMessage = err
+            )
+            stopForeground(STOP_FOREGROUND_REMOVE)
         }
+    }
+
+    private suspend fun handleDisconnect() = operationMutex.withLock {
+        _vpnStats.value = _vpnStats.value.copy(status = VpnStatus.STOPPING)
+        cleanupResources()
+        _vpnStats.value = VpnSessionStats(status = VpnStatus.DISCONNECTED)
+        stopForeground(STOP_FOREGROUND_REMOVE)
     }
 
     private fun startCommandClientListener() {
@@ -264,7 +332,7 @@ class VlessVpnService : VpnService() {
                 override fun writeLogs(p0: LogIterator?) {}
                 override fun writeServiceStatus(p0: ServiceStatusMessage?) {}
                 override fun writeStatus(status: StatusMessage?) {
-                    if (status != null) {
+                    if (status != null && _vpnStats.value.status == VpnStatus.CONNECTED) {
                         _vpnStats.value = _vpnStats.value.copy(
                             bytesIn = status.downlinkTotal,
                             bytesOut = status.uplinkTotal,
@@ -280,10 +348,11 @@ class VlessVpnService : VpnService() {
                 statusInterval = 1000000000L // 1 second in ns
             }
 
-            commandClient = Libbox.newCommandClient(clientHandler, clientOptions)
-            commandClient?.connect()
+            val client = Libbox.newCommandClient(clientHandler, clientOptions)
+            commandClient = client
+            client.connect()
         } catch (e: Exception) {
-            Log.e("VlessVpnService", "CommandClient listener start failed", e)
+            Log.w("VlessVpnService", "CommandClient listener note: ${e.message}")
         }
     }
 
@@ -300,40 +369,43 @@ class VlessVpnService : VpnService() {
         }
     }
 
-    private fun stopCommandServer() {
+    /**
+     * Closes native objects, listeners and TUN file descriptors without resetting UI state.
+     */
+    private fun cleanupResources() {
+        statsJob?.cancel()
+        statsJob = null
+
         try {
             commandClient?.disconnect()
-            commandClient = null
         } catch (_: Exception) {}
+        commandClient = null
 
         try {
             commandServer?.closeService()
             commandServer?.close()
-            commandServer = null
         } catch (_: Exception) {}
-    }
+        commandServer = null
 
-    private fun stopVpnTunnel() {
-        statsJob?.cancel()
-        stopCommandServer()
+        try {
+            platformAdapter?.closeDefaultInterfaceMonitor(null)
+        } catch (_: Exception) {}
+        platformAdapter = null
 
         try {
             vpnInterface?.close()
         } catch (_: Exception) {}
         vpnInterface = null
-
-        _vpnStats.value = VpnSessionStats(status = VpnStatus.DISCONNECTED)
-        stopForeground(STOP_FOREGROUND_REMOVE)
     }
 
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 "vless_card_vpn_service",
-                "VLESS Card VPN Core",
+                "VLESS Card VPN Service",
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "Active VPN Tunnel Status"
+                description = "Состояние туннеля связи"
                 setShowBadge(false)
             }
             val nm = getSystemService(NotificationManager::class.java)
@@ -363,14 +435,26 @@ class VlessVpnService : VpnService() {
             .setContentText(statusText)
             .setSmallIcon(android.R.drawable.ic_lock_lock)
             .setContentIntent(pendingIntent)
-            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Disconnect", disconnectPending)
+            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Отключить", disconnectPending)
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .build()
     }
 
+    override fun onRevoke() {
+        sessionSequence.incrementAndGet()
+        connectionJob?.cancel()
+        serviceScope.launch {
+            handleDisconnect()
+            stopSelf()
+        }
+        super.onRevoke()
+    }
+
     override fun onDestroy() {
-        stopVpnTunnel()
+        sessionSequence.incrementAndGet()
+        connectionJob?.cancel()
+        cleanupResources()
         serviceScope.cancel()
         super.onDestroy()
     }

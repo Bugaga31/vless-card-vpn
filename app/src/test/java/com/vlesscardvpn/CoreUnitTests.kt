@@ -1,9 +1,16 @@
 package com.vlesscardvpn
 
+import com.vlesscardvpn.core.NetworkProfileManager
+import com.vlesscardvpn.core.NetworkType
 import com.vlesscardvpn.core.SingBoxManager
 import com.vlesscardvpn.domain.AppSettings
+import com.vlesscardvpn.domain.PingTester
 import com.vlesscardvpn.domain.VlessConfig
 import com.vlesscardvpn.util.UniversalConfigParser
+import com.vlesscardvpn.worker.VpnSessionStats
+import com.vlesscardvpn.worker.VpnStatus
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.test.runTest
 import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Test
@@ -36,10 +43,12 @@ class CoreUnitTests {
         assertEquals("vmess", config?.protocolType)
         assertEquals("c8b4f912-4d23-411a-96ea-5fb3d88190bc", config?.uuid)
         assertEquals("VmessTest", config?.name)
+        assertEquals(10002, config?.port)
+        assertEquals("194.36.191.12", config?.address)
     }
 
     @Test
-    fun testSingBoxConfigStructure() {
+    fun testSingBoxConfigStructureAndValidation() {
         val config = VlessConfig(
             id = "test-1",
             name = "Test VLESS",
@@ -49,17 +58,19 @@ class CoreUnitTests {
             protocolType = "vless",
             flow = "xtls-rprx-vision",
             security = "reality",
-            sni = "yandex.ru",
+            sni = "samsung.com",
             publicKey = "Xb2qfC4uJt4Xh3mP9nL8rK1sV5wY0zQ3aE6dG7iO2k=",
             shortId = "6a"
         )
 
-        // Mock context not needed for pure JSON construction test
         val fakeConfigJson = SingBoxManager.generateConfig(
-            context = android.app.Application(),
+            context = null,
             config = config,
             settings = AppSettings(enableRuDirect = true, blockQuicYouTube = true)
         )
+
+        val validationResult = SingBoxManager.validateGeneratedConfig(fakeConfigJson)
+        assertTrue("Generated config must be valid according to sing-box schema: ${validationResult.exceptionOrNull()?.message}", validationResult.isSuccess)
 
         val json = JSONObject(fakeConfigJson)
         assertTrue(json.has("inbounds"))
@@ -77,7 +88,162 @@ class CoreUnitTests {
         assertEquals("vless", proxy.getString("type"))
         assertEquals("185.196.10.15", proxy.getString("server"))
         assertEquals(443, proxy.getInt("server_port"))
-        assertEquals("yandex.ru", proxy.getJSONObject("tls").getString("server_name"))
+        // Explicit config SNI 'samsung.com' must be strictly preserved!
+        assertEquals("samsung.com", proxy.getJSONObject("tls").getString("server_name"))
         assertTrue(proxy.getJSONObject("tls").has("reality"))
+        // transport.type = "tcp" must NOT be present
+        assertFalse(proxy.has("transport"))
+    }
+
+    @Test
+    fun testCompleteFieldPropagation() {
+        val config = VlessConfig(
+            id = "cfg-prop-1",
+            name = "Full Prop Node",
+            address = "198.51.100.25",
+            port = 8443,
+            uuid = "11111111-2222-3333-4444-555555555555",
+            protocolType = "vless",
+            flow = "xtls-rprx-vision",
+            security = "reality",
+            sni = "custom.gateway.net",
+            fingerprint = "firefox",
+            publicKey = "my-test-public-key-12345",
+            shortId = "beef"
+        )
+
+        val settings = AppSettings(
+            mtuSize = 1380,
+            enableRuDirect = true,
+            blockQuicYouTube = true,
+            customDnsProvider = "Google (8.8.8.8)"
+        )
+
+        val jsonStr = SingBoxManager.generateConfig(null, config, settings)
+        val json = JSONObject(jsonStr)
+
+        val proxy = json.getJSONArray("outbounds").getJSONObject(0)
+        assertEquals("198.51.100.25", proxy.getString("server"))
+        assertEquals(8443, proxy.getInt("server_port"))
+        assertEquals("11111111-2222-3333-4444-555555555555", proxy.getString("uuid"))
+        assertEquals("xtls-rprx-vision", proxy.getString("flow"))
+
+        val tls = proxy.getJSONObject("tls")
+        assertEquals("custom.gateway.net", tls.getString("server_name"))
+        assertEquals("firefox", tls.getJSONObject("utls").getString("fingerprint"))
+        assertEquals("my-test-public-key-12345", tls.getJSONObject("reality").getString("public_key"))
+        assertEquals("beef", tls.getJSONObject("reality").getString("short_id"))
+
+        val tun = json.getJSONArray("inbounds").getJSONObject(0)
+        assertEquals(1380, tun.getInt("mtu"))
+
+        val dnsServers = json.getJSONObject("dns").getJSONArray("servers")
+        assertEquals("https://8.8.8.8/dns-query", dnsServers.getJSONObject(0).getString("address"))
+    }
+
+    @Test
+    fun testSniPreservationRules() {
+        val configWithSamsung = VlessConfig(
+            name = "Samsung SNI",
+            address = "1.2.3.4",
+            port = 443,
+            uuid = "some-uuid",
+            sni = "samsung.com"
+        )
+        val configWithYandex = VlessConfig(
+            name = "Yandex SNI",
+            address = "1.2.3.4",
+            port = 443,
+            uuid = "some-uuid",
+            sni = "yandex.ru"
+        )
+        val configEmptySni = VlessConfig(
+            name = "Empty SNI",
+            address = "1.2.3.4",
+            port = 443,
+            uuid = "some-uuid",
+            sni = ""
+        )
+
+        val defaultSettings = AppSettings()
+        val customSniSettings = AppSettings(customSniOverride = "mycustom.org")
+
+        // 1. Explicit SNI must be preserved regardless of network profile
+        assertEquals("samsung.com", SingBoxManager.resolveEffectiveSni(configWithSamsung, defaultSettings, null))
+        assertEquals("yandex.ru", SingBoxManager.resolveEffectiveSni(configWithYandex, defaultSettings, null))
+
+        // 2. Empty SNI with custom override
+        assertEquals("mycustom.org", SingBoxManager.resolveEffectiveSni(configEmptySni, customSniSettings, null))
+
+        // 3. Empty SNI with default settings resolves to fallback
+        assertEquals("yandex.ru", SingBoxManager.resolveEffectiveSni(configEmptySni, defaultSettings, null))
+    }
+
+    @Test
+    fun testRuDirectRulesStructure() {
+        val config = VlessConfig(
+            name = "Test",
+            address = "1.1.1.1",
+            port = 443,
+            uuid = "uuid-123"
+        )
+
+        // RU Direct ON
+        val jsonOnStr = SingBoxManager.generateConfig(null, config, AppSettings(enableRuDirect = true))
+        val jsonOn = JSONObject(jsonOnStr)
+        val routeRulesOn = jsonOn.getJSONObject("route").getJSONArray("rules")
+        var hasDomainSuffixRu = false
+        for (i in 0 until routeRulesOn.length()) {
+            val r = routeRulesOn.getJSONObject(i)
+            if (r.has("domain_suffix") && r.optString("outbound") == "direct") {
+                hasDomainSuffixRu = true
+            }
+        }
+        assertTrue("When enableRuDirect is TRUE, route rules must contain direct domain_suffix rule", hasDomainSuffixRu)
+
+        // RU Direct OFF
+        val jsonOffStr = SingBoxManager.generateConfig(null, config, AppSettings(enableRuDirect = false))
+        val jsonOff = JSONObject(jsonOffStr)
+        val routeRulesOff = jsonOff.getJSONObject("route").getJSONArray("rules")
+        var hasDirectDomainSuffixInOff = false
+        for (i in 0 until routeRulesOff.length()) {
+            val r = routeRulesOff.getJSONObject(i)
+            if (r.has("domain_suffix") && r.optString("outbound") == "direct") {
+                hasDirectDomainSuffixInOff = true
+            }
+        }
+        assertFalse("When enableRuDirect is FALSE, route rules must NOT contain direct domain_suffix rule", hasDirectDomainSuffixInOff)
+    }
+
+    @Test
+    fun testPreserveErrorStateModel() {
+        val initialStats = VpnSessionStats(status = VpnStatus.CONNECTING)
+        assertEquals(VpnStatus.CONNECTING, initialStats.status)
+
+        // Transition on error preserves explicit diagnostic reason
+        val errorStats = initialStats.copy(
+            status = VpnStatus.ERROR,
+            errorMessage = "Сквозной тест HTTPS не пройден: узел не маршрутизирует трафик"
+        )
+        assertEquals(VpnStatus.ERROR, errorStats.status)
+        assertEquals("Сквозной тест HTTPS не пройден: узел не маршрутизирует трафик", errorStats.errorMessage)
+
+        // User explicit disconnect clears to DISCONNECTED
+        val disconnectedStats = VpnSessionStats(status = VpnStatus.DISCONNECTED)
+        assertEquals(VpnStatus.DISCONNECTED, disconnectedStats.status)
+        assertNull(disconnectedStats.errorMessage)
+    }
+
+    @Test
+    fun testPingTesterLatencyBreakdownErrorPreservation() {
+        val badConfig = VlessConfig(
+            name = "Bad Port Node",
+            address = "127.0.0.1",
+            port = -1,
+            uuid = "invalid"
+        )
+        val result = PingTester.testDetailedLatency(badConfig, 100)
+        assertFalse("Invalid port must fail immediately", result.success)
+        assertNotNull("Error message must be preserved", result.errorReason)
     }
 }

@@ -1,10 +1,14 @@
 package com.vlesscardvpn.domain
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.io.InputStream
+import java.net.HttpURLConnection
 import java.net.InetSocketAddress
 import java.net.Socket
 import java.net.URL
+import javax.net.ssl.HttpsURLConnection
 import javax.net.ssl.SNIHostName
 import javax.net.ssl.SSLParameters
 import javax.net.ssl.SSLSocket
@@ -22,27 +26,38 @@ data class LatencyBreakdown(
 object PingTester {
 
     /**
-     * Measure complete TCP, TLS and Handshake latency without silently ignoring TLS errors.
+     * Endpoint reachability test for server nodes (TCP connect + TLS client hello check).
+     * Used for server list ping measurements.
+     * Does NOT substitute authenticated VPN tunnel verification.
      */
     fun testDetailedLatency(config: VlessConfig, timeoutMs: Int = 3500): LatencyBreakdown {
         var tcpLatency = -1
         var tlsLatency = -1
-        var errorMessage: String? = null
+
+        if (config.address.isBlank() || config.port <= 0) {
+            return LatencyBreakdown(
+                success = false,
+                errorReason = "Invalid server address or port: ${config.address}:${config.port}"
+            )
+        }
 
         try {
             Socket().use { socket ->
                 socket.soTimeout = timeoutMs
                 socket.tcpNoDelay = true
                 val tcpStart = System.currentTimeMillis()
-                socket.connect(InetSocketAddress(config.address, config.port), timeoutMs)
+                socket.connect(InetSocketAddress(config.address.trim(), config.port), timeoutMs)
                 tcpLatency = (System.currentTimeMillis() - tcpStart).toInt().coerceAtLeast(1)
 
-                if (config.security.equals("tls", ignoreCase = true) || config.security.equals("reality", ignoreCase = true)) {
+                val isTls = config.security.equals("tls", ignoreCase = true)
+                val isReality = config.security.equals("reality", ignoreCase = true)
+
+                if (isTls || isReality) {
                     val sslFactory = SSLSocketFactory.getDefault() as SSLSocketFactory
-                    val sslSocket = sslFactory.createSocket(socket, config.address, config.port, false) as SSLSocket
+                    val sslSocket = sslFactory.createSocket(socket, config.address.trim(), config.port, false) as SSLSocket
+                    val effectiveSni = config.sni.ifBlank { "yandex.ru" }.trim()
                     val params = SSLParameters().apply {
-                        val sni = config.sni.ifBlank { "yandex.ru" }
-                        serverNames = listOf(SNIHostName(sni))
+                        serverNames = listOf(SNIHostName(effectiveSni))
                     }
                     sslSocket.sslParameters = params
                     sslSocket.soTimeout = timeoutMs
@@ -51,13 +66,18 @@ object PingTester {
                         sslSocket.startHandshake()
                         tlsLatency = (System.currentTimeMillis() - tlsStart).toInt().coerceAtLeast(1)
                     } catch (e: Exception) {
-                        // For Reality servers, handshake with standard CA certs will naturally fail verification,
-                        // but receiving TLS server hello confirms port and TLS stack are alive!
-                        if (config.security.equals("reality", ignoreCase = true) && (e.message?.contains("CertPathValidatorException") == true || e.message?.contains("Trust anchor") == true || e.message?.contains("handshake") == true)) {
+                        // For Reality servers, standard CA validation is expected to fail on untrusted target cert,
+                        // but receiving TLS Alert or ServerHello confirms TLS port responsiveness.
+                        val msg = e.message ?: ""
+                        if (isReality && (msg.contains("CertPathValidatorException") || msg.contains("Trust anchor") || msg.contains("handshake"))) {
                             tlsLatency = (System.currentTimeMillis() - tlsStart).toInt().coerceAtLeast(1)
                         } else {
-                            errorMessage = "TLS handshake failed: ${e.localizedMessage}"
-                            return LatencyBreakdown(tcpMs = tcpLatency, tlsMs = -1, success = false, errorReason = errorMessage)
+                            return LatencyBreakdown(
+                                tcpMs = tcpLatency,
+                                tlsMs = -1,
+                                success = false,
+                                errorReason = "TLS handshake failed: ${e.localizedMessage ?: "Unknown SSL error"}"
+                            )
                         }
                     }
                 }
@@ -75,13 +95,13 @@ object PingTester {
                 tlsMs = -1,
                 httpMs = -1,
                 success = false,
-                errorReason = e.localizedMessage ?: "TCP Connection timed out"
+                errorReason = e.localizedMessage ?: "Connection timed out"
             )
         }
     }
 
     /**
-     * Backward-compatible simple ping calculation.
+     * Simple ping calculation for UI lists.
      */
     fun pingConfig(config: VlessConfig, timeoutMs: Int = 3000): Int {
         val result = testDetailedLatency(config, timeoutMs)
@@ -93,35 +113,53 @@ object PingTester {
     }
 
     /**
-     * Real end-to-end verification through the active TUN / Sing-Box tunnel.
+     * Strict end-to-end verification through the active TUN / Sing-Box proxy tunnel.
+     * - Uses HTTPS endpoints only (no plaintext HTTP).
+     * - Strictly rejects 301/302 redirects (captive portals or ISP blocks).
+     * - Requires HTTP 204 No Content response.
+     * - Supports coroutine cancellation and bounded timeouts.
      */
-    suspend fun verifyEndToEndConnection(timeoutMs: Int = 4000): Pair<Boolean, Int> = withContext(Dispatchers.IO) {
-        val testUrls = listOf(
-            "http://www.google.com/generate_204",
-            "http://cp.cloudflare.com/generate_204",
-            "http://connectivitycheck.gstatic.com/generate_204",
-            "http://www.youtube.com/generate_204"
+    suspend fun verifyEndToEndConnection(timeoutMs: Int = 3500): Pair<Boolean, Int> = withContext(Dispatchers.IO) {
+        val secureCheckEndpoints = listOf(
+            "https://www.google.com/generate_204",
+            "https://cp.cloudflare.com/generate_204",
+            "https://connectivitycheck.gstatic.com/generate_204"
         )
-        for (testUrl in testUrls) {
+
+        for (endpoint in secureCheckEndpoints) {
             try {
-                var responseCode = -1
-                val latency = measureTimeMillis {
-                    val url = URL(testUrl)
-                    val conn = url.openConnection() as java.net.HttpURLConnection
-                    conn.connectTimeout = timeoutMs
-                    conn.readTimeout = timeoutMs
-                    conn.instanceFollowRedirects = false
-                    conn.useCaches = false
-                    conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Android; Mobile)")
-                    conn.connect()
-                    responseCode = conn.responseCode
-                    conn.disconnect()
+                var conn: HttpsURLConnection? = null
+                var stream: InputStream? = null
+                try {
+                    val url = URL(endpoint)
+                    var responseCode = -1
+                    val latency = measureTimeMillis {
+                        conn = (url.openConnection() as HttpsURLConnection).apply {
+                            connectTimeout = timeoutMs
+                            readTimeout = timeoutMs
+                            instanceFollowRedirects = false // Do not accept redirects as valid proof!
+                            useCaches = false
+                            defaultUseCaches = false
+                            setRequestProperty("User-Agent", "Mozilla/5.0 (Android; Mobile; rv:122.0) Gecko/122.0")
+                            setRequestProperty("Connection", "close")
+                        }
+                        conn?.connect()
+                        responseCode = conn?.responseCode ?: -1
+                        stream = conn?.inputStream
+                    }
+
+                    // Only HTTP 204 indicates an unintercepted connectivity probe
+                    if (responseCode == 204) {
+                        return@withContext Pair(true, latency.toInt().coerceAtLeast(1))
+                    }
+                } finally {
+                    try { stream?.close() } catch (_: Exception) {}
+                    try { conn?.disconnect() } catch (_: Exception) {}
                 }
-                if (responseCode in 200..204 || responseCode == 301 || responseCode == 302) {
-                    return@withContext Pair(true, latency.toInt().coerceAtLeast(1))
-                }
-            } catch (e: Exception) {
-                // Continue trying fallbacks
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                // Try next verification endpoint
             }
         }
         Pair(false, -1)
