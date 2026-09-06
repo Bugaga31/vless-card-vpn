@@ -23,9 +23,11 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.vlesscardvpn.data.InMemoryConfigRepo
 import com.vlesscardvpn.domain.VlessConfig
+import com.vlesscardvpn.ui.DiagnosticScreen
 import com.vlesscardvpn.ui.FreeConfigsScreen
 import com.vlesscardvpn.ui.ServerListScreen
 import com.vlesscardvpn.ui.SettingsScreen
+import com.vlesscardvpn.ui.StealthProfileScreen
 import com.vlesscardvpn.ui.components.CyberSplashScreen
 import com.vlesscardvpn.ui.theme.VlessCardVpnTheme
 import com.vlesscardvpn.worker.VlessVpnService
@@ -43,7 +45,13 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    VlessCardVpnApp(autoConnectOnStart = shouldAutoConnect)
+                    VlessCardVpnApp(
+                        autoConnectOnStart = shouldAutoConnect,
+                        onPanicExit = {
+                            VlessVpnService.stopVpn(this@MainActivity)
+                            finishAffinity()
+                        }
+                    )
                 }
             }
         }
@@ -51,7 +59,10 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun VlessCardVpnApp(autoConnectOnStart: Boolean = false) {
+fun VlessCardVpnApp(
+    autoConnectOnStart: Boolean = false,
+    onPanicExit: () -> Unit = {}
+) {
     val context = LocalContext.current
     val navController = rememberNavController()
     val repo = remember { InMemoryConfigRepo() }
@@ -126,7 +137,22 @@ fun VlessCardVpnApp(autoConnectOnStart: Boolean = false) {
                         vpnStats = vpnStats,
                         onToggleConnect = handleConnectToggle,
                         onNavigateToSettings = { navController.navigate("settings") },
-                        onNavigateToFree = { navController.navigate("free_configs") }
+                        onNavigateToFree = { navController.navigate("free_configs") },
+                        onNavigateToDiagnostic = { navController.navigate("diagnostic") },
+                        onNavigateToStealth = { navController.navigate("stealth") },
+                        onPanicTrigger = onPanicExit
+                    )
+                }
+                composable("diagnostic") {
+                    DiagnosticScreen(
+                        repo = repo,
+                        onBack = { navController.popBackStack() }
+                    )
+                }
+                composable("stealth") {
+                    StealthProfileScreen(
+                        repo = repo,
+                        onBack = { navController.popBackStack() }
                     )
                 }
                 composable("settings") {
