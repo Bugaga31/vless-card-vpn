@@ -70,7 +70,7 @@ fun VlessCardVpnApp(
 
     DisposableEffect(repo, autoPilotEngine) {
         onDispose {
-            autoPilotEngine.close()
+            autoPilotEngine.release()
             repo.close()
         }
     }
