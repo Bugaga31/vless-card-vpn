@@ -513,7 +513,7 @@ class VlessVpnService : VpnService() {
         )
 
         return NotificationCompat.Builder(this, "vless_card_vpn_service")
-            .setContentTitle("VLESS Stealth Core: ${config.name}")
+            .setContentTitle("VLESS Stealth Core: ${config?.name ?: "Активное подключение"}")
             .setContentText(statusText)
             .setSmallIcon(android.R.drawable.ic_lock_lock)
             .setContentIntent(pendingIntent)
