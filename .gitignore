@@ -25,4 +25,4 @@ out/
 captures/
 output.json
 app/release/
-app/debug/
+app/debug/.gradle-home/

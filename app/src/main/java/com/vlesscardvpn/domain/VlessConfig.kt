@@ -26,6 +26,10 @@ data class AppSettings(
     val autoSelectBestPing: Boolean = true,
     val enableRuDirect: Boolean = true,
     val customSniOverride: String = "yandex.ru",
+    val autoTestAfterImport: Boolean = true,
+    val includeFreeNodesInMainList: Boolean = true,
+    val showOnlyWorkingNodes: Boolean = false,
+    val maxFreeNodesToAdd: Int = 30,
     val autoFetchSources: List<String> = listOf(
         "https://raw.githubusercontent.com/GoldCaviar/vpn-configs-for-russia/refs/heads/main/Vless-Reality-White-Lists-Rus-Mobile.txt",
         "https://raw.githubusercontent.com/zieng2/wl/main/vless_universal.txt",

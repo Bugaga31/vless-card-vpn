@@ -49,14 +49,15 @@ fun ServerListScreen(
     val snackbarHostState = remember { SnackbarHostState() }
 
     // Sorted configs if setting enabled
-    val configs = remember(rawConfigs, settings.autoSelectBestPing) {
+    val visibleConfigs = if (settings.showOnlyWorkingNodes) rawConfigs.filter { it.pingMs > 0 } else rawConfigs
+    val configs = remember(visibleConfigs, settings.autoSelectBestPing) {
         if (settings.autoSelectBestPing) {
-            rawConfigs.sortedWith(
+            visibleConfigs.sortedWith(
                 compareBy<VlessConfig> { if (it.pingMs > 0) 0 else 1 }
                     .thenBy { if (it.pingMs > 0) it.pingMs else Int.MAX_VALUE }
             )
         } else {
-            rawConfigs
+            visibleConfigs
         }
     }
 

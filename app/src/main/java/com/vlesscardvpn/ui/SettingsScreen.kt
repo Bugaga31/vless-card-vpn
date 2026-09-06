@@ -148,7 +148,29 @@ fun SettingsScreen(
                 }
             }
 
-            // Section 3: Performance & Ping
+            // Section 3: Import & list behavior
+            Text(
+                text = "IMPORT & SERVER LIST",
+                color = NeonGreen,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold
+            )
+            Card(colors = CardDefaults.cardColors(containerColor = DarkSurface), shape = RoundedCornerShape(12.dp)) {
+                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    SettingSwitch("Test servers after import", "Automatically check imported free nodes.", settings.autoTestAfterImport) { repo.updateSettings(settings.copy(autoTestAfterImport = it)) }
+                    SettingSwitch("Show only working servers", "Hide nodes without a successful latency check.", settings.showOnlyWorkingNodes) { repo.updateSettings(settings.copy(showOnlyWorkingNodes = it)) }
+                    OutlinedTextField(
+                        value = settings.maxFreeNodesToAdd.toString(),
+                        onValueChange = { value -> value.toIntOrNull()?.coerceIn(1, 200)?.let { repo.updateSettings(settings.copy(maxFreeNodesToAdd = it)) } },
+                        label = { Text("Maximum free nodes to add") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = NeonGreen, unfocusedBorderColor = Color(0xFF2E3349), focusedTextColor = TextPrimary, unfocusedTextColor = TextPrimary)
+                    )
+                }
+            }
+
+            // Section 4: Performance & Ping
             Text(
                 text = "AUTOMATION",
                 color = NeonGreen,
@@ -188,6 +210,18 @@ fun SettingsScreen(
                     }
                 }
             }
+            }
         }
+    }
+}
+
+@Composable
+private fun SettingSwitch(title: String, description: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
+    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(title, fontWeight = FontWeight.SemiBold, color = TextPrimary)
+            Text(description, fontSize = 13.sp, color = TextSecondary)
+        }
+        Switch(checked = checked, onCheckedChange = onCheckedChange, colors = SwitchDefaults.colors(checkedThumbColor = NeonGreen, checkedTrackColor = NeonGreen.copy(alpha = 0.5f)))
     }
 }
