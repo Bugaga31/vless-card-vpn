@@ -1,12 +1,13 @@
 package com.vlesscardvpn.ui
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -31,7 +32,7 @@ fun SettingsScreen(
         containerColor = DarkBackground,
         topBar = {
             TopAppBar(
-                title = { Text("Settings & Masking", fontWeight = FontWeight.Bold, color = TextPrimary) },
+                title = { Text("Core & Tunnel Settings", fontWeight = FontWeight.Bold, color = TextPrimary) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = TextPrimary)
@@ -45,31 +46,26 @@ fun SettingsScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .padding(16.dp)
+                .padding(14.dp)
                 .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // Section 1: Masking & SNI Spoofing
-            Text(
-                text = "TRAFFIC MASKING (OBFUSCATION)",
-                color = NeonCyan,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Bold
-            )
-
+            // Section 1: Masking & Anti-DPI
+            SectionHeader("ANTIDPI & REALITY MASKING", NeonCyan)
             Card(
                 colors = CardDefaults.cardColors(containerColor = DarkSurface),
-                shape = RoundedCornerShape(12.dp)
+                shape = RoundedCornerShape(14.dp),
+                border = BorderStroke(1.dp, DarkBorder)
             ) {
-                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text(
-                        text = "SNI Domain Masking",
+                        text = "SNI Domain Obfuscation",
                         fontWeight = FontWeight.SemiBold,
                         color = TextPrimary
                     )
                     Text(
-                        text = "VLESS Reality mimics real HTTPS handshakes to trusted Russian white-listed services (e.g. Yandex, VK) to bypass DPI deep packet inspection.",
-                        fontSize = 13.sp,
+                        text = "VLESS Reality mimics real HTTPS handshakes to trusted Russian white-listed services to bypass ISP DPI blocking.",
+                        fontSize = 12.sp,
                         color = TextSecondary
                     )
 
@@ -79,11 +75,12 @@ fun SettingsScreen(
                             customSni = it
                             repo.updateSettings(settings.copy(customSniOverride = it))
                         },
-                        label = { Text("Custom SNI Mask (e.g. yandex.ru, vk.com)") },
+                        label = { Text("Custom SNI Mask") },
                         modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedBorderColor = NeonCyan,
-                            unfocusedBorderColor = Color(0xFF2E3349),
+                            unfocusedBorderColor = DarkBorder,
                             focusedTextColor = TextPrimary,
                             unfocusedTextColor = TextPrimary
                         )
@@ -91,7 +88,7 @@ fun SettingsScreen(
 
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         listOf("yandex.ru", "vk.com", "samsung.com", "apple.com").forEach { domain ->
                             FilterChip(
@@ -107,120 +104,183 @@ fun SettingsScreen(
                 }
             }
 
-            // Section 2: Split Routing (Russian Direct Access)
-            Text(
-                text = "SPLIT ROUTING & BYPASS",
-                color = NeonPurple,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Bold
-            )
-
+            // Section 2: Routing & Russian Services
+            SectionHeader("ROUTING & BYPASS", NeonPurple)
             Card(
                 colors = CardDefaults.cardColors(containerColor = DarkSurface),
-                shape = RoundedCornerShape(12.dp)
+                shape = RoundedCornerShape(14.dp),
+                border = BorderStroke(1.dp, DarkBorder)
             ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "Direct Access for .RU & Russian Services",
-                                fontWeight = FontWeight.SemiBold,
-                                color = TextPrimary
-                            )
-                            Text(
-                                text = "Gosuslugi, Banking apps, Yandex, VK and *.ru sites work directly without VPN slowdown or blocking.",
-                                fontSize = 13.sp,
-                                color = TextSecondary
-                            )
-                        }
-                        Switch(
-                            checked = settings.enableRuDirect,
-                            onCheckedChange = {
-                                repo.updateSettings(settings.copy(enableRuDirect = it))
-                            },
-                            colors = SwitchDefaults.colors(checkedThumbColor = NeonCyan, checkedTrackColor = NeonCyan.copy(alpha = 0.5f))
-                        )
-                    }
+                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    SettingSwitch(
+                        title = "Direct Access for Russian Services (.RU)",
+                        description = "Gosuslugi, Banking apps, Yandex, VK and *.ru sites work directly with 0 ms VPN overhead.",
+                        checked = settings.enableRuDirect,
+                        accentColor = NeonPurple
+                    ) { repo.updateSettings(settings.copy(enableRuDirect = it)) }
+
+                    HorizontalDivider(color = DarkBorder, thickness = 1.dp)
+
+                    SettingSwitch(
+                        title = "Block QUIC (Fix YouTube & Streaming)",
+                        description = "Blocks UDP 443 to prevent ISP throttle on YouTube and force high-speed TCP/TLS stream.",
+                        checked = settings.blockQuicYouTube,
+                        accentColor = NeonPurple
+                    ) { repo.updateSettings(settings.copy(blockQuicYouTube = it)) }
                 }
             }
 
-            // Section 3: Import & list behavior
-            Text(
-                text = "IMPORT & SERVER LIST",
-                color = NeonGreen,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Bold
-            )
-            Card(colors = CardDefaults.cardColors(containerColor = DarkSurface), shape = RoundedCornerShape(12.dp)) {
-                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    SettingSwitch("Test servers after import", "Automatically check imported free nodes.", settings.autoTestAfterImport) { repo.updateSettings(settings.copy(autoTestAfterImport = it)) }
-                    SettingSwitch("Show only working servers", "Hide nodes without a successful latency check.", settings.showOnlyWorkingNodes) { repo.updateSettings(settings.copy(showOnlyWorkingNodes = it)) }
+            // Section 3: Tunnel & DNS
+            SectionHeader("TUNNEL & PERFORMANCE", NeonAmber)
+            Card(
+                colors = CardDefaults.cardColors(containerColor = DarkSurface),
+                shape = RoundedCornerShape(14.dp),
+                border = BorderStroke(1.dp, DarkBorder)
+            ) {
+                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(
+                        text = "Secure DNS Provider",
+                        fontWeight = FontWeight.SemiBold,
+                        color = TextPrimary
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        listOf("Cloudflare (1.1.1.1)", "Quad9 (9.9.9.9)", "Google (8.8.8.8)").forEach { dns ->
+                            FilterChip(
+                                selected = settings.customDnsProvider == dns,
+                                onClick = { repo.updateSettings(settings.copy(customDnsProvider = dns)) },
+                                label = { Text(dns.substringBefore(" "), fontSize = 11.sp) }
+                            )
+                        }
+                    }
+
+                    HorizontalDivider(color = DarkBorder, thickness = 1.dp)
+
                     OutlinedTextField(
-                        value = settings.maxFreeNodesToAdd.toString(),
-                        onValueChange = { value -> value.toIntOrNull()?.coerceIn(1, 200)?.let { repo.updateSettings(settings.copy(maxFreeNodesToAdd = it)) } },
-                        label = { Text("Maximum free nodes to add") },
+                        value = settings.mtuSize.toString(),
+                        onValueChange = { value ->
+                            value.toIntOrNull()?.coerceIn(1200, 1500)?.let {
+                                repo.updateSettings(settings.copy(mtuSize = it))
+                            }
+                        },
+                        label = { Text("TUN Interface MTU (1200 - 1500)") },
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = true,
-                        colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = NeonGreen, unfocusedBorderColor = Color(0xFF2E3349), focusedTextColor = TextPrimary, unfocusedTextColor = TextPrimary)
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = NeonAmber,
+                            unfocusedBorderColor = DarkBorder,
+                            focusedTextColor = TextPrimary,
+                            unfocusedTextColor = TextPrimary
+                        )
+                    )
+
+                    SettingSwitch(
+                        title = "Auto-Reconnect on Network Switch",
+                        description = "Instantly restore tunnel when switching between Wi-Fi and LTE.",
+                        checked = settings.autoReconnectOnNetworkChange,
+                        accentColor = NeonAmber
+                    ) { repo.updateSettings(settings.copy(autoReconnectOnNetworkChange = it)) }
+                }
+            }
+
+            // Section 4: Auto-Parsing & Server List
+            SectionHeader("AUTOPARSE & SERVER LIST", NeonGreen)
+            Card(
+                colors = CardDefaults.cardColors(containerColor = DarkSurface),
+                shape = RoundedCornerShape(14.dp),
+                border = BorderStroke(1.dp, DarkBorder)
+            ) {
+                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    SettingSwitch(
+                        title = "Auto-sort by lowest Ping",
+                        description = "Shows the fastest and lowest latency servers at the top of the list.",
+                        checked = settings.autoSelectBestPing,
+                        accentColor = NeonGreen
+                    ) { repo.updateSettings(settings.copy(autoSelectBestPing = it)) }
+
+                    HorizontalDivider(color = DarkBorder, thickness = 1.dp)
+
+                    SettingSwitch(
+                        title = "Test latency after import",
+                        description = "Immediately ping imported nodes to verify availability.",
+                        checked = settings.autoTestAfterImport,
+                        accentColor = NeonGreen
+                    ) { repo.updateSettings(settings.copy(autoTestAfterImport = it)) }
+
+                    HorizontalDivider(color = DarkBorder, thickness = 1.dp)
+
+                    SettingSwitch(
+                        title = "Hide dead / unreachable nodes",
+                        description = "Display only working servers with positive response.",
+                        checked = settings.showOnlyWorkingNodes,
+                        accentColor = NeonGreen
+                    ) { repo.updateSettings(settings.copy(showOnlyWorkingNodes = it)) }
+
+                    HorizontalDivider(color = DarkBorder, thickness = 1.dp)
+
+                    OutlinedTextField(
+                        value = settings.maxFreeNodesToAdd.toString(),
+                        onValueChange = { value ->
+                            value.toIntOrNull()?.coerceIn(1, 200)?.let {
+                                repo.updateSettings(settings.copy(maxFreeNodesToAdd = it))
+                            }
+                        },
+                        label = { Text("Maximum free nodes to add on scan") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = NeonGreen,
+                            unfocusedBorderColor = DarkBorder,
+                            focusedTextColor = TextPrimary,
+                            unfocusedTextColor = TextPrimary
+                        )
                     )
                 }
             }
 
-            // Section 4: Performance & Ping
-            Text(
-                text = "AUTOMATION",
-                color = NeonGreen,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Bold
-            )
-
-            Card(
-                colors = CardDefaults.cardColors(containerColor = DarkSurface),
-                shape = RoundedCornerShape(12.dp)
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "Auto-sort by lowest Ping",
-                                fontWeight = FontWeight.SemiBold,
-                                color = TextPrimary
-                            )
-                            Text(
-                                text = "Always shows the fastest, lowest latency servers at the top.",
-                                fontSize = 13.sp,
-                                color = TextSecondary
-                            )
-                        }
-                        Switch(
-                            checked = settings.autoSelectBestPing,
-                            onCheckedChange = {
-                                repo.updateSettings(settings.copy(autoSelectBestPing = it))
-                            },
-                            colors = SwitchDefaults.colors(checkedThumbColor = NeonGreen, checkedTrackColor = NeonGreen.copy(alpha = 0.5f))
-                        )
-                    }
-                }
-            }
+            Spacer(modifier = Modifier.height(20.dp))
         }
     }
 }
 
 @Composable
-private fun SettingSwitch(title: String, description: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
-    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+private fun SectionHeader(title: String, color: Color) {
+    Text(
+        text = title,
+        color = color,
+        fontSize = 11.sp,
+        fontWeight = FontWeight.Bold,
+        letterSpacing = 0.8.sp
+    )
+}
+
+@Composable
+private fun SettingSwitch(
+    title: String,
+    description: String,
+    checked: Boolean,
+    accentColor: Color,
+    onCheckedChange: (Boolean) -> Unit
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
         Column(modifier = Modifier.weight(1f)) {
-            Text(title, fontWeight = FontWeight.SemiBold, color = TextPrimary)
-            Text(description, fontSize = 13.sp, color = TextSecondary)
+            Text(title, fontWeight = FontWeight.SemiBold, color = TextPrimary, fontSize = 14.sp)
+            Text(description, fontSize = 12.sp, color = TextSecondary)
         }
-        Switch(checked = checked, onCheckedChange = onCheckedChange, colors = SwitchDefaults.colors(checkedThumbColor = NeonGreen, checkedTrackColor = NeonGreen.copy(alpha = 0.5f)))
+        Spacer(modifier = Modifier.width(10.dp))
+        Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+            colors = SwitchDefaults.colors(
+                checkedThumbColor = accentColor,
+                checkedTrackColor = accentColor.copy(alpha = 0.4f)
+            )
+        )
     }
 }

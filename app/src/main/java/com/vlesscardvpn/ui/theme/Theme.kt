@@ -5,23 +5,46 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 
-// Modern OLED Dark Theme Colors
-val DarkBackground = Color(0xFF0F1117)
-val DarkSurface = Color(0xFF181B26)
-val DarkSurfaceVariant = Color(0xFF222638)
-val NeonCyan = Color(0xFF00E5FF)
-val NeonPurple = Color(0xFF8B5CF6)
-val NeonGreen = Color(0xFF10B981)
-val NeonAmber = Color(0xFFF59E0B)
-val NeonRed = Color(0xFFEF4444)
-val TextPrimary = Color(0xFFF1F5F9)
-val TextSecondary = Color(0xFF94A3B8)
+// Premium Cyber OLED Palette
+val DarkBackground = Color(0xFF090A0F)
+val DarkSurface = Color(0xFF12151F)
+val DarkSurfaceVariant = Color(0xFF1B2030)
+val DarkCardBg = Color(0xFF161A26)
+val DarkBorder = Color(0xFF262D42)
+
+val NeonCyan = Color(0xFF00F5FF)
+val NeonCyanGlow = Color(0x3300F5FF)
+val NeonPurple = Color(0xFF9D4EDD)
+val NeonPurpleGlow = Color(0x339D4EDD)
+val NeonGreen = Color(0xFF00FF9D)
+val NeonGreenGlow = Color(0x3300FF9D)
+val NeonAmber = Color(0xFFFFB703)
+val NeonAmberGlow = Color(0x33FFB703)
+val NeonRed = Color(0xFFFF3366)
+val NeonRedGlow = Color(0x33FF3366)
+
+val TextPrimary = Color(0xFFF8FAFC)
+val TextSecondary = Color(0xFF8E9BAE)
+val TextTertiary = Color(0xFF5D6B82)
+
+val CyberGradient = Brush.horizontalGradient(
+    colors = listOf(Color(0xFF00F5FF), Color(0xFF9D4EDD))
+)
+
+val ActiveCardGradient = Brush.linearGradient(
+    colors = listOf(Color(0xFF1A233A), Color(0xFF141926))
+)
+
+val ConnectedGlowGradient = Brush.radialGradient(
+    colors = listOf(NeonGreen.copy(alpha = 0.35f), Color.Transparent)
+)
 
 private val DarkColors = darkColorScheme(
     primary = NeonCyan,
-    onPrimary = Color(0xFF0B192C),
+    onPrimary = Color(0xFF060D17),
     secondary = NeonPurple,
     onSecondary = Color.White,
     background = DarkBackground,
@@ -33,26 +56,13 @@ private val DarkColors = darkColorScheme(
     error = NeonRed
 )
 
-private val LightColors = lightColorScheme(
-    primary = Color(0xFF0284C7),
-    onPrimary = Color.White,
-    secondary = Color(0xFF7C3AED),
-    background = Color(0xFFF8FAFC),
-    surface = Color.White,
-    surfaceVariant = Color(0xFFF1F5F9),
-    onSurface = Color(0xFF0F172A),
-    onBackground = Color(0xFF0F172A)
-)
-
 @Composable
 fun VlessCardVpnTheme(
-    darkTheme: Boolean = true, // Dark theme default as requested
+    darkTheme: Boolean = true,
     content: @Composable () -> Unit
 ) {
-    val colors = if (darkTheme) DarkColors else LightColors
-
     MaterialTheme(
-        colorScheme = colors,
+        colorScheme = DarkColors,
         typography = MaterialTheme.typography,
         content = content
     )
