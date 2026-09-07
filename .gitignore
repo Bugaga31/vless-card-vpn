@@ -10,6 +10,9 @@
 .DS_Store
 /build
 app/build/
+xray-test/build/
+build/
+release/
 /captures
 .externalNativeBuild
 .cxx
