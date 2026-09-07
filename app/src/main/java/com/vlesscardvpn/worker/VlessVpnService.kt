@@ -6,6 +6,7 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.net.VpnService
 import android.os.Build
 import android.os.ParcelFileDescriptor
@@ -59,14 +60,23 @@ class VlessVpnService : VpnService() {
         val vpnStats = _vpnStats.asStateFlow()
 
         fun startVpn(context: Context, config: VlessConfig) {
-            val intent = Intent(context, VlessVpnService::class.java).apply {
-                action = ACTION_CONNECT
-                putExtra(EXTRA_CONFIG_ID, config.id)
-            }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                context.startForegroundService(intent)
-            } else {
-                context.startService(intent)
+            try {
+                val intent = Intent(context, VlessVpnService::class.java).apply {
+                    action = ACTION_CONNECT
+                    putExtra(EXTRA_CONFIG_ID, config.id)
+                }
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    context.startForegroundService(intent)
+                } else {
+                    context.startService(intent)
+                }
+            } catch (e: Exception) {
+                Log.e("VlessVpnService", "startVpn failed", e)
+                _vpnStats.value = VpnSessionStats(
+                    status = VpnStatus.ERROR,
+                    activeConfig = config,
+                    errorMessage = "Не удалось запустить службу VPN: ${e.localizedMessage ?: "Отказано в доступе"}"
+                )
             }
         }
 
@@ -108,6 +118,7 @@ class VlessVpnService : VpnService() {
                 basePath = baseDir.absolutePath
                 workingPath = workingDir.absolutePath
                 tempPath = tempDir.absolutePath
+                fixAndroidStack = true
                 debug = false
             }
             Libbox.setup(options)
@@ -135,31 +146,17 @@ class VlessVpnService : VpnService() {
                 val configId = intent.getStringExtra(EXTRA_CONFIG_ID) ?: ""
                 val sessionId = sessionSequence.incrementAndGet()
 
-                // CRITICAL FIX: MUST call startForeground synchronously (Android 12+ / FGS rules)
-                // before ANY coroutine launch or heavy work. This was the primary cause of app exit/crash.
+                // CRITICAL FIX: MUST call startForeground synchronously (Android 12+ / 14+ FGS rules)
+                // with explicit FOREGROUND_SERVICE_TYPE_SPECIAL_USE before ANY coroutine launch or heavy work.
                 val initialNotification = try {
                     createNotification(null, "Подключение...")
                 } catch (t: Throwable) {
                     null
                 }
                 if (initialNotification != null) {
-                    try {
-                        startForeground(1, initialNotification)
-                    } catch (se: SecurityException) {
-                        _vpnStats.value = VpnSessionStats(status = VpnStatus.ERROR, errorMessage = "Нет разрешения на foreground service (VPN permission)")
-                        return START_NOT_STICKY
-                    } catch (t: Throwable) {
-                        _vpnStats.value = VpnSessionStats(status = VpnStatus.ERROR, errorMessage = "Не удалось запустить foreground: ${t.javaClass.simpleName}")
-                        return START_NOT_STICKY
-                    }
+                    safeStartForeground(1, initialNotification)
                 } else {
-                    // Fallback: still try to start foreground with minimal notification
-                    try {
-                        startForeground(1, createNotification(null, "Подключение"))
-                    } catch (_: Exception) {
-                        // If even this fails, we cannot continue as FGS
-                        return START_NOT_STICKY
-                    }
+                    safeStartForeground(1, createNotification(null, "Подключение"))
                 }
 
                 connectionJob?.cancel()
@@ -213,7 +210,7 @@ class VlessVpnService : VpnService() {
 
         _vpnStats.value = VpnSessionStats(status = VpnStatus.CONNECTING, activeConfig = config)
         // Keep foreground alive (already started in onStartCommand)
-        try { startForeground(1, createNotification(config, "Инициализация ядра связи...")) } catch (_: Exception) {}
+        safeStartForeground(1, createNotification(config, "Инициализация ядра связи..."))
 
         try {
             // 2. Evaluate Network Profile with consistent settings snapshot
@@ -299,7 +296,7 @@ class VlessVpnService : VpnService() {
 
             // 7. CRITICAL: End-to-End Verification Before setting CONNECTED status
             // Never promote to CONNECTED on partial success (TUN open but no proxy traffic)
-            startForeground(1, createNotification(config, "Проверка сквозного защищенного соединения..."))
+            safeStartForeground(1, createNotification(config, "Проверка сквозного защищенного соединения..."))
 
             var verified = false
             var retryCount = 0
@@ -342,7 +339,7 @@ class VlessVpnService : VpnService() {
                 connectedSinceTimestamp = startTime
             )
 
-            startForeground(1, createNotification(config, "Подключено • Защищено (${lastVerifyLatency} мс)"))
+            safeStartForeground(1, createNotification(config, "Подключено • Защищено (${lastVerifyLatency} мс)"))
             startStatsUpdater(startTime)
 
         } catch (e: CancellationException) {
@@ -489,6 +486,22 @@ class VlessVpnService : VpnService() {
             }
             val nm = getSystemService(NotificationManager::class.java)
             nm.createNotificationChannel(channel)
+        }
+    }
+
+    private fun safeStartForeground(id: Int, notification: Notification) {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                startForeground(id, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+            } else {
+                startForeground(id, notification)
+            }
+        } catch (t: Throwable) {
+            Log.e("VlessVpnService", "safeStartForeground failed (${t.javaClass.simpleName}): ${t.message}", t)
+            _vpnStats.value = VpnSessionStats(
+                status = VpnStatus.ERROR,
+                errorMessage = "Ошибка запуска службы: ${t.localizedMessage ?: t.javaClass.simpleName}"
+            )
         }
     }
 

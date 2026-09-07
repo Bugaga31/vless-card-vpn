@@ -248,6 +248,13 @@ class LibboxPlatformInterface(
                     addDnsServer("1.1.1.1")
                     addDnsServer("8.8.8.8")
                 }
+
+                // Disallow self app to prevent VPN routing recursion
+                try {
+                    addDisallowedApplication(vpnService.packageName)
+                } catch (e: Exception) {
+                    Log.w("LibboxPlatform", "Could not disallow own package: ${e.message}")
+                }
             }
 
             try { currentPfd?.close() } catch (_: Exception) {}

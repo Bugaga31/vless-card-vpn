@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.0.29] - 2026-09-07
+
+### Fixed & Improved
+- **Fix Crash on VPN Connect (Android 14 / API 34)**: Устранено падение и выход из приложения сразу после выдачи системного разрешения VPN. Добавлен явный тип `FOREGROUND_SERVICE_TYPE_SPECIAL_USE` в вызовы `startForeground()`, включен `fixAndroidStack = true` в libbox, добавлено исключение пакета приложения `addDisallowedApplication` от зацикливания сокетов.
+- **1-Click Auto Connect**: Автоматический поиск, фильтрация и запуск рабочего VLESS Reality узла в одно нажатие прямо с главного экрана.
+- **Redesign UI & Assets**: Новый неоновый логотип и полный набор adaptive/round launcher иконок (`mipmap-mdpi`...`xxxhdpi`), Breathing Pulse Glow для активного туннеля и карточки телеметрии (Upload/Download, таймер сессии).
+- **VK & RU Direct Routing**: Прямая маршрутизация без задержки для сервисов VK, Госуслуг, банков и маркетплейсов с маскировкой под мобильные клиенты операторов РФ (МТС, Билайн, Мегафон, Т2).
+- **DPI Anti-Throttling**: Блокировка QUIC (UDP 443/80) для ускорения YouTube через Reality TCP-туннель.
+
 ## [1.0.25] - 2026-09-07
 
 ### Visual & Experience Enhancements

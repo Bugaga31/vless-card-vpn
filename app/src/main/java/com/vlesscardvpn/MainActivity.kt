@@ -132,13 +132,18 @@ fun VlessCardVpnApp(
             }
 
             if (cfgToConnect != null) {
-                val prepareIntent = VpnService.prepare(context)
-                if (prepareIntent != null) {
-                    pendingConfig = cfgToConnect
-                    vpnPermissionLauncher.launch(prepareIntent)
-                } else {
-                    repo.setActive(cfgToConnect.id)
-                    VlessVpnService.startVpn(context, cfgToConnect)
+                try {
+                    val prepareIntent = VpnService.prepare(context)
+                    if (prepareIntent != null) {
+                        pendingConfig = cfgToConnect
+                        vpnPermissionLauncher.launch(prepareIntent)
+                    } else {
+                        repo.setActive(cfgToConnect.id)
+                        VlessVpnService.startVpn(context, cfgToConnect)
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.e("MainActivity", "VPN permission prepare failed", e)
+                    Toast.makeText(context, "Ошибка запроса разрешения VPN: ${e.localizedMessage ?: e.javaClass.simpleName}", Toast.LENGTH_LONG).show()
                 }
             } else {
                 Toast.makeText(context, "Не удалось найти рабочий узел связи. Проверьте интернет-соединение.", Toast.LENGTH_LONG).show()

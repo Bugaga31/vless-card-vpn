@@ -190,7 +190,7 @@ object SingBoxManager {
                 put("mtu", effectiveMtu)
                 put("auto_route", true)
                 put("strict_route", true)
-                put("stack", "system")
+                put("stack", "mixed")
                 put("sniff", true)
             })
         }
