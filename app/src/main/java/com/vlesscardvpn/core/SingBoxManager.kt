@@ -109,7 +109,8 @@ object SingBoxManager {
             "vmess" -> createVmessOutbound(config, effectiveSni, settings)
             "trojan" -> createTrojanOutbound(config, effectiveSni, settings)
             "shadowsocks", "ss" -> createShadowsocksOutbound(config)
-            else -> createVlessOutbound(config, effectiveSni)
+            "hysteria2", "hysteria" -> createHysteria2Outbound(config, effectiveSni, settings)
+            else -> createVlessOutbound(config, effectiveSni, settings)
         }
 
         // Rules array with supported sing-box 1.8+ syntax (no pseudo geosite/geoip strings in domain/ip_cidr)
@@ -400,6 +401,71 @@ object SingBoxManager {
             put("method", method.trim())
             put("password", password.trim())
         }
+    }
+
+    /**
+     * Hysteria2 Outbound — QUIC-based protocol with aggressive congestion control.
+     * Best for mobile networks with high packet loss (1-5%) and latency (100+ ms).
+     *
+     * Config encodes Hysteria2 params in the uuid field: hysteria2:password=...;obfs=...;sni=...
+     */
+    private fun createHysteria2Outbound(config: VlessConfig, effectiveSni: String, settings: AppSettings): JSONObject {
+        // Parse encoded params from uuid field
+        val params = parseHysteria2Params(config.uuid)
+        val password = params["password"] ?: config.uuid
+        val obfs = params["obfs"] ?: ""
+        val obfsPassword = params["obfs-password"] ?: ""
+        val sni = params["sni"] ?: effectiveSni
+
+        return JSONObject().apply {
+            put("type", "hysteria2")
+            put("tag", "proxy")
+            put("server", config.address.trim())
+            put("server_port", config.port)
+            put("password", password)
+            put("up_mbps", 100)
+            put("down_mbps", 500)
+
+            if (obfs.isNotBlank()) {
+                put("obfs", JSONObject().apply {
+                    put("type", "salamander")
+                    put("password", obfsPassword.ifBlank { password })
+                })
+            }
+
+            put("tls", JSONObject().apply {
+                put("enabled", true)
+                put("server_name", sni)
+                put("insecure", false)
+                if (settings.enableFragmentation) {
+                    put("fragment", JSONObject().apply {
+                        put("enabled", true)
+                        put("packets", settings.fragmentPackets)
+                        put("length", "10-50")
+                        put("interval", settings.fragmentInterval)
+                    })
+                }
+            })
+
+            // QUIC-specific congestion control
+            put("quic", JSONObject().apply {
+                put("init_stream_receive_window", 8388608)
+                put("max_stream_receive_window", 16777216)
+                put("init_connection_receive_window", 20971520)
+                put("max_connection_receive_window", 33554432)
+                put("max_idle_timeout", "30s")
+                put("keep_alive_period", "10s")
+            })
+        }
+    }
+
+    private fun parseHysteria2Params(uuid: String): Map<String, String> {
+        if (!uuid.startsWith("hysteria2:")) return emptyMap()
+        return uuid.removePrefix("hysteria2:").split(";")
+            .mapNotNull { part ->
+                val kv = part.split("=", limit = 2)
+                if (kv.size == 2) kv[0] to kv[1] else null
+            }.toMap()
     }
 
     /**

@@ -7,6 +7,7 @@ import com.vlesscardvpn.core.SniPool
 import com.vlesscardvpn.core.UpdateInfo
 import com.vlesscardvpn.domain.*
 import com.vlesscardvpn.util.UniversalConfigParser
+import com.vlesscardvpn.util.XrayConfigImporter
 import com.vlesscardvpn.worker.VpnSessionStats
 import com.vlesscardvpn.worker.VpnStatus
 import kotlinx.coroutines.CancellationException
@@ -640,5 +641,181 @@ class CoreUnitTests {
         val sni = SniPool.randomCdnSni()
         assertTrue(sni.isNotBlank())
         assertTrue("CDN SNI must be a global domain", sni.endsWith(".com") || sni.endsWith(".org") || sni.endsWith(".net") || sni.endsWith(".io"))
+    }
+
+    @Test
+    fun testXrayConfigImportVless() {
+        val xrayJson = """
+{
+  "outbounds": [{
+    "protocol": "vless",
+    "tag": "my-vless",
+    "settings": {
+      "vnext": [{
+        "address": "203.0.113.5",
+        "port": 8443,
+        "users": [{
+          "id": "e9f8a7b6-c5d4-3210-9876-543210fedcba",
+          "flow": "xtls-rprx-vision",
+          "encryption": "none"
+        }]
+      }]
+    },
+    "streamSettings": {
+      "network": "tcp",
+      "security": "reality",
+      "realitySettings": {
+        "serverName": "samsung.com",
+        "fingerprint": "firefox",
+        "publicKey": "test-pub-key-abc",
+        "shortId": "abcd"
+      }
+    }
+  }]
+}
+        """.trimIndent()
+
+        val result = XrayConfigImporter.importFromJson(xrayJson)
+        assertEquals(1, result.configs.size)
+        val config = result.configs[0]
+        assertEquals("vless", config.protocolType)
+        assertEquals("203.0.113.5", config.address)
+        assertEquals(8443, config.port)
+        assertEquals("e9f8a7b6-c5d4-3210-9876-543210fedcba", config.uuid)
+        assertEquals("samsung.com", config.sni)
+        assertEquals("firefox", config.fingerprint)
+        assertEquals("test-pub-key-abc", config.publicKey)
+        assertEquals("abcd", config.shortId)
+        assertEquals("reality", config.security)
+        assertEquals("xray-import", config.source)
+    }
+
+    @Test
+    fun testXrayConfigImportVmessWs() {
+        val xrayJson = """
+{
+  "outbounds": [{
+    "protocol": "vmess",
+    "tag": "vmess-ws",
+    "settings": {
+      "vnext": [{
+        "address": "198.51.100.10",
+        "port": 80,
+        "users": [{
+          "id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+          "security": "auto"
+        }]
+      }]
+    },
+    "streamSettings": {
+      "network": "ws",
+      "security": "tls",
+      "tlsSettings": {
+        "serverName": "mycdn.net"
+      },
+      "wsSettings": {
+        "path": "/api/stream",
+        "headers": {
+          "Host": "mycdn.net"
+        }
+      }
+    }
+  }]
+}
+        """.trimIndent()
+
+        val result = XrayConfigImporter.importFromJson(xrayJson)
+        assertEquals(1, result.configs.size)
+        val config = result.configs[0]
+        assertEquals("vmess", config.protocolType)
+        assertEquals("198.51.100.10", config.address)
+        assertEquals(80, config.port)
+        assertEquals("ws", config.transport)
+        assertEquals("/api/stream", config.wsPath)
+        assertEquals("mycdn.net", config.wsHost)
+        assertEquals("tls", config.security)
+        assertEquals("xray-import", config.source)
+    }
+
+    @Test
+    fun testXrayConfigImportTrojan() {
+        val xrayJson = """
+{
+  "outbounds": [{
+    "protocol": "trojan",
+    "tag": "my-trojan",
+    "settings": {
+      "servers": [{
+        "address": "trojan.example.com",
+        "port": 443,
+        "password": "super-secret-password"
+      }]
+    },
+    "streamSettings": {
+      "network": "tcp",
+      "security": "tls",
+      "tlsSettings": {
+        "serverName": "trojan.example.com"
+      }
+    }
+  }]
+}
+        """.trimIndent()
+
+        val result = XrayConfigImporter.importFromJson(xrayJson)
+        assertEquals(1, result.configs.size)
+        val config = result.configs[0]
+        assertEquals("trojan", config.protocolType)
+        assertEquals("trojan.example.com", config.address)
+        assertEquals(443, config.port)
+        assertEquals("super-secret-password", config.uuid)
+        assertEquals("tls", config.security)
+        assertEquals("xray-import", config.source)
+    }
+
+    @Test
+    fun testHysteria2OutboundGeneration() {
+        val config = VlessConfig(
+            name = "Hysteria2 Test",
+            address = "h2.example.com",
+            port = 8443,
+            uuid = "hysteria2:password=test-pass;obfs=salamander;obfs-password=obfs-secret;sni=real.sni.com",
+            protocolType = "hysteria2",
+            security = "tls",
+            sni = "real.sni.com"
+        )
+        val settings = AppSettings(enableFragmentation = true)
+        val json = SingBoxManager.generateConfig(null, config, settings)
+
+        val proxy = JSONObject(json).getJSONArray("outbounds").getJSONObject(0)
+        assertEquals("hysteria2", proxy.getString("type"))
+        assertEquals("h2.example.com", proxy.getString("server"))
+        assertEquals(8443, proxy.getInt("server_port"))
+        assertEquals("test-pass", proxy.getString("password"))
+        assertTrue(proxy.has("obfs"))
+        assertEquals("salamander", proxy.getJSONObject("obfs").getString("type"))
+        assertTrue(proxy.has("tls"))
+        assertEquals("real.sni.com", proxy.getJSONObject("tls").getString("server_name"))
+        assertTrue(proxy.has("quic"))
+    }
+
+    @Test
+    fun testHysteria2ParamsParsing() {
+        val encoded = "hysteria2:password=pwd;obfs=salamander;obfs-password=obs;" +
+            "sni=example.com"
+
+        // Test via outbound generation
+        val config = VlessConfig(
+            name = "H2",
+            address = "1.2.3.4",
+            port = 443,
+            uuid = encoded,
+            protocolType = "hysteria2"
+        )
+        val json = SingBoxManager.generateConfig(null, config, AppSettings())
+        val proxy = JSONObject(json).getJSONArray("outbounds").getJSONObject(0)
+        assertEquals("pwd", proxy.getString("password"))
+        assertEquals("salamander", proxy.getJSONObject("obfs").getString("type"))
+        assertEquals("obs", proxy.getJSONObject("obfs").getString("password"))
     }
 }

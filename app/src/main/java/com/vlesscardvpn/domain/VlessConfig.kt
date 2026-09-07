@@ -66,6 +66,8 @@ data class AppSettings(
     val fragmentInterval: String = "10-20ms",
     // SNI rotation: randomly pick from Russian SNI pool each connection
     val enableSniRotation: Boolean = false,
+    // JA4 fingerprint rotation (next-gen TLS fingerprinting, replaces JA3)
+    val enableJa4: Boolean = true,
     // Per-app split tunneling: bypass VPN for selected apps (banks, gov, etc.)
     val bypassApps: List<String> = listOf(
         "ru.sberbankmobile",

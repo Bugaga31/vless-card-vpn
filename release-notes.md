@@ -1,18 +1,22 @@
-## v1.0.32 — Anti-DPI: TLS Fragmentation + SNI Rotation + Per-App Split Tunneling
+## v1.0.33 — Xray JSON Import + Hysteria2 + JA4 Fingerprints
 
-### 🛡️ Анти-ТСПУ (Anti-DPI)
-- **TLS-фрагментация пакетов**: разбиение ClientHello на фрагменты для обхода DPI (настройки: `packets`, `interval`, `length`)
-- **SNI-ротация**: пул из 250+ российских доменов (.ru/.by/.com) — случайный SNI при каждом подключении, чтобы избежать fingerprinting
-- **Per-App Split Tunneling**: обход VPN для выбранных приложений (банки, госуслуги, почта) — трафик идёт напрямую
+### 🔄 Xray-совместимость
+- **XrayConfigImporter**: прямой импорт Xray JSON-конфигов (v2ray/xray формат)
+- Поддержка: VLESS, VMess, Trojan, Shadowsocks, Hysteria2 outbounds
+- Парсинг `streamSettings` (wsSettings, grpcSettings, realitySettings, tlsSettings)
+- Извлечение правил маршрутизации из `routing.rules`
 
-### 🇷🇺 Российский SNI-пул
-- Правительственные домены: kremlin.ru, nalog.gov.ru, gosuslugi.ru, mos.ru и десятки других
-- Операторские: mts.ru, beeline.ru, megafon.ru, tele2.ru
-- Медиа: 1tv.ru, rbc.ru, ria.ru, tass.ru, kommersant.ru
-- Банки: sberbank.ru, tbank.ru, vtb.ru, alfabank.ru
-- CDN-фолбэк: microsoft.com, cloudflare.com, apple.com, github.com
+### ⚡ Hysteria2 Outbound
+- Полноценная генерация Hysteria2 конфига для sing-box
+- QUIC-оптимизации: увеличенные окна приёма (8-33 MB), keep-alive 10s
+- Обфускация salamander (по умолчанию)
+- Авто-парсинг параметров из закодированного uuid
+
+### 🔐 JA4 Fingerprints
+- `enableJa4` — флаг перехода на JA4 (новый стандарт TLS-фингерпринтов)
+- JA4 заменяет JA3 в 2026 — DPI уже использует JA4 для детекции
 
 ### 📦 Технические детали
-- 26 unit-тестов в CoreUnitTests (6 новых: фрагментация, SNI-ротация, per-app split)
-- Всего 50 тестов (0 failures)
-- APK: 215 MB (debug)
+- 31 unit-тест в CoreUnitTests (5 новых: Xray импорт ×3, Hysteria2 ×2)
+- Всего 55 тестов (0 failures)
+- Новые файлы: `XrayConfigImporter.kt` (309 строк), `SingBoxManager.kt` (+65 строк Hysteria2)
