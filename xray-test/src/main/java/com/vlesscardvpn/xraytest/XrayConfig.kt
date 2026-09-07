@@ -7,7 +7,9 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 class ProfileError(val explanation: String) : IllegalArgumentException(explanation)
-data class Node(val host: String, val port: Int, val id: String, val params: Map<String, String>)
+data class Node(val host: String, val port: Int, val id: String, val params: Map<String, String>) {
+    val transport: String get() = params["type"] ?: "tcp"
+}
 
 object XrayConfig {
     fun parse(raw: String): Node {
