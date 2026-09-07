@@ -36,7 +36,7 @@ fun LoungeScreen(entries: List<CardProfile>, working: Boolean, loaded: Boolean, 
     var tab by rememberSaveable { mutableStateOf(0) }
     var auto by rememberSaveable { mutableStateOf(true) }
     var favoritesOnly by rememberSaveable { mutableStateOf(false) }
-    var probeConsent by rememberSaveable { mutableStateOf(false) }
+    var probeConsent by rememberSaveable { mutableStateOf(true) }
     var sourceConsent by rememberSaveable { mutableStateOf(false) }
     var selected by rememberSaveable { mutableStateOf<String?>(null) }
     var importOpen by remember { mutableStateOf(false) }
@@ -81,7 +81,7 @@ fun LoungeScreen(entries: List<CardProfile>, working: Boolean, loaded: Boolean, 
                                     Text(activeName ?: chosen?.name ?: "Добавь первый сервер — без случайных демо-узлов", color = Color(0xFFD5E0D8))
                                     Text(session.message, fontSize = 13.sp)
                                     if (vpnBusy) OutlinedButton(onClick = onStop, modifier = Modifier.fillMaxWidth().heightIn(min = 54.dp)) { Text("Отключить / отменить") }
-                                    else Button(onClick = { onConnect(auto, favoritesOnly, chosen?.key, probeConsent) }, enabled = !locked && probeConsent && candidates.isNotEmpty(), modifier = Modifier.fillMaxWidth().heightIn(min = 54.dp), shape = RoundedCornerShape(18.dp)) { Text(if (auto) "Подключить автоматически" else "Подключить сервер") }
+                                    else Button(onClick = { onConnect(auto, favoritesOnly, chosen?.key, probeConsent) }, enabled = !locked && probeConsent && (candidates.isNotEmpty() || auto), modifier = Modifier.fillMaxWidth().heightIn(min = 54.dp), shape = RoundedCornerShape(18.dp)) { Text(if (auto) "Подключить автоматически" else "Подключить сервер") }
                                 }
                             }
                         }
@@ -133,7 +133,7 @@ fun LoungeScreen(entries: List<CardProfile>, working: Boolean, loaded: Boolean, 
                         item { StatCard("КАНДИДАТОВ ДЛЯ ЗАПУСКА", "${candidates.size}", Modifier.fillMaxWidth()) }
                         item { Text("Как работает\n\n1. Запускает выбранного кандидата.\n2. Проверяет оба HTTPS-адреса через Xray.\n3. Оставляет первый прошедший проверки сервер.\n4. После трёх неудачных раундов и минимум 60 секунд ищет замену.\n\nЭто не рейтинг самого быстрого сервера. Ошибка запуска ядра останавливает попытку. Изменить режим и список можно после отключения.", color = Muted, lineHeight = 23.sp) }
                         item { if (vpnBusy) OutlinedButton(onClick = onStop, modifier = Modifier.fillMaxWidth()) { Text("Отключить авто / VPN") }
-                            else Button(onClick = { onConnect(auto, favoritesOnly, chosen?.key, probeConsent) }, enabled = !locked && probeConsent && candidates.isNotEmpty(), modifier = Modifier.fillMaxWidth()) { Text("Запустить подключение") } }
+                            else Button(onClick = { onConnect(auto, favoritesOnly, chosen?.key, probeConsent) }, enabled = !locked && probeConsent && (candidates.isNotEmpty() || auto), modifier = Modifier.fillMaxWidth()) { Text("Запустить подключение") } }
                     }
                     4 -> {
                         item { Text(session.message, fontSize = 18.sp) }

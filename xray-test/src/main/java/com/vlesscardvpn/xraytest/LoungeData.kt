@@ -68,14 +68,18 @@ object LoungeStorage {
 object RunningLabels { var names: List<String> = emptyList() }
 object PublicSources {
     val sources = listOf(
-        "kort0881 · clean VLESS" to "https://raw.githubusercontent.com/kort0881/vpn-vless-configs-russia/main/githubmirror/clean/vless.txt",
-        "igareck · Reality" to "https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/main/Vless-Reality-White-Lists-Rus-Mobile.txt",
+        "igareck · Белые списки (Mobile)" to "https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/main/Vless-Reality-White-Lists-Rus-Mobile.txt",
+        "igareck · Белые списки (Резерв)" to "https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/main/Vless-Reality-White-Lists-Rus-Mobile-2.txt",
+        "igareck · Черные списки (BLACK VLESS)" to "https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/main/BLACK_VLESS_RUS.txt",
+        "igareck · Черные списки (Mobile)" to "https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/main/BLACK_VLESS_RUS_mobile.txt",
+        "kort0881 · Clean VLESS" to "https://raw.githubusercontent.com/kort0881/vpn-vless-configs-russia/main/githubmirror/clean/vless.txt",
+        "kort0881 · RU SNI Reality" to "https://raw.githubusercontent.com/kort0881/vpn-vless-configs-russia/main/githubmirror/ru-sni/vless_ru.txt",
+        "ByeWhiteLists2 · Universal" to "https://raw.githubusercontent.com/ByeWhiteLists/ByeWhiteLists2/main/ByeWhiteLists2.txt",
         "barry-far · VLESS" to "https://raw.githubusercontent.com/barry-far/V2ray-Config/main/Splitted-By-Protocol/vless.txt",
         "Epodonios · VLESS" to "https://raw.githubusercontent.com/Epodonios/v2ray-configs/main/Splitted-By-Protocol/vless.txt",
         "MhdiTaheri · VLESS" to "https://raw.githubusercontent.com/MhdiTaheri/V2rayCollector/main/sub/vless",
         "FREE2CONFIG · Reality" to "https://raw.githubusercontent.com/Mosifree/-FREE2CONFIG/main/Reality",
-        "zieng2 · universal" to "https://raw.githubusercontent.com/zieng2/wl/main/vless_universal.txt",
-        "ByeWhiteLists2 · VLESS" to "https://raw.githubusercontent.com/ByeWhiteLists/ByeWhiteLists2/main/ByeWhiteLists2.txt"
+        "zieng2 · Universal" to "https://raw.githubusercontent.com/zieng2/wl/main/vless_universal.txt"
     )
     private val client = OkHttpClient.Builder().connectTimeout(8, TimeUnit.SECONDS).readTimeout(8, TimeUnit.SECONDS)
         .callTimeout(15, TimeUnit.SECONDS).followRedirects(false).followSslRedirects(false).retryOnConnectionFailure(false).build()

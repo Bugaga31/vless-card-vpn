@@ -8,7 +8,7 @@ import org.json.JSONObject
 
 object SingBoxManager {
 
-    // Domain suffixes for RU Direct split tunneling (strict suffix matching supported by sing-box)
+    // Domain suffixes for RU Direct split tunneling & DPI bypass (strict suffix matching supported by sing-box)
     private val ruDomainSuffixes = listOf(
         ".ru",
         ".su",
@@ -17,6 +17,8 @@ object SingBoxManager {
         "ya.ru",
         "vk.com",
         "vk.ru",
+        "vk-cdn.net",
+        "vkvideo.ru",
         "mail.ru",
         "gosuslugi.ru",
         "sberbank.ru",
@@ -39,7 +41,10 @@ object SingBoxManager {
         "customs.gov.ru",
         "pfr.gov.ru",
         "2gis.ru",
-        "hh.ru"
+        "hh.ru",
+        "kinopoisk.ru",
+        "pikabu.ru",
+        "habr.com"
     )
 
     // Private / local IPv4 & IPv6 CIDRs

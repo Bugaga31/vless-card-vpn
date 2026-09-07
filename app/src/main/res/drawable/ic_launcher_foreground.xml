@@ -4,5 +4,35 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <path android:fillColor="#FFFFFF" android:pathData="M54,30 L70,54 L54,78 L38,54 Z"/>
+
+    <!-- Shield / Card Outer Emblem -->
+    <path
+        android:strokeColor="#E1C58A"
+        android:strokeWidth="3.5"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:fillColor="#251F12"
+        android:pathData="M54,22 L78,32 C78,56 68,74 54,86 C40,74 30,56 30,32 Z" />
+
+    <!-- Inner Keyhole & Fast Beam / V-Speed Indicator -->
+    <path
+        android:fillColor="#E1C58A"
+        android:pathData="M54,34 L66,54 L58,54 L58,68 L50,68 L50,54 L42,54 Z" />
+
+    <!-- Center Security Sparkle Core -->
+    <path
+        android:fillColor="#00E5FF"
+        android:pathData="M54,44 L57,48 L61,48 L58,51 L59,55 L54,52 L49,55 L50,51 L47,48 L51,48 Z" />
+
+    <!-- Floating Connection Nodes -->
+    <path
+        android:fillColor="#00E5FF"
+        android:pathData="M24,54m-3,0a3,3 0,1 1,6 0a3,3 0,1 1,-6 0" />
+    <path
+        android:fillColor="#00E5FF"
+        android:pathData="M84,54m-3,0a3,3 0,1 1,6 0a3,3 0,1 1,-6 0" />
+    <path
+        android:strokeColor="#00E5FF"
+        android:strokeWidth="1.5"
+        android:pathData="M27,54 L32,54 M76,54 L81,54" />
 </vector>

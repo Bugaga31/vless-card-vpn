@@ -25,8 +25,11 @@ import com.vlesscardvpn.data.AppRepository
 import com.vlesscardvpn.domain.AutoPilotEngine
 import com.vlesscardvpn.domain.VlessConfig
 import com.vlesscardvpn.ui.*
+import com.vlesscardvpn.ui.CrashReportsScreen
 import com.vlesscardvpn.ui.components.InstrumentSplashScreen
 import com.vlesscardvpn.ui.theme.VlessCardVpnTheme
+import com.vlesscardvpn.data.PublicConfigFetcher
+import com.vlesscardvpn.worker.SubscriptionUpdateWorker
 import com.vlesscardvpn.worker.VlessVpnService
 import com.vlesscardvpn.worker.VpnStatus
 import kotlinx.coroutines.delay
@@ -83,6 +86,7 @@ fun VlessCardVpnApp(
     var pendingConfig by remember { mutableStateOf<VlessConfig?>(null) }
 
     LaunchedEffect(Unit) {
+        SubscriptionUpdateWorker.schedulePeriodic(context.applicationContext)
         delay(800)
         showSplash = false
         if (settings.autoSelect) autoPilotEngine.startAutoPilot(settings.healthCheckInterval)
@@ -105,23 +109,40 @@ fun VlessCardVpnApp(
     }
 
     val handleConnectToggle: (VlessConfig?) -> Unit = { targetConfig ->
-        val cfgToConnect = targetConfig ?: configs.firstOrNull { it.isActive } ?: configs.firstOrNull()
-        if (vpnStats.status == VpnStatus.CONNECTED || vpnStats.status == VpnStatus.CONNECTING) {
-            VlessVpnService.stopVpn(context)
-            scope.launch { repo.setActive("") }
-        } else if (cfgToConnect != null) {
-            val prepareIntent = VpnService.prepare(context)
-            if (prepareIntent != null) {
-                pendingConfig = cfgToConnect
-                vpnPermissionLauncher.launch(prepareIntent)
-            } else {
-                scope.launch {
+        scope.launch {
+            if (vpnStats.status == VpnStatus.CONNECTED || vpnStats.status == VpnStatus.CONNECTING) {
+                VlessVpnService.stopVpn(context)
+                repo.setActive("")
+                return@launch
+            }
+
+            // 1-Click Auto Connect: Pick requested config, or active, or lowest-ping verified, or fetch live
+            var cfgToConnect = targetConfig 
+                ?: configs.firstOrNull { it.isActive } 
+                ?: configs.filter { it.pingMs in 1..2000 }.minByOrNull { it.pingMs }
+                ?: configs.firstOrNull()
+
+            if (cfgToConnect == null) {
+                Toast.makeText(context, "⚡ 1-Click: Автоматический поиск и подбор рабочего VLESS/Reality сервера…", Toast.LENGTH_SHORT).show()
+                val working = PublicConfigFetcher.fetchAndFilterWorkingConfigs(maxWorkingCount = 15)
+                if (working.isNotEmpty()) {
+                    working.forEach { repo.addConfig(it) }
+                    cfgToConnect = working.minByOrNull { it.pingMs } ?: working.first()
+                }
+            }
+
+            if (cfgToConnect != null) {
+                val prepareIntent = VpnService.prepare(context)
+                if (prepareIntent != null) {
+                    pendingConfig = cfgToConnect
+                    vpnPermissionLauncher.launch(prepareIntent)
+                } else {
                     repo.setActive(cfgToConnect.id)
                     VlessVpnService.startVpn(context, cfgToConnect)
                 }
+            } else {
+                Toast.makeText(context, "Не удалось найти рабочий узел связи. Проверьте интернет-соединение.", Toast.LENGTH_LONG).show()
             }
-        } else {
-            Toast.makeText(context, "Сначала импортируйте или выберите сервер", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -149,6 +170,7 @@ fun VlessCardVpnApp(
                         onNavigateToServers = { navController.navigate("servers") },
                         onNavigateToAutopilot = { navController.navigate("autopilot") },
                         onNavigateToDiagnostic = { navController.navigate("diagnostic") },
+                        onNavigateToSettings = { navController.navigate("settings") },
                         onPanicTrigger = onPanicExit
                     )
                 }
@@ -158,8 +180,9 @@ fun VlessCardVpnApp(
                 composable("autopilot") { AutopilotScreen(repo, autoPilotEngine) { navController.popBackStack() } }
                 composable("diagnostic") { DiagnosticScreen(repo) { navController.popBackStack() } }
                 composable("stealth") { StealthProfileScreen(repo) { navController.popBackStack() } }
-                composable("settings") { SettingsScreen(repo) { navController.popBackStack() } }
+                composable("settings") { SettingsScreen(repo, onNavigateToCrashReports = { navController.navigate("crash_reports") }) { navController.popBackStack() } }
                 composable("free_configs") { FreeConfigsScreen(repo) { navController.popBackStack() } }
+                composable("crash_reports") { CrashReportsScreen(repo) { navController.popBackStack() } }
             }
         }
     }

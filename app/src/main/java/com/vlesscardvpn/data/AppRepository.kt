@@ -132,7 +132,10 @@ class AppRepository(private val context: Context) {
         maxFreeNodesToAdd = prefs.getInt("maxFreeNodesToAdd", 100),
         autopilotConsentGiven = prefs.getBoolean("autopilotConsentGiven", false),
         autopilotAllowedOnlyFavorites = prefs.getBoolean("autopilotAllowedOnlyFavorites", false),
-        autopilotAggressiveAdapting = prefs.getBoolean("autopilotAggressiveAdapting", false)
+        autopilotAggressiveAdapting = prefs.getBoolean("autopilotAggressiveAdapting", false),
+        githubIssuesRepo = prefs.getString("githubIssuesRepo", "vless-card-vpn/vless-card-vpn") ?: "vless-card-vpn/vless-card-vpn",
+        githubApiToken = prefs.getString("githubApiToken", "") ?: "",
+        autoSendCrashReportsConsent = prefs.getBoolean("autoSendCrashReportsConsent", false)
     )
 
     private fun saveSettingsToPrefs(settings: AppSettings) {
@@ -157,6 +160,9 @@ class AppRepository(private val context: Context) {
             putBoolean("autopilotConsentGiven", settings.autopilotConsentGiven)
             putBoolean("autopilotAllowedOnlyFavorites", settings.autopilotAllowedOnlyFavorites)
             putBoolean("autopilotAggressiveAdapting", settings.autopilotAggressiveAdapting)
+            putString("githubIssuesRepo", settings.githubIssuesRepo)
+            putString("githubApiToken", settings.githubApiToken)
+            putBoolean("autoSendCrashReportsConsent", settings.autoSendCrashReportsConsent)
             apply()
         }
     }

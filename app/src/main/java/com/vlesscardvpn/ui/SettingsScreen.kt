@@ -36,6 +36,7 @@ import kotlinx.coroutines.launch
 @Composable
 fun SettingsScreen(
     repo: AppRepository,
+    onNavigateToCrashReports: () -> Unit = {},
     onBack: () -> Unit
 ) {
     val context = LocalContext.current
@@ -317,6 +318,47 @@ fun SettingsScreen(
                     Icon(Icons.Default.DeleteOutline, contentDescription = null, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(8.dp))
                     Text("Сбросить память и профили автопилота", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold)
+                }
+            }
+
+            // Group 5: Отчеты об ошибках и GitHub
+            GroupCard(title = "5. ОТЧЕТЫ ОБ ОШИБКАХ И СВЯЗЬ С РАЗРАБОТЧИКОМ") {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(
+                        text = "Репозиторий GitHub для баг-репортов",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onBackground
+                    )
+                    Text(
+                        text = "Куда направлять отчеты о сбоях (формат: owner/repo или full URL)",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(2.dp))
+                    OutlinedTextField(
+                        value = settings.githubIssuesRepo,
+                        onValueChange = { repo.updateSettings { s -> s.copy(githubIssuesRepo = it) } },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = SignalOrange,
+                            unfocusedBorderColor = MaterialTheme.colorScheme.outline
+                        )
+                    )
+                }
+
+                HorizontalDivider(color = MaterialTheme.colorScheme.outline, thickness = 1.dp)
+
+                Button(
+                    onClick = onNavigateToCrashReports,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(InstrumentDimens.radiusSmall),
+                    colors = ButtonDefaults.buttonColors(containerColor = SignalOrange)
+                ) {
+                    Icon(Icons.Default.BugReport, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Открыть журнал и отправку отчетов в GitHub", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
                 }
             }
 

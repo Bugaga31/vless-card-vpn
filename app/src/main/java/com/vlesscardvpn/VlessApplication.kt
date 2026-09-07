@@ -3,6 +3,7 @@ package com.vlesscardvpn
 import android.app.Application
 import android.content.Context
 import android.util.Log
+import com.vlesscardvpn.core.CrashReportManager
 import go.Seq
 import java.io.File
 import java.io.PrintWriter
@@ -66,6 +67,8 @@ class VlessApplication : Application() {
         val defaultHandler = Thread.getDefaultUncaughtExceptionHandler()
         Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
             try {
+                // Save formatted JSON entry for crash manager & GitHub issues
+                CrashReportManager.recordException(applicationContext, thread, throwable, "CRASH")
                 recordCrashReport(thread, throwable)
             } catch (e: Exception) {
                 Log.e(TAG, "Error saving crash report", e)

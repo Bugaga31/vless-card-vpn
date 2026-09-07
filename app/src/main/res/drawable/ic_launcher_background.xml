@@ -4,5 +4,16 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <path android:fillColor="#6200EE" android:pathData="M0,0h108v108h-108z"/>
+    <path
+        android:fillColor="#0D1117"
+        android:pathData="M0,0h108v108h-108z" />
+    <!-- Subtle cybernetic grid accent -->
+    <path
+        android:strokeColor="#1E293B"
+        android:strokeWidth="1"
+        android:pathData="M0,36 L108,36 M0,72 L108,72 M36,0 L36,108 M72,0 L72,108" />
+    <!-- Gradient glow background circle -->
+    <path
+        android:fillColor="#152438"
+        android:pathData="M54,54m-42,0a42,42 0,1 1,84 0a42,42 0,1 1,-84 0" />
 </vector>

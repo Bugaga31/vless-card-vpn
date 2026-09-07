@@ -82,7 +82,39 @@ class MainActivity : ComponentActivity() {
     private fun connect(auto: Boolean, favoritesOnly: Boolean, selected: String?, consent: Boolean) {
         if (!consent || occupied() || !loaded) return
         val candidates = ProfileCatalog.candidates(entries, auto, favoritesOnly, selected)
-        if (candidates.isEmpty()) { message = "Нет подходящих серверов: выбери узел или добавь избранные."; return }
+        if (candidates.isEmpty()) {
+            if (auto && !favoritesOnly) {
+                working = true
+                message = "Авто-режим: автоматическая загрузка и подбор рабочих серверов…"
+                lifecycleScope.launch {
+                    try {
+                        val result = PublicSources.fetch { message = it }
+                        entries = LoungeStorage.change(applicationContext) { ProfileCatalog.merge(it, result.profiles) }
+                        val freshCandidates = ProfileCatalog.candidates(entries, auto = true, favoritesOnly = false, selectedKey = null)
+                        if (freshCandidates.isNotEmpty()) {
+                            TestState.profiles.value = freshCandidates.map { it.node() }
+                            RunningLabels.names = freshCandidates.map { it.name }
+                            val intent = Intent(this@MainActivity, XrayVpnService::class.java).setAction("START").putExtra("auto", true).putExtra("consent", consent).putExtra("selected", 0)
+                            val request = VpnService.prepare(this@MainActivity)
+                            if (request == null) startVpn(intent)
+                            else { pending = intent; permissionPending = true; permission.launch(request) }
+                        } else {
+                            message = "Не удалось загрузить серверы. Проверьте подключение к сети."
+                        }
+                    } catch (e: CancellationException) { throw e }
+                    catch (e: Exception) {
+                        Reports.error(e)
+                        message = "Ошибка автоматической загрузки серверов."
+                    } finally {
+                        working = false
+                    }
+                }
+                return
+            } else {
+                message = "Нет подходящих серверов: выбери узел или включи авто-режим."
+                return
+            }
+        }
         TestState.profiles.value = candidates.map { it.node() }
         RunningLabels.names = candidates.map { it.name }
         val intent = Intent(this, XrayVpnService::class.java).setAction("START").putExtra("auto", auto).putExtra("consent", consent).putExtra("selected", 0)

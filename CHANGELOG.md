@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.0.25] - 2026-09-07
+
+### Visual & Experience Enhancements
+- **HUD Breathing Pulse**: Добавлен неоновый изумрудный пульсирующий ореол вокруг карточки подключения в активном статусе.
+- **Live Traffic Telemetry**: Внедрены виджеты мгновенной скорости (Download/Upload) и суммарного объема переданных данных с адаптивным форматированием.
+- **Protocol & Node Badges**: На карточке узла и в списке добавлены плашки протоколов (`VLESS`, `VMESS`, `TROJAN`, `SS`) и индикатор пинга.
+- **Brand Identity & Vector Iconography**: Интегрирован визуальный стиль кибер-щита в шапке и splash-экране, обновлены иконки для всех разрешений Android (`res/mipmap-*`).
+
 ## [1.0.23] - 2026-09-06
 
 ### Security and reliability
