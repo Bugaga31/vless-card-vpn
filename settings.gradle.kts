@@ -14,3 +14,4 @@ dependencyResolutionManagement {
 }
 rootProject.name = "VlessCardVpn"
 include(":app")
+include(":xray-test")
