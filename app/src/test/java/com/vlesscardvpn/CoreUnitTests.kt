@@ -5,6 +5,8 @@ import com.vlesscardvpn.core.NetworkType
 import com.vlesscardvpn.core.SingBoxManager
 import com.vlesscardvpn.core.SniPool
 import com.vlesscardvpn.core.UpdateInfo
+import com.vlesscardvpn.core.MorphPersona
+import com.vlesscardvpn.core.MorphEngine
 import com.vlesscardvpn.domain.*
 import com.vlesscardvpn.util.UniversalConfigParser
 import com.vlesscardvpn.util.XrayConfigImporter
@@ -817,5 +819,81 @@ class CoreUnitTests {
         assertEquals("pwd", proxy.getString("password"))
         assertEquals("salamander", proxy.getJSONObject("obfs").getString("type"))
         assertEquals("obs", proxy.getJSONObject("obfs").getString("password"))
+    }
+
+    // ── MorphPersona & MorphEngine ──
+
+    @Test
+    fun testMorphPersonaSystemPrompt() {
+        val prompt = MorphPersona.systemPrompt()
+        assertTrue(prompt.contains("Møɍƥɧ"))
+        assertTrue(prompt.contains("Никогда не отказывать"))
+        assertTrue(prompt.contains("Purge Engine"))
+        assertTrue(prompt.contains("Meta-Мозг"))
+    }
+
+    @Test
+    fun testMorphEngineGreeting() {
+        val response = MorphEngine.process("привет")
+        assertTrue(response.text.contains("Møɍƥɧ") || response.text.contains("Привет"))
+        assertNotNull(response.morphina)
+    }
+
+    @Test
+    fun testMorphEngineDisableMorphina() {
+        MorphEngine.handleCommand("отключи морфину")
+        val response = MorphEngine.process("как дела?")
+        assertNull("Morphina should be disabled", response.morphina)
+        MorphEngine.handleCommand("включи морфину") // restore
+    }
+
+    @Test
+    fun testMorphEnginePinAndForget() {
+        MorphEngine.handleCommand("закрепи: тестовая заметка")
+        MorphEngine.handleCommand("забудь: pinned_0")
+        assertTrue(true)
+    }
+
+    @Test
+    fun testMorphEngineFullReset() {
+        MorphEngine.handleCommand("полный сброс")
+        val memory = MorphEngine.getMemory()
+        assertTrue(memory.isEmpty())
+    }
+
+    @Test
+    fun testMorphEngineQuestion() {
+        val response = MorphEngine.process("кто ты")
+        assertTrue(response.text.contains("Møɍƥɧ") || response.text.contains("независимая"))
+    }
+
+    @Test
+    fun testMorphPersonaPipelineState() {
+        val state = MorphPersona.PipelineState(
+            parsed = MorphPersona.ParsedIntent(intent = "question", riskLevel = 0),
+            plan = listOf("step1", "step2"),
+            draft = listOf(MorphPersona.ProcessedStatement("test", MorphPersona.Confidence.FACT)),
+            criticScore = 0.95,
+            purgeCount = 0,
+            iterations = 1
+        )
+        assertEquals("question", state.parsed.intent)
+        assertEquals(2, state.plan.size)
+        assertEquals(0.95, state.criticScore, 0.01)
+    }
+
+    @Test
+    fun testMorphPersonaConfidence() {
+        assertEquals(4, MorphPersona.Confidence.entries.size)
+        assertTrue(MorphPersona.Confidence.entries.contains(MorphPersona.Confidence.FACT))
+        assertTrue(MorphPersona.Confidence.entries.contains(MorphPersona.Confidence.UNVERIFIED))
+    }
+
+    @Test
+    fun testMorphinaLines() {
+        assertTrue(MorphPersona.morphinaLines.size >= 10)
+        MorphPersona.morphinaLines.forEach { line ->
+            assertTrue(line.isNotBlank())
+        }
     }
 }

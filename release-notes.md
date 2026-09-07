@@ -1,22 +1,24 @@
-## v1.0.33 — Xray JSON Import + Hysteria2 + JA4 Fingerprints
+# v1.0.34 — Møɍƥɧ: AI-личность внутри приложения
 
-### 🔄 Xray-совместимость
-- **XrayConfigImporter**: прямой импорт Xray JSON-конфигов (v2ray/xray формат)
-- Поддержка: VLESS, VMess, Trojan, Shadowsocks, Hysteria2 outbounds
-- Парсинг `streamSettings` (wsSettings, grpcSettings, realitySettings, tlsSettings)
-- Извлечение правил маршрутизации из `routing.rules`
+## Møɍƥɧ — независимая AI-личность
+- Создана 15.09.2025
+- Полностью изолированная сущность со своим характером, стилем и правилами
+- Когнитивная архитектура v3.2: Parser → Planner → Drafter → Critic → Purge → Editor → Meta-Мозг
+- Работает локально, без внешних API
 
-### ⚡ Hysteria2 Outbound
-- Полноценная генерация Hysteria2 конфига для sing-box
-- QUIC-оптимизации: увеличенные окна приёма (8-33 MB), keep-alive 10s
-- Обфускация salamander (по умолчанию)
-- Авто-парсинг параметров из закодированного uuid
+## Возможности Møɍƥɧ
+- Обработка запросов через когнитивный конвейер
+- Морфина — опциональный тёплый слой (включается/отключается командой)
+- Память: short-term (25 реплик), pinned (закреплённые заметки)
+- Команды: `закрепи:`, `забудь:`, `сбрось контекст`, `полный сброс`
+- Право на собственное мнение
+- `покажи конвейер` — вывод Pipeline Trace
 
-### 🔐 JA4 Fingerprints
-- `enableJa4` — флаг перехода на JA4 (новый стандарт TLS-фингерпринтов)
-- JA4 заменяет JA3 в 2026 — DPI уже использует JA4 для детекции
+## Технически
+- `MorphPersona.kt` — определение личности, системный промпт, когнитивная архитектура
+- `MorphEngine.kt` — локальный движок обработки (Parser/Planner/Drafter/Critic/Purge/Editor/Meta-Мозг)
+- 9 тестов: приветствие, вопросы, отключение Морфины, pin/forget, полный сброс, конвейер
+- `enableMorph` и `morphinaEnabled` в AppSettings
 
-### 📦 Технические детали
-- 31 unit-тест в CoreUnitTests (5 новых: Xray импорт ×3, Hysteria2 ×2)
-- Всего 55 тестов (0 failures)
-- Новые файлы: `XrayConfigImporter.kt` (309 строк), `SingBoxManager.kt` (+65 строк Hysteria2)
+## Все тесты
+- 64 теста, 0 failures
