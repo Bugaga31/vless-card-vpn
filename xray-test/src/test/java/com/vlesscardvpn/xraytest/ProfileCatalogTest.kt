@@ -15,5 +15,16 @@ class ProfileCatalogTest {
     @Test fun autoFiltersFavorites() { val p = parse(link).profiles.single().copy(favorite = true); assertEquals(listOf(p), ProfileCatalog.candidates(listOf(p), true, true, null)) }
     @Test fun codecRoundTripPreservesFavoriteAndLabel() { val entries = parse("$link#My%20node").profiles.map { it.copy(favorite = true) }; assertEquals(entries, ProfileCatalog.decode(ProfileCatalog.encode(entries))) }
     @Test(expected = IllegalArgumentException::class) fun unsupportedStorageVersionDoesNotBecomeEmpty() { ProfileCatalog.decode("{\"version\":2,\"profiles\":[]}") }
-    @Test fun mergeEnforcesCap() { val many = (1..60).map { parse(link.replace(":443?", ":${1000 + it}?")).profiles.single() }; assertEquals(50, ProfileCatalog.merge(emptyList(), many).size) }
+    @Test fun mergeEnforcesCap() { val many = (1..120).map { parse(link.replace(":443?", ":${1000 + it}?")).profiles.single() }; assertEquals(100, ProfileCatalog.merge(emptyList(), many).size) }
+    @Test fun balancedMergeDoesNotLetFirstSourceConsumeCatalogue() {
+        fun group(prefix: String) = (1..100).map { parse(link.replace("example.org:443", "$prefix.example.org:${1000 + it}")).profiles.single() }
+        val merged = ProfileCatalog.mergeBalanced(emptyList(), listOf(group("first"), group("second")))
+        assertEquals(100, merged.size)
+        assertEquals(50, merged.count { it.node().host.startsWith("first") })
+        assertEquals(50, merged.count { it.node().host.startsWith("second") })
+    }
+    @Test fun htmlEncodedQuerySeparatorsAreNormalized() {
+        val encoded = link.replace("?security=tls", "?security=tls&amp;type=tcp")
+        assertEquals("tcp", parse(encoded).profiles.single().node().transport)
+    }
 }

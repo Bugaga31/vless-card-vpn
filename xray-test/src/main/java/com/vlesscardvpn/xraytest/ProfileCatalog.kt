@@ -12,7 +12,7 @@ data class CardProfile(val link: String, val name: String, val origin: String, v
 }
 data class ParsedProfiles(val profiles: List<CardProfile>, val skipped: Int)
 object ProfileCatalog {
-    const val LIMIT = 50
+    const val LIMIT = 100
     fun parse(input: String, origin: String, decodeBase64: (String) -> String): ParsedProfiles {
         require(input.length <= 2097152) { "Input too large" }
         val text = if (input.contains("://")) input else try { decodeBase64(input.filterNot { it.isWhitespace() }) } catch (_: Exception) { input }
@@ -20,8 +20,9 @@ object ProfileCatalog {
         val found = mutableListOf<CardProfile>()
         val seen = mutableSetOf<Node>()
         var skipped = 0
-        for (line in text.lineSequence().map { it.trim() }.filter { it.isNotBlank() }.take(5000)) {
-            if (line.startsWith('#')) continue
+        for (rawLine in text.lineSequence().map { it.trim() }.filter { it.isNotBlank() }.take(5000)) {
+            if (rawLine.startsWith('#') || rawLine.startsWith("//")) continue
+            val line = rawLine.replace("&amp;", "&")
             try {
                 val node = XrayConfig.parse(line)
                 if (seen.add(node)) {
@@ -34,7 +35,28 @@ object ProfileCatalog {
         return ParsedProfiles(found, skipped)
     }
     fun merge(existing: List<CardProfile>, incoming: List<CardProfile>): List<CardProfile> =
-        (existing + incoming).distinctBy { it.node() }.take(LIMIT)
+        mergeBalanced(existing, listOf(incoming))
+    fun mergeBalanced(existing: List<CardProfile>, groups: List<List<CardProfile>>): List<CardProfile> {
+        val result = existing.distinctBy { it.node() }.take(LIMIT).toMutableList()
+        val seen = result.mapTo(mutableSetOf()) { it.node() }
+        val iterators = groups.filter { it.isNotEmpty() }.map { it.iterator() }.toMutableList()
+        while (result.size < LIMIT && iterators.isNotEmpty()) {
+            val round = iterators.iterator()
+            while (round.hasNext() && result.size < LIMIT) {
+                val source = round.next()
+                var added = false
+                while (source.hasNext() && !added) {
+                    val profile = source.next()
+                    if (seen.add(profile.node())) {
+                        result.add(profile)
+                        added = true
+                    }
+                }
+                if (!source.hasNext()) round.remove()
+            }
+        }
+        return result
+    }
     fun candidates(entries: List<CardProfile>, auto: Boolean, favoritesOnly: Boolean, selectedKey: String?): List<CardProfile> =
         if (auto) entries.filter { !favoritesOnly || it.favorite }
         else entries.firstOrNull { it.key == selectedKey }?.let { listOf(it) }.orEmpty()

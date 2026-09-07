@@ -71,14 +71,18 @@ object PublicSources {
         "kort0881 · clean VLESS" to "https://raw.githubusercontent.com/kort0881/vpn-vless-configs-russia/main/githubmirror/clean/vless.txt",
         "igareck · Reality" to "https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/main/Vless-Reality-White-Lists-Rus-Mobile.txt",
         "barry-far · VLESS" to "https://raw.githubusercontent.com/barry-far/V2ray-Config/main/Splitted-By-Protocol/vless.txt",
-        "Epodonios · VLESS" to "https://raw.githubusercontent.com/Epodonios/v2ray-configs/main/Splitted-By-Protocol/vless.txt"
+        "Epodonios · VLESS" to "https://raw.githubusercontent.com/Epodonios/v2ray-configs/main/Splitted-By-Protocol/vless.txt",
+        "MhdiTaheri · VLESS" to "https://raw.githubusercontent.com/MhdiTaheri/V2rayCollector/main/sub/vless",
+        "FREE2CONFIG · Reality" to "https://raw.githubusercontent.com/Mosifree/-FREE2CONFIG/main/Reality",
+        "zieng2 · universal" to "https://raw.githubusercontent.com/zieng2/wl/main/vless_universal.txt",
+        "ByeWhiteLists2 · VLESS" to "https://raw.githubusercontent.com/ByeWhiteLists/ByeWhiteLists2/main/ByeWhiteLists2.txt"
     )
     private val client = OkHttpClient.Builder().connectTimeout(8, TimeUnit.SECONDS).readTimeout(8, TimeUnit.SECONDS)
         .callTimeout(15, TimeUnit.SECONDS).followRedirects(false).followSslRedirects(false).retryOnConnectionFailure(false).build()
     fun parse(text: String, origin: String) = ProfileCatalog.parse(text, origin) { String(Base64.decode(it, Base64.DEFAULT), Charsets.UTF_8) }
     data class Result(val profiles: List<CardProfile>, val skipped: Int, val failures: Int)
     suspend fun fetch(progress: suspend (String) -> Unit): Result {
-        val entries = mutableListOf<CardProfile>()
+        val groups = mutableListOf<List<CardProfile>>()
         var skipped = 0
         var failures = 0
         for ((i, source) in sources.withIndex()) {
@@ -87,11 +91,12 @@ object PublicSources {
             try {
                 val body = readSource(source.second)
                 val parsed = withContext(Dispatchers.Default) { parse(body, "Публичный · ${source.first}") }
-                entries.addAll(parsed.profiles); skipped += parsed.skipped
+                groups.add(parsed.profiles)
+                skipped += parsed.skipped
             } catch (e: CancellationException) { throw e }
             catch (_: Exception) { failures++ }
         }
-        return Result(entries.distinctBy { it.node() }, skipped, failures)
+        return Result(ProfileCatalog.mergeBalanced(emptyList(), groups), skipped, failures)
     }
     private suspend fun readSource(url: String): String = suspendCancellableCoroutine { continuation ->
         val call = client.newCall(Request.Builder().url(url).header("Cache-Control", "no-cache").build())
