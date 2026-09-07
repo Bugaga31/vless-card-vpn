@@ -30,7 +30,7 @@ class XrayVpnService : VpnService() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == "STOP") {
             TestState.update(TestState.session.value.copy(message = "Останавливаю…", busy = true))
-            if (run?.isActive == true) run?.cancel() else stopSelf()
+            if (run?.isCompleted == false) run?.cancel() else { TestState.update(Session()); stopSelf() }
             return START_NOT_STICKY
         }
         if (intent?.action != "START") { stopSelf(); return START_NOT_STICKY }
@@ -134,7 +134,8 @@ class XrayVpnService : VpnService() {
                 withContext(Dispatchers.Main) {
                     if (!failure) TestState.update(Session())
                     stopForeground(STOP_FOREGROUND_REMOVE)
-                    stopSelfResult(startId)
+                    // STOP commands have a newer startId. No replacement run can enter while this job is active.
+                    stopSelf()
                     if (destroyed) scope.cancel()
                 }
             }
