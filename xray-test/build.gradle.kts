@@ -1,3 +1,4 @@
+import java.io.File
 import java.net.URI
 import java.security.MessageDigest
 
@@ -14,12 +15,14 @@ val prepareXray by tasks.registering {
     doLast {
         val dest = coreFile.get().asFile
         dest.parentFile.mkdirs()
-        val temp = java.io.File(dest.parentFile, "download.tmp")
+        val temp = File(dest.parentFile, "download.tmp")
         try {
             val conn = URI("https://github.com/2dust/AndroidLibXrayLite/releases/download/v26.8.20/libv2ray.aar").toURL().openConnection()
             conn.connectTimeout = 30000
             conn.readTimeout = 60000
-            conn.getInputStream().use { input -> temp.outputStream().use { input.copyTo(it) } }
+            conn.getInputStream().use { input ->
+                temp.outputStream().use { output -> input.copyTo(output) }
+            }
             val actual = MessageDigest.getInstance("SHA-256").digest(temp.readBytes()).joinToString("") { "%02x".format(it) }
             check(actual == expected) { "Xray artifact checksum mismatch: refusing build" }
             temp.copyTo(dest, overwrite = true)
