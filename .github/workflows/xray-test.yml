@@ -1,0 +1,31 @@
+name: Xray Test Build
+on:
+  push:
+    branches: [feat/xray-test]
+  pull_request:
+    paths: ['xray-test/**', 'settings.gradle.kts', '.github/workflows/xray-test.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  xray-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: '8.7'
+      - run: gradle wrapper --gradle-version 8.7
+      - run: chmod +x gradlew
+      - run: ./gradlew :xray-test:testDebugUnitTest :xray-test:assembleDebug --stacktrace
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: xray-test-unit-results
+          path: xray-test/build/reports/tests/testDebugUnitTest/
+          if-no-files-found: ignore
