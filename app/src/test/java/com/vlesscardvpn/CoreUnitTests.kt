@@ -3,6 +3,7 @@ package com.vlesscardvpn
 import com.vlesscardvpn.core.NetworkProfileManager
 import com.vlesscardvpn.core.NetworkType
 import com.vlesscardvpn.core.SingBoxManager
+import com.vlesscardvpn.core.SniPool
 import com.vlesscardvpn.core.UpdateInfo
 import com.vlesscardvpn.domain.*
 import com.vlesscardvpn.util.UniversalConfigParser
@@ -521,5 +522,123 @@ class CoreUnitTests {
         assertTrue(info.updateAvailable)
         assertEquals("1.0.31", info.latestVersion)
         assertEquals("1.0.30", info.currentVersion)
+    }
+
+    @Test
+    fun testFragmentationInTlsConfig() {
+        val config = VlessConfig(
+            name = "Frag Test",
+            address = "10.0.0.1",
+            port = 443,
+            uuid = "uuid",
+            security = "reality",
+            publicKey = "test-key",
+            shortId = "ab"
+        )
+        val settings = AppSettings(enableFragmentation = true, fragmentPackets = "tlshello", fragmentInterval = "5-15ms")
+        val json = SingBoxManager.generateConfig(null, config, settings)
+
+        val proxy = JSONObject(json).getJSONArray("outbounds").getJSONObject(0)
+        val tls = proxy.getJSONObject("tls")
+        assertTrue("Fragmentation must be enabled in TLS config", tls.has("fragment"))
+        val fragment = tls.getJSONObject("fragment")
+        assertTrue(fragment.getBoolean("enabled"))
+        assertEquals("tlshello", fragment.getString("packets"))
+        assertEquals("5-15ms", fragment.getString("interval"))
+    }
+
+    @Test
+    fun testFragmentationDisabledByDefault() {
+        val config = VlessConfig(
+            name = "No Frag",
+            address = "10.0.0.1",
+            port = 443,
+            uuid = "uuid",
+            security = "reality",
+            publicKey = "test-key",
+            shortId = "ab"
+        )
+        val settings = AppSettings(enableFragmentation = false)
+        val json = SingBoxManager.generateConfig(null, config, settings)
+
+        val proxy = JSONObject(json).getJSONArray("outbounds").getJSONObject(0)
+        val tls = proxy.getJSONObject("tls")
+        assertFalse("Fragmentation must NOT be present when disabled", tls.has("fragment"))
+    }
+
+    @Test
+    fun testSniRotationEnabled() {
+        val config = VlessConfig(
+            name = "SNI Rot",
+            address = "10.0.0.1",
+            port = 443,
+            uuid = "uuid",
+            sni = "",
+            security = "reality",
+            publicKey = "test-key",
+            shortId = "ab"
+        )
+        val settings = AppSettings(enableSniRotation = true)
+        val json = SingBoxManager.generateConfig(null, config, settings)
+
+        val proxy = JSONObject(json).getJSONArray("outbounds").getJSONObject(0)
+        val sni = proxy.getJSONObject("tls").getString("server_name")
+        // SNI must be non-empty and from the Russian pool
+        assertTrue(sni.isNotBlank())
+        assertTrue(sni.endsWith(".ru") || sni.endsWith(".com") || sni.endsWith(".by"))
+    }
+
+    @Test
+    fun testPerAppSplitTunneling() {
+        val config = VlessConfig(
+            name = "App Split",
+            address = "10.0.0.1",
+            port = 443,
+            uuid = "uuid"
+        )
+        val settings = AppSettings(
+            bypassApps = listOf("ru.sberbankmobile", "com.tinkoff.android")
+        )
+        val json = SingBoxManager.generateConfig(null, config, settings)
+
+        val rules = JSONObject(json).getJSONObject("route").getJSONArray("rules")
+        var foundPackageRule = false
+        for (i in 0 until rules.length()) {
+            val rule = rules.getJSONObject(i)
+            if (rule.has("package_name") && rule.optString("outbound") == "direct") {
+                foundPackageRule = true
+                val packages = rule.getJSONArray("package_name")
+                assertEquals(2, packages.length())
+                assertEquals("ru.sberbankmobile", packages.getString(0))
+                assertEquals("com.tinkoff.android", packages.getString(1))
+            }
+        }
+        assertTrue("Per-app split tunneling rule must be present", foundPackageRule)
+    }
+
+    @Test
+    fun testSniPoolRotation() {
+        val sni1 = SniPool.nextSni()
+        val sni2 = SniPool.nextSni()
+        val sni3 = SniPool.nextSni()
+
+        assertNotEquals(sni1, sni2)
+        assertNotEquals(sni2, sni3)
+        assertTrue(sni1.endsWith(".ru") || sni1.endsWith(".by"))
+        assertTrue(sni2.endsWith(".ru") || sni2.endsWith(".by"))
+    }
+
+    @Test
+    fun testSniPoolRandomSni() {
+        val sni = SniPool.randomSni()
+        assertTrue(sni.isNotBlank())
+        assertTrue(sni.endsWith(".ru") || sni.endsWith(".by") || sni.endsWith(".com"))
+    }
+
+    @Test
+    fun testSniPoolRandomCdnSni() {
+        val sni = SniPool.randomCdnSni()
+        assertTrue(sni.isNotBlank())
+        assertTrue("CDN SNI must be a global domain", sni.endsWith(".com") || sni.endsWith(".org") || sni.endsWith(".net") || sni.endsWith(".io"))
     }
 }

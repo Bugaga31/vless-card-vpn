@@ -1,16 +1,18 @@
-## v1.0.31 — WS/gRPC/H2 Transport + DNS AdBlock + Auto-Update
+## v1.0.32 — Anti-DPI: TLS Fragmentation + SNI Rotation + Per-App Split Tunneling
 
-### 🚀 Новые возможности
-- **WebSocket, gRPC, HTTP/2 транспорт**: поддержка `ws`, `grpc`, `h2` транспорта для VLESS и VMess с полной конфигурацией (path, host, serviceName)
-- **DNS-блокировка рекламы**: встроенный блоклист +250 рекламных/трекерных доменов (Google Ads, Meta, Yandex Ads, VK, Xiaomi, Samsung, Huawei, Oppo/Vivo и др.)
-- **Авто-проверка обновлений**: фоновая проверка GitHub Releases на новые версии APK с уведомлением
+### 🛡️ Анти-ТСПУ (Anti-DPI)
+- **TLS-фрагментация пакетов**: разбиение ClientHello на фрагменты для обхода DPI (настройки: `packets`, `interval`, `length`)
+- **SNI-ротация**: пул из 250+ российских доменов (.ru/.by/.com) — случайный SNI при каждом подключении, чтобы избежать fingerprinting
+- **Per-App Split Tunneling**: обход VPN для выбранных приложений (банки, госуслуги, почта) — трафик идёт напрямую
 
-### 🛠 Улучшения
-- Парсер VMess теперь извлекает `net` (ws/grpc/h2), `path` и `host` из JSON-конфигов
-- `PingTester` различает Reality-серверы (TCP-достижимость) и TLS-серверы (полный handshake)
-- Добавлены новые источники бесплатных конфигов в `autoFetchSources`
+### 🇷🇺 Российский SNI-пул
+- Правительственные домены: kremlin.ru, nalog.gov.ru, gosuslugi.ru, mos.ru и десятки других
+- Операторские: mts.ru, beeline.ru, megafon.ru, tele2.ru
+- Медиа: 1tv.ru, rbc.ru, ria.ru, tass.ru, kommersant.ru
+- Банки: sberbank.ru, tbank.ru, vtb.ru, alfabank.ru
+- CDN-фолбэк: microsoft.com, cloudflare.com, apple.com, github.com
 
 ### 📦 Технические детали
-- 6 новых тестов для транспортных генераций и парсинга
-- Всего 43 unit-теста (0 failures)
+- 26 unit-тестов в CoreUnitTests (6 новых: фрагментация, SNI-ротация, per-app split)
+- Всего 50 тестов (0 failures)
 - APK: 215 MB (debug)

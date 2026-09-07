@@ -60,6 +60,23 @@ data class AppSettings(
     val githubApiToken: String = "",
     val autoSendCrashReportsConsent: Boolean = false,
     val enableAdBlock: Boolean = true,
+    // Anti-DPI: TLS fragmentation to bypass TSPU deep packet inspection
+    val enableFragmentation: Boolean = true,
+    val fragmentPackets: String = "tlshello", // tlshello, 1-1, 1-2, 1-3, 1-5
+    val fragmentInterval: String = "10-20ms",
+    // SNI rotation: randomly pick from Russian SNI pool each connection
+    val enableSniRotation: Boolean = false,
+    // Per-app split tunneling: bypass VPN for selected apps (banks, gov, etc.)
+    val bypassApps: List<String> = listOf(
+        "ru.sberbankmobile",
+        "com.tinkoff.android",
+        "ru.alfabank.alfamobile",
+        "ru.vtb.mobilebank",
+        "ru.gosuslugi",
+        "com.mos.ru",
+        "ru.mail.mailapp",
+        "ru.yandex.mail"
+    ),
     val autoFetchSources: List<String> = listOf(
         "https://raw.githubusercontent.com/0xRadikal/Free-v2ray-Configs/main/verified/configs.txt",
         "https://raw.githubusercontent.com/0xRadikal/Free-v2ray-Configs/main/all/vless.txt",

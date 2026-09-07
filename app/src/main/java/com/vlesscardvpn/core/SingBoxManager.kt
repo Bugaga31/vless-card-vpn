@@ -88,7 +88,12 @@ object SingBoxManager {
         settings: AppSettings = AppSettings(),
         networkProfile: EvaluatedNetworkProfile? = null
     ): String {
-        val effectiveSni = resolveEffectiveSni(config, settings, networkProfile)
+        // SNI rotation: pick random Russian SNI if enabled and no explicit config SNI
+        val effectiveSni = when {
+            config.sni.isNotBlank() -> config.sni.trim()
+            settings.enableSniRotation -> SniPool.randomSni()
+            else -> resolveEffectiveSni(config, settings, networkProfile)
+        }
         val effectiveMtu = networkProfile?.optimalMtu ?: settings.mtuSize.coerceIn(1280, 1500)
 
         val effectiveDns = when {
@@ -100,9 +105,9 @@ object SingBoxManager {
         }
 
         val proxyOutbound = when (config.protocolType.lowercase()) {
-            "vless" -> createVlessOutbound(config, effectiveSni)
-            "vmess" -> createVmessOutbound(config, effectiveSni)
-            "trojan" -> createTrojanOutbound(config, effectiveSni)
+            "vless" -> createVlessOutbound(config, effectiveSni, settings)
+            "vmess" -> createVmessOutbound(config, effectiveSni, settings)
+            "trojan" -> createTrojanOutbound(config, effectiveSni, settings)
             "shadowsocks", "ss" -> createShadowsocksOutbound(config)
             else -> createVlessOutbound(config, effectiveSni)
         }
@@ -146,6 +151,14 @@ object SingBoxManager {
             if (settings.enableRuDirect) {
                 put(JSONObject().apply {
                     put("domain_suffix", JSONArray(ruDomainSuffixes))
+                    put("outbound", "direct")
+                })
+            }
+
+            // 6. Per-App Split Tunneling: bypass VPN for selected apps (banks, gov, etc.)
+            if (settings.bypassApps.isNotEmpty()) {
+                put(JSONObject().apply {
+                    put("package_name", JSONArray(settings.bypassApps))
                     put("outbound", "direct")
                 })
             }
@@ -228,7 +241,7 @@ object SingBoxManager {
      * VLESS Outbound for sing-box with transport support (tcp, ws, grpc, h2).
      * Note: In sing-box schema, standard TCP transport is default and MUST NOT have `transport: { type: "tcp" }`.
      */
-    private fun createVlessOutbound(config: VlessConfig, effectiveSni: String): JSONObject {
+    private fun createVlessOutbound(config: VlessConfig, effectiveSni: String, settings: AppSettings = AppSettings()): JSONObject {
         return JSONObject().apply {
             put("type", "vless")
             put("tag", "proxy")
@@ -284,12 +297,21 @@ object SingBoxManager {
                             put("short_id", config.shortId.trim())
                         })
                     }
+                    // Anti-DPI: TLS fragmentation to evade TSPU packet inspection
+                    if (settings.enableFragmentation) {
+                        put("fragment", JSONObject().apply {
+                            put("enabled", true)
+                            put("packets", settings.fragmentPackets)
+                            put("length", "10-50")
+                            put("interval", settings.fragmentInterval)
+                        })
+                    }
                 })
             }
         }
     }
 
-    private fun createVmessOutbound(config: VlessConfig, effectiveSni: String): JSONObject {
+    private fun createVmessOutbound(config: VlessConfig, effectiveSni: String, settings: AppSettings = AppSettings()): JSONObject {
         return JSONObject().apply {
             put("type", "vmess")
             put("tag", "proxy")
@@ -330,12 +352,20 @@ object SingBoxManager {
                 put("tls", JSONObject().apply {
                     put("enabled", true)
                     put("server_name", effectiveSni)
+                    if (settings.enableFragmentation) {
+                        put("fragment", JSONObject().apply {
+                            put("enabled", true)
+                            put("packets", settings.fragmentPackets)
+                            put("length", "10-50")
+                            put("interval", settings.fragmentInterval)
+                        })
+                    }
                 })
             }
         }
     }
 
-    private fun createTrojanOutbound(config: VlessConfig, effectiveSni: String): JSONObject {
+    private fun createTrojanOutbound(config: VlessConfig, effectiveSni: String, settings: AppSettings = AppSettings()): JSONObject {
         return JSONObject().apply {
             put("type", "trojan")
             put("tag", "proxy")
@@ -345,6 +375,14 @@ object SingBoxManager {
             put("tls", JSONObject().apply {
                 put("enabled", true)
                 put("server_name", effectiveSni)
+                if (settings.enableFragmentation) {
+                    put("fragment", JSONObject().apply {
+                        put("enabled", true)
+                        put("packets", settings.fragmentPackets)
+                        put("length", "10-50")
+                        put("interval", settings.fragmentInterval)
+                    })
+                }
             })
         }
     }
