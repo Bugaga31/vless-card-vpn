@@ -5,7 +5,7 @@ plugins {
 }
 
 // Match the existing release workflow's v1.0.<run_number> tag.
-val releaseNumber = providers.environmentVariable("GITHUB_RUN_NUMBER").orNull?.toIntOrNull() ?: 25
+val releaseNumber = providers.environmentVariable("GITHUB_RUN_NUMBER").orNull?.toIntOrNull() ?: 30
 
 android {
     namespace = "com.vlesscardvpn"
