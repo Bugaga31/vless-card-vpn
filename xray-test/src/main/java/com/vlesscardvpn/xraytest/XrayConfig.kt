@@ -35,7 +35,17 @@ object XrayConfig {
         val transport = q["type"] ?: "tcp"
         if (transport !in setOf("tcp", "raw", "ws", "grpc")) bad("В первом тесте поддерживаются TCP, WebSocket и gRPC")
         if (q.getOrDefault("encryption", "none") != "none") bad("Этот режим VLESS encryption пока не поддерживается")
-        if (q.getOrDefault("headerType", "none") != "none") bad("TCP HTTP header пока не поддерживается")
+        val headerType = q.getOrDefault("headerType", "none")
+        if (headerType !in setOf("none", "http")) bad("Неизвестный тип TCP-заголовка")
+        if (headerType == "http") {
+            if (transport !in setOf("tcp", "raw")) bad("headerType=http поддерживается только для TCP/raw")
+            val hostHeader = q["host"].orEmpty()
+            val rawPaths = q["path"].orEmpty()
+            if ((hostHeader + rawPaths).any { it.code < 32 || it.code == 127 }) bad("Управляющие символы в HTTP-заголовке или пути")
+            val paths = rawPaths.ifBlank { "/" }
+            if (hostHeader.isNotBlank() && hostHeader.split(',').any { it.trim().isEmpty() || it.trim().any { c -> c.isWhitespace() } }) bad("Некорректный HTTP Host")
+            if (paths.split(',').any { !it.trim().startsWith("/") || it.trim().any { c -> c.isWhitespace() } }) bad("HTTP-путь должен начинаться с / и не содержать пробелов")
+        }
         if (q.getOrDefault("mode", "gun") != "gun") bad("Этот режим транспорта пока не поддерживается")
         val flow = q["flow"].orEmpty()
         if (flow !in setOf("", "xtls-rprx-vision")) bad("Этот flow пока не поддерживается")
@@ -69,6 +79,14 @@ object XrayConfig {
             tls.put("allowInsecure", false)
             q["alpn"]?.takeIf { it.isNotBlank() }?.let { tls.put("alpn", JSONArray(it.split(','))) }
             stream.put("tlsSettings", tls)
+        }
+        if (q["headerType"] == "http") {
+            val request = JSONObject().put("version", "1.1").put("method", "GET")
+                .put("path", JSONArray(q["path"].orEmpty().ifBlank { "/" }.split(',').map { it.trim() }))
+            q["host"]?.takeIf { it.isNotBlank() }?.let {
+                request.put("headers", JSONObject().put("Host", JSONArray(it.split(',').map { host -> host.trim() })))
+            }
+            stream.put("tcpSettings", JSONObject().put("header", JSONObject().put("type", "http").put("request", request)))
         }
         when (transport) {
             "ws" -> stream.put("wsSettings", JSONObject().put("path", q["path"] ?: "/").put("headers", JSONObject().apply { q["host"]?.let { put("Host", it) } }))
