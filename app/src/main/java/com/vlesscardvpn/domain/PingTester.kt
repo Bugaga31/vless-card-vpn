@@ -66,6 +66,44 @@ object PingTester {
         return if (result.success) if (result.tlsMs > 0) result.tlsMs else result.tcpMs else -1
     }
 
+    /**
+     * Measures download speed by fetching a test file through the VPN tunnel.
+     * Returns speed in bytes per second, or -1 on failure.
+     */
+    suspend fun measureDownloadSpeed(
+        testUrl: String = "https://speed.cloudflare.com/__down?bytes=1048576",
+        timeoutMs: Int = 8000
+    ): Long = withContext(Dispatchers.IO) {
+        try {
+            val url = URL(testUrl)
+            val connection = url.openConnection() as javax.net.ssl.HttpsURLConnection
+            connection.connectTimeout = timeoutMs
+            connection.readTimeout = timeoutMs
+            connection.setRequestProperty("User-Agent", "VLESS-Card-SpeedTest/1.0")
+            connection.instanceFollowRedirects = true
+
+            val startTime = System.currentTimeMillis()
+            connection.connect()
+
+            if (connection.responseCode != 200) return@withContext -1L
+
+            val buffer = ByteArray(8192)
+            var totalBytes = 0L
+            connection.inputStream.use { input ->
+                var bytesRead: Int
+                while (input.read(buffer).also { bytesRead = it } != -1) {
+                    totalBytes += bytesRead
+                    if (System.currentTimeMillis() - startTime > timeoutMs) break
+                }
+            }
+
+            val elapsedMs = (System.currentTimeMillis() - startTime).coerceAtLeast(1)
+            (totalBytes * 1000L / elapsedMs)
+        } catch (e: Exception) {
+            -1L
+        }
+    }
+
     suspend fun verifyEndToEndConnection(timeoutMs: Int = 3500): Pair<Boolean, Int> = withContext(Dispatchers.IO) {
         val endpoints = listOf(
             "https://www.google.com/generate_204",

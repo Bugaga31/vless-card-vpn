@@ -124,7 +124,15 @@ object SingBoxManager {
                 })
             }
 
-            // 3. Direct access for local/private IP ranges
+            // 3. Ad-blocking DNS: block ad/tracker domains at route level
+            if (settings.enableAdBlock) {
+                put(JSONObject().apply {
+                    put("domain_suffix", JSONArray(AdBlockDns.adBlockRules))
+                    put("outbound", "block")
+                })
+            }
+
+            // 4. Direct access for local/private IP ranges
             put(JSONObject().apply {
                 put("ip_is_private", true)
                 put("outbound", "direct")
@@ -134,7 +142,7 @@ object SingBoxManager {
                 put("outbound", "direct")
             })
 
-            // 4. RU Direct Routing (Split Tunneling if enabled)
+            // 5. RU Direct Routing (Split Tunneling if enabled)
             if (settings.enableRuDirect) {
                 put(JSONObject().apply {
                     put("domain_suffix", JSONArray(ruDomainSuffixes))
@@ -217,7 +225,7 @@ object SingBoxManager {
     }
 
     /**
-     * Plain TCP VLESS Outbound for sing-box.
+     * VLESS Outbound for sing-box with transport support (tcp, ws, grpc, h2).
      * Note: In sing-box schema, standard TCP transport is default and MUST NOT have `transport: { type: "tcp" }`.
      */
     private fun createVlessOutbound(config: VlessConfig, effectiveSni: String): JSONObject {
@@ -230,6 +238,36 @@ object SingBoxManager {
             if (config.flow.isNotBlank()) {
                 put("flow", config.flow.trim())
             }
+
+            // Transport layer: ws, grpc, h2 (tcp is default, omitted)
+            when (config.transport.lowercase()) {
+                "ws", "websocket" -> {
+                    put("transport", JSONObject().apply {
+                        put("type", "ws")
+                        put("path", config.wsPath.ifBlank { "/" })
+                        if (config.wsHost.isNotBlank()) {
+                            put("headers", JSONObject().apply {
+                                put("Host", config.wsHost.trim())
+                            })
+                        }
+                        put("early_data_header_name", "Sec-WebSocket-Protocol")
+                    })
+                }
+                "grpc", "gun" -> {
+                    put("transport", JSONObject().apply {
+                        put("type", "grpc")
+                        put("service_name", config.serviceName.ifBlank { "GunService" })
+                    })
+                }
+                "h2", "http2" -> {
+                    put("transport", JSONObject().apply {
+                        put("type", "http")
+                        put("host", JSONArray(listOf(config.wsHost.ifBlank { effectiveSni })))
+                        put("path", config.wsPath.ifBlank { "/" })
+                    })
+                }
+            }
+
             if (config.security.equals("reality", ignoreCase = true) || config.security.equals("tls", ignoreCase = true)) {
                 put("tls", JSONObject().apply {
                     put("enabled", true)
@@ -259,6 +297,35 @@ object SingBoxManager {
             put("server_port", config.port)
             put("uuid", config.uuid.trim())
             put("security", "auto")
+
+            // Transport for VMess
+            when (config.transport.lowercase()) {
+                "ws", "websocket" -> {
+                    put("transport", JSONObject().apply {
+                        put("type", "ws")
+                        put("path", config.wsPath.ifBlank { "/" })
+                        if (config.wsHost.isNotBlank()) {
+                            put("headers", JSONObject().apply {
+                                put("Host", config.wsHost.trim())
+                            })
+                        }
+                    })
+                }
+                "grpc", "gun" -> {
+                    put("transport", JSONObject().apply {
+                        put("type", "grpc")
+                        put("service_name", config.serviceName.ifBlank { "GunService" })
+                    })
+                }
+                "h2", "http2" -> {
+                    put("transport", JSONObject().apply {
+                        put("type", "http")
+                        put("host", JSONArray(listOf(config.wsHost.ifBlank { effectiveSni })))
+                        put("path", config.wsPath.ifBlank { "/" })
+                    })
+                }
+            }
+
             if (config.security.equals("tls", ignoreCase = true)) {
                 put("tls", JSONObject().apply {
                     put("enabled", true)

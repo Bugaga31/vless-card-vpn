@@ -106,6 +106,7 @@ object UniversalConfigParser {
                 }
             }
 
+            val transportType = queryMap["type"] ?: "tcp"
             VlessConfig(
                 name = remark,
                 address = address,
@@ -119,7 +120,11 @@ object UniversalConfigParser {
                 publicKey = queryMap["pbk"] ?: "",
                 shortId = queryMap["sid"] ?: "",
                 remark = remark,
-                isFree = true
+                isFree = true,
+                transport = transportType,
+                wsHost = queryMap["host"] ?: "",
+                wsPath = queryMap["path"] ?: "/",
+                serviceName = queryMap["serviceName"] ?: ""
             )
         } catch (e: Exception) {
             null
@@ -181,6 +186,9 @@ object UniversalConfigParser {
             val ps = json.optString("ps", "VMess Node")
             val sni = json.optString("sni", json.optString("host", "yandex.ru"))
             val tls = json.optString("tls", "")
+            val net = json.optString("net", "tcp")
+            val wsPath = json.optString("path", "/")
+            val wsHost = json.optString("host", "")
 
             VlessConfig(
                 name = ps,
@@ -191,7 +199,10 @@ object UniversalConfigParser {
                 security = if (tls.isNotBlank()) "tls" else "none",
                 sni = sni,
                 remark = ps,
-                isFree = true
+                isFree = true,
+                transport = net,
+                wsHost = wsHost,
+                wsPath = wsPath
             )
         } catch (e: Exception) {
             null

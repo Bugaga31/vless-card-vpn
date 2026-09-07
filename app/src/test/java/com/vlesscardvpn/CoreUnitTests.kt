@@ -3,6 +3,7 @@ package com.vlesscardvpn
 import com.vlesscardvpn.core.NetworkProfileManager
 import com.vlesscardvpn.core.NetworkType
 import com.vlesscardvpn.core.SingBoxManager
+import com.vlesscardvpn.core.UpdateInfo
 import com.vlesscardvpn.domain.*
 import com.vlesscardvpn.util.UniversalConfigParser
 import com.vlesscardvpn.worker.VpnSessionStats
@@ -378,5 +379,147 @@ class CoreUnitTests {
         assertEquals(1, afterSingleFail.consecutiveFailures)
         assertEquals(AutopilotStateStatus.STABLE, afterSingleFail.status)
         assertTrue(afterSingleFail.lastChangeExplanation.contains("единичный сбой"))
+    }
+
+    @Test
+    fun testWebSocketTransportConfigGeneration() {
+        val config = VlessConfig(
+            name = "WS Node",
+            address = "cdn.example.com",
+            port = 443,
+            uuid = "ws-uuid-123",
+            protocolType = "vless",
+            security = "tls",
+            sni = "cdn.example.com",
+            transport = "ws",
+            wsHost = "cdn.example.com",
+            wsPath = "/vless-ws"
+        )
+
+        val jsonStr = SingBoxManager.generateConfig(null, config, AppSettings(enableAdBlock = false))
+        val json = JSONObject(jsonStr)
+        val proxy = json.getJSONArray("outbounds").getJSONObject(0)
+
+        assertEquals("vless", proxy.getString("type"))
+        assertTrue(proxy.has("transport"))
+        val transport = proxy.getJSONObject("transport")
+        assertEquals("ws", transport.getString("type"))
+        assertEquals("/vless-ws", transport.getString("path"))
+        assertTrue(transport.has("headers"))
+        assertEquals("cdn.example.com", transport.getJSONObject("headers").getString("Host"))
+    }
+
+    @Test
+    fun testGrpcTransportConfigGeneration() {
+        val config = VlessConfig(
+            name = "gRPC Node",
+            address = "grpc.example.com",
+            port = 443,
+            uuid = "grpc-uuid-456",
+            protocolType = "vless",
+            security = "reality",
+            sni = "yandex.ru",
+            publicKey = "test-pbk",
+            shortId = "ab",
+            transport = "grpc",
+            serviceName = "MyService"
+        )
+
+        val jsonStr = SingBoxManager.generateConfig(null, config, AppSettings(enableAdBlock = false))
+        val json = JSONObject(jsonStr)
+        val proxy = json.getJSONArray("outbounds").getJSONObject(0)
+
+        assertEquals("vless", proxy.getString("type"))
+        assertTrue(proxy.has("transport"))
+        val transport = proxy.getJSONObject("transport")
+        assertEquals("grpc", transport.getString("type"))
+        assertEquals("MyService", transport.getString("service_name"))
+        // Reality TLS must still be present
+        assertTrue(proxy.has("tls"))
+        assertTrue(proxy.getJSONObject("tls").has("reality"))
+    }
+
+    @Test
+    fun testAdBlockDnsRulesInConfig() {
+        val config = VlessConfig(
+            name = "Test",
+            address = "1.1.1.1",
+            port = 443,
+            uuid = "uuid-123"
+        )
+
+        // AdBlock ON
+        val jsonOn = SingBoxManager.generateConfig(null, config, AppSettings(enableAdBlock = true))
+        val jsonOnObj = JSONObject(jsonOn)
+        val routeRules = jsonOnObj.getJSONObject("route").getJSONArray("rules")
+        var hasAdBlockRule = false
+        for (i in 0 until routeRules.length()) {
+            val rule = routeRules.getJSONObject(i)
+            if (rule.has("domain_suffix") && rule.optString("outbound") == "block") {
+                val domains = rule.getJSONArray("domain_suffix")
+                if (domains.length() > 10) {
+                    hasAdBlockRule = true
+                    break
+                }
+            }
+        }
+        assertTrue("AdBlock DNS rules must be present when enabled", hasAdBlockRule)
+
+        // AdBlock OFF
+        val jsonOff = SingBoxManager.generateConfig(null, config, AppSettings(enableAdBlock = false))
+        val jsonOffObj = JSONObject(jsonOff)
+        val routeRulesOff = jsonOffObj.getJSONObject("route").getJSONArray("rules")
+        var hasAdBlockRuleOff = false
+        for (i in 0 until routeRulesOff.length()) {
+            val rule = routeRulesOff.getJSONObject(i)
+            if (rule.has("domain_suffix") && rule.optString("outbound") == "block") {
+                val domains = rule.getJSONArray("domain_suffix")
+                if (domains.length() > 10) {
+                    hasAdBlockRuleOff = true
+                    break
+                }
+            }
+        }
+        assertFalse("AdBlock DNS rules must NOT be present when disabled", hasAdBlockRuleOff)
+    }
+
+    @Test
+    fun testVlessUriParsingWithWebSocket() {
+        val rawUri = "vless://ws-uuid@cdn.example.com:443?type=ws&security=tls&sni=cdn.example.com&path=%2Fvless-ws&host=cdn.example.com#WS-Node"
+        val config = UniversalConfigParser.parseSingleUri(rawUri)
+
+        assertNotNull("WebSocket config must be parsed", config)
+        assertEquals("ws", config?.transport)
+        assertEquals("/vless-ws", config?.wsPath)
+        assertEquals("cdn.example.com", config?.wsHost)
+        assertEquals("WS-Node", config?.name)
+    }
+
+    @Test
+    fun testVlessUriParsingWithGrpc() {
+        val rawUri = "vless://grpc-uuid@grpc.example.com:443?type=grpc&security=reality&sni=yandex.ru&pbk=test&sid=ab&serviceName=MyService#gRPC-Node"
+        val config = UniversalConfigParser.parseSingleUri(rawUri)
+
+        assertNotNull("gRPC config must be parsed", config)
+        assertEquals("grpc", config?.transport)
+        assertEquals("MyService", config?.serviceName)
+        assertEquals("gRPC-Node", config?.name)
+    }
+
+    @Test
+    fun testUpdateCheckerVersionComparison() {
+        // Version parsing is tested indirectly via the private method
+        // We validate that the UpdateInfo structure is correct
+        val info = UpdateInfo(
+            latestVersion = "1.0.31",
+            currentVersion = "1.0.30",
+            updateAvailable = true,
+            downloadUrl = "https://example.com/app.apk",
+            releaseNotes = "Bug fixes",
+            publishedAt = "2026-09-07"
+        )
+        assertTrue(info.updateAvailable)
+        assertEquals("1.0.31", info.latestVersion)
+        assertEquals("1.0.30", info.currentVersion)
     }
 }

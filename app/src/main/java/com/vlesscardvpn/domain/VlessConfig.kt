@@ -26,7 +26,13 @@ data class VlessConfig(
     val isFavorite: Boolean = false,
     val tcpLatencyMs: Int = -1,
     val tlsLatencyMs: Int = -1,
-    val httpLatencyMs: Int = -1
+    val httpLatencyMs: Int = -1,
+    // Transport layer (ws, grpc, h2, tcp)
+    val transport: String = "tcp",
+    val wsHost: String = "",
+    val wsPath: String = "/",
+    val serviceName: String = "",
+    val downloadSpeedBps: Long = 0L
 )
 
 data class AppSettings(
@@ -53,6 +59,7 @@ data class AppSettings(
     val githubIssuesRepo: String = "github.com/vless-card-vpn/vless-card-vpn",
     val githubApiToken: String = "",
     val autoSendCrashReportsConsent: Boolean = false,
+    val enableAdBlock: Boolean = true,
     val autoFetchSources: List<String> = listOf(
         "https://raw.githubusercontent.com/0xRadikal/Free-v2ray-Configs/main/verified/configs.txt",
         "https://raw.githubusercontent.com/0xRadikal/Free-v2ray-Configs/main/all/vless.txt",
