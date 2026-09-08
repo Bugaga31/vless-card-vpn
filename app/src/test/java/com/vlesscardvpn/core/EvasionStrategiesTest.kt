@@ -67,4 +67,26 @@ class EvasionStrategiesTest {
             EvasionStrategies.TRUSTED_SNI_LIST.toSet().size
         )
     }
+
+    @Test
+    fun settingsStrategyOverridesFragmentPackets() {
+        // Явная стратегия из настроек имеет приоритет над легаси fragmentPackets
+        assertEquals(
+            EvasionStrategies.Strategy.WHITE_RU,
+            EvasionStrategies.resolveFromSettings("white_ru", "tlshello")
+        )
+        // "auto" → легаси-резолв
+        assertEquals(
+            EvasionStrategies.Strategy.ZAPRET_GHOST,
+            EvasionStrategies.resolveFromSettings("auto", "tlshello")
+        )
+        // Параметры стратегии применяются целиком
+        val params = EvasionStrategies.effectiveFragmentParams("white_ru", "tlshello", "10-20ms")!!
+        assertEquals("1-2", params.first)
+        assertEquals("5-15ms", params.second)
+        // Turbo Reality — без фрагментации
+        assertNull(EvasionStrategies.effectiveFragmentParams("turbo_reality", "tlshello", "10-20ms"))
+        // Fingerprint тоже от стратегии
+        assertEquals("safari", EvasionStrategies.activeFingerprint("white_ru", "tlshello"))
+    }
 }

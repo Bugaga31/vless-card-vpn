@@ -189,7 +189,7 @@ object SingBoxManager {
             put("servers", JSONArray().apply {
                 put(JSONObject().apply {
                     put("tag", "remote-dns")
-                    put("address", effectiveDns)
+                    put("address", toDohIfNeeded(effectiveDns))
                     put("detour", "proxy")
                 })
                 put(JSONObject().apply {
@@ -289,7 +289,7 @@ object SingBoxManager {
                     put("insecure", false)
                     put("utls", JSONObject().apply {
                         put("enabled", true)
-                        put("fingerprint", config.fingerprint.ifBlank { EvasionStrategies.activeFingerprint(settings.fragmentPackets) })
+                        put("fingerprint", config.fingerprint.ifBlank { EvasionStrategies.activeFingerprint(settings.evasionStrategy, settings.fragmentPackets) })
                     })
                     if (config.security.equals("reality", ignoreCase = true)) {
                         put("reality", JSONObject().apply {
@@ -298,20 +298,27 @@ object SingBoxManager {
                             put("short_id", config.shortId.trim())
                         })
                     }
-                    // Anti-DPI: strategy-driven fragmentation (EvasionStrategies cascade)
+                    // Anti-DPI: libbox этого билда ждёт fragment как bool; стратегия из настроек
+                    // решает вкл/выкл (турбо-Reality — без фрагментации).
                     if (settings.enableFragmentation) {
-                        EvasionStrategies.effectiveFragmentParams(settings.fragmentPackets, settings.fragmentInterval)?.let { (packets, interval) ->
-                            put("fragment", JSONObject().apply {
-                                put("enabled", true)
-                                put("packets", packets)
-                                put("length", "10-50")
-                                put("interval", interval)
-                            })
+                        EvasionStrategies.effectiveFragmentParams(settings.evasionStrategy, settings.fragmentPackets, settings.fragmentInterval)?.let {
+                            put("fragment", true)
                         }
                     }
                 })
             }
         }
+    }
+
+    /**
+     * DoH Bootstrap: поднимаем известные IP-резолверы до DNS-over-HTTPS —
+     * шифрованный резолв через туннель, провайдер не видит домены.
+     * IP-based URL не требует bootstrap-резолва. Прочие адреса — как есть.
+     */
+    private fun toDohIfNeeded(address: String): String = when {
+        address.contains("1.1.1.1") -> "https://1.1.1.1/dns-query"
+        address.contains("8.8.8.8") -> "https://8.8.8.8/dns-query"
+        else -> address
     }
 
     private fun createVmessOutbound(config: VlessConfig, effectiveSni: String, settings: AppSettings = AppSettings()): JSONObject {
@@ -356,13 +363,8 @@ object SingBoxManager {
                     put("enabled", true)
                     put("server_name", effectiveSni)
                     if (settings.enableFragmentation) {
-                        EvasionStrategies.effectiveFragmentParams(settings.fragmentPackets, settings.fragmentInterval)?.let { (packets, interval) ->
-                            put("fragment", JSONObject().apply {
-                                put("enabled", true)
-                                put("packets", packets)
-                                put("length", "10-50")
-                                put("interval", interval)
-                            })
+                        EvasionStrategies.effectiveFragmentParams(settings.evasionStrategy, settings.fragmentPackets, settings.fragmentInterval)?.let {
+                            put("fragment", true)
                         }
                     }
                 })
@@ -381,13 +383,8 @@ object SingBoxManager {
                 put("enabled", true)
                 put("server_name", effectiveSni)
                 if (settings.enableFragmentation) {
-                    EvasionStrategies.effectiveFragmentParams(settings.fragmentPackets, settings.fragmentInterval)?.let { (packets, interval) ->
-                        put("fragment", JSONObject().apply {
-                            put("enabled", true)
-                            put("packets", packets)
-                            put("length", "10-50")
-                            put("interval", interval)
-                        })
+                    EvasionStrategies.effectiveFragmentParams(settings.evasionStrategy, settings.fragmentPackets, settings.fragmentInterval)?.let {
+                        put("fragment", true)
                     }
                 }
             })
@@ -444,13 +441,8 @@ object SingBoxManager {
                 put("server_name", sni)
                 put("insecure", false)
                 if (settings.enableFragmentation) {
-                    EvasionStrategies.effectiveFragmentParams(settings.fragmentPackets, settings.fragmentInterval)?.let { (packets, interval) ->
-                        put("fragment", JSONObject().apply {
-                            put("enabled", true)
-                            put("packets", packets)
-                            put("length", "10-50")
-                            put("interval", interval)
-                        })
+                    EvasionStrategies.effectiveFragmentParams(settings.evasionStrategy, settings.fragmentPackets, settings.fragmentInterval)?.let {
+                        put("fragment", true)
                     }
                 }
             })

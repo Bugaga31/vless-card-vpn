@@ -1,3 +1,12 @@
+# v1.0.38 — Фикс запуска ядра: fragment как bool
+
+## Что нового
+- 🐞 **Исправлена runtime-ошибка decode конфига sing-box**: `outbounds[0].tls.fragment: cannot unmarshal object into Go value of type bool`. Этот билд libbox принимает `fragment` только как булев флаг — теперь конфиг именно такой; тонкие параметры фрагментации зашиты в Go-ядро, стратегия (EvasionStrategies) управляет вкл/выкл (turbo_reality → без фрагментации).
+- ⚡ **Автоподключение при старте приложения**: при включённом автопилоте туннель поднимается сам через 2.5с после запуска — кнопку жать не нужно.
+- 🎛️ **Настройка «Стратегия стелса» теперь реально работает**: `evasionStrategy` из настроек управляет фрагментацией и uTLS-fingerprint ядра (раньше была декоративной — нигде не читалась).
+- 🔐 **DNS-over-HTTPS автоматически**: Cloudflare/Google DNS в конфиге ядра поднимаются до DoH (`https://1.1.1.1/dns-query`) — шифрованный резолв через туннель, DoH Bootstrap-стратегия работает по-настоящему.
+- 🧪 `testFragmentationInTlsConfig` переведён на булев контракт + новые `testTurboRealityStrategyDisablesFragment` и `settingsStrategyOverridesFragmentPackets` (79 юнит-тестов).
+
 # v1.0.37 — Одна кнопка: AutoPilot всегда в связке + 9 стратегий стелса
 
 ## Что нового

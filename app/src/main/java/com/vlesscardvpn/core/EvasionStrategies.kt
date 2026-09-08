@@ -192,6 +192,46 @@ object EvasionStrategies {
     fun activeFingerprint(fragmentPacketsSetting: String): String =
         resolveActive(fragmentPacketsSetting).uTlsFingerprint
 
+    /**
+     * Стратегия из настроек (settings.evasionStrategy). "auto"/пусто →
+     * резолв по легаси fragmentPackets; явный id → сама стратегия.
+     */
+    fun resolveFromSettings(strategySetting: String, fragmentPacketsSetting: String): Strategy {
+        val v = strategySetting.trim()
+        if (v.isNotEmpty() && !v.equals("auto", ignoreCase = true)) {
+            Strategy.entries.firstOrNull { it.id.equals(v, ignoreCase = true) }?.let { return it }
+        }
+        return resolveActive(fragmentPacketsSetting)
+    }
+
+    /**
+     * Параметры фрагментации с приоритетом явной стратегии из настроек.
+     * Явный id стратегии → её параметры; "auto"/неизвестно → легаси-резолв
+     * по fragmentPackets (pass-through для старых настроек). null = без фрагментации.
+     */
+    fun effectiveFragmentParams(
+        strategySetting: String,
+        fragmentPacketsSetting: String,
+        currentInterval: String
+    ): Pair<String, String>? {
+        Strategy.entries.firstOrNull { it.id.equals(strategySetting.trim(), ignoreCase = true) }
+            ?.let { strategy ->
+                val (packets, interval) = strategy.recommendedFragmentPackets to strategy.recommendedFragmentInterval
+                if (packets.equals("none", ignoreCase = true) || interval == "0ms") return null
+                return packets to interval
+            }
+        return effectiveFragmentParams(fragmentPacketsSetting, currentInterval)
+    }
+
+    /** Fingerprint uTLS с приоритетом явной стратегии из настроек. */
+    fun activeFingerprint(strategySetting: String, fragmentPacketsSetting: String): String {
+        val v = strategySetting.trim()
+        if (v.isNotEmpty() && !v.equals("auto", ignoreCase = true)) {
+            Strategy.entries.firstOrNull { it.id.equals(v, ignoreCase = true) }?.let { return it.uTlsFingerprint }
+        }
+        return activeFingerprint(fragmentPacketsSetting)
+    }
+
     /** Человекочитаемый план каскада — для тостов и экрана статуса. */
     fun describePlan(): String =
         cascadePlan().joinToString(" → ") { it.displayName.substringAfter(" ").trim() }

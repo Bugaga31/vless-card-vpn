@@ -158,6 +158,16 @@ fun VlessCardVpnApp(
         }
     }
 
+    // Полный автомат: при открытии приложения туннель поднимается сам,
+    // если включён автопилот (settings.autoSelect) — кнопку жать не нужно.
+    LaunchedEffect(settings.autoSelect, configs.size) {
+        if (!settings.autoSelect) return@LaunchedEffect
+        delay(2500) // даём подпискам и БД прогрузиться после сплэша
+        if (vpnStats.status != VpnStatus.CONNECTED && vpnStats.status != VpnStatus.CONNECTING) {
+            handleConnectToggle(null)
+        }
+    }
+
     LaunchedEffect(autoConnectOnStart, showSplash) {
         if (autoConnectOnStart && !showSplash && vpnStats.status == VpnStatus.DISCONNECTED) {
             handleConnectToggle(null)

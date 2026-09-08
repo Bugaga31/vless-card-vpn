@@ -543,11 +543,28 @@ class CoreUnitTests {
 
         val proxy = JSONObject(json).getJSONArray("outbounds").getJSONObject(0)
         val tls = proxy.getJSONObject("tls")
+        // Этот билд libbox декодирует fragment как bool — иначе runtime-ошибка
+        // "cannot unmarshal object into Go value of type bool".
         assertTrue("Fragmentation must be enabled in TLS config", tls.has("fragment"))
-        val fragment = tls.getJSONObject("fragment")
-        assertTrue(fragment.getBoolean("enabled"))
-        assertEquals("tlshello", fragment.getString("packets"))
-        assertEquals("5-15ms", fragment.getString("interval"))
+        assertTrue("fragment must be a boolean flag", tls.getBoolean("fragment"))
+    }
+
+    @Test
+    fun testTurboRealityStrategyDisablesFragment() {
+        val config = VlessConfig(
+            name = "Reality No Frag",
+            address = "10.0.0.1",
+            port = 443,
+            uuid = "uuid",
+            security = "reality",
+            publicKey = "test-key",
+            shortId = "ab"
+        )
+        val settings = AppSettings(enableFragmentation = true, evasionStrategy = "turbo_reality")
+        val json = SingBoxManager.generateConfig(null, config, settings)
+
+        val proxy = JSONObject(json).getJSONArray("outbounds").getJSONObject(0)
+        assertFalse("turbo_reality strategy must omit fragment", proxy.getJSONObject("tls").has("fragment"))
     }
 
     @Test
