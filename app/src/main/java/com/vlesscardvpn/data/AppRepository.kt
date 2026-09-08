@@ -136,7 +136,12 @@ class AppRepository(private val context: Context) {
         githubIssuesRepo = prefs.getString("githubIssuesRepo", "vless-card-vpn/vless-card-vpn") ?: "vless-card-vpn/vless-card-vpn",
         githubApiToken = prefs.getString("githubApiToken", "") ?: "",
         autoSendCrashReportsConsent = prefs.getBoolean("autoSendCrashReportsConsent", false),
-        vpnCore = prefs.getString("vpnCore", "auto") ?: "auto"
+        vpnCore = prefs.getString("vpnCore", "auto") ?: "auto",
+        evasionStrategy = prefs.getString("evasionStrategy", "auto_cascade") ?: "auto_cascade",
+        enableSniRotation = prefs.getBoolean("enableSniRotation", true),
+        enableFragmentation = prefs.getBoolean("enableFragmentation", true),
+        fragmentPackets = prefs.getString("fragmentPackets", "tlshello") ?: "tlshello",
+        fragmentInterval = prefs.getString("fragmentInterval", "5-15ms") ?: "5-15ms"
     )
 
     private fun saveSettingsToPrefs(settings: AppSettings) {
@@ -165,6 +170,11 @@ class AppRepository(private val context: Context) {
             putString("githubApiToken", settings.githubApiToken)
             putBoolean("autoSendCrashReportsConsent", settings.autoSendCrashReportsConsent)
             putString("vpnCore", settings.vpnCore)
+            putString("evasionStrategy", settings.evasionStrategy)
+            putBoolean("enableSniRotation", settings.enableSniRotation)
+            putBoolean("enableFragmentation", settings.enableFragmentation)
+            putString("fragmentPackets", settings.fragmentPackets)
+            putString("fragmentInterval", settings.fragmentInterval)
             apply()
         }
     }

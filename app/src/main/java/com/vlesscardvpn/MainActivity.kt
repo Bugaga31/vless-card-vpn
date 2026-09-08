@@ -158,19 +158,32 @@ fun VlessCardVpnApp(
         }
     }
 
-    // Полный автомат: при открытии приложения туннель поднимается сам,
-    // если включён автопилот (settings.autoSelect) — кнопку жать не нужно.
-    LaunchedEffect(settings.autoSelect, configs.size) {
-        if (!settings.autoSelect) return@LaunchedEffect
-        delay(2500) // даём подпискам и БД прогрузиться после сплэша
-        if (vpnStats.status != VpnStatus.CONNECTED && vpnStats.status != VpnStatus.CONNECTING) {
-            handleConnectToggle(null)
+    // Запрос разрешения VPN сразу при первом запуске (после установки/открытия)
+    var vpnPermissionChecked by remember { mutableStateOf(false) }
+    var autoConnectAttempted by remember { mutableStateOf(false) }
+
+    LaunchedEffect(showSplash) {
+        if (!showSplash && !vpnPermissionChecked) {
+            vpnPermissionChecked = true
+            try {
+                val prepareIntent = VpnService.prepare(context)
+                if (prepareIntent != null) {
+                    vpnPermissionLauncher.launch(prepareIntent)
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("MainActivity", "Early VPN permission check failed", e)
+            }
         }
     }
 
-    LaunchedEffect(autoConnectOnStart, showSplash) {
-        if (autoConnectOnStart && !showSplash && vpnStats.status == VpnStatus.DISCONNECTED) {
-            handleConnectToggle(null)
+    // Полный автомат: однократное автоподключение при старте приложения
+    LaunchedEffect(showSplash, settings.autoSelect, autoConnectOnStart) {
+        if (!showSplash && (settings.autoSelect || autoConnectOnStart) && !autoConnectAttempted) {
+            autoConnectAttempted = true
+            delay(1500) // даём подпискам и БД прогрузиться
+            if (vpnStats.status == VpnStatus.DISCONNECTED) {
+                handleConnectToggle(null)
+            }
         }
     }
 
