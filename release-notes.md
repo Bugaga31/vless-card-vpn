@@ -1,3 +1,15 @@
+# v1.0.36 — Dual-Engine (SingBox + V2Ray) + Anti-DPI WhiteList Masquerade + 1-Click AutoPilot
+
+## Что нового
+- 🚀 **Полноценная двухъядерная архитектура**: интеграция `libv2ray.aar` (`v2ray-core` + `tun2socks`) в основной VPN-сервис рядом с `sing-box`.
+- ⚡ **Режим «1-Click AutoPilot»**: нажатие одной кнопки автоматически обновляет подписки из белых списков, меряет пинг и моментально подключается к лучшему серверу с оптимальным ядром.
+- 🛡️ **Anti-DPI Evasion & White-list Masquerade**:
+  - Маскировка под доверенную инфраструктуру РФ (`yandex.ru`, `vk.com`, `gosuslugi.ru`, `sberbank.ru`, `tbank.ru`, `ozon.ru`, `mail.ru` и операторы связи).
+  - TLS ClientHello Fragmentation для обхода блокировок ТСПУ РКН.
+  - Подделка HTTP Fake Headers.
+- ⚙️ **Переключатель ядра VPN** в Настройках (`⚡ Авто`, `Sing-Box`, `V2Ray`).
+- 🧪 Добавлены тесты генерации конфигураций и маскировки DPI: `V2RayManagerTest`, `AntiDpiEvasionEngineTest`.
+
 # v1.0.35 — libv2ray AAR + исправление сборки
 
 ## Что нового

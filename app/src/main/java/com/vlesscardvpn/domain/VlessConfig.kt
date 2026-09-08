@@ -75,6 +75,7 @@ data class AppSettings(
         "ru.mail.mailapp",
         "ru.yandex.mail"
     ),
+    val vpnCore: String = "auto", // "auto", "singbox", "v2ray"
     val enableMorph: Boolean = false,
     val morphinaEnabled: Boolean = true,
     val autoFetchSources: List<String> = listOf(

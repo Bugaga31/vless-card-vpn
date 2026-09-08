@@ -138,7 +138,41 @@ fun SettingsScreen(
                 }
             }
 
-            // Group 2: Маршрутизация & Трафик
+            // Group 2: Ядро VPN (V2Ray / Sing-Box)
+            GroupCard(title = "2. ЯДРО СЕТИ (V2RAY / SING-BOX)") {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = "Движок туннелирования",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onBackground
+                    )
+                    Text(
+                        text = "Auto: Sing-Box для Reality + V2Ray для WS/TLS/VMess. Или принудительный выбор.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        listOf(
+                            "auto" to "⚡ Авто",
+                            "singbox" to "Sing-Box",
+                            "v2ray" to "V2Ray"
+                        ).forEach { (coreKey, coreLabel) ->
+                            val selected = settings.vpnCore.equals(coreKey, ignoreCase = true)
+                            FilterChip(
+                                selected = selected,
+                                onClick = { repo.updateSettings { s -> s.copy(vpnCore = coreKey) } },
+                                label = { Text(coreLabel) }
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Group 3: Маршрутизация & Трафик
             GroupCard(title = "2. МАРШРУТИЗАЦИЯ И ТРАФИК") {
                 SettingSwitchItem(
                     title = "Прямой доступ для РФ (.RU)",
@@ -194,7 +228,7 @@ fun SettingsScreen(
                 }
             }
 
-            // Group 3: Диагностика & DNS
+            // Group 4: Диагностика & DNS
             GroupCard(title = "3. ДИАГНОСТИКА И DNS") {
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Row(
@@ -269,7 +303,7 @@ fun SettingsScreen(
                 ) { repo.updateSettings { s -> s.copy(autoTestAfterImport = it) } }
             }
 
-            // Group 4: Приложение & Хранилище
+            // Group 5: Приложение & Хранилище
             GroupCard(title = "4. ПРИЛОЖЕНИЕ И ПАМЯТЬ") {
                 SettingSwitchItem(
                     title = "Скрывать недоступные серверы",

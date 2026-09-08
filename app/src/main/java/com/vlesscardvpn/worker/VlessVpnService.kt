@@ -16,6 +16,7 @@ import com.vlesscardvpn.MainActivity
 import com.vlesscardvpn.core.LibboxPlatformInterface
 import com.vlesscardvpn.core.NetworkProfileManager
 import com.vlesscardvpn.core.SingBoxManager
+import com.vlesscardvpn.core.V2RayCoreEngine
 import com.vlesscardvpn.data.AppRepository
 import com.vlesscardvpn.domain.AppSettings
 import com.vlesscardvpn.domain.PingTester
@@ -98,6 +99,7 @@ class VlessVpnService : VpnService() {
     private var commandServer: CommandServer? = null
     private var commandClient: CommandClient? = null
     private var platformAdapter: LibboxPlatformInterface? = null
+    private var v2rayEngine: V2RayCoreEngine? = null
 
     private lateinit var repository: AppRepository
 
@@ -223,71 +225,111 @@ class VlessVpnService : VpnService() {
 
             if (sessionId != sessionSequence.get()) return
 
-            // 3. Generate Sing-Box Core Config JSON and validate before applying
-            val singBoxJson = SingBoxManager.generateConfig(
-                context = this@VlessVpnService,
-                config = config,
-                settings = settingsSnapshot,
-                networkProfile = netProfile
-            )
-
-            SingBoxManager.validateGeneratedConfig(singBoxJson).getOrThrow()
+            // 3. Decide which core to use: sing-box (default for Reality & Advanced Anti-DPI) or v2ray-core
+            val useV2Ray = (settingsSnapshot.vpnCore.equals("v2ray", ignoreCase = true)) ||
+                           (settingsSnapshot.vpnCore.equals("auto", ignoreCase = true) && !config.security.equals("reality", ignoreCase = true) && (config.protocolType.equals("vmess", ignoreCase = true) || config.transport.equals("ws", ignoreCase = true)))
 
             // 4. Teardown any lingering core instance cleanly before spawning new
             cleanupResources()
 
-            // 5. Setup LibboxPlatformInterface and CommandServer
-            val adapter = LibboxPlatformInterface(this@VlessVpnService) { pfd ->
-                vpnInterface = pfd
-            }
-            platformAdapter = adapter
+            if (useV2Ray) {
+                // Launch via V2Ray Core Engine (libv2ray.aar)
+                val builder = Builder()
+                    .setSession("VLESS Card VPN · v2ray")
+                    .setMtu(netProfile.optimalMtu.coerceIn(1280, 1500))
+                    .addAddress("172.19.0.1", 30)
+                    .addRoute("0.0.0.0", 0)
+                    .addAddress("fdfe:dcba:9876::1", 126)
+                    .addRoute("::", 0)
+                    .addDnsServer("1.1.1.1")
+                    .setBlocking(false)
 
-            val serverHandler = object : CommandServerHandler {
-                override fun getSystemProxyStatus(): SystemProxyStatus? = null
-                override fun serviceReload() {}
-                override fun serviceStop() {
-                    // Core stopped unexpectedly
-                    serviceScope.launch {
-                        operationMutex.withLock {
-                            if (_vpnStats.value.status == VpnStatus.CONNECTED) {
-                                cleanupResources()
-                                _vpnStats.value = VpnSessionStats(
-                                    status = VpnStatus.ERROR,
-                                    activeConfig = config,
-                                    errorMessage = "Ядро туннеля было остановлено системой"
-                                )
-                                stopForeground(STOP_FOREGROUND_REMOVE)
+                try {
+                    builder.addDisallowedApplication(packageName)
+                } catch (_: Exception) {}
+
+                val pfd = builder.establish() ?: throw IllegalStateException("TUN builder establish returned null")
+                vpnInterface = pfd
+
+                val engine = V2RayCoreEngine(applicationContext)
+                try {
+                    engine.start(config, pfd, settingsSnapshot)
+                    v2rayEngine = engine
+                } catch (t: Throwable) {
+                    Log.e("VlessVpnService", "V2Ray engine start failed", t)
+                    cleanupResources()
+                    _vpnStats.value = VpnSessionStats(
+                        status = VpnStatus.ERROR,
+                        activeConfig = config,
+                        errorMessage = "Ошибка запуска ядра v2ray: ${sanitizeError(t.message)}"
+                    )
+                    stopForeground(STOP_FOREGROUND_REMOVE)
+                    return
+                }
+            } else {
+                // Launch via Sing-Box Core Engine (libbox.aar)
+                val singBoxJson = SingBoxManager.generateConfig(
+                    context = this@VlessVpnService,
+                    config = config,
+                    settings = settingsSnapshot,
+                    networkProfile = netProfile
+                )
+
+                SingBoxManager.validateGeneratedConfig(singBoxJson).getOrThrow()
+
+                // 5. Setup LibboxPlatformInterface and CommandServer
+                val adapter = LibboxPlatformInterface(this@VlessVpnService) { pfd ->
+                    vpnInterface = pfd
+                }
+                platformAdapter = adapter
+
+                val serverHandler = object : CommandServerHandler {
+                    override fun getSystemProxyStatus(): SystemProxyStatus? = null
+                    override fun serviceReload() {}
+                    override fun serviceStop() {
+                        // Core stopped unexpectedly
+                        serviceScope.launch {
+                            operationMutex.withLock {
+                                if (_vpnStats.value.status == VpnStatus.CONNECTED) {
+                                    cleanupResources()
+                                    _vpnStats.value = VpnSessionStats(
+                                        status = VpnStatus.ERROR,
+                                        activeConfig = config,
+                                        errorMessage = "Ядро туннеля было остановлено системой"
+                                    )
+                                    stopForeground(STOP_FOREGROUND_REMOVE)
+                                }
                             }
                         }
                     }
+                    override fun setSystemProxyEnabled(p0: Boolean) {}
+                    override fun writeDebugMessage(msg: String?) {
+                        Log.d("SingBoxCore", msg ?: "")
+                    }
                 }
-                override fun setSystemProxyEnabled(p0: Boolean) {}
-                override fun writeDebugMessage(msg: String?) {
-                    Log.d("SingBoxCore", msg ?: "")
+
+                // 5b. Start CommandServer and load config - protected boundary for libbox/JNI
+                val server = try {
+                    val s = CommandServer(serverHandler, adapter)
+                    s.start()
+                    s.startOrReloadService(singBoxJson, OverrideOptions())
+                    s
+                } catch (t: Throwable) {
+                    Log.e("VlessVpnService", "CommandServer startOrReloadService failed (libbox/JNI)", t)
+                    cleanupResources()
+                    _vpnStats.value = VpnSessionStats(
+                        status = VpnStatus.ERROR,
+                        activeConfig = config,
+                        errorMessage = "Ошибка запуска ядра sing-box: ${sanitizeError(t.message)}"
+                    )
+                    stopForeground(STOP_FOREGROUND_REMOVE)
+                    return
                 }
-            }
+                commandServer = server
 
-            // 5b. Start CommandServer and load config - protected boundary for libbox/JNI
-            val server = try {
-                val s = CommandServer(serverHandler, adapter)
-                s.start()
-                s.startOrReloadService(singBoxJson, OverrideOptions())
-                s
-            } catch (t: Throwable) {
-                Log.e("VlessVpnService", "CommandServer startOrReloadService failed (libbox/JNI)", t)
-                cleanupResources()
-                _vpnStats.value = VpnSessionStats(
-                    status = VpnStatus.ERROR,
-                    activeConfig = config,
-                    errorMessage = "Ошибка запуска ядра sing-box: ${sanitizeError(t.message)}"
-                )
-                stopForeground(STOP_FOREGROUND_REMOVE)
-                return
+                // 6. Connect CommandClient for real traffic metrics
+                startCommandClientListener()
             }
-            commandServer = server
-
-            // 6. Connect CommandClient for real traffic metrics
-            startCommandClientListener()
 
             if (sessionId != sessionSequence.get()) {
                 cleanupResources()
@@ -467,6 +509,9 @@ class VlessVpnService : VpnService() {
 
         try { platformAdapter?.closeDefaultInterfaceMonitor(null) } catch (_: Exception) {}
         platformAdapter = null
+
+        try { v2rayEngine?.stop() } catch (_: Exception) {}
+        v2rayEngine = null
 
         try { vpnInterface?.close() } catch (_: Exception) {}
         vpnInterface = null

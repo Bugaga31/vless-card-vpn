@@ -33,3 +33,4 @@ app/debug/
 .gradle-home/
 .gradle-local/
 app/libs/*.jar
+!app/libs/libv2ray.aar

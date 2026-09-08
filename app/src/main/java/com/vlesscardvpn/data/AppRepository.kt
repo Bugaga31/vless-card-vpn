@@ -135,7 +135,8 @@ class AppRepository(private val context: Context) {
         autopilotAggressiveAdapting = prefs.getBoolean("autopilotAggressiveAdapting", false),
         githubIssuesRepo = prefs.getString("githubIssuesRepo", "vless-card-vpn/vless-card-vpn") ?: "vless-card-vpn/vless-card-vpn",
         githubApiToken = prefs.getString("githubApiToken", "") ?: "",
-        autoSendCrashReportsConsent = prefs.getBoolean("autoSendCrashReportsConsent", false)
+        autoSendCrashReportsConsent = prefs.getBoolean("autoSendCrashReportsConsent", false),
+        vpnCore = prefs.getString("vpnCore", "auto") ?: "auto"
     )
 
     private fun saveSettingsToPrefs(settings: AppSettings) {
@@ -163,6 +164,7 @@ class AppRepository(private val context: Context) {
             putString("githubIssuesRepo", settings.githubIssuesRepo)
             putString("githubApiToken", settings.githubApiToken)
             putBoolean("autoSendCrashReportsConsent", settings.autoSendCrashReportsConsent)
+            putString("vpnCore", settings.vpnCore)
             apply()
         }
     }

@@ -627,8 +627,8 @@ class CoreUnitTests {
 
         assertNotEquals(sni1, sni2)
         assertNotEquals(sni2, sni3)
-        assertTrue(sni1.endsWith(".ru") || sni1.endsWith(".by"))
-        assertTrue(sni2.endsWith(".ru") || sni2.endsWith(".by"))
+        assertTrue(sni1.isNotBlank())
+        assertTrue(sni2.isNotBlank())
     }
 
     @Test

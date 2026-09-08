@@ -204,7 +204,7 @@ fun HomeScreen(
                     Text(
                         when {
                             connected -> "Туннель активен. Трафик защищён через Reality."
-                            connecting -> "Запускаем ядро sing-box и верифицируем пинг..."
+                            connecting -> "Запускаем ядро (v2ray / sing-box) и верифицируем пинг..."
                             stopping -> "Завершаем текущую сессию..."
                             vpnStats.status == VpnStatus.ERROR -> vpnStats.errorMessage ?: "Проверьте сервер или откройте диагностику."
                             selected == null -> "Добавьте свой узел связи, чтобы начать."
