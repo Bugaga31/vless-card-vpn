@@ -116,22 +116,29 @@ fun VlessCardVpnApp(
                 return@launch
             }
 
-            // 1-Click Auto Connect: Pick requested config, or active, or lowest-ping verified, or fetch live
-            var cfgToConnect = targetConfig 
-                ?: configs.firstOrNull { it.isActive } 
-                ?: configs.filter { it.pingMs in 1..2000 }.minByOrNull { it.pingMs }
+            // 1-Click Full Automation Connect:
+            // 1. If user passed a specific config, use it.
+            // 2. Otherwise find lowest-ping verified config among existing ones.
+            // 3. If none exist or none verified, automatically fetch live subscription pool, ping in parallel, and connect to the fastest node!
+            var cfgToConnect = targetConfig ?: configs.filter { it.pingMs in 1..1500 }.minByOrNull { it.pingMs }
+                ?: configs.firstOrNull { it.isActive }
                 ?: configs.firstOrNull()
 
-            if (cfgToConnect == null) {
-                Toast.makeText(context, "⚡ 1-Click: Автоматический поиск и подбор рабочего VLESS/Reality сервера…", Toast.LENGTH_SHORT).show()
-                val working = PublicConfigFetcher.fetchAndFilterWorkingConfigs(maxWorkingCount = 15)
+            if (cfgToConnect == null || (targetConfig == null && cfgToConnect.pingMs <= 0)) {
+                Toast.makeText(context, "⚡ 1-Click: Сканирование пула подписок и выбор быстрейшего узла…", Toast.LENGTH_SHORT).show()
+                val working = PublicConfigFetcher.fetchAndFilterWorkingConfigs(maxWorkingCount = 20)
                 if (working.isNotEmpty()) {
                     working.forEach { repo.addConfig(it) }
-                    cfgToConnect = working.minByOrNull { it.pingMs } ?: working.first()
+                    cfgToConnect = working.minByOrNull { if (it.pingMs > 0) it.pingMs else 9999 } ?: working.first()
                 }
             }
 
             if (cfgToConnect != null) {
+                // Кнопка «Подключить» = полный автомат: автопилот всегда идёт в связке
+                // с туннелем — фон-скан подписок, перепинг и failover на быстрейший узел.
+                runCatching { autoPilotEngine.setConsent(true) }
+                runCatching { autoPilotEngine.startAutoPilot(settings.healthCheckInterval) }
+                scope.launch { runCatching { autoPilotEngine.triggerManualScan() } }
                 try {
                     val prepareIntent = VpnService.prepare(context)
                     if (prepareIntent != null) {

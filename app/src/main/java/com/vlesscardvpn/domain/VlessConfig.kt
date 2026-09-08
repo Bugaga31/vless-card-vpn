@@ -37,9 +37,9 @@ data class VlessConfig(
 
 data class AppSettings(
     val isDarkTheme: Boolean = true,
-    val autoSelect: Boolean = false,
+    val autoSelect: Boolean = true,
     val autoSelectBestPing: Boolean = true,
-    val healthCheckInterval: Int = 30, // seconds
+    val healthCheckInterval: Int = 20, // seconds
     val failoverEnabled: Boolean = true,
     val lastWorkingConfigId: String = "",
     val enableRuDirect: Boolean = true,
@@ -53,18 +53,22 @@ data class AppSettings(
     val showOnlyWorkingNodes: Boolean = false,
     val deduplicateNodes: Boolean = true,
     val maxFreeNodesToAdd: Int = 100,
-    val autopilotConsentGiven: Boolean = false,
+    val autopilotConsentGiven: Boolean = true,
     val autopilotAllowedOnlyFavorites: Boolean = false,
-    val autopilotAggressiveAdapting: Boolean = false,
+    val autopilotAggressiveAdapting: Boolean = true,
     val githubIssuesRepo: String = "github.com/vless-card-vpn/vless-card-vpn",
     val githubApiToken: String = "",
     val autoSendCrashReportsConsent: Boolean = false,
     val enableAdBlock: Boolean = true,
     val enableJa4: Boolean = true,
-    val enableSniRotation: Boolean = false,
+    val enableSniRotation: Boolean = true,
     val enableFragmentation: Boolean = true,
     val fragmentPackets: String = "tlshello",
     val fragmentInterval: String = "10-20ms",
+    val evasionStrategy: String = "zapret_ghost", // "zapret_ghost", "white_ru", "turbo_reality", "morph_chaos"
+    val enableTcpFastOpen: Boolean = true,
+    val enableMux: Boolean = false,
+    val enableNoisePadding: Boolean = true,
     val bypassApps: List<String> = listOf(
         "com.sberbankmobile",
         "ru.tinkoff.mobile",

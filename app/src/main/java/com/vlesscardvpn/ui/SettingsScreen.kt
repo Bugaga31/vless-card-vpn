@@ -138,37 +138,20 @@ fun SettingsScreen(
                 }
             }
 
-            // Group 2: Ядро VPN (V2Ray / Sing-Box)
-            GroupCard(title = "2. ЯДРО СЕТИ (V2RAY / SING-BOX)") {
+            // Group 2: Ядро туннелирования
+            GroupCard(title = "2. ЯДРО ТУННЕЛЯ И ПРОТОКОЛЫ") {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
-                        text = "Движок туннелирования",
+                        text = "Высокопроизводительный движок",
                         style = MaterialTheme.typography.bodyMedium,
                         fontWeight = FontWeight.SemiBold,
                         color = MaterialTheme.colorScheme.onBackground
                     )
                     Text(
-                        text = "Auto: Sing-Box для Reality + V2Ray для WS/TLS/VMess. Или принудительный выбор.",
+                        text = "Универсальный сетевой стек Sing-Box с поддержкой VLESS Reality, VMess, Trojan, uTLS и защиты от ТСПУ.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        listOf(
-                            "auto" to "⚡ Авто",
-                            "singbox" to "Sing-Box",
-                            "v2ray" to "V2Ray"
-                        ).forEach { (coreKey, coreLabel) ->
-                            val selected = settings.vpnCore.equals(coreKey, ignoreCase = true)
-                            FilterChip(
-                                selected = selected,
-                                onClick = { repo.updateSettings { s -> s.copy(vpnCore = coreKey) } },
-                                label = { Text(coreLabel) }
-                            )
-                        }
-                    }
                 }
             }
 

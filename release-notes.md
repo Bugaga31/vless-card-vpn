@@ -1,3 +1,13 @@
+# v1.0.37 — Одна кнопка: AutoPilot всегда в связке + 9 стратегий стелса
+
+## Что нового
+- 🤖 **AutoPilot вшит в главную кнопку «Подключить»**: туннель поднимается мгновенно на лучшем узле, а автопилот параллельно сканирует подписки и перепинговывает пул — failover на быстрейший сервер автоматом.
+- 🎭 **Движок стратегий стелса EvasionStrategies (9 режимов)**: Автокаскад, Zapret Ghost (сплит ClientHello), Белый плащ РФ (мимикрия под Яндекс/ВК/Госуслуги, uTLS Safari), Morph Chaos (джиттер + ротация SNI), Reality XTLS-Vision, Fake-Packets First, QUIC Killer (TCP fallback), HTTP Host Split, DoH Bootstrap.
+- ⚙️ **Стратегии реально управляют ядром**: все 4 outbound-блока фрагментации (VLESS/VMess/Trojan/Hysteria2) и uTLS-fingerprint резолвятся через активную стратегию; для Reality фрагментация честно отключается.
+- 🐞 **Исправлен JNI-конфликт двух gomobile-ядер** («No implementation found for libv2ray._init»): убран дублирующий libv2ray.aar, туннель работает на едином libbox.
+- 🧹 **Чистка SNI-пула**: 134 bare-домена .ru/.by/.com вместо 327 строк мусора — удалены битые SNI с путями (ломали TLS-handshake), чужие TLD и заблокированные ТСПУ ресурсы.
+- 🧪 Новый EvasionStrategiesTest (7 тестов); всего 76 юнит-тестов — зелёные.
+
 # v1.0.36 — Dual-Engine (SingBox + V2Ray) + Anti-DPI WhiteList Masquerade + 1-Click AutoPilot
 
 ## Что нового

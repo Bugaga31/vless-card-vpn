@@ -5,7 +5,7 @@ plugins {
 }
 
 // Match the existing release workflow's v1.0.<run_number> tag.
-val releaseNumber = providers.environmentVariable("GITHUB_RUN_NUMBER").orNull?.toIntOrNull() ?: 36
+val releaseNumber = providers.environmentVariable("GITHUB_RUN_NUMBER").orNull?.toIntOrNull() ?: 37
 
 android {
     namespace = "com.vlesscardvpn"
@@ -39,7 +39,7 @@ android {
 
 dependencies {
     implementation(files("libs/libbox-android-1.0.1.aar"))
-    implementation(files("libs/libv2ray.aar"))
+
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.4")
     implementation("androidx.activity:activity-compose:1.9.1")

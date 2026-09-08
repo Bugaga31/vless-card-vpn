@@ -53,6 +53,12 @@ class VlessApplication : Application() {
      */
     private fun setupGoSeqContext() {
         try {
+            System.loadLibrary("box")
+            Log.i(TAG, "Loaded libbox.so (sing-box native library)")
+        } catch (t: Throwable) {
+            Log.w(TAG, "Could not load libbox: ${t.message}")
+        }
+        try {
             Seq.setContext(applicationContext)
             Log.i(TAG, "Go Seq context initialized successfully")
         } catch (t: Throwable) {

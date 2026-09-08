@@ -289,7 +289,7 @@ object SingBoxManager {
                     put("insecure", false)
                     put("utls", JSONObject().apply {
                         put("enabled", true)
-                        put("fingerprint", config.fingerprint.ifBlank { "chrome" })
+                        put("fingerprint", config.fingerprint.ifBlank { EvasionStrategies.activeFingerprint(settings.fragmentPackets) })
                     })
                     if (config.security.equals("reality", ignoreCase = true)) {
                         put("reality", JSONObject().apply {
@@ -298,14 +298,16 @@ object SingBoxManager {
                             put("short_id", config.shortId.trim())
                         })
                     }
-                    // Anti-DPI: TLS fragmentation to evade TSPU packet inspection
+                    // Anti-DPI: strategy-driven fragmentation (EvasionStrategies cascade)
                     if (settings.enableFragmentation) {
-                        put("fragment", JSONObject().apply {
-                            put("enabled", true)
-                            put("packets", settings.fragmentPackets)
-                            put("length", "10-50")
-                            put("interval", settings.fragmentInterval)
-                        })
+                        EvasionStrategies.effectiveFragmentParams(settings.fragmentPackets, settings.fragmentInterval)?.let { (packets, interval) ->
+                            put("fragment", JSONObject().apply {
+                                put("enabled", true)
+                                put("packets", packets)
+                                put("length", "10-50")
+                                put("interval", interval)
+                            })
+                        }
                     }
                 })
             }
@@ -354,12 +356,14 @@ object SingBoxManager {
                     put("enabled", true)
                     put("server_name", effectiveSni)
                     if (settings.enableFragmentation) {
-                        put("fragment", JSONObject().apply {
-                            put("enabled", true)
-                            put("packets", settings.fragmentPackets)
-                            put("length", "10-50")
-                            put("interval", settings.fragmentInterval)
-                        })
+                        EvasionStrategies.effectiveFragmentParams(settings.fragmentPackets, settings.fragmentInterval)?.let { (packets, interval) ->
+                            put("fragment", JSONObject().apply {
+                                put("enabled", true)
+                                put("packets", packets)
+                                put("length", "10-50")
+                                put("interval", interval)
+                            })
+                        }
                     }
                 })
             }
@@ -377,12 +381,14 @@ object SingBoxManager {
                 put("enabled", true)
                 put("server_name", effectiveSni)
                 if (settings.enableFragmentation) {
-                    put("fragment", JSONObject().apply {
-                        put("enabled", true)
-                        put("packets", settings.fragmentPackets)
-                        put("length", "10-50")
-                        put("interval", settings.fragmentInterval)
-                    })
+                    EvasionStrategies.effectiveFragmentParams(settings.fragmentPackets, settings.fragmentInterval)?.let { (packets, interval) ->
+                        put("fragment", JSONObject().apply {
+                            put("enabled", true)
+                            put("packets", packets)
+                            put("length", "10-50")
+                            put("interval", interval)
+                        })
+                    }
                 }
             })
         }
@@ -438,12 +444,14 @@ object SingBoxManager {
                 put("server_name", sni)
                 put("insecure", false)
                 if (settings.enableFragmentation) {
-                    put("fragment", JSONObject().apply {
-                        put("enabled", true)
-                        put("packets", settings.fragmentPackets)
-                        put("length", "10-50")
-                        put("interval", settings.fragmentInterval)
-                    })
+                    EvasionStrategies.effectiveFragmentParams(settings.fragmentPackets, settings.fragmentInterval)?.let { (packets, interval) ->
+                        put("fragment", JSONObject().apply {
+                            put("enabled", true)
+                            put("packets", packets)
+                            put("length", "10-50")
+                            put("interval", interval)
+                        })
+                    }
                 }
             })
 
