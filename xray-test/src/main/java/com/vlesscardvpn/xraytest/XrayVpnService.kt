@@ -37,11 +37,11 @@ class XrayVpnService : VpnService() {
         if (run?.isCompleted == false) return START_NOT_STICKY
         try {
             val nm = getSystemService(NotificationManager::class.java)
-            if (Build.VERSION.SDK_INT >= 26) nm.createNotificationChannel(NotificationChannel("vpn-test", "Xray VPN test", NotificationManager.IMPORTANCE_LOW))
+            if (Build.VERSION.SDK_INT >= 26) nm.createNotificationChannel(NotificationChannel("vpn-test", "v2ray VPN test", NotificationManager.IMPORTANCE_LOW))
             val open = PendingIntent.getActivity(this, 1, Intent(this, MainActivity::class.java), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
             val stop = PendingIntent.getService(this, 2, Intent(this, XrayVpnService::class.java).setAction("STOP"), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
             val notification = NotificationCompat.Builder(this, "vpn-test").setSmallIcon(android.R.drawable.ic_lock_lock)
-                .setContentTitle("VLESS Card · Xray VPN").setContentText("VPN активен и защищает соединение").setContentIntent(open)
+                .setContentTitle("VLESS Card · v2ray VPN").setContentText("VPN активен и защищает соединение").setContentIntent(open)
                 .addAction(0, "Отключить", stop).setOngoing(true).build()
             if (Build.VERSION.SDK_INT >= 34) startForeground(42, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
             else startForeground(42, notification)
@@ -63,8 +63,8 @@ class XrayVpnService : VpnService() {
         try {
             check(consent && nodes.isNotEmpty() && selected in nodes.indices) { "Invalid start request" }
             check(prepare(this) == null) { "VPN permission missing" }
-            TestState.update(Session(busy = true, message = "Инициализация Xray…"))
-            Reports.add("Xray environment init")
+            TestState.update(Session(busy = true, message = "Инициализация v2ray…"))
+            Reports.add("v2ray environment init")
             Seq.setContext(applicationContext)
             Libv2ray.initCoreEnv(filesDir.absolutePath, "")
             controller = Libv2ray.newCoreController(object : CoreCallbackHandler {
@@ -74,7 +74,7 @@ class XrayVpnService : VpnService() {
             })
             currentCoroutineContext().ensureActive()
             Reports.add("Establish TUN")
-            tun = Builder().setSession("VLESS Card VPN · Xray").setMtu(1400)
+            tun = Builder().setSession("VLESS Card VPN · v2ray").setMtu(1400)
                 .addAddress("172.19.0.1", 30).addRoute("0.0.0.0", 0)
                 .addAddress("fdfe:dcba:9876::1", 126).addRoute("::", 0)
                 .addDnsServer("1.1.1.1").addDisallowedApplication(packageName)
@@ -91,7 +91,7 @@ class XrayVpnService : VpnService() {
                     TestState.update(Session(busy = true, message = "Сервер ${i + 1}: запуск и проверка…", node = i))
                     Reports.add("Start candidate ${i + 1}")
                     port = ServerSocket(0).use { it.localPort }
-                    controller.startLoop(XrayConfig.build(nodes[i], port), tun.fd)
+                    controller.startLoop(XrayConfig.build(nodes[i], port), tun.fd.toLong())
                     check(controller.isRunning) { "Core did not start" }
                     currentCoroutineContext().ensureActive()
                     val results = checkServicesFast(port)
@@ -124,7 +124,7 @@ class XrayVpnService : VpnService() {
         catch (e: Exception) {
             failure = true; Reports.error(e); TestState.update(Session(message = "Ошибка запуска или проверки. Открой «Отчёт»."))
         } catch (e: LinkageError) {
-            failure = true; Reports.error(e); TestState.update(Session(message = "Не удалось загрузить Xray на этом устройстве."))
+            failure = true; Reports.error(e); TestState.update(Session(message = "Не удалось загрузить v2ray на этом устройстве."))
         } finally {
             withContext(NonCancellable) {
                 Reports.add("Stop core, then close TUN")

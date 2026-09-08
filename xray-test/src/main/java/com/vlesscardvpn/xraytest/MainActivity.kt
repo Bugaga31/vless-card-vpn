@@ -12,6 +12,7 @@ import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.*
 
 class MainActivity : ComponentActivity() {
+    private val probeConsentDefault = true
     private var entries by mutableStateOf<List<CardProfile>>(emptyList())
     private var working by mutableStateOf(false)
     private var loaded by mutableStateOf(false)
@@ -124,6 +125,35 @@ class MainActivity : ComponentActivity() {
             else { pending = intent; permissionPending = true; permission.launch(request) }
         } catch (e: Exception) { Reports.error(e); permissionPending = false; pending = null; message = "Не удалось запросить разрешение VPN. Открой отчёт." }
     }
+    private fun turbo(consent: Boolean) {
+        if (!consent || occupied() || !loaded) return
+        working = true
+        work = lifecycleScope.launch {
+            try {
+                if (entries.isEmpty()) {
+                    message = "Турбо: загружаю серверы из источников…"
+                    val result = PublicSources.fetch { message = it }
+                    entries = LoungeStorage.change(applicationContext) { ProfileCatalog.merge(it, result.profiles) }
+                }
+                if (entries.isEmpty()) { message = "Турбо: серверы не найдены. Добавь свои ссылки."; return@launch }
+                message = "Турбо: измеряю задержку ${entries.size} серверов…"
+                val nodes = entries.map { it.node() }
+                val probes = TurboEngine.rank(nodes)
+                val best = probes.filter { it.latencyMs >= 0 }.minByOrNull { it.latencyMs }
+                if (best == null) { message = "Турбо: ни один сервер не отвечает. Проверь интернет."; return@launch }
+                val ordered = TurboEngine.order(nodes.size, probes, TurboEngine.Strategy.FASTEST).map { entries[it] }
+                TestState.profiles.value = ordered.map { it.node() }
+                RunningLabels.names = ordered.map { it.name }
+                message = "Турбо: лучший — ${entries[best.index].name} (${best.latencyMs} мс). Подключаю…"
+                val intent = Intent(this@MainActivity, XrayVpnService::class.java).setAction("START").putExtra("auto", true).putExtra("consent", consent).putExtra("selected", 0)
+                val request = VpnService.prepare(this@MainActivity)
+                if (request == null) startVpn(intent)
+                else { pending = intent; permissionPending = true; permission.launch(request) }
+            } catch (e: CancellationException) { throw e }
+            catch (e: Exception) { Reports.error(e); message = "Турбо: ошибка запуска. Открой отчёт." }
+            finally { working = false }
+        }
+    }
     private fun stop() {
         try { startService(Intent(this, XrayVpnService::class.java).setAction("STOP")) }
         catch (e: Exception) { Reports.error(e); message = "Не удалось отправить команду отключения." }
@@ -136,6 +166,7 @@ class MainActivity : ComponentActivity() {
                 onFavorite = { key -> change { list -> list.map { if (it.key == key) it.copy(favorite = !it.favorite) else it } } },
                 onDelete = { key -> change { list -> list.filterNot { it.key == key } } },
                 onConnect = { auto, favorites, key, consent -> connect(auto, favorites, key, consent) }, onStop = { stop() },
+                onTurbo = { turbo(probeConsentDefault) },
                 report = { Reports.read(this) })
         }
         load()

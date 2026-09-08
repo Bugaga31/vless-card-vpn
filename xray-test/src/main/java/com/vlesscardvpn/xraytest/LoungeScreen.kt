@@ -31,7 +31,7 @@ private val Ink = Color(0xFF0D1411)
 fun LoungeScreen(entries: List<CardProfile>, working: Boolean, loaded: Boolean, permissionPending: Boolean, message: String,
     onReload: () -> Unit, onImport: (String) -> Unit, onFetch: (Boolean) -> Unit, onCancelFetch: () -> Unit,
     onFavorite: (String) -> Unit, onDelete: (String) -> Unit,
-    onConnect: (Boolean, Boolean, String?, Boolean) -> Unit, onStop: () -> Unit, report: () -> String) {
+    onConnect: (Boolean, Boolean, String?, Boolean) -> Unit, onStop: () -> Unit, onTurbo: () -> Unit, report: () -> String) {
     val session by TestState.session.collectAsState()
     var tab by rememberSaveable { mutableStateOf(0) }
     var auto by rememberSaveable { mutableStateOf(true) }
@@ -81,7 +81,10 @@ fun LoungeScreen(entries: List<CardProfile>, working: Boolean, loaded: Boolean, 
                                     Text(activeName ?: chosen?.name ?: "Добавь первый сервер — без случайных демо-узлов", color = Color(0xFFD5E0D8))
                                     Text(session.message, fontSize = 13.sp)
                                     if (vpnBusy) OutlinedButton(onClick = onStop, modifier = Modifier.fillMaxWidth().heightIn(min = 54.dp)) { Text("Отключить / отменить") }
-                                    else Button(onClick = { onConnect(auto, favoritesOnly, chosen?.key, probeConsent) }, enabled = !locked && probeConsent && (candidates.isNotEmpty() || auto), modifier = Modifier.fillMaxWidth().heightIn(min = 54.dp), shape = RoundedCornerShape(18.dp)) { Text(if (auto) "Подключить автоматически" else "Подключить сервер") }
+                                    else {
+                                        Button(onClick = onTurbo, enabled = !locked && probeConsent, modifier = Modifier.fillMaxWidth().heightIn(min = 54.dp), shape = RoundedCornerShape(18.dp)) { Text("⚡ ТУРБО — одна кнопка", fontSize = 16.sp) }
+                                        OutlinedButton(onClick = { onConnect(auto, favoritesOnly, chosen?.key, probeConsent) }, enabled = !locked && probeConsent && (candidates.isNotEmpty() || auto), modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp), shape = RoundedCornerShape(18.dp)) { Text(if (auto) "Подключить автоматически" else "Подключить сервер") }
+                                    }
                                 }
                             }
                         }
@@ -92,7 +95,8 @@ fun LoungeScreen(entries: List<CardProfile>, working: Boolean, loaded: Boolean, 
                             }
                         }
                         item { ToggleRow("Авто-подключение", "Первый прошедший проверки сервер, затем поиск замены при сбоях", auto, !locked) { auto = it } }
-                        item { ToggleRow("Разрешить проверки", "Три HTTPS-запроса на Telegram-сайт и YouTube через Xray, затем периодические проверки. Это не тест звонков и видео.", probeConsent, !locked) { probeConsent = it } }
+                        item { Text("⚡ ТУРБО: загружает серверы при пустом списке, параллельно меряет TCP-задержку всех узлов и подключает самый быстрый. Остальные отсортированы по скорости как запасные.", color = Muted, fontSize = 12.sp) }
+                        item { ToggleRow("Разрешить проверки", "Три HTTPS-запроса на Telegram-сайт и YouTube через v2ray, затем периодические проверки. Это не тест звонков и видео.", probeConsent, !locked) { probeConsent = it } }
                         item { OutlinedButton(onClick = { tab = 1 }, modifier = Modifier.fillMaxWidth()) { Text("Открыть коллекцию серверов") } }
                         item { Text("Серверы сохраняются локально в зашифрованном хранилище Android Keystore. Тестовая версия не является kill switch.", color = Muted, fontSize = 12.sp) }
                     }
@@ -131,7 +135,7 @@ fun LoungeScreen(entries: List<CardProfile>, working: Boolean, loaded: Boolean, 
                         item { ToggleRow("Только избранные", "В авто-подбор попадут лишь серверы со звездой. Пустое избранное не заменяется всеми серверами.", favoritesOnly, !locked) { favoritesOnly = it } }
                         item { ToggleRow("Разрешить HTTPS-проверки", "Проверяются Telegram-сайт и YouTube. Автоматическая смена сервера может прервать текущие соединения.", probeConsent, !locked) { probeConsent = it } }
                         item { StatCard("КАНДИДАТОВ ДЛЯ ЗАПУСКА", "${candidates.size}", Modifier.fillMaxWidth()) }
-                        item { Text("Как работает\n\n1. Запускает выбранного кандидата.\n2. Проверяет оба HTTPS-адреса через Xray.\n3. Оставляет первый прошедший проверки сервер.\n4. После трёх неудачных раундов и минимум 60 секунд ищет замену.\n\nЭто не рейтинг самого быстрого сервера. Ошибка запуска ядра останавливает попытку. Изменить режим и список можно после отключения.", color = Muted, lineHeight = 23.sp) }
+                        item { Text("Как работает\n\n1. Запускает выбранного кандидата.\n2. Проверяет оба HTTPS-адреса через v2ray.\n3. Оставляет первый прошедший проверки сервер.\n4. После трёх неудачных раундов и минимум 60 секунд ищет замену.\n\nЭто не рейтинг самого быстрого сервера. Ошибка запуска ядра останавливает попытку. Изменить режим и список можно после отключения.", color = Muted, lineHeight = 23.sp) }
                         item { if (vpnBusy) OutlinedButton(onClick = onStop, modifier = Modifier.fillMaxWidth()) { Text("Отключить авто / VPN") }
                             else Button(onClick = { onConnect(auto, favoritesOnly, chosen?.key, probeConsent) }, enabled = !locked && probeConsent && (candidates.isNotEmpty() || auto), modifier = Modifier.fillMaxWidth()) { Text("Запустить подключение") } }
                     }
@@ -140,7 +144,7 @@ fun LoungeScreen(entries: List<CardProfile>, working: Boolean, loaded: Boolean, 
                         item { Text("Отчёт содержит этапы подключения, результаты HTTPS-проверок с медианой задержки и сведения о вылете. Успешный SOCKS-тест сам по себе не доказывает прохождение трафика других приложений через TUN.", color = Muted) }
                         item { Button(onClick = { reportText = report() }, modifier = Modifier.fillMaxWidth()) { Text("Открыть отчёт") } }
                         item { Text("После вылета открой приложение снова и скопируй отчёт. Полные ссылки и текст ошибок ядра в него не добавляются. Всё равно проверь содержимое перед отправкой.", color = Muted) }
-                        item { Text("${BuildConfig.VERSION_NAME}\nОтдельное приложение на Xray. Старое приложение и его данные не изменяются. При остановке VPN Android может восстановить прямое соединение.", color = Muted, fontSize = 12.sp) }
+                        item { Text("${BuildConfig.VERSION_NAME}\nОтдельное приложение на ядре v2ray (v2fly). Старое приложение и его данные не изменяются. При остановке VPN Android может восстановить прямое соединение.", color = Muted, fontSize = 12.sp) }
                     }
                 }
             }

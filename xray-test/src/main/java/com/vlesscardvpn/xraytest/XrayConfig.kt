@@ -34,7 +34,8 @@ object XrayConfig {
         val accepted = setOf("security", "type", "encryption", "flow", "sni", "serverName", "fp", "pbk", "sid", "spx", "path", "host", "serviceName", "mode", "alpn", "headerType")
         if (q.keys.any { it !in accepted }) bad("В ссылке есть неподдерживаемые параметры; не изменяйте их наугад")
         val security = q["security"] ?: "none"
-        if (security !in setOf("tls", "reality")) bad("Для теста нужен VLESS с TLS или REALITY")
+        // v2ray-core (v2fly) не поддерживает REALITY — только TLS.
+        if (security != "tls") bad("Ядро v2ray поддерживает только VLESS с TLS (REALITY недоступен)")
         val transport = q["type"] ?: "tcp"
         if (transport !in setOf("tcp", "raw", "ws", "grpc")) bad("В первом тесте поддерживаются TCP, WebSocket и gRPC")
         if (q.getOrDefault("encryption", "none") != "none") bad("Этот режим VLESS encryption пока не поддерживается")
@@ -51,13 +52,8 @@ object XrayConfig {
         }
         if (q.getOrDefault("mode", "gun") != "gun") bad("Этот режим транспорта пока не поддерживается")
         val flow = q["flow"].orEmpty()
-        if (flow !in setOf("", "xtls-rprx-vision")) bad("Этот flow пока не поддерживается")
-        if (flow.isNotEmpty() && transport !in setOf("tcp", "raw")) bad("Vision требует TCP")
-        if (security == "reality") {
-            if (q["pbk"].isNullOrBlank() || (q["sni"] ?: q["serverName"]).isNullOrBlank()) bad("Для REALITY нужны public key и SNI")
-            val sid = q["sid"].orEmpty()
-            if (sid.length > 16 || sid.length % 2 != 0 || !sid.matches(Regex("[0-9a-fA-F]*"))) bad("Некорректный short ID")
-        }
+        // XTLS Vision — фича Xray, в v2ray-core её нет.
+        if (flow.isNotEmpty()) bad("flow (XTLS Vision) поддерживается только ядром Xray, а не v2ray")
         return Node(host, u.port, id, q)
     }
 
@@ -75,16 +71,11 @@ object XrayConfig {
         val transport = q["type"] ?: "tcp"
         val sec = q.getValue("security")
         val stream = JSONObject().put("network", transport).put("security", sec)
+        // uTLS fingerprint — фича Xray; у v2ray-core обычный TLS.
         val tls = JSONObject().put("serverName", q["sni"] ?: q["serverName"] ?: n.host)
-            .put("fingerprint", q["fp"] ?: "chrome")
-        if (sec == "reality") {
-            tls.put("publicKey", q.getValue("pbk")).put("shortId", q["sid"].orEmpty()).put("spiderX", q["spx"] ?: "/")
-            stream.put("realitySettings", tls)
-        } else {
-            tls.put("allowInsecure", false)
-            q["alpn"]?.takeIf { it.isNotBlank() }?.let { tls.put("alpn", JSONArray(it.split(','))) }
-            stream.put("tlsSettings", tls)
-        }
+            .put("allowInsecure", false)
+        q["alpn"]?.takeIf { it.isNotBlank() }?.let { tls.put("alpn", JSONArray(it.split(','))) }
+        stream.put("tlsSettings", tls)
         if (q["headerType"] == "http") {
             val request = JSONObject().put("version", "1.1").put("method", "GET")
                 .put("path", JSONArray(q["path"].orEmpty().ifBlank { "/" }.split(',').map { it.trim() }))
@@ -97,7 +88,7 @@ object XrayConfig {
             "ws" -> stream.put("wsSettings", JSONObject().put("path", q["path"] ?: "/").put("headers", JSONObject().apply { q["host"]?.let { put("Host", it) } }))
             "grpc" -> stream.put("grpcSettings", JSONObject().put("serviceName", q["serviceName"] ?: q["path"].orEmpty()).put("multiMode", false))
         }
-        val user = JSONObject().put("id", n.id).put("encryption", "none").put("flow", q["flow"].orEmpty())
+        val user = JSONObject().put("id", n.id).put("encryption", "none")
         val outbound = JSONObject().put("tag", "proxy").put("protocol", "vless").put("streamSettings", stream)
             .put("settings", JSONObject().put("vnext", JSONArray().put(JSONObject().put("address", n.host).put("port", n.port).put("users", JSONArray().put(user)))))
             .put("mux", JSONObject().put("enabled", false))
@@ -105,16 +96,13 @@ object XrayConfig {
         val directOutbound = JSONObject().put("tag", "direct").put("protocol", "freedom")
         val blockOutbound = JSONObject().put("tag", "block").put("protocol", "blackhole")
 
-        val dnsConfig = JSONObject()
-            .put("servers", JSONArray().put("1.1.1.1").put("8.8.8.8"))
-            .put("queryStrategy", "UseIPv4")
-
+        // v2ray-core не имеет tun-inbound и встроенного DNS-модуля в этой сборке:
+        // TUN обслуживает tun2socks внутри Go-обёртки, резолв — системный.
         return JSONObject().put("log", JSONObject().put("loglevel", "none"))
-            .put("dns", dnsConfig)
             .put("stats", JSONObject())
             .put("inbounds", JSONArray()
-                .put(JSONObject().put("tag", "tun").put("protocol", "tun").put("settings", JSONObject().put("name", "xray0").put("MTU", 1400)))
-                .put(JSONObject().put("tag", "probe").put("listen", "127.0.0.1").put("port", socksPort).put("protocol", "socks").put("settings", JSONObject().put("auth", "noauth").put("udp", false))))
+                .put(JSONObject().put("tag", "probe").put("listen", "127.0.0.1").put("port", socksPort).put("protocol", "socks").put("settings", JSONObject().put("auth", "noauth").put("udp", true))
+                    .put("sniffing", JSONObject().put("enabled", true).put("destOverride", JSONArray().put("http").put("tls")))))
             .put("outbounds", JSONArray().put(outbound).put(directOutbound).put(blockOutbound))
             .put("routing", JSONObject().put("domainStrategy", "AsIs").put("rules", JSONArray()))
             .toString()

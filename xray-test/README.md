@@ -1,4 +1,4 @@
-# VLESS Card Test — Xray candidate
+# VLESS Card Test — v2ray candidate
 
 EXPERIMENTAL, not yet compiled or device-validated. This is not an update for the sing-box app.
 Application ID: `com.vlesscardvpn.xraytest`. Existing app/data stay untouched.
@@ -6,9 +6,11 @@ Application ID: `com.vlesscardvpn.xraytest`. Existing app/data stay untouched.
 ## Build
 `./gradlew :xray-test:testDebugUnitTest :xray-test:assembleDebug`
 Output: `xray-test/build/outputs/apk/debug/xray-test-debug.apk`.
-Requires Android SDK 34/JDK 17 and internet for Gradle and the pinned core download.
-`prepareXray` downloads the official AndroidLibXrayLite v26.8.20 AAR and fails closed on SHA-256 mismatch.
-No libbox dependency is included in this module/process. Uses Xray's native Android TUN; no second Go runtime or HEV binary.
+Requires Android SDK 34/JDK 17, Go, gomobile and Android NDK for the core build.
+`prepareV2ray` builds `libv2ray.aar` locally from v2fly/v2ray-core v4.45.2 + tun2socks
+via `v2ray-mobile/build-aar.sh` (no prebuilt binary download).
+No libbox dependency is included in this module/process. The TUN fd is forwarded by
+tun2socks into the core's loopback SOCKS inbound.
 
 ## First device test
 1. Install beside the existing application. Only one Android VPN can be active at a time.
@@ -21,7 +23,8 @@ No libbox dependency is included in this module/process. Uses Xray's native Andr
 
 ## Actual scope and limitations
 - Minimal Private Lounge test UI, not all original screens.
-- VLESS TLS/REALITY over TCP/raw, WS, gRPC; unsupported options rejected, no silent conversion.
+- VLESS TLS over TCP/raw, WS, gRPC; REALITY/XTLS Vision are NOT supported by v2ray-core
+  and are rejected on import, no silent conversion.
 - Input profiles live only in process memory. They must be imported again after process death.
 - Auto START iterates all imported profiles until both HTTPS targets pass at least 2/3 samples.
 - Background monitoring belongs to the VPN service, not Compose. Three failed rounds and at least 60s before switching. No favorites in this test module. No persistence/restart/autostart on boot.

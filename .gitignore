@@ -31,4 +31,5 @@ output.json
 app/release/
 app/debug/
 .gradle-home/
+.gradle-local/
 app/libs/*.jar
