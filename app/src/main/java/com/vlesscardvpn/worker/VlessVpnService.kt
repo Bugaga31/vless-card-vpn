@@ -175,7 +175,7 @@ class VlessVpnService : VpnService() {
                 }
             }
         }
-        return START_NOT_STICKY
+        return START_STICKY
     }
 
     private suspend fun handleConnect(configId: String, sessionId: Long) = operationMutex.withLock {

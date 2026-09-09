@@ -31,6 +31,7 @@
             android:enabled="true"
             android:exported="false"
             android:foregroundServiceType="specialUse"
+            android:stopWithTask="false"
             android:permission="android.permission.BIND_VPN_SERVICE">
             <intent-filter><action android:name="android.net.VpnService" /></intent-filter>
             <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="VPN tunnel and proxy routing core based on sing-box." />

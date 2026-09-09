@@ -38,7 +38,7 @@ import kotlinx.coroutines.launch
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val shouldAutoConnect = intent.getBooleanExtra("EXTRA_AUTO_CONNECT", false)
+        val shouldAutoConnect = intent?.getBooleanExtra("EXTRA_AUTO_CONNECT", false) ?: false
 
         setContent {
             VlessCardVpnTheme(darkTheme = true) {
