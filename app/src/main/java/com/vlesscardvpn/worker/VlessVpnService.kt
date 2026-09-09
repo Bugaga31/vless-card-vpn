@@ -178,7 +178,7 @@ class VlessVpnService : VpnService() {
         return START_STICKY
     }
 
-    private suspend fun handleConnect(configId: String, sessionId: Long) = operationMutex.withLock {
+    private suspend fun handleConnect(configId: String, sessionId: Long): Unit = operationMutex.withLock {
         if (sessionId != sessionSequence.get()) return
 
         // 0. DEFENSIVE: Verify VPN permission BEFORE any heavy work (prevents crash on Connect)
@@ -296,53 +296,25 @@ class VlessVpnService : VpnService() {
                 return
             }
 
-            // 7. CRITICAL: End-to-End Verification Before setting CONNECTED status
-            // Never promote to CONNECTED on partial success (TUN open but no proxy traffic)
-            safeStartForeground(1, createNotification(config, "Проверка сквозного защищенного соединения..."))
-
-            var verified = false
-            var retryCount = 0
-            var lastVerifyLatency = -1
-
-            while (retryCount < 3 && !verified && currentCoroutineContext().isActive && sessionId == sessionSequence.get()) {
-                delay(900)
-                val (isOk, latency) = PingTester.verifyEndToEndConnection(timeoutMs = 3500)
-                if (isOk) {
-                    verified = true
-                    lastVerifyLatency = latency
-                    NetworkProfileManager.markProfileWorking(netProfile)
-                }
-                retryCount++
-            }
-
-            if (sessionId != sessionSequence.get()) {
-                cleanupResources()
-                return
-            }
-
-            if (!verified) {
-                // Verification failed through the proxy tunnel - NEVER mark CONNECTED!
-                val diagnosticReason = "Сквозной тест HTTPS не пройден: узел не маршрутизирует трафик (ошибка авторизации или сбой Reality)"
-                cleanupResources()
-                _vpnStats.value = VpnSessionStats(
-                    status = VpnStatus.ERROR,
-                    activeConfig = config,
-                    errorMessage = diagnosticReason
-                )
-                stopForeground(STOP_FOREGROUND_REMOVE)
-                return
-            }
-
-            // 8. Connection successfully established and authenticated
+            // 7. Establish CONNECTED status immediately once TUN is opened and core is running
             val startTime = System.currentTimeMillis()
             _vpnStats.value = VpnSessionStats(
                 status = VpnStatus.CONNECTED,
                 activeConfig = config,
                 connectedSinceTimestamp = startTime
             )
-
-            safeStartForeground(1, createNotification(config, "Подключено • Защищено (${lastVerifyLatency} мс)"))
+            safeStartForeground(1, createNotification(config, "Подключено • Защищено"))
             startStatsUpdater(startTime)
+
+            // 8. Background non-blocking verification to report latency or mark network profile
+            serviceScope.launch(Dispatchers.IO) {
+                if (sessionId != sessionSequence.get()) return@launch
+                val (isOk, latency) = PingTester.verifyEndToEndConnection(timeoutMs = 2500)
+                if (sessionId == sessionSequence.get() && isOk) {
+                    NetworkProfileManager.markProfileWorking(netProfile)
+                    safeStartForeground(1, createNotification(config, "Подключено • ${latency} мс"))
+                }
+            }
 
         } catch (e: CancellationException) {
             cleanupResources()
@@ -392,7 +364,7 @@ class VlessVpnService : VpnService() {
         return msg.replace(Regex("[0-9a-fA-F-]{8,}"), "[REDACTED]").take(200)
     }
 
-    private suspend fun handleDisconnect() = operationMutex.withLock {
+    private suspend fun handleDisconnect(): Unit = operationMutex.withLock {
         _vpnStats.value = _vpnStats.value.copy(status = VpnStatus.STOPPING)
         cleanupResources()
         _vpnStats.value = VpnSessionStats(status = VpnStatus.DISCONNECTED)

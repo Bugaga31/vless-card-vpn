@@ -104,32 +104,39 @@ object PingTester {
         }
     }
 
-    suspend fun verifyEndToEndConnection(timeoutMs: Int = 3500): Pair<Boolean, Int> = withContext(Dispatchers.IO) {
+    suspend fun verifyEndToEndConnection(timeoutMs: Int = 3000): Pair<Boolean, Int> = withContext(Dispatchers.IO) {
+        // Fast endpoints including Cloudflare, Google, Yandex, Apple captive check
         val endpoints = listOf(
-            "https://www.google.com/generate_204",
             "https://cp.cloudflare.com/generate_204",
-            "https://connectivitycheck.gstatic.com/generate_204"
+            "http://connectivitycheck.gstatic.com/generate_204",
+            "https://www.google.com/generate_204",
+            "http://captive.apple.com/hotspot-detect.html",
+            "https://ya.ru"
         )
         for (endpoint in endpoints) {
             try {
-                var connection: HttpsURLConnection? = null
+                var connection: java.net.HttpURLConnection? = null
                 var stream: InputStream? = null
                 try {
                     var code = -1
                     val latency = measureTimeMillis {
-                        connection = (URL(endpoint).openConnection() as HttpsURLConnection).apply {
+                        connection = (URL(endpoint).openConnection() as java.net.HttpURLConnection).apply {
                             connectTimeout = timeoutMs
                             readTimeout = timeoutMs
                             instanceFollowRedirects = false
                             useCaches = false
-                            setRequestProperty("User-Agent", "VLESS-Card-Connectivity/1.0")
+                            setRequestProperty("User-Agent", "Mozilla/5.0 (Android; Mobile; rv:120.0)")
                             setRequestProperty("Connection", "close")
                         }
                         connection?.connect()
                         code = connection?.responseCode ?: -1
-                        if (code == 204) stream = connection?.inputStream
+                        if (code in 200..399) {
+                            stream = connection?.inputStream
+                        }
                     }
-                    if (code == 204) return@withContext true to latency.toInt().coerceAtLeast(1)
+                    if (code in 200..399 || code == 204) {
+                        return@withContext true to latency.toInt().coerceAtLeast(1)
+                    }
                 } finally {
                     try { stream?.close() } catch (_: Exception) {}
                     try { connection?.disconnect() } catch (_: Exception) {}

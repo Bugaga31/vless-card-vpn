@@ -386,16 +386,15 @@ class AutoPilotEngine(
         )
         // Apply the permission filter BEFORE the scan limit.
         val candidates = allConfigs.filter { readPolicy().permits(it, failedConfig?.id) }.take(10)
-        val reachable = mutableListOf<Pair<VlessConfig, LatencyBreakdown>>()
-        for (candidate in candidates) {
-            currentCoroutineContext().ensureActive()
-            if (!allowed()) { pause("Подбор остановлен: разрешения или сессия изменились"); return }
-            // Favorites can change while a preceding probe is running.
-            val fresh = database.vlessConfigDao().getById(candidate.id)?.toDomain() ?: continue
-            if (!readPolicy().permits(fresh, failedConfig?.id)) continue
-            val result = PingTester.testDetailedLatency(fresh, timeoutMs = 2000)
-            currentCoroutineContext().ensureActive()
-            if (result.success) reachable += fresh to result
+        val reachable = coroutineScope {
+            candidates.map { candidate ->
+                async {
+                    val fresh = database.vlessConfigDao().getById(candidate.id)?.toDomain() ?: return@async null
+                    if (!readPolicy().permits(fresh, failedConfig?.id)) return@async null
+                    val result = PingTester.testDetailedLatency(fresh, timeoutMs = 1500)
+                    if (result.success) fresh to result else null
+                }
+            }.awaitAll().filterNotNull()
         }
         val ranked = reachable.sortedBy { (_, result) ->
             if (result.tlsMs > 0) result.tlsMs else result.tcpMs

@@ -10,6 +10,9 @@ import com.vlesscardvpn.domain.AppSettings
 import com.vlesscardvpn.domain.PingTester
 import com.vlesscardvpn.domain.VlessConfig
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -53,20 +56,27 @@ class AppRepository(private val context: Context) {
 
     suspend fun testAllConfigs() = withContext(Dispatchers.IO) {
         val all = db.vlessConfigDao().getAll()
-        for (item in all) {
-            val breakdown = PingTester.testDetailedLatency(item.toDomain(), timeoutMs = 2500)
-            val ping = if (breakdown.success) {
-                if (breakdown.tlsMs > 0) breakdown.tlsMs else breakdown.tcpMs
-            } else -1
-            db.vlessConfigDao().update(
-                item.copy(
-                    pingMs = ping,
-                    tcpLatencyMs = breakdown.tcpMs,
-                    tlsLatencyMs = breakdown.tlsMs,
-                    healthState = if (ping > 0) "HEALTHY" else "DEAD",
-                    lastCheck = System.currentTimeMillis()
-                )
-            )
+        // Run parallel ping tests in chunks of 20 with 1500ms timeout for ultra-fast scanning
+        all.chunked(20).forEach { chunk ->
+            coroutineScope {
+                chunk.map { item ->
+                    async {
+                        val breakdown = PingTester.testDetailedLatency(item.toDomain(), timeoutMs = 1500)
+                        val ping = if (breakdown.success) {
+                            if (breakdown.tlsMs > 0) breakdown.tlsMs else breakdown.tcpMs
+                        } else -1
+                        db.vlessConfigDao().update(
+                            item.copy(
+                                pingMs = ping,
+                                tcpLatencyMs = breakdown.tcpMs,
+                                tlsLatencyMs = breakdown.tlsMs,
+                                healthState = if (ping > 0) "HEALTHY" else "DEAD",
+                                lastCheck = System.currentTimeMillis()
+                            )
+                        )
+                    }
+                }.awaitAll()
+            }
         }
     }
 
