@@ -21,8 +21,9 @@ object UpdateChecker {
     private const val GITHUB_API = "https://api.github.com/repos/Bugaga31/vless-card-vpn/releases/latest"
 
     suspend fun checkForUpdates(currentVersion: String): UpdateInfo? = withContext(Dispatchers.IO) {
+        var connection: javax.net.ssl.HttpsURLConnection? = null
         try {
-            val connection = URL(GITHUB_API).openConnection() as javax.net.ssl.HttpsURLConnection
+            connection = URL(GITHUB_API).openConnection() as javax.net.ssl.HttpsURLConnection
             connection.connectTimeout = 10000
             connection.readTimeout = 10000
             connection.setRequestProperty("Accept", "application/vnd.github.v3+json")
@@ -30,11 +31,10 @@ object UpdateChecker {
 
             if (connection.responseCode != 200) return@withContext null
 
-            val body = connection.inputStream.bufferedReader().readText()
+            val body = connection.inputStream.bufferedReader().use { it.readText() }
             val json = JSONObject(body)
 
             val tagName = json.optString("tag_name", "").removePrefix("v")
-            val htmlUrl = json.optString("html_url", "")
             val notes = json.optString("body", "")
             val publishedAt = json.optString("published_at", "")
 
@@ -62,6 +62,8 @@ object UpdateChecker {
             )
         } catch (e: Exception) {
             null
+        } finally {
+            try { connection?.disconnect() } catch (_: Exception) {}
         }
     }
 

@@ -74,9 +74,10 @@ object PingTester {
         testUrl: String = "https://speed.cloudflare.com/__down?bytes=1048576",
         timeoutMs: Int = 8000
     ): Long = withContext(Dispatchers.IO) {
+        var connection: javax.net.ssl.HttpsURLConnection? = null
         try {
             val url = URL(testUrl)
-            val connection = url.openConnection() as javax.net.ssl.HttpsURLConnection
+            connection = url.openConnection() as javax.net.ssl.HttpsURLConnection
             connection.connectTimeout = timeoutMs
             connection.readTimeout = timeoutMs
             connection.setRequestProperty("User-Agent", "VLESS-Card-SpeedTest/1.0")
@@ -101,16 +102,20 @@ object PingTester {
             (totalBytes * 1000L / elapsedMs)
         } catch (e: Exception) {
             -1L
+        } finally {
+            try { connection?.disconnect() } catch (_: Exception) {}
         }
     }
 
     suspend fun verifyEndToEndConnection(timeoutMs: Int = 3000): Pair<Boolean, Int> = withContext(Dispatchers.IO) {
         // Fast endpoints including Cloudflare, Google, Yandex, Apple captive check
+        // HTTPS only — the manifest sets usesCleartextTraffic=false, so plain-http
+        // endpoints would always fail and shrink failover redundancy.
         val endpoints = listOf(
             "https://cp.cloudflare.com/generate_204",
-            "http://connectivitycheck.gstatic.com/generate_204",
+            "https://connectivitycheck.gstatic.com/generate_204",
             "https://www.google.com/generate_204",
-            "http://captive.apple.com/hotspot-detect.html",
+            "https://captive.apple.com/hotspot-detect.html",
             "https://ya.ru"
         )
         for (endpoint in endpoints) {

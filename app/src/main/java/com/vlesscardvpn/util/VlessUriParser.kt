@@ -18,11 +18,8 @@ object VlessUriParser {
             val uuid = main.substring(0, atIndex)
             val hostPortQuery = main.substring(atIndex + 1)
             val queryParts = hostPortQuery.split("?", limit = 2)
-            val hostPort = queryParts[0].split(":", limit = 2)
-            if (hostPort.size < 2) return null
-
-            val address = hostPort[0]
-            val port = hostPort[1].toIntOrNull() ?: 443
+            val (address, parsedPort) = UniversalConfigParser.splitHostPort(queryParts[0]) ?: return null
+            val port = parsedPort ?: 443
 
             val queryMap = mutableMapOf<String, String>()
             if (queryParts.size > 1) {
@@ -39,9 +36,9 @@ object VlessUriParser {
                 address = address,
                 port = port,
                 uuid = uuid,
-                flow = queryMap["flow"] ?: "xtls-rprx-vision",
-                security = queryMap["security"] ?: "reality",
-                sni = queryMap["sni"] ?: "samsung.com",
+                flow = queryMap["flow"] ?: "",
+                security = queryMap["security"] ?: "none",
+                sni = queryMap["sni"] ?: "",
                 fingerprint = queryMap["fp"] ?: "chrome",
                 publicKey = queryMap["pbk"] ?: "",
                 shortId = queryMap["sid"] ?: "",

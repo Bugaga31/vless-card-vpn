@@ -2,7 +2,6 @@ package com.vlesscardvpn.data
 
 import android.content.Context
 import android.content.SharedPreferences
-import androidx.room.Room
 import com.vlesscardvpn.data.db.AppDatabase
 import com.vlesscardvpn.data.db.toDomain
 import com.vlesscardvpn.data.db.toEntity
@@ -21,11 +20,7 @@ import kotlinx.coroutines.withContext
 
 class AppRepository(private val context: Context) {
 
-    private val db = Room.databaseBuilder(
-        context.applicationContext,
-        AppDatabase::class.java,
-        "vless_vpn.db"
-    ).fallbackToDestructiveMigration().build()
+    private val db = AppDatabase.getInstance(context)
 
     private val prefs: SharedPreferences = context.getSharedPreferences("vless_vpn_prefs", Context.MODE_PRIVATE)
     private val rescuePrefs: SharedPreferences = context.getSharedPreferences("rescue_profiles_prefs", Context.MODE_PRIVATE)
@@ -81,7 +76,11 @@ class AppRepository(private val context: Context) {
     }
 
     fun getDatabase(): AppDatabase = db
-    fun close() = db.close()
+
+    // The database is a process-wide singleton shared with VlessVpnService and
+    // SubscriptionUpdateWorker — closing it here would break them. Lifecycle is
+    // owned by the process, so close() is intentionally a no-op.
+    fun close() = Unit
 
     fun saveRescueProfile(profile: com.vlesscardvpn.domain.RescueProfile) {
         rescuePrefs.edit().putString("rescue_${profile.configId}", profile.toJson()).apply()

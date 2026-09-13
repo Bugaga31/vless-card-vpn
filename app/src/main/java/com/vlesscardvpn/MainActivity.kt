@@ -215,7 +215,7 @@ fun VlessCardVpnApp(
                 composable("autopilot") { AutopilotScreen(repo, autoPilotEngine) { navController.popBackStack() } }
                 composable("diagnostic") { DiagnosticScreen(repo) { navController.popBackStack() } }
                 composable("stealth") { StealthProfileScreen(repo) { navController.popBackStack() } }
-                composable("settings") { SettingsScreen(repo, onNavigateToCrashReports = { navController.navigate("crash_reports") }) { navController.popBackStack() } }
+                composable("settings") { SettingsScreen(repo, autoPilotEngine, onNavigateToCrashReports = { navController.navigate("crash_reports") }) { navController.popBackStack() } }
                 composable("free_configs") { FreeConfigsScreen(repo) { navController.popBackStack() } }
                 composable("crash_reports") { CrashReportsScreen(repo) { navController.popBackStack() } }
             }

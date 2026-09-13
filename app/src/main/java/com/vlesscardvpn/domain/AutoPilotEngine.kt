@@ -136,7 +136,11 @@ class AutoPilotEngine(
      */
     fun resetLearnedMemory() {
         prefs.edit().clear().putBoolean("autopilot_consent", _state.value.consentGiven).apply()
-        latencyHistory.clear()
+        // latencyHistory is mutated by the engine loop under engineMutex — clearing it
+        // from the UI thread without the lock can hit a concurrent-mutation crash.
+        scope.launch {
+            engineMutex.withLock { latencyHistory.clear() }
+        }
         _state.value = _state.value.copy(
             probeCountTotal = 0,
             probeCountSuccess = 0,

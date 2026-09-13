@@ -142,4 +142,27 @@ interface VlessConfigDao {
 @Database(entities = [VlessConfigEntity::class], version = 1, exportSchema = false)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun vlessConfigDao(): VlessConfigDao
+
+    companion object {
+        @Volatile
+        private var instance: AppDatabase? = null
+
+        /**
+         * Process-wide singleton. Multiple Room instances for the same file do not
+         * propagate Flow invalidation between each other, which left the UI showing
+         * stale data after service/worker writes.
+         */
+        fun getInstance(context: android.content.Context): AppDatabase =
+            instance ?: synchronized(this) {
+                instance ?: androidx.room.Room.databaseBuilder(
+                    context.applicationContext,
+                    AppDatabase::class.java,
+                    "vless_vpn.db"
+                )
+                    .fallbackToDestructiveMigration()
+                    .enableMultiInstanceInvalidation()
+                    .build()
+                    .also { instance = it }
+            }
+    }
 }

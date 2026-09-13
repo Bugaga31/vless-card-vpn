@@ -36,6 +36,7 @@ import kotlinx.coroutines.launch
 @Composable
 fun SettingsScreen(
     repo: AppRepository,
+    autoPilotEngine: AutoPilotEngine,
     onNavigateToCrashReports: () -> Unit = {},
     onBack: () -> Unit
 ) {
@@ -324,8 +325,9 @@ fun SettingsScreen(
 
                 OutlinedButton(
                     onClick = {
-                        val autoPilot = AutoPilotEngine(context, repo.getDatabase())
-                        autoPilot.resetLearnedMemory()
+                        // Reuse the shared engine — creating a fresh AutoPilotEngine here
+                        // leaked its CoroutineScope on every tap.
+                        autoPilotEngine.resetLearnedMemory()
                         Toast.makeText(context, "Память удачных профилей сброшена", Toast.LENGTH_SHORT).show()
                     },
                     modifier = Modifier.fillMaxWidth(),

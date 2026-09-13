@@ -819,7 +819,7 @@ class CoreUnitTests {
         assertEquals("salamander", proxy.getJSONObject("obfs").getString("type"))
         assertTrue(proxy.has("tls"))
         assertEquals("real.sni.com", proxy.getJSONObject("tls").getString("server_name"))
-        assertTrue(proxy.has("quic"))
+        assertFalse("hysteria2 outbound must not contain a quic options block (rejected by DisallowUnknownFields)", proxy.has("quic"))
     }
 
     @Test

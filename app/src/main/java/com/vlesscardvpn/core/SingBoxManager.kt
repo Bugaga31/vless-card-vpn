@@ -453,16 +453,8 @@ object SingBoxManager {
                     }
                 }
             })
-
-            // QUIC-specific congestion control
-            put("quic", JSONObject().apply {
-                put("init_stream_receive_window", 8388608)
-                put("max_stream_receive_window", 16777216)
-                put("init_connection_receive_window", 20971520)
-                put("max_connection_receive_window", 33554432)
-                put("max_idle_timeout", "30s")
-                put("keep_alive_period", "10s")
-            })
+            // NOTE: no "quic" options block — sing-box hysteria2 outbound has no such
+            // section, and this core parses configs with DisallowUnknownFields.
         }
     }
 

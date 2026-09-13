@@ -209,7 +209,15 @@ class VlessVpnService : VpnService() {
         return START_STICKY
     }
 
-    private suspend fun handleConnect(configId: String, sessionId: Long): Unit = operationMutex.withLock {
+    private suspend fun handleConnect(configId: String, sessionId: Long) {
+        operationMutex.withLock { handleConnectLocked(configId, sessionId) }
+        // A terminal failure must not leave a lingering (START_STICKY) background service.
+        if (_vpnStats.value.status == VpnStatus.ERROR) {
+            stopSelf()
+        }
+    }
+
+    private suspend fun handleConnectLocked(configId: String, sessionId: Long) {
         if (sessionId != sessionSequence.get()) return
 
         // 0. DEFENSIVE: Verify VPN permission BEFORE any heavy work (prevents crash on Connect)
@@ -270,7 +278,7 @@ class VlessVpnService : VpnService() {
                 SingBoxManager.validateGeneratedConfig(singBoxJson).getOrThrow()
 
                 // 5. Setup LibboxPlatformInterface and CommandServer
-                val adapter = LibboxPlatformInterface(this@VlessVpnService) { pfd ->
+                val adapter = LibboxPlatformInterface(this@VlessVpnService, settingsSnapshot.bypassApps) { pfd ->
                     vpnInterface = pfd
                 }
                 platformAdapter = adapter
@@ -434,7 +442,19 @@ class VlessVpnService : VpnService() {
 
             val client = Libbox.newCommandClient(clientHandler, clientOptions)
             commandClient = client
-            client.connect()
+            // CommandClient.connect() is a BLOCKING streaming loop that only returns after
+            // disconnect(). It must run on its own thread — never on a coroutine holding
+            // operationMutex, otherwise CONNECTED is never reached and disconnect deadlocks.
+            Thread {
+                try {
+                    client.connect()
+                } catch (e: Exception) {
+                    Log.w("VlessVpnService", "CommandClient listener stopped: ${e.message}")
+                }
+            }.apply {
+                name = "libbox-command-client"
+                isDaemon = true
+            }.start()
         } catch (e: Exception) {
             Log.w("VlessVpnService", "CommandClient listener note: ${e.message}")
         }

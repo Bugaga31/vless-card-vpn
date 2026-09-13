@@ -72,6 +72,30 @@ object UniversalConfigParser {
         }
     }
 
+    /**
+     * Splits "host:port" with support for bracketed IPv6 ("[2001:db8::1]:443").
+     * Returns host (brackets stripped) to port (null when absent/invalid — caller applies
+     * its scheme default). Returns null only when the value cannot be a host[:port] at all
+     * (e.g. bare IPv6 without brackets, which is impossible to split reliably).
+     */
+    internal fun splitHostPort(hostPort: String): Pair<String, Int?>? {
+        val s = hostPort.trim()
+        if (s.isEmpty()) return null
+        if (s.startsWith("[")) {
+            val close = s.indexOf(']')
+            if (close <= 1) return null
+            val host = s.substring(1, close)
+            val rest = s.substring(close + 1)
+            val port = if (rest.startsWith(":")) rest.substring(1).toIntOrNull() else null
+            return host to port
+        }
+        val idx = s.lastIndexOf(':')
+        if (idx == -1) return s to null
+        val host = s.substring(0, idx)
+        if (host.contains(':')) return null // bare IPv6 without brackets
+        return host to s.substring(idx + 1).toIntOrNull()
+    }
+
     fun parseVless(uri: String): VlessConfig? {
         return try {
             val withoutScheme = uri.substring("vless://".length)
@@ -86,11 +110,8 @@ object UniversalConfigParser {
             val uuid = main.substring(0, atIndex)
             val hostPortQuery = main.substring(atIndex + 1)
             val queryParts = hostPortQuery.split("?", limit = 2)
-            val hostPort = queryParts[0].split(":", limit = 2)
-            if (hostPort.size < 2) return null
-
-            val address = hostPort[0]
-            val port = hostPort[1].toIntOrNull() ?: 443
+            val (address, parsedPort) = splitHostPort(queryParts[0]) ?: return null
+            val port = parsedPort ?: 443
 
             val queryMap = mutableMapOf<String, String>()
             if (queryParts.size > 1) {
@@ -113,9 +134,12 @@ object UniversalConfigParser {
                 port = port,
                 uuid = uuid,
                 protocolType = "vless",
-                flow = queryMap["flow"] ?: "xtls-rprx-vision",
-                security = queryMap["security"] ?: "reality",
-                sni = queryMap["sni"] ?: queryMap["host"] ?: "yandex.ru",
+                // Per the VLESS share-link spec, absent security means "none" (plain TCP)
+                // and flow is only present for XTLS Vision — never invent them, otherwise
+                // plain VLESS nodes get an empty-Reality config that can never start.
+                flow = queryMap["flow"] ?: "",
+                security = queryMap["security"] ?: "none",
+                sni = queryMap["sni"] ?: queryMap["host"] ?: "",
                 fingerprint = queryMap["fp"] ?: "chrome",
                 publicKey = queryMap["pbk"] ?: "",
                 shortId = queryMap["sid"] ?: "",
@@ -141,18 +165,28 @@ object UniversalConfigParser {
             val main = parts[0]
             val atIndex = main.indexOf('@')
             if (atIndex == -1) return null
-            val password = main.substring(0, atIndex)
+            // Trojan passwords are routinely percent-encoded in share links (p%40ss -> p@ss)
+            val password = try {
+                URLDecoder.decode(main.substring(0, atIndex), StandardCharsets.UTF_8.name())
+            } catch (_: Exception) {
+                main.substring(0, atIndex)
+            }
             val hostPortQuery = main.substring(atIndex + 1)
             val queryParts = hostPortQuery.split("?", limit = 2)
-            val hostPort = queryParts[0].split(":", limit = 2)
-            val address = hostPort[0]
-            val port = hostPort.getOrNull(1)?.toIntOrNull() ?: 443
+            val (address, parsedPort) = splitHostPort(queryParts[0]) ?: return null
+            val port = parsedPort ?: 443
 
             val queryMap = mutableMapOf<String, String>()
             if (queryParts.size > 1) {
                 queryParts[1].split("&").forEach { pair ->
                     val kv = pair.split("=", limit = 2)
-                    if (kv.size == 2) queryMap[kv[0]] = kv[1]
+                    if (kv.size == 2) {
+                        try {
+                            queryMap[kv[0]] = URLDecoder.decode(kv[1], StandardCharsets.UTF_8.name())
+                        } catch (_: Exception) {
+                            queryMap[kv[0]] = kv[1]
+                        }
+                    }
                 }
             }
 
@@ -218,20 +252,26 @@ object UniversalConfigParser {
             } else "Shadowsocks Node"
             val main = parts[0]
 
+            // Strip the SIP002 query (?plugin=...) BEFORE parsing host:port, otherwise the
+            // query tail lands in the port field and the real port silently resets to 8388.
+            // Plugins are not supported by the sing-box outbound we generate, so the query
+            // is ignored rather than mangling the endpoint.
+            val mainNoQuery = main.split("?", limit = 2)[0]
+
             // Format: user:pass@host:port or base64(user:pass)@host:port
-            val atIndex = main.indexOf('@')
+            val atIndex = mainNoQuery.indexOf('@')
             val (address, port, uuid) = if (atIndex != -1) {
-                val hostPort = main.substring(atIndex + 1).split(":")
-                val userInfo = main.substring(0, atIndex)
+                val (host, parsedPort) = splitHostPort(mainNoQuery.substring(atIndex + 1)) ?: return null
+                val userInfo = mainNoQuery.substring(0, atIndex)
                 val decodedUser = decodeBase64Safe(userInfo)?.let { String(it, StandardCharsets.UTF_8) } ?: userInfo
-                Triple(hostPort[0], hostPort.getOrNull(1)?.toIntOrNull() ?: 8388, decodedUser)
+                Triple(host, parsedPort ?: 8388, decodedUser)
             } else {
-                val decodedBytes = decodeBase64Safe(main) ?: return null
+                val decodedBytes = decodeBase64Safe(mainNoQuery) ?: return null
                 val decoded = String(decodedBytes, StandardCharsets.UTF_8)
                 val atIdx = decoded.indexOf('@')
                 if (atIdx != -1) {
-                    val hostPort = decoded.substring(atIdx + 1).split(":")
-                    Triple(hostPort[0], hostPort.getOrNull(1)?.toIntOrNull() ?: 8388, decoded.substring(0, atIdx))
+                    val (host, parsedPort) = splitHostPort(decoded.substring(atIdx + 1)) ?: return null
+                    Triple(host, parsedPort ?: 8388, decoded.substring(0, atIdx))
                 } else {
                     return null
                 }

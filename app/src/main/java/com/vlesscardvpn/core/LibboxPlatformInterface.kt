@@ -17,6 +17,7 @@ import java.util.Collections
 
 class LibboxPlatformInterface(
     private val vpnService: VpnService,
+    private val bypassApps: List<String> = emptyList(),
     private val onTunOpened: (ParcelFileDescriptor) -> Unit
 ) : PlatformInterface {
 
@@ -254,6 +255,19 @@ class LibboxPlatformInterface(
                     addDisallowedApplication(vpnService.packageName)
                 } catch (e: Exception) {
                     Log.w("LibboxPlatform", "Could not disallow own package: ${e.message}")
+                }
+
+                // Per-app split tunneling: exclude user-selected apps (banks, gov, etc.)
+                // at the VpnService level. This actually works, unlike a sing-box
+                // package_name route rule, which stays a no-op while findConnectionOwner
+                // returns null.
+                for (pkg in bypassApps) {
+                    if (pkg.isBlank() || pkg == vpnService.packageName) continue
+                    try {
+                        addDisallowedApplication(pkg)
+                    } catch (e: Exception) {
+                        Log.w("LibboxPlatform", "Bypass app not installed, skipped: $pkg")
+                    }
                 }
             }
 
