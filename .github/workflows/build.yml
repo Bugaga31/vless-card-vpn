@@ -49,10 +49,30 @@ jobs:
       uses: softprops/action-gh-release@v2
       if: startsWith(github.ref, 'refs/heads/main')
       with:
-        tag_name: v1.0.40
-        name: v1.0.40 — Anti-Self-Exit & Background Resilience
+        tag_name: v1.0.${{ github.run_number }}
+        name: VLESS Card VPN v1.0.${{ github.run_number }} (Performance & Correctness Fixes)
+        body: |
+          ### 🚀 Что нового в этом релизе:
+          
+          - **🔋 Энергосбережение и разгрузка CPU:**
+            - Включен **GSO (Generic Segmentation Offload)** на TUN-интерфейсе для пакетной обработки данных.
+            - Интеллектуальный **Deep Sleep** режим: автоматическое замедление фоновых замеров и таймеров при выключенном экране (`ACTION_SCREEN_OFF`).
+          
+          - **⚡ Сетевые оптимизации (Zero RTT & Speed):**
+            - **TCP Fast Open** на исходящих соединениях.
+            - Локальный in-core DNS-кэш на 4096 записей с мгновенным откликом (0 мс).
+            - Мгновенный сброс QUIC/UDP 443 для предотвращения зависаний YouTube.
+            - Прямой роутинг (Direct) для ресурсов РФ (`.ru`, `.su`, банки, Госуслуги).
+          
+          - **🛠️ Критические исправления (Fixes Pass):**
+            - Устранен взаимный Deadlock в `VlessVpnService` при подключении/отключении.
+            - Исправлен синтаксис конфигурации Hysteria2 в SingBox.
+            - Исправлены парсеры VLESS/Trojan/Shadowsocks URI (IPv6 хосты, URL decode, спецификация VLESS).
+            - Реализован реальный Per-app Bypass через исключение пакетов в `VpnService`.
+            - Потокобезопасный `AppDatabase` синглтон для предотвращения утечек ресурсов.
         draft: false
         prerelease: false
+        make_latest: true
         files: app/build/outputs/apk/debug/app-debug.apk
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
