@@ -4,8 +4,10 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.ServiceInfo
 import android.net.VpnService
 import android.os.Build
@@ -99,7 +101,8 @@ class VlessVpnService : VpnService() {
     private var commandServer: CommandServer? = null
     private var commandClient: CommandClient? = null
     private var platformAdapter: LibboxPlatformInterface? = null
-
+    private var screenStateReceiver: BroadcastReceiver? = null
+    @Volatile private var isScreenInteractive = true
 
     private lateinit var repository: AppRepository
 
@@ -108,6 +111,34 @@ class VlessVpnService : VpnService() {
         repository = AppRepository(applicationContext)
         createNotificationChannel()
         initLibboxEnvironment()
+        registerScreenStateReceiver()
+    }
+
+    private fun registerScreenStateReceiver() {
+        try {
+            val filter = IntentFilter().apply {
+                addAction(Intent.ACTION_SCREEN_OFF)
+                addAction(Intent.ACTION_SCREEN_ON)
+            }
+            val receiver = object : BroadcastReceiver() {
+                override fun onReceive(context: Context?, intent: Intent?) {
+                    when (intent?.action) {
+                        Intent.ACTION_SCREEN_OFF -> {
+                            isScreenInteractive = false
+                            Log.d("VlessVpnService", "Screen OFF: entering energy-saving idle state")
+                        }
+                        Intent.ACTION_SCREEN_ON -> {
+                            isScreenInteractive = true
+                            Log.d("VlessVpnService", "Screen ON: returning to active state")
+                        }
+                    }
+                }
+            }
+            screenStateReceiver = receiver
+            registerReceiver(receiver, filter)
+        } catch (e: Exception) {
+            Log.w("VlessVpnService", "Failed to register screen state receiver", e)
+        }
     }
 
     private fun initLibboxEnvironment() {
@@ -413,7 +444,9 @@ class VlessVpnService : VpnService() {
         statsJob?.cancel()
         statsJob = serviceScope.launch {
             while (isActive && _vpnStats.value.status == VpnStatus.CONNECTED) {
-                delay(1000)
+                // When screen is off, relax ticker interval to 5000ms to preserve battery and CPU cycles
+                val delayTime = if (isScreenInteractive) 1000L else 5000L
+                delay(delayTime)
                 val duration = (System.currentTimeMillis() - startTime) / 1000
                 _vpnStats.value = _vpnStats.value.copy(
                     durationSeconds = duration
@@ -525,6 +558,10 @@ class VlessVpnService : VpnService() {
     override fun onDestroy() {
         sessionSequence.incrementAndGet()
         connectionJob?.cancel()
+        screenStateReceiver?.let {
+            try { unregisterReceiver(it) } catch (_: Exception) {}
+            screenStateReceiver = null
+        }
         cleanupResources()
         serviceScope.cancel()
         super.onDestroy()

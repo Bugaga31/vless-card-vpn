@@ -276,7 +276,7 @@ object AdBlockDns {
         "bdapi.ads.realme.com",
         "api.log.realme.com",
         // Moto/Lenovo
-        "idm.iot. lenovo.com",
+        "idm.iot.lenovo.com",
         "ad.api.lenovo.com",
         "api.ads.lenovo.com",
         // Telegram

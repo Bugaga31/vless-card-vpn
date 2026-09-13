@@ -201,6 +201,8 @@ object SingBoxManager {
             put("rules", dnsRulesArray)
             put("final", "remote-dns")
             put("strategy", "prefer_ipv4")
+            put("independent_cache", true)
+            put("cache_capacity", 4096)
         }
 
         val inboundsArray = JSONArray().apply {
@@ -214,6 +216,7 @@ object SingBoxManager {
                 put("strict_route", true)
                 put("stack", "mixed")
                 put("sniff", true)
+                put("gso", true)
             })
         }
 
@@ -280,6 +283,10 @@ object SingBoxManager {
                         put("path", config.wsPath.ifBlank { "/" })
                     })
                 }
+            }
+
+            if (settings.enableTcpFastOpen) {
+                put("tcp_fast_open", true)
             }
 
             if (config.security.equals("reality", ignoreCase = true) || config.security.equals("tls", ignoreCase = true)) {

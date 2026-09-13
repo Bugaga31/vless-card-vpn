@@ -85,6 +85,7 @@ class CoreUnitTests {
         val tun = inbounds.getJSONObject(0)
         assertEquals("tun", tun.getString("type"))
         assertEquals(1400, tun.getInt("mtu"))
+        assertTrue("Inbound tun must enable GSO for battery & CPU offload", tun.optBoolean("gso", false))
 
         val outbounds = json.getJSONArray("outbounds")
         val proxy = outbounds.getJSONObject(0)
@@ -142,6 +143,9 @@ class CoreUnitTests {
 
         val dnsServers = json.getJSONObject("dns").getJSONArray("servers")
         assertEquals("https://8.8.8.8/dns-query", dnsServers.getJSONObject(0).getString("address"))
+        assertTrue(proxy.optBoolean("tcp_fast_open", false))
+        assertTrue(json.getJSONObject("dns").optBoolean("independent_cache", false))
+        assertEquals(4096, json.getJSONObject("dns").optInt("cache_capacity", 0))
     }
 
     @Test
