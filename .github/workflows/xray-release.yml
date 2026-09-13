@@ -1,9 +1,8 @@
 name: Xray Release
 on:
   push:
-    branches: [feat/xray-test, main]
+    branches: [feat/xray-test]
     tags:
-      - 'v*'
       - 'xray-*'
   workflow_dispatch:
 
