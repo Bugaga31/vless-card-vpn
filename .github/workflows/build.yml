@@ -75,6 +75,5 @@ jobs:
         gh release create "$TAG" app/build/outputs/apk/debug/app-debug.apk \
           --title "VLESS Card VPN $TAG (Performance & Correctness Fixes)" \
           --notes-file /tmp/release_notes.md \
-          --latest \
-          --clobber || \
+          --latest || \
         gh release upload "$TAG" app/build/outputs/apk/debug/app-debug.apk --clobber
