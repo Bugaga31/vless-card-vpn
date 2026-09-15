@@ -113,28 +113,36 @@ object SingBoxManager {
             else -> createVlessOutbound(config, effectiveSni, settings)
         }
 
-        // Rules array with supported sing-box 1.8+ syntax (no pseudo geosite/geoip strings in domain/ip_cidr)
+        // Rules array using sing-box 1.13 rule-action syntax. The legacy special
+        // outbounds (block / dns) and inbound.sniff were removed in sing-box 1.13.0,
+        // so they are replaced by the rule actions sniff / hijack-dns / reject.
         val rulesArray = JSONArray().apply {
-            // 1. DNS Interception
+            // 0. Sniff protocols & TLS SNI before routing (replaces removed inbound.sniff).
+            //    Required so domain_suffix rules (RU direct, ad-block) can actually match.
             put(JSONObject().apply {
-                put("protocol", "dns")
-                put("outbound", "dns-out")
+                put("action", "sniff")
             })
 
-            // 2. Fix YouTube buffering & throttling: Block QUIC (UDP 443, 80) if enabled
+            // 1. DNS Interception: hijack DNS queries into the sing-box DNS module
+            put(JSONObject().apply {
+                put("protocol", "dns")
+                put("action", "hijack-dns")
+            })
+
+            // 2. Fix YouTube buffering & throttling: reject QUIC (UDP 443, 80) if enabled
             if (settings.blockQuicYouTube) {
                 put(JSONObject().apply {
                     put("port", JSONArray(listOf(443, 80)))
                     put("network", "udp")
-                    put("outbound", "block")
+                    put("action", "reject")
                 })
             }
 
-            // 3. Ad-blocking DNS: block ad/tracker domains at route level
+            // 3. Ad-blocking DNS: reject ad/tracker domains at route level
             if (settings.enableAdBlock) {
                 put(JSONObject().apply {
                     put("domain_suffix", JSONArray(AdBlockDns.adBlockRules))
-                    put("outbound", "block")
+                    put("action", "reject")
                 })
             }
 
@@ -172,17 +180,14 @@ object SingBoxManager {
         }
 
         val dnsRulesArray = JSONArray().apply {
-            // DNS queries to local/direct routes use local DNS
+            // RU domains resolve via the local (direct) resolver; everything else
+            // falls through to dns.final = remote-dns (DoH through the tunnel).
             if (settings.enableRuDirect) {
                 put(JSONObject().apply {
                     put("domain_suffix", JSONArray(ruDomainSuffixes))
                     put("server", "local-dns")
                 })
             }
-            put(JSONObject().apply {
-                put("outbound", "direct")
-                put("server", "local-dns")
-            })
         }
 
         val dns = JSONObject().apply {
@@ -210,21 +215,19 @@ object SingBoxManager {
                 put("type", "tun")
                 put("tag", "tun-in")
                 put("interface_name", "tun0")
-                put("inet4_address", "172.19.0.1/30")
+                // sing-box 1.10+ uses "address" (array). The legacy inet4_address
+                // field was removed in 1.12.0, and gso/inbound.sniff in 1.13.0.
+                put("address", JSONArray(listOf("172.19.0.1/30")))
                 put("mtu", effectiveMtu)
                 put("auto_route", true)
                 put("strict_route", true)
                 put("stack", "mixed")
-                put("sniff", true)
-                put("gso", true)
             })
         }
 
         val outboundsArray = JSONArray().apply {
             put(proxyOutbound)
             put(JSONObject().apply { put("type", "direct"); put("tag", "direct") })
-            put(JSONObject().apply { put("type", "block"); put("tag", "block") })
-            put(JSONObject().apply { put("type", "dns"); put("tag", "dns-out") })
         }
 
         val root = JSONObject().apply {
