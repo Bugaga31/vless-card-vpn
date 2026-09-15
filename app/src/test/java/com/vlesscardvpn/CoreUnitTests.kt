@@ -85,7 +85,12 @@ class CoreUnitTests {
         val tun = inbounds.getJSONObject(0)
         assertEquals("tun", tun.getString("type"))
         assertEquals(1400, tun.getInt("mtu"))
-        assertTrue("Inbound tun must enable GSO for battery & CPU offload", tun.optBoolean("gso", false))
+        // sing-box 1.13 merged TUN addresses into "address" and dropped the legacy fields.
+        assertTrue("TUN inbound must use the sing-box 1.10+ 'address' array", tun.has("address"))
+        assertEquals("172.19.0.1/30", tun.getJSONArray("address").getString(0))
+        assertFalse("gso was removed in sing-box 1.13", tun.has("gso"))
+        assertFalse("inet4_address was removed in sing-box 1.12", tun.has("inet4_address"))
+        assertFalse("inbound.sniff was removed in sing-box 1.13", tun.has("sniff"))
 
         val outbounds = json.getJSONArray("outbounds")
         val proxy = outbounds.getJSONObject(0)
@@ -463,7 +468,7 @@ class CoreUnitTests {
         var hasAdBlockRule = false
         for (i in 0 until routeRules.length()) {
             val rule = routeRules.getJSONObject(i)
-            if (rule.has("domain_suffix") && rule.optString("outbound") == "block") {
+            if (rule.has("domain_suffix") && rule.optString("action") == "reject") {
                 val domains = rule.getJSONArray("domain_suffix")
                 if (domains.length() > 10) {
                     hasAdBlockRule = true
@@ -480,7 +485,7 @@ class CoreUnitTests {
         var hasAdBlockRuleOff = false
         for (i in 0 until routeRulesOff.length()) {
             val rule = routeRulesOff.getJSONObject(i)
-            if (rule.has("domain_suffix") && rule.optString("outbound") == "block") {
+            if (rule.has("domain_suffix") && rule.optString("action") == "reject") {
                 val domains = rule.getJSONArray("domain_suffix")
                 if (domains.length() > 10) {
                     hasAdBlockRuleOff = true
