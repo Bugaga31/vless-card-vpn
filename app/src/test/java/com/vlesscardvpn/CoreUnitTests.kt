@@ -187,8 +187,10 @@ class CoreUnitTests {
         // 2. Empty SNI with custom override
         assertEquals("mycustom.org", SingBoxManager.resolveEffectiveSni(configEmptySni, customSniSettings, null))
 
-        // 3. Empty SNI with default settings resolves to fallback
-        assertEquals("yandex.ru", SingBoxManager.resolveEffectiveSni(configEmptySni, defaultSettings, null))
+        // REALITY cannot safely invent an SNI; a server-configured name is required.
+        assertThrows(IllegalArgumentException::class.java) {
+            SingBoxManager.resolveEffectiveSni(configEmptySni, defaultSettings, null)
+        }
     }
 
     @Test
@@ -608,13 +610,9 @@ class CoreUnitTests {
             shortId = "ab"
         )
         val settings = AppSettings(enableSniRotation = true)
-        val json = SingBoxManager.generateConfig(null, config, settings)
-
-        val proxy = JSONObject(json).getJSONArray("outbounds").getJSONObject(0)
-        val sni = proxy.getJSONObject("tls").getString("server_name")
-        // SNI must be non-empty and from the Russian pool
-        assertTrue(sni.isNotBlank())
-        assertTrue(sni.endsWith(".ru") || sni.endsWith(".com") || sni.endsWith(".by"))
+        assertThrows(IllegalArgumentException::class.java) {
+            SingBoxManager.generateConfig(null, config, settings)
+        }
     }
 
     @Test

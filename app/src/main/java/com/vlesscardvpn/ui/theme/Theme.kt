@@ -14,26 +14,26 @@ import androidx.compose.ui.unit.sp
 
 // Legacy tokens used by the existing dark-only application screens.
 // Keep foreground/background pairs together; new components use colorScheme.
-val MineralBackground = Color(0xFF101211)
-val MineralSurface = Color(0xFF191D1A)
-val MineralSurfaceSubtle = Color(0xFF252B26)
-val MineralSurfaceElevated = Color(0xFF2B322C)
-val MineralBorder = Color(0xFF465047)
-val MineralBorderActive = Color(0xFFB99A5D)
+val MineralBackground = Color(0xFF10151F)
+val MineralSurface = Color(0xFF182131)
+val MineralSurfaceSubtle = Color(0xFF233047)
+val MineralSurfaceElevated = Color(0xFF293952)
+val MineralBorder = Color(0xFF536680)
+val MineralBorderActive = Color(0xFF8AB8FF)
 val InstrumentDarkBg = MineralBackground
 val InstrumentDarkSurface = MineralSurface
 val InstrumentDarkSurfaceSubtle = MineralSurfaceSubtle
 val InstrumentDarkBorder = MineralBorder
-val GraphitePrimary = Color(0xFFF5F0E5)
-val GraphiteSecondary = Color(0xFFC6CABB)
-val GraphiteTertiary = Color(0xFFABB3A8)
+val GraphitePrimary = Color(0xFFF2F6FF)
+val GraphiteSecondary = Color(0xFFC6D2E4)
+val GraphiteTertiary = Color(0xFFA9B9D0)
 val GraphitePrimaryDark = GraphitePrimary
 val GraphiteSecondaryDark = GraphiteSecondary
 val GraphiteTertiaryDark = GraphiteTertiary
-val SignalOrange = Color(0xFFE1C58A)
-val SignalOrangeHover = Color(0xFFD6B36A)
-val SignalOrangeContainer = Color(0xFF373223)
-val SignalOrangeContent = Color(0xFFF3E4C3)
+val SignalOrange = Color(0xFF8AB8FF)
+val SignalOrangeHover = Color(0xFF72A8F8)
+val SignalOrangeContainer = Color(0xFF243F65)
+val SignalOrangeContent = Color(0xFFD9E8FF)
 val SemanticGreen = Color(0xFF79CDA4)
 val SemanticGreenBg = Color(0xFF17382A)
 val SemanticAmber = Color(0xFFE4BE79)
@@ -68,7 +68,7 @@ private val LightColorScheme = lightColorScheme(
     outline = Color(0xFF727A70), error = Color(0xFFAD2534)
 )
 private val DarkColorScheme = darkColorScheme(
-    primary = SignalOrange, onPrimary = Color(0xFF251F12),
+    primary = SignalOrange, onPrimary = Color(0xFF0D2341),
     primaryContainer = SignalOrangeContainer, onPrimaryContainer = SignalOrangeContent,
     secondary = GraphiteSecondary, onSecondary = MineralBackground,
     background = MineralBackground, onBackground = GraphitePrimary,
@@ -77,14 +77,14 @@ private val DarkColorScheme = darkColorScheme(
     outline = MineralBorder, error = SemanticRed, onError = Color(0xFF351016)
 )
 val InstrumentTypography = Typography(
-    displayLarge = TextStyle(fontFamily = FontFamily.Serif, fontWeight = FontWeight.Normal, fontSize = 34.sp, lineHeight = 42.sp),
+    displayLarge = TextStyle(fontFamily = FontFamily.SansSerif, fontWeight = FontWeight.Normal, fontSize = 34.sp, lineHeight = 42.sp),
     titleLarge = TextStyle(fontWeight = FontWeight.Medium, fontSize = 24.sp, lineHeight = 32.sp),
     titleMedium = TextStyle(fontWeight = FontWeight.Medium, fontSize = 16.sp, lineHeight = 24.sp),
     bodyLarge = TextStyle(fontSize = 16.sp, lineHeight = 26.sp),
     bodyMedium = TextStyle(fontSize = 14.sp, lineHeight = 22.sp),
-    bodySmall = TextStyle(fontSize = 12.sp, lineHeight = 18.sp),
-    labelMedium = TextStyle(fontWeight = FontWeight.Medium, fontSize = 12.sp, lineHeight = 18.sp, letterSpacing = 1.sp),
-    labelSmall = TextStyle(fontWeight = FontWeight.Medium, fontSize = 11.sp, lineHeight = 16.sp, letterSpacing = 0.5.sp)
+    bodySmall = TextStyle(fontSize = 14.sp, lineHeight = 20.sp),
+    labelMedium = TextStyle(fontWeight = FontWeight.Medium, fontSize = 14.sp, lineHeight = 20.sp, letterSpacing = 1.sp),
+    labelSmall = TextStyle(fontWeight = FontWeight.Medium, fontSize = 14.sp, lineHeight = 20.sp, letterSpacing = 0.5.sp)
 )
 @Composable
 fun VlessCardVpnTheme(darkTheme: Boolean = true, content: @Composable () -> Unit) {

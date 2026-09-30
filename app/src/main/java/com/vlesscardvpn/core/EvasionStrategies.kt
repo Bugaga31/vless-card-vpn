@@ -25,6 +25,18 @@ object EvasionStrategies {
          * Каскад «на всё случаи»: пробует стратегии по очереди.
          * Параметры фрагментации берутся с первой стадии каскада.
          */
+        STABLE_TLS(
+            id = "stable_tls",
+            displayName = "Стабильный TLS",
+            tagLine = "Параметры сервера без случайной подмены",
+            description = "Сохраняет SNI и отпечаток из подписки. Без экспериментальной " +
+                "фрагментации и ротации доменов. Проверка сертификата остаётся включённой; " +
+                "профиль не гарантирует обход блокировок.",
+            recommendedFragmentPackets = "none",
+            recommendedFragmentInterval = "0ms",
+            uTlsFingerprint = "chrome",
+            origin = "Server-compatible TLS"
+        ),
         AUTO_CASCADE(
             id = "auto_cascade",
             displayName = "🤖 Автокаскад (кнопка «Подключить»)",

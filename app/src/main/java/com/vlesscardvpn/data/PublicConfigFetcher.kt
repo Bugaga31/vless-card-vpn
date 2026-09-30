@@ -3,7 +3,11 @@ package com.vlesscardvpn.data
 import com.vlesscardvpn.domain.PingTester
 import com.vlesscardvpn.domain.VlessConfig
 import com.vlesscardvpn.util.UniversalConfigParser
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.ensureActive
+import kotlin.coroutines.coroutineContext
 import kotlinx.coroutines.Dispatchers
+import okhttp3.ResponseBody
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.withContext
@@ -15,8 +19,21 @@ object PublicConfigFetcher {
     private val client = OkHttpClient.Builder()
         .connectTimeout(8, TimeUnit.SECONDS)
         .readTimeout(8, TimeUnit.SECONDS)
+        .callTimeout(12, TimeUnit.SECONDS)
+        .followSslRedirects(false)
         .followRedirects(true)
         .build()
+
+    private const val MAX_FEED_BYTES = 2L * 1024 * 1024
+    private const val MAX_CANDIDATES = 500
+
+    internal fun readBoundedBody(body: ResponseBody?): String {
+        if (body == null) return ""
+        require(body.contentLength() <= MAX_FEED_BYTES) { "Подписка слишком большая" }
+        val source = body.source()
+        require(!source.request(MAX_FEED_BYTES + 1)) { "Подписка слишком большая" }
+        return source.readUtf8()
+    }
 
     // Curated high-yield Russia TSPU/DPI-tested VLESS Reality sources prioritized
     val DEFAULT_PUBLIC_SOURCES = listOf(
@@ -42,23 +59,28 @@ object PublicConfigFetcher {
         onProgress: (Int, Int, String) -> Unit = { _, _, _ -> }
     ): List<VlessConfig> = withContext(Dispatchers.IO) {
         val parsed = mutableListOf<VlessConfig>()
-        for (sourceUrl in sources) {
+        require(maxWorkingCount in 1..150)
+        for (sourceUrl in sources.take(24)) {
+            coroutineContext.ensureActive()
+            if (parsed.size >= MAX_CANDIDATES) break
+            if (!sourceUrl.startsWith("https://", ignoreCase = true)) continue
             try {
                 onProgress(parsed.size, 0, "Loading ${sourceUrl.substringAfterLast('/')}...")
                 client.newCall(Request.Builder().url(sourceUrl).build()).execute().use { response ->
                     if (!response.isSuccessful) return@use
-                    val body = response.body?.string().orEmpty()
+                    val body = readBoundedBody(response.body)
                     if (sourceUrl.endsWith("sources.txt")) {
                         body.lines().map { it.trim() }.filter { it.startsWith("https://") }.take(6).forEach { nestedUrl ->
                             try {
                                 client.newCall(Request.Builder().url(nestedUrl).build()).execute().use { nested ->
-                                    if (nested.isSuccessful) parsed += UniversalConfigParser.parseAny(nested.body?.string().orEmpty())
+                                    if (nested.isSuccessful) parsed += UniversalConfigParser.parseAny(readBoundedBody(nested.body))
+                                        .take((MAX_CANDIDATES - parsed.size).coerceAtLeast(0))
                                 }
-                            } catch (_: Exception) {}
+                            } catch (cancelled: CancellationException) { throw cancelled } catch (_: Exception) {}
                         }
-                    } else parsed += UniversalConfigParser.parseAny(body)
+                    } else parsed += UniversalConfigParser.parseAny(body).take((MAX_CANDIDATES - parsed.size).coerceAtLeast(0))
                 }
-            } catch (_: Exception) {}
+            } catch (cancelled: CancellationException) { throw cancelled } catch (_: Exception) {}
         }
 
         val unique = parsed.distinctBy {
@@ -67,6 +89,7 @@ object PublicConfigFetcher {
         var tested = 0
         val working = mutableListOf<VlessConfig>()
         for (chunk in unique.chunked(24)) {
+            coroutineContext.ensureActive()
             chunk.map { cfg -> async { cfg to PingTester.pingConfig(cfg) } }.awaitAll().forEach { (cfg, ping) ->
                 tested++
                 if (ping in 1..2500) {

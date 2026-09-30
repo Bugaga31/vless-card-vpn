@@ -32,6 +32,10 @@ import com.vlesscardvpn.data.PublicConfigFetcher
 import com.vlesscardvpn.worker.SubscriptionUpdateWorker
 import com.vlesscardvpn.worker.VlessVpnService
 import com.vlesscardvpn.worker.VpnStatus
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineExceptionHandler
+import kotlinx.coroutines.Job
+import com.vlesscardvpn.core.CrashReportManager
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -65,7 +69,13 @@ fun VlessCardVpnApp(
     onPanicExit: () -> Unit = {}
 ) {
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
+    val uiErrors = remember(context) {
+        CoroutineExceptionHandler { _, error ->
+            CrashReportManager.recordException(context.applicationContext, Thread.currentThread(), error, "UI_TASK")
+            Toast.makeText(context, "Ошибка операции. Подробности в отчётах об ошибках.", Toast.LENGTH_LONG).show()
+        }
+    }
+    val scope = rememberCoroutineScope { uiErrors }
     val navController = rememberNavController()
 
     val repo = remember { AppRepository(context.applicationContext) }
@@ -84,6 +94,8 @@ fun VlessCardVpnApp(
 
     var showSplash by remember { mutableStateOf(true) }
     var pendingConfig by remember { mutableStateOf<VlessConfig?>(null) }
+    var preparingConnection by remember { mutableStateOf(false) }
+    var preparationJob by remember { mutableStateOf<Job?>(null) }
 
     LaunchedEffect(Unit) {
         SubscriptionUpdateWorker.schedulePeriodic(context.applicationContext)
@@ -108,73 +120,57 @@ fun VlessCardVpnApp(
         pendingConfig = null
     }
 
-    val handleConnectToggle: (VlessConfig?) -> Unit = { targetConfig ->
-        scope.launch {
-            if (vpnStats.status == VpnStatus.CONNECTED || vpnStats.status == VpnStatus.CONNECTING) {
-                VlessVpnService.stopVpn(context)
-                repo.setActive("")
-                return@launch
-            }
-
-            // 1-Click Full Automation Connect:
-            // 1. If user passed a specific config, use it.
-            // 2. Otherwise find lowest-ping verified config among existing ones.
-            // 3. If none exist or none verified, automatically fetch live subscription pool, ping in parallel, and connect to the fastest node!
-            var cfgToConnect = targetConfig ?: configs.filter { it.pingMs in 1..1500 }.minByOrNull { it.pingMs }
-                ?: configs.firstOrNull { it.isActive }
-                ?: configs.firstOrNull()
-
-            if (cfgToConnect == null || (targetConfig == null && cfgToConnect.pingMs <= 0)) {
-                Toast.makeText(context, "⚡ 1-Click: Сканирование пула подписок и выбор быстрейшего узла…", Toast.LENGTH_SHORT).show()
-                val working = PublicConfigFetcher.fetchAndFilterWorkingConfigs(maxWorkingCount = 20)
-                if (working.isNotEmpty()) {
-                    working.forEach { repo.addConfig(it) }
-                    cfgToConnect = working.minByOrNull { if (it.pingMs > 0) it.pingMs else 9999 } ?: working.first()
-                }
-            }
-
-            if (cfgToConnect != null) {
-                // Кнопка «Подключить» = полный автомат: автопилот всегда идёт в связке
-                // с туннелем — фон-скан подписок, перепинг и failover на быстрейший узел.
-                runCatching { autoPilotEngine.setConsent(true) }
-                runCatching { autoPilotEngine.startAutoPilot(settings.healthCheckInterval) }
-                scope.launch { runCatching { autoPilotEngine.triggerManualScan() } }
-                try {
-                    val prepareIntent = VpnService.prepare(context)
-                    if (prepareIntent != null) {
-                        pendingConfig = cfgToConnect
-                        vpnPermissionLauncher.launch(prepareIntent)
-                    } else {
-                        repo.setActive(cfgToConnect.id)
-                        VlessVpnService.startVpn(context, cfgToConnect)
-                    }
-                } catch (e: Exception) {
-                    android.util.Log.e("MainActivity", "VPN permission prepare failed", e)
-                    Toast.makeText(context, "Ошибка запроса разрешения VPN: ${e.localizedMessage ?: e.javaClass.simpleName}", Toast.LENGTH_LONG).show()
-                }
-            } else {
-                Toast.makeText(context, "Не удалось найти рабочий узел связи. Проверьте интернет-соединение.", Toast.LENGTH_LONG).show()
-            }
+    val handleConnectToggle: (VlessConfig?) -> Unit = toggle@{ targetConfig ->
+        if (preparingConnection) {
+            preparationJob?.cancel()
+            return@toggle
         }
-    }
-
-    // Запрос разрешения VPN сразу при первом запуске (после установки/открытия)
-    var vpnPermissionChecked by remember { mutableStateOf(false) }
-    var autoConnectAttempted by remember { mutableStateOf(false) }
-
-    LaunchedEffect(showSplash) {
-        if (!showSplash && !vpnPermissionChecked) {
-            vpnPermissionChecked = true
+        if (pendingConfig != null) return@toggle // System VPN permission dialog is already open.
+        preparationJob = scope.launch {
+            preparingConnection = true
             try {
+                if (VlessVpnService.vpnStats.value.status in listOf(VpnStatus.CONNECTED, VpnStatus.CONNECTING)) {
+                    VlessVpnService.stopVpn(context)
+                    repo.setActive("")
+                    return@launch
+                }
+                var cfgToConnect = targetConfig
+                    ?: configs.filter { it.pingMs in 1..1500 }.minByOrNull { it.pingMs }
+                    ?: configs.firstOrNull { it.isActive } ?: configs.firstOrNull()
+                if (cfgToConnect == null) {
+                    val working = PublicConfigFetcher.fetchAndFilterWorkingConfigs(maxWorkingCount = 20)
+                    repo.addConfigs(working)
+                    cfgToConnect = working.firstOrNull()
+                }
+                val config = cfgToConnect
+                if (config == null) {
+                    Toast.makeText(context, "Нет доступных узлов. Добавьте подписку или сервер.", Toast.LENGTH_LONG).show()
+                    return@launch
+                }
+                // A connect click does not override the user's monitoring consent.
+                if (settings.autoSelect && settings.autopilotConsentGiven) {
+                    autoPilotEngine.startAutoPilot(settings.healthCheckInterval)
+                }
                 val prepareIntent = VpnService.prepare(context)
                 if (prepareIntent != null) {
+                    pendingConfig = config
                     vpnPermissionLauncher.launch(prepareIntent)
+                } else {
+                    repo.setActive(config.id)
+                    VlessVpnService.startVpn(context, config)
                 }
-            } catch (e: Exception) {
-                android.util.Log.e("MainActivity", "Early VPN permission check failed", e)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                CrashReportManager.recordException(context.applicationContext, Thread.currentThread(), error, "CONNECT_UI")
+                Toast.makeText(context, "Не удалось подготовить подключение. Откройте отчёты об ошибках.", Toast.LENGTH_LONG).show()
+            } finally {
+                preparingConnection = false
             }
         }
     }
+
+    var autoConnectAttempted by remember { mutableStateOf(false) }
 
     // Полный автомат: однократное автоподключение при старте приложения
     LaunchedEffect(showSplash, settings.autoSelect, autoConnectOnStart) {
@@ -206,7 +202,9 @@ fun VlessCardVpnApp(
                         onNavigateToAutopilot = { navController.navigate("autopilot") },
                         onNavigateToDiagnostic = { navController.navigate("diagnostic") },
                         onNavigateToSettings = { navController.navigate("settings") },
-                        onPanicTrigger = onPanicExit
+                        onPanicTrigger = onPanicExit,
+                        preparingConnection = preparingConnection,
+                        onNavigateToCrashReports = { navController.navigate("crash_reports") }
                     )
                 }
                 composable("servers") {

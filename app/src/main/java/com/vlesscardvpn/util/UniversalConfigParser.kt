@@ -40,24 +40,24 @@ object UniversalConfigParser {
     fun decodeBase64Safe(text: String): ByteArray? {
         val clean = text.replace("\r", "").replace("\n", "").replace(" ", "").trim()
         if (clean.isBlank()) return null
-        return try {
-            // JVM Standard Base64
-            java.util.Base64.getDecoder().decode(clean)
-        } catch (_: Exception) {
+        // java.util.Base64 was added in Android 8/API 26. The app also supports API 24/25.
+        // Use the platform decoder first; reflection keeps JVM unit tests independent of Android stubs.
+        for (flags in listOf(0, 8)) { // DEFAULT, URL_SAFE
             try {
-                // URL-safe Base64
-                java.util.Base64.getUrlDecoder().decode(clean)
-            } catch (_: Exception) {
-                try {
-                    // Android Base64 fallback if available
-                    val clazz = Class.forName("android.util.Base64")
-                    val method = clazz.getMethod("decode", String::class.java, Int::class.javaPrimitiveType)
-                    method.invoke(null, clean, 0) as? ByteArray
-                } catch (_: Exception) {
-                    null
-                }
-            }
+                val clazz = Class.forName("android.util.Base64")
+                val bytes = clazz.getMethod("decode", String::class.java, Int::class.javaPrimitiveType)
+                    .invoke(null, clean, flags) as? ByteArray
+                if (bytes != null) return bytes
+            } catch (_: Exception) {}
         }
+        for (factory in listOf("getDecoder", "getUrlDecoder")) {
+            try {
+                val clazz = Class.forName("java.util.Base64")
+                val decoder = clazz.getMethod(factory).invoke(null)
+                return decoder.javaClass.getMethod("decode", String::class.java).invoke(decoder, clean) as? ByteArray
+            } catch (_: Exception) {}
+        }
+        return null
     }
 
     private fun tryDecodeBase64(text: String): String? {

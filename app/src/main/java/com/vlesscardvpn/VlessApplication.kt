@@ -4,7 +4,6 @@ import android.app.Application
 import android.content.Context
 import android.util.Log
 import com.vlesscardvpn.core.CrashReportManager
-import go.Seq
 import java.io.File
 import java.io.PrintWriter
 import java.io.StringWriter
@@ -44,26 +43,7 @@ class VlessApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
-        setupGoSeqContext()
         setupUncaughtExceptionHandler()
-    }
-
-    /**
-     * Initializes Go runtime environment context for Go Mobile / Libbox.
-     */
-    private fun setupGoSeqContext() {
-        try {
-            System.loadLibrary("box")
-            Log.i(TAG, "Loaded libbox.so (sing-box native library)")
-        } catch (t: Throwable) {
-            Log.w(TAG, "Could not load libbox: ${t.message}")
-        }
-        try {
-            Seq.setContext(applicationContext)
-            Log.i(TAG, "Go Seq context initialized successfully")
-        } catch (t: Throwable) {
-            Log.e(TAG, "Failed to initialize Go Seq context", t)
-        }
     }
 
     /**

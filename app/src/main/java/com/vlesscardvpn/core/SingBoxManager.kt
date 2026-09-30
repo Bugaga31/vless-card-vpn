@@ -70,12 +70,16 @@ object SingBoxManager {
         settings: AppSettings,
         networkProfile: EvaluatedNetworkProfile?
     ): String {
-        return when {
-            config.sni.isNotBlank() -> config.sni.trim()
-            settings.customSniOverride.isNotBlank() && !settings.customSniOverride.equals("auto", ignoreCase = true) -> settings.customSniOverride.trim()
-            networkProfile != null && networkProfile.recommendedSni.isNotBlank() -> networkProfile.recommendedSni.trim()
-            else -> "yandex.ru"
+        // A server-compatible name is essential for TLS certificate validation and REALITY.
+        // Network/operator domains and random SNI are not valid substitutes.
+        if (config.sni.isNotBlank()) return config.sni.trim()
+        if (settings.customSniOverride.isNotBlank() && !settings.customSniOverride.equals("auto", true)) {
+            return settings.customSniOverride.trim()
         }
+        require(!config.security.equals("reality", true)) {
+            "Для REALITY нужен SNI из конфигурации сервера. Обновите подписку."
+        }
+        return config.address.trim()
     }
 
     /**
@@ -88,13 +92,8 @@ object SingBoxManager {
         settings: AppSettings = AppSettings(),
         networkProfile: EvaluatedNetworkProfile? = null
     ): String {
-        // SNI rotation: pick random Russian SNI if enabled and no explicit config SNI
-        val effectiveSni = when {
-            config.sni.isNotBlank() -> config.sni.trim()
-            settings.enableSniRotation -> SniPool.randomSni()
-            else -> resolveEffectiveSni(config, settings, networkProfile)
-        }
-        val effectiveMtu = networkProfile?.optimalMtu ?: settings.mtuSize.coerceIn(1280, 1500)
+        val effectiveSni = resolveEffectiveSni(config, settings, networkProfile)
+        val effectiveMtu = (networkProfile?.optimalMtu ?: settings.mtuSize).coerceIn(1280, 1500)
 
         val effectiveDns = when {
             settings.customDnsProvider.contains("Google", ignoreCase = true) -> "https://8.8.8.8/dns-query"

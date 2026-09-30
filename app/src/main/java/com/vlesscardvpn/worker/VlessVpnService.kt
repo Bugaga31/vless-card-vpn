@@ -18,6 +18,9 @@ import com.vlesscardvpn.MainActivity
 import com.vlesscardvpn.core.LibboxPlatformInterface
 import com.vlesscardvpn.core.NetworkProfileManager
 import com.vlesscardvpn.core.SingBoxManager
+import com.vlesscardvpn.core.CrashReportManager
+import com.vlesscardvpn.VlessApplication
+import go.Seq
 
 import com.vlesscardvpn.data.AppRepository
 import com.vlesscardvpn.domain.AppSettings
@@ -92,7 +95,22 @@ class VlessVpnService : VpnService() {
     }
 
     private var vpnInterface: ParcelFileDescriptor? = null
-    private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private val backgroundErrors: CoroutineExceptionHandler = CoroutineExceptionHandler { _, failure ->
+        CrashReportManager.recordException(applicationContext, Thread.currentThread(), failure, "VPN_BACKGROUND")
+        sessionSequence.incrementAndGet()
+        connectionJob?.cancel()
+        serviceScope.launch {
+            operationMutex.withLock {
+                cleanupResources()
+                _vpnStats.value = VpnSessionStats(status = VpnStatus.ERROR,
+                    errorMessage = "Ошибка фоновой задачи. Откройте отчёты об ошибках.")
+                stopForeground(STOP_FOREGROUND_REMOVE)
+                stopSelf()
+            }
+        }
+    }
+    private val serviceScope: CoroutineScope = CoroutineScope(Dispatchers.IO + SupervisorJob() + backgroundErrors)
+    private var nativeInitialized = false
     private val operationMutex = Mutex()
     private val sessionSequence = AtomicLong(0L)
 
@@ -110,7 +128,6 @@ class VlessVpnService : VpnService() {
         super.onCreate()
         repository = AppRepository(applicationContext)
         createNotificationChannel()
-        initLibboxEnvironment()
         registerScreenStateReceiver()
     }
 
@@ -141,24 +158,19 @@ class VlessVpnService : VpnService() {
         }
     }
 
+    /** Run on Dispatchers.IO only after startForeground has succeeded. */
     private fun initLibboxEnvironment() {
-        try {
-            val baseDir = File(filesDir, "singbox").apply { mkdirs() }
-            val workingDir = File(cacheDir, "singbox_work").apply { mkdirs() }
-            val tempDir = File(cacheDir, "singbox_temp").apply { mkdirs() }
-
-            val options = SetupOptions().apply {
-                basePath = baseDir.absolutePath
-                workingPath = workingDir.absolutePath
-                tempPath = tempDir.absolutePath
-                fixAndroidStack = true
-                debug = false
-            }
-            Libbox.setup(options)
-        } catch (t: Throwable) {
-            // JNI / native setup can throw on bad AAR or ABI mismatch - do not crash the service
-            Log.e("VlessVpnService", "Libbox.setup failed (possible AAR/ABI issue)", t)
+        if (nativeInitialized) return
+        Seq.setContext(applicationContext)
+        val options = SetupOptions().apply {
+            basePath = File(filesDir, "singbox").apply { mkdirs() }.absolutePath
+            workingPath = File(cacheDir, "singbox_work").apply { mkdirs() }.absolutePath
+            tempPath = File(cacheDir, "singbox_temp").apply { mkdirs() }.absolutePath
+            fixAndroidStack = true
+            debug = false
         }
+        Libbox.setup(options)
+        nativeInitialized = true
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -181,15 +193,9 @@ class VlessVpnService : VpnService() {
 
                 // CRITICAL FIX: MUST call startForeground synchronously (Android 12+ / 14+ FGS rules)
                 // with explicit FOREGROUND_SERVICE_TYPE_SPECIAL_USE before ANY coroutine launch or heavy work.
-                val initialNotification = try {
-                    createNotification(null, "Подключение...")
-                } catch (t: Throwable) {
-                    null
-                }
-                if (initialNotification != null) {
-                    safeStartForeground(1, initialNotification)
-                } else {
-                    safeStartForeground(1, createNotification(null, "Подключение"))
+                if (!safeStartForeground(1, createNotification(null, "Подключение…"))) {
+                    stopSelf(startId)
+                    return START_NOT_STICKY
                 }
 
                 connectionJob?.cancel()
@@ -251,7 +257,10 @@ class VlessVpnService : VpnService() {
 
         _vpnStats.value = VpnSessionStats(status = VpnStatus.CONNECTING, activeConfig = config)
         // Keep foreground alive (already started in onStartCommand)
-        safeStartForeground(1, createNotification(config, "Инициализация ядра связи..."))
+        if (!safeStartForeground(1, createNotification(config, "Инициализация ядра связи…"))) {
+            cleanupResources()
+            return
+        }
 
         try {
             // 2. Evaluate Network Profile with consistent settings snapshot
@@ -267,6 +276,8 @@ class VlessVpnService : VpnService() {
             // 3. Teardown any lingering core instance cleanly before spawning new
             cleanupResources()
 
+            initLibboxEnvironment()
+
             // 4. Launch via Sing-Box Engine (Full unified support for VLESS Reality, VMess, Trojan, ShadowTLS, uTLS)
             val singBoxJson = SingBoxManager.generateConfig(
                 context = this@VlessVpnService,
@@ -275,60 +286,65 @@ class VlessVpnService : VpnService() {
                 networkProfile = netProfile
             )
 
-                SingBoxManager.validateGeneratedConfig(singBoxJson).getOrThrow()
+            SingBoxManager.validateGeneratedConfig(singBoxJson).getOrThrow()
+            // Structural JSON checks alone cannot detect native schema incompatibility.
+            Libbox.checkConfig(singBoxJson)
 
-                // 5. Setup LibboxPlatformInterface and CommandServer
-                val adapter = LibboxPlatformInterface(this@VlessVpnService, settingsSnapshot.bypassApps) { pfd ->
-                    vpnInterface = pfd
-                }
-                platformAdapter = adapter
+            // 5. Setup LibboxPlatformInterface and CommandServer
+            val adapter = LibboxPlatformInterface(this@VlessVpnService, settingsSnapshot.bypassApps) { pfd ->
+                vpnInterface = pfd
+            }
+            platformAdapter = adapter
 
-                val serverHandler = object : CommandServerHandler {
-                    override fun getSystemProxyStatus(): SystemProxyStatus? = null
-                    override fun serviceReload() {}
-                    override fun serviceStop() {
-                        // Core stopped unexpectedly
-                        serviceScope.launch {
-                            operationMutex.withLock {
-                                if (_vpnStats.value.status == VpnStatus.CONNECTED) {
-                                    cleanupResources()
-                                    _vpnStats.value = VpnSessionStats(
-                                        status = VpnStatus.ERROR,
-                                        activeConfig = config,
-                                        errorMessage = "Ядро туннеля было остановлено системой"
-                                    )
-                                    stopForeground(STOP_FOREGROUND_REMOVE)
-                                }
+            val serverHandler = object : CommandServerHandler {
+                override fun getSystemProxyStatus(): SystemProxyStatus? = null
+                override fun serviceReload() {}
+                override fun serviceStop() {
+                    // Core stopped unexpectedly
+                    serviceScope.launch {
+                        operationMutex.withLock {
+                            if (sessionId == sessionSequence.get() && _vpnStats.value.status == VpnStatus.CONNECTED) {
+                                cleanupResources()
+                                _vpnStats.value = VpnSessionStats(
+                                    status = VpnStatus.ERROR,
+                                    activeConfig = config,
+                                    errorMessage = "Ядро туннеля было остановлено системой"
+                                )
+                                stopForeground(STOP_FOREGROUND_REMOVE)
                             }
                         }
                     }
-                    override fun setSystemProxyEnabled(p0: Boolean) {}
-                    override fun writeDebugMessage(msg: String?) {
-                        Log.d("SingBoxCore", msg ?: "")
-                    }
                 }
-
-                // 5b. Start CommandServer and load config - protected boundary for libbox/JNI
-                val server = try {
-                    val s = CommandServer(serverHandler, adapter)
-                    s.start()
-                    s.startOrReloadService(singBoxJson, OverrideOptions())
-                    s
-                } catch (t: Throwable) {
-                    Log.e("VlessVpnService", "CommandServer startOrReloadService failed (libbox/JNI)", t)
-                    cleanupResources()
-                    _vpnStats.value = VpnSessionStats(
-                        status = VpnStatus.ERROR,
-                        activeConfig = config,
-                        errorMessage = "Ошибка запуска ядра sing-box: ${sanitizeError(t.message)}"
-                    )
-                    stopForeground(STOP_FOREGROUND_REMOVE)
-                    return
+                override fun setSystemProxyEnabled(p0: Boolean) {}
+                override fun writeDebugMessage(msg: String?) {
+                    Log.d("SingBoxCore", VlessApplication.sanitizeLog(msg))
                 }
-                commandServer = server
+            }
 
-                // 6. Connect CommandClient for real traffic metrics
-                startCommandClientListener()
+            // 5b. Start CommandServer and load config - protected boundary for libbox/JNI
+            val server = try {
+                val s = CommandServer(serverHandler, adapter)
+                // Retain ownership before any operation which may fail.
+                commandServer = s
+                s.start()
+                s.startOrReloadService(singBoxJson, OverrideOptions())
+                s
+            } catch (t: Throwable) {
+                Log.e("VlessVpnService", "CommandServer startOrReloadService failed (libbox/JNI)", t)
+                CrashReportManager.recordException(applicationContext, Thread.currentThread(), t, "VPN_START")
+                cleanupResources()
+                _vpnStats.value = VpnSessionStats(
+                    status = VpnStatus.ERROR,
+                    activeConfig = config,
+                    errorMessage = "Ошибка запуска ядра sing-box: ${sanitizeError(t.message)}"
+                )
+                stopForeground(STOP_FOREGROUND_REMOVE)
+                return
+            }
+            commandServer = server
+
+            // 6. Connect CommandClient for real traffic metrics
+            startCommandClientListener()
 
             if (sessionId != sessionSequence.get()) {
                 cleanupResources()
@@ -386,7 +402,8 @@ class VlessVpnService : VpnService() {
             )
             stopForeground(STOP_FOREGROUND_REMOVE)
         } catch (t: Throwable) {
-            // Last resort catch for JNI / native libbox crashes
+            // Catches JVM/linkage failures, NOT SIGSEGV/abort in native code.
+            CrashReportManager.recordException(applicationContext, Thread.currentThread(), t, "VPN_START")
             Log.e("VlessVpnService", "FATAL Throwable in VPN tunnel setup (JNI/libbox)", t)
             cleanupResources()
             _vpnStats.value = VpnSessionStats(
@@ -398,10 +415,8 @@ class VlessVpnService : VpnService() {
         }
     }
 
-    private fun sanitizeError(msg: String?): String {
-        if (msg.isNullOrBlank()) return "unknown"
-        return msg.replace(Regex("[0-9a-fA-F-]{8,}"), "[REDACTED]").take(200)
-    }
+    private fun sanitizeError(msg: String?): String =
+        VlessApplication.sanitizeLog(msg).ifBlank { "Неизвестная ошибка" }.take(200)
 
     private suspend fun handleDisconnect(): Unit = operationMutex.withLock {
         _vpnStats.value = _vpnStats.value.copy(status = VpnStatus.STOPPING)
@@ -448,8 +463,8 @@ class VlessVpnService : VpnService() {
             Thread {
                 try {
                     client.connect()
-                } catch (e: Exception) {
-                    Log.w("VlessVpnService", "CommandClient listener stopped: ${e.message}")
+                } catch (e: Throwable) {
+                    Log.w("VlessVpnService", "CommandClient listener stopped: ${sanitizeError(e.message)}")
                 }
             }.apply {
                 name = "libbox-command-client"
@@ -483,22 +498,16 @@ class VlessVpnService : VpnService() {
         statsJob?.cancel()
         statsJob = null
 
-        try { commandClient?.disconnect() } catch (_: Exception) {}
-        commandClient = null
-
-        try {
-            commandServer?.closeService()
-            commandServer?.close()
-        } catch (_: Exception) {}
-        commandServer = null
-
-        try { platformAdapter?.closeDefaultInterfaceMonitor(null) } catch (_: Exception) {}
-        platformAdapter = null
-
-
-
-        try { vpnInterface?.close() } catch (_: Exception) {}
-        vpnInterface = null
+        val client = commandClient.also { commandClient = null }
+        val server = commandServer.also { commandServer = null }
+        val adapter = platformAdapter.also { platformAdapter = null }
+        val tun = vpnInterface.also { vpnInterface = null }
+        // Independent cleanup: closeService failure must not prevent server.close.
+        try { client?.disconnect() } catch (_: Throwable) {}
+        try { server?.closeService() } catch (_: Throwable) {}
+        try { server?.close() } catch (_: Throwable) {}
+        try { adapter?.closeDefaultInterfaceMonitor(null) } catch (_: Throwable) {}
+        try { tun?.close() } catch (_: Throwable) {}
 
         // Do NOT call stopSelf or change _vpnStats here — caller decides state
     }
@@ -518,19 +527,21 @@ class VlessVpnService : VpnService() {
         }
     }
 
-    private fun safeStartForeground(id: Int, notification: Notification) {
-        try {
+    private fun safeStartForeground(id: Int, notification: Notification): Boolean {
+        return try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
                 startForeground(id, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
             } else {
                 startForeground(id, notification)
             }
+            true
         } catch (t: Throwable) {
             Log.e("VlessVpnService", "safeStartForeground failed (${t.javaClass.simpleName}): ${t.message}", t)
             _vpnStats.value = VpnSessionStats(
                 status = VpnStatus.ERROR,
-                errorMessage = "Ошибка запуска службы: ${t.localizedMessage ?: t.javaClass.simpleName}"
+                errorMessage = "Ошибка запуска службы: ${sanitizeError(t.message ?: t.javaClass.simpleName)}"
             )
+            false
         }
     }
 
@@ -582,8 +593,11 @@ class VlessVpnService : VpnService() {
             try { unregisterReceiver(it) } catch (_: Exception) {}
             screenStateReceiver = null
         }
-        cleanupResources()
-        serviceScope.cancel()
+        // Never race closeService against a synchronous native start on Dispatchers.IO.
+        serviceScope.launch(NonCancellable) {
+            operationMutex.withLock { cleanupResources() }
+            serviceScope.cancel()
+        }
         super.onDestroy()
     }
 }
