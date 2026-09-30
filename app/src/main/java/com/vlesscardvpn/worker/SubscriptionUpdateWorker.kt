@@ -60,6 +60,8 @@ class SubscriptionUpdateWorker(
                 repeatInterval = 6,
                 repeatIntervalTimeUnit = TimeUnit.HOURS
             )
+                // Do not compete with the first UI frame on a cold app start.
+                .setInitialDelay(15, TimeUnit.MINUTES)
                 .setConstraints(constraints)
                 .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 15, TimeUnit.MINUTES)
                 .build()

@@ -101,7 +101,11 @@ fun VlessCardVpnApp(
         SubscriptionUpdateWorker.schedulePeriodic(context.applicationContext)
         delay(800)
         showSplash = false
-        if (settings.autoSelect) autoPilotEngine.startAutoPilot(settings.healthCheckInterval)
+        // Restore monitoring only for a tunnel that was already running. Opening the UI
+        // must not start a tunnel or scan all nodes because a selection setting was saved.
+        if (settings.autoSelect && VlessVpnService.vpnStats.value.status == VpnStatus.CONNECTED) {
+            autoPilotEngine.startAutoPilot(settings.healthCheckInterval)
+        }
     }
 
     val vpnPermissionLauncher = rememberLauncherForActivityResult(
@@ -172,9 +176,10 @@ fun VlessCardVpnApp(
 
     var autoConnectAttempted by remember { mutableStateOf(false) }
 
-    // Полный автомат: однократное автоподключение при старте приложения
-    LaunchedEffect(showSplash, settings.autoSelect, autoConnectOnStart) {
-        if (!showSplash && (settings.autoSelect || autoConnectOnStart) && !autoConnectAttempted) {
+    // Autoselection is not consent to connect on every launcher open.
+    // Only an explicit Quick Settings action requests connection on entry.
+    LaunchedEffect(showSplash, autoConnectOnStart) {
+        if (!showSplash && autoConnectOnStart && !autoConnectAttempted) {
             autoConnectAttempted = true
             delay(1500) // даём подпискам и БД прогрузиться
             if (vpnStats.status == VpnStatus.DISCONNECTED) {
