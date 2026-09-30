@@ -11,7 +11,10 @@ android {
     namespace = "com.vlesscardvpn"
     compileSdk = 34
     defaultConfig {
-        applicationId = "com.vlesscardvpn"
+        // Install the diagnostic build alongside the release without deleting user data.
+        val stabilityPreview = providers.gradleProperty("stabilityPreview").orNull == "true"
+        applicationId = if (stabilityPreview) "com.vlesscardvpn.preview" else "com.vlesscardvpn"
+        manifestPlaceholders["vpnAppLabel"] = if (stabilityPreview) "VLESS Card VPN · Test" else "@string/app_name"
         minSdk = 24
         targetSdk = 34
         versionCode = releaseNumber
