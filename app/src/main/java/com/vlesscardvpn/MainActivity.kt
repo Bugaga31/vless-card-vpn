@@ -45,20 +45,9 @@ class MainActivity : ComponentActivity() {
         val shouldAutoConnect = intent?.getBooleanExtra("EXTRA_AUTO_CONNECT", false) ?: false
 
         setContent {
-            VlessCardVpnTheme(darkTheme = true) {
-                Surface(
-                    modifier = Modifier.fillMaxSize(),
-                    color = MaterialTheme.colorScheme.background
-                ) {
-                    VlessCardVpnApp(
-                        autoConnectOnStart = shouldAutoConnect,
-                        onPanicExit = {
-                            VlessVpnService.stopVpn(this@MainActivity)
-                            finishAffinity()
-                        }
-                    )
-                }
-            }
+            VlessCardVpnApp(autoConnectOnStart = shouldAutoConnect, onPanicExit = {
+                VlessVpnService.stopVpn(this@MainActivity); finishAffinity()
+            })
         }
     }
 }
@@ -162,6 +151,9 @@ fun VlessCardVpnApp(
         }
     }
 
+    VlessCardVpnTheme(darkTheme = com.vlesscardvpn.domain.AppAppearance.isDark(settings.themeMode,
+        androidx.compose.foundation.isSystemInDarkTheme())) {
+    Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
     AnimatedContent(
         targetState = showSplash,
         transitionSpec = { fadeIn(animationSpec = tween(280)) togetherWith fadeOut(animationSpec = tween(280)) },
@@ -198,5 +190,7 @@ fun VlessCardVpnApp(
                 composable("crash_reports") { CrashReportsScreen(repo) { navController.popBackStack() } }
             }
         }
+    }
+    }
     }
 }

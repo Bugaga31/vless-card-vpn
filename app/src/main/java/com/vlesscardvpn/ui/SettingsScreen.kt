@@ -38,6 +38,7 @@ fun SettingsScreen(
     repo: AppRepository,
     autoPilotEngine: AutoPilotEngine,
     onNavigateToCrashReports: () -> Unit = {},
+    scrollState: androidx.compose.foundation.ScrollState = rememberScrollState(),
     onBack: () -> Unit
 ) {
     val context = LocalContext.current
@@ -51,7 +52,7 @@ fun SettingsScreen(
             TopAppBar(
                 title = {
                     Text(
-                        text = "Параметры связи",
+                        text = "Настройки",
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onBackground
@@ -71,11 +72,13 @@ fun SettingsScreen(
                 .fillMaxSize()
                 .padding(padding)
                 .padding(horizontal = InstrumentDimens.space16, vertical = InstrumentDimens.space12)
-                .verticalScroll(rememberScrollState()),
+                .verticalScroll(scrollState),
             verticalArrangement = Arrangement.spacedBy(InstrumentDimens.space16)
         ) {
+            AppearancePanel(settings.themeMode) { mode -> repo.updateSettings { it.copy(themeMode = mode) } }
+
             // Group 1: Подключение & Автопилот
-            GroupCard(title = "1. ПОДКЛЮЧЕНИЕ И АВТОПИЛОТ") {
+            GroupCard(title = "Подключение и автопилот") {
                 SettingSwitchItem(
                     title = "Автопилот сети (Автовыбор)",
                     description = "Автоматический выбор стабильного узла и восстановление при сбоях",
@@ -96,7 +99,7 @@ fun SettingsScreen(
 
                 SettingSwitchItem(
                     title = "Авто-восстановление сети",
-                    description = "Бесшовный перезапуск туннеля при смене Wi-Fi и мобильного интернета",
+                    description = "Повторное подключение при смене Wi-Fi и мобильного интернета",
                     checked = settings.autoReconnectOnNetworkChange
                 ) { repo.updateSettings { s -> s.copy(autoReconnectOnNetworkChange = it) } }
 
@@ -110,6 +113,7 @@ fun SettingsScreen(
                     ) {
                         Text(
                             text = "Размер MTU",
+                            modifier = Modifier.weight(1f),
                             style = MaterialTheme.typography.bodyMedium,
                             fontWeight = FontWeight.SemiBold,
                             color = MaterialTheme.colorScheme.onBackground
@@ -117,7 +121,7 @@ fun SettingsScreen(
                         BadgeTag(text = "требует рестарта")
                     }
                     Text(
-                        text = "1400 по умолчанию. Уменьшение до 1360 решает проблемы фрагментации в сотовых сетях.",
+                        text = "1400 по умолчанию. Меньший MTU может помочь в сотовой сети. Применяется при новом подключении.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -132,7 +136,7 @@ fun SettingsScreen(
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = true,
                         colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = SignalOrange,
+                            focusedBorderColor = MaterialTheme.colorScheme.primary,
                             unfocusedBorderColor = MaterialTheme.colorScheme.outline
                         )
                     )
@@ -140,7 +144,7 @@ fun SettingsScreen(
             }
 
             // Group 2: Ядро туннелирования
-            GroupCard(title = "2. ЯДРО ТУННЕЛЯ И ПРОТОКОЛЫ") {
+            GroupCard(title = "Ядро туннеля и протоколы") {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
                         text = "Высокопроизводительный движок",
@@ -157,7 +161,7 @@ fun SettingsScreen(
             }
 
             // Group 3: Маршрутизация & Трафик
-            GroupCard(title = "2. МАРШРУТИЗАЦИЯ И ТРАФИК") {
+            GroupCard(title = "Маршрутизация и трафик") {
                 SettingSwitchItem(
                     title = "Прямой доступ для РФ (.RU)",
                     description = "Банки, Госуслуги, Ozon, WB и .ru сайты идут в обход туннеля с 0 мс задержки",
@@ -205,7 +209,7 @@ fun SettingsScreen(
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = true,
                         colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = SignalOrange,
+                            focusedBorderColor = MaterialTheme.colorScheme.primary,
                             unfocusedBorderColor = MaterialTheme.colorScheme.outline
                         )
                     )
@@ -213,7 +217,7 @@ fun SettingsScreen(
             }
 
             // Group 4: Диагностика & DNS
-            GroupCard(title = "3. ДИАГНОСТИКА И DNS") {
+            GroupCard(title = "Диагностика и dns") {
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -243,8 +247,8 @@ fun SettingsScreen(
                                 onClick = { repo.updateSettings { s -> s.copy(customDnsProvider = dns) } },
                                 label = { Text(dns.substringBefore(" "), style = MaterialTheme.typography.bodySmall) },
                                 colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = SignalOrangeContainer,
-                                    selectedLabelColor = SignalOrangeContent
+                                    selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
+                                    selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
                                 )
                             )
                         }
@@ -270,8 +274,8 @@ fun SettingsScreen(
                                 onClick = { repo.updateSettings { s -> s.copy(healthCheckInterval = sec) } },
                                 label = { Text("${sec} сек", style = MaterialTheme.typography.bodySmall) },
                                 colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = SignalOrangeContainer,
-                                    selectedLabelColor = SignalOrangeContent
+                                    selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
+                                    selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
                                 )
                             )
                         }
@@ -288,7 +292,7 @@ fun SettingsScreen(
             }
 
             // Group 5: Приложение & Хранилище
-            GroupCard(title = "4. ПРИЛОЖЕНИЕ И ПАМЯТЬ") {
+            GroupCard(title = "Приложение и память") {
                 SettingSwitchItem(
                     title = "Скрывать недоступные серверы",
                     description = "Отображать в общем списке только узлы с подтверждённым откликом",
@@ -305,6 +309,7 @@ fun SettingsScreen(
 
                 HorizontalDivider(color = MaterialTheme.colorScheme.outline, thickness = 1.dp)
 
+                Text("Лимит импорта публичных узлов", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 OutlinedTextField(
                     value = settings.maxFreeNodesToAdd.toString(),
                     onValueChange = { value ->
@@ -312,11 +317,10 @@ fun SettingsScreen(
                             repo.updateSettings { s -> s.copy(maxFreeNodesToAdd = it) }
                         }
                     },
-                    label = { Text("Лимит импорта публичных узлов") },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
                     colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = SignalOrange,
+                        focusedBorderColor = MaterialTheme.colorScheme.primary,
                         unfocusedBorderColor = MaterialTheme.colorScheme.outline
                     )
                 )
@@ -332,16 +336,16 @@ fun SettingsScreen(
                     },
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(InstrumentDimens.radiusSmall),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = SemanticRed)
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error)
                 ) {
                     Icon(Icons.Default.DeleteOutline, contentDescription = null, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("Сбросить память и профили автопилота", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold)
+                    Text("Сбросить обучение", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold)
                 }
             }
 
             // Group 5: Отчеты об ошибках и GitHub
-            GroupCard(title = "5. ОТЧЕТЫ ОБ ОШИБКАХ И СВЯЗЬ С РАЗРАБОТЧИКОМ") {
+            GroupCard(title = "Отчеты об ошибках и связь с разработчиком") {
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text(
                         text = "Репозиторий GitHub для баг-репортов",
@@ -361,7 +365,7 @@ fun SettingsScreen(
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = true,
                         colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = SignalOrange,
+                            focusedBorderColor = MaterialTheme.colorScheme.primary,
                             unfocusedBorderColor = MaterialTheme.colorScheme.outline
                         )
                     )
@@ -373,11 +377,11 @@ fun SettingsScreen(
                     onClick = onNavigateToCrashReports,
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(InstrumentDimens.radiusSmall),
-                    colors = ButtonDefaults.buttonColors(containerColor = SignalOrange)
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
                 ) {
                     Icon(Icons.Default.BugReport, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("Открыть журнал и отправку отчетов в GitHub", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
+                    Text("Отчёты об ошибках", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
                 }
             }
 
@@ -396,8 +400,8 @@ private fun GroupCard(
             text = title,
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
-            fontWeight = FontWeight.Bold,
-            letterSpacing = 0.8.sp,
+            fontWeight = FontWeight.SemiBold,
+            letterSpacing = 0.sp,
             modifier = Modifier.padding(bottom = InstrumentDimens.space8)
         )
 
@@ -405,7 +409,7 @@ private fun GroupCard(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(InstrumentDimens.radiusMedium),
             color = MaterialTheme.colorScheme.surface,
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
         ) {
             Column(
                 modifier = Modifier.padding(InstrumentDimens.space16),
@@ -430,18 +434,8 @@ private fun SettingSwitchItem(
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
         Column(modifier = Modifier.weight(1f)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onBackground
-                )
-                if (badge != null) {
-                    Spacer(modifier = Modifier.width(6.dp))
-                    BadgeTag(text = badge)
-                }
-            }
+            Text(text = title, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium,
+                color = MaterialTheme.colorScheme.onBackground)
             Spacer(modifier = Modifier.height(2.dp))
             Text(
                 text = description,
@@ -454,8 +448,8 @@ private fun SettingSwitchItem(
             checked = checked,
             onCheckedChange = onCheckedChange,
             colors = SwitchDefaults.colors(
-                checkedThumbColor = SignalOrange,
-                checkedTrackColor = SignalOrangeContainer
+                checkedThumbColor = MaterialTheme.colorScheme.primary,
+                checkedTrackColor = MaterialTheme.colorScheme.primaryContainer
             )
         )
     }
@@ -464,14 +458,14 @@ private fun SettingSwitchItem(
 @Composable
 private fun BadgeTag(text: String) {
     Surface(
-        color = MineralSurfaceSubtle,
+        color = MaterialTheme.colorScheme.surfaceVariant,
         shape = RoundedCornerShape(4.dp),
         border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outline)
     ) {
         Text(
             text = text,
             style = MaterialTheme.typography.labelSmall,
-            fontSize = 10.sp,
+            fontSize = 14.sp,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
         )

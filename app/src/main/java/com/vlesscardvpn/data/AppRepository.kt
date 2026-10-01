@@ -155,6 +155,7 @@ class AppRepository(private val context: Context) {
 
     private fun loadSettingsFromPrefs() = AppSettings(
         isDarkTheme = prefs.getBoolean("isDarkTheme", true),
+        themeMode = com.vlesscardvpn.domain.AppAppearance.normalize(prefs.getString("themeMode", "system") ?: "system"),
         autoSelect = prefs.getBoolean("autoSelect", false),
         autoSelectBestPing = prefs.getBoolean("autoSelectBestPing", true),
         healthCheckInterval = prefs.getInt("healthCheckInterval", 30),
@@ -188,6 +189,7 @@ class AppRepository(private val context: Context) {
     private fun saveSettingsToPrefs(settings: AppSettings) {
         prefs.edit().apply {
             putBoolean("isDarkTheme", settings.isDarkTheme)
+            putString("themeMode", com.vlesscardvpn.domain.AppAppearance.normalize(settings.themeMode))
             putBoolean("autoSelect", settings.autoSelect)
             putBoolean("autoSelectBestPing", settings.autoSelectBestPing)
             putInt("healthCheckInterval", settings.healthCheckInterval)

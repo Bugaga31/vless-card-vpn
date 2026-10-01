@@ -37,6 +37,7 @@ data class VlessConfig(
 
 data class AppSettings(
     val isDarkTheme: Boolean = true,
+    val themeMode: String = "system",
     val autoSelect: Boolean = true,
     val autoSelectBestPing: Boolean = true,
     val healthCheckInterval: Int = 20, // seconds

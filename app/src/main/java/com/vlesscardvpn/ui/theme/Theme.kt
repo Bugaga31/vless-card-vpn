@@ -6,6 +6,7 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -53,41 +54,65 @@ object InstrumentDimens {
     val space32 = 32.dp
     val space48 = 48.dp
     val radiusSmall = 12.dp
-    val radiusMedium = 20.dp
-    val radiusLarge = 28.dp
+    val radiusMedium = 16.dp
+    val radiusLarge = 20.dp
     val radiusPill = 999.dp
     val minTouchTarget = 48.dp
 }
 
 private val LightColorScheme = lightColorScheme(
-    primary = Color(0xFF73551F), onPrimary = Color.White,
-    primaryContainer = Color(0xFFF0E4C8), onPrimaryContainer = Color(0xFF30230F),
-    background = Color(0xFFF7F3EA), onBackground = Color(0xFF1B211C),
-    surface = Color.White, onSurface = Color(0xFF1B211C),
-    surfaceVariant = Color(0xFFE9E7DD), onSurfaceVariant = Color(0xFF51594E),
-    outline = Color(0xFF727A70), error = Color(0xFFAD2534)
+    primary = Color(0xFF0066CC), onPrimary = Color.White,
+    primaryContainer = Color(0xFFE7F0FB), onPrimaryContainer = Color(0xFF143A67),
+    secondary = Color(0xFF875104), onSecondary = Color.White,
+    secondaryContainer = Color(0xFFFFEED2), onSecondaryContainer = Color(0xFF65400A),
+    tertiary = Color(0xFF18794E), onTertiary = Color.White,
+    tertiaryContainer = Color(0xFFE5F3EA), onTertiaryContainer = Color(0xFF155638),
+    background = Color(0xFFF5F5F7), onBackground = Color(0xFF202124),
+    surface = Color.White, onSurface = Color(0xFF202124),
+    surfaceVariant = Color(0xFFEBEDF1), onSurfaceVariant = Color(0xFF59616E),
+    outline = Color(0xFF818896), outlineVariant = Color(0xFFD8DCE3),
+    error = Color(0xFFB3261E), onError = Color.White,
+    errorContainer = Color(0xFFFBEAE8), onErrorContainer = Color(0xFF7B1B16)
 )
 private val DarkColorScheme = darkColorScheme(
-    primary = SignalOrange, onPrimary = Color(0xFF0D2341),
-    primaryContainer = SignalOrangeContainer, onPrimaryContainer = SignalOrangeContent,
-    secondary = GraphiteSecondary, onSecondary = MineralBackground,
-    background = MineralBackground, onBackground = GraphitePrimary,
-    surface = MineralSurface, onSurface = GraphitePrimary,
-    surfaceVariant = MineralSurfaceSubtle, onSurfaceVariant = GraphiteSecondary,
-    outline = MineralBorder, error = SemanticRed, onError = Color(0xFF351016)
+    primary = Color(0xFF86B6FF), onPrimary = Color(0xFF102C52),
+    primaryContainer = Color(0xFF24374F), onPrimaryContainer = Color(0xFFCEE3FF),
+    secondary = Color(0xFFEAC47F), onSecondary = Color(0xFF412E0A),
+    secondaryContainer = Color(0xFF3A3021), onSecondaryContainer = Color(0xFFF1D6A5),
+    tertiary = Color(0xFF70D6A4), onTertiary = Color(0xFF0F3B28),
+    tertiaryContainer = Color(0xFF203A2D), onTertiaryContainer = Color(0xFFB8EBCD),
+    background = Color(0xFF141518), onBackground = Color(0xFFF2F3F7),
+    surface = Color(0xFF202126), onSurface = Color(0xFFF2F3F7),
+    surfaceVariant = Color(0xFF2B2E35), onSurfaceVariant = Color(0xFFB4BAC7),
+    outline = Color(0xFF7E8796), outlineVariant = Color(0xFF3B3F48),
+    error = Color(0xFFFFB4AB), onError = Color(0xFF601410),
+    errorContainer = Color(0xFF412824), onErrorContainer = Color(0xFFFFDAD5)
 )
 val InstrumentTypography = Typography(
-    displayLarge = TextStyle(fontFamily = FontFamily.SansSerif, fontWeight = FontWeight.Normal, fontSize = 34.sp, lineHeight = 42.sp),
-    titleLarge = TextStyle(fontWeight = FontWeight.Medium, fontSize = 24.sp, lineHeight = 32.sp),
+    displayLarge = TextStyle(fontFamily = FontFamily.SansSerif, fontWeight = FontWeight.SemiBold, fontSize = 32.sp, lineHeight = 40.sp),
+    titleLarge = TextStyle(fontWeight = FontWeight.SemiBold, fontSize = 24.sp, lineHeight = 32.sp),
     titleMedium = TextStyle(fontWeight = FontWeight.Medium, fontSize = 16.sp, lineHeight = 24.sp),
-    bodyLarge = TextStyle(fontSize = 16.sp, lineHeight = 26.sp),
+    bodyLarge = TextStyle(fontSize = 16.sp, lineHeight = 24.sp),
     bodyMedium = TextStyle(fontSize = 14.sp, lineHeight = 22.sp),
     bodySmall = TextStyle(fontSize = 14.sp, lineHeight = 20.sp),
-    labelMedium = TextStyle(fontWeight = FontWeight.Medium, fontSize = 14.sp, lineHeight = 20.sp, letterSpacing = 1.sp),
-    labelSmall = TextStyle(fontWeight = FontWeight.Medium, fontSize = 14.sp, lineHeight = 20.sp, letterSpacing = 0.5.sp)
+    labelMedium = TextStyle(fontWeight = FontWeight.Medium, fontSize = 14.sp, lineHeight = 20.sp),
+    labelSmall = TextStyle(fontWeight = FontWeight.Medium, fontSize = 14.sp, lineHeight = 20.sp)
 )
 @Composable
 fun VlessCardVpnTheme(darkTheme: Boolean = true, content: @Composable () -> Unit) {
-    MaterialTheme(colorScheme = if (darkTheme) DarkColorScheme else LightColorScheme,
-        typography = InstrumentTypography, content = content)
+    val palette = if (darkTheme) DarkColorScheme else LightColorScheme
+    val view = androidx.compose.ui.platform.LocalView.current
+    val activity = generateSequence(view.context) { (it as? android.content.ContextWrapper)?.baseContext }
+        .filterIsInstance<android.app.Activity>().firstOrNull()
+    androidx.compose.runtime.SideEffect {
+        if (!view.isInEditMode && activity != null) {
+            activity.window.statusBarColor = palette.background.toArgb()
+            activity.window.navigationBarColor = palette.background.toArgb()
+            androidx.core.view.WindowCompat.getInsetsController(activity.window, view).apply {
+                isAppearanceLightStatusBars = !darkTheme
+                isAppearanceLightNavigationBars = !darkTheme
+            }
+        }
+    }
+    MaterialTheme(colorScheme = palette, typography = InstrumentTypography, content = content)
 }

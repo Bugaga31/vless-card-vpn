@@ -38,7 +38,7 @@ class HomeScreenSmokeTest {
     }
     @Test fun disconnectedScreenHasConnectAndTlsProfile() {
         show()
-        compose.onNodeWithText("ГОТОВ К ПОДКЛЮЧЕНИЮ").assertIsDisplayed()
+        compose.onNodeWithText("Не подключено").assertIsDisplayed()
         capture("home-disconnected")
         compose.onNodeWithText("Авто").assertIsDisplayed()
         capture("home-profile")

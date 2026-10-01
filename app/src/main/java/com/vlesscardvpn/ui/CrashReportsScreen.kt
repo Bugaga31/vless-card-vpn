@@ -79,7 +79,7 @@ fun CrashReportsScreen(
                             refreshList()
                             Toast.makeText(context, "Журнал ошибок очищен", Toast.LENGTH_SHORT).show()
                         }) {
-                            Icon(Icons.Default.DeleteOutline, contentDescription = "Очистить", tint = SemanticRed)
+                            Icon(Icons.Default.DeleteOutline, contentDescription = "Очистить", tint = MaterialTheme.colorScheme.error)
                         }
                     }
                 },
@@ -97,7 +97,7 @@ fun CrashReportsScreen(
             Surface(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(InstrumentDimens.radiusMedium),
-                color = MineralSurfaceSubtle,
+                color = MaterialTheme.colorScheme.surfaceVariant,
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
             ) {
                 Row(
@@ -107,7 +107,7 @@ fun CrashReportsScreen(
                     Icon(
                         Icons.Default.Security,
                         contentDescription = null,
-                        tint = SignalOrange,
+                        tint = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.size(24.dp)
                     )
                     Spacer(modifier = Modifier.width(InstrumentDimens.space12))
@@ -119,7 +119,7 @@ fun CrashReportsScreen(
                             color = MaterialTheme.colorScheme.onBackground
                         )
                         Text(
-                            text = "Все UUID, Reality-ключи, токены и адреса автоматически удаляются из отчетов. Отправка на GitHub происходит только с вашего явного согласия.",
+                            text = "Перед отправкой отчёт обезличивается. Проверьте его содержимое. Отправка на GitHub — только с вашего согласия.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -143,19 +143,20 @@ fun CrashReportsScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = "Репозиторий GitHub для баг-репортов",
+                            text = "Отчёты GitHub",
+                            modifier = Modifier.weight(1f),
                             style = MaterialTheme.typography.bodySmall,
                             fontWeight = FontWeight.SemiBold,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                         Surface(
-                            color = SignalOrangeContainer,
+                            color = MaterialTheme.colorScheme.primaryContainer,
                             shape = RoundedCornerShape(4.dp)
                         ) {
                             Text(
                                 text = "GitHub Issues",
                                 style = MaterialTheme.typography.labelSmall,
-                                color = SignalOrangeContent,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer,
                                 modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                             )
                         }
@@ -166,7 +167,9 @@ fun CrashReportsScreen(
                         style = MaterialTheme.typography.bodyMedium,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.primary,
-                        fontFamily = FontFamily.Monospace
+                        fontFamily = FontFamily.Monospace,
+                        maxLines = 2,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                     )
                 }
             }
@@ -180,21 +183,21 @@ fun CrashReportsScreen(
                 ) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Icon(
-                            Icons.Default.CheckCircleOutline,
+                            Icons.Default.Description,
                             contentDescription = null,
-                            tint = SemanticGreen,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.size(56.dp)
                         )
                         Spacer(modifier = Modifier.height(InstrumentDimens.space12))
                         Text(
-                            text = "Ошибок не зафиксировано",
+                            text = "Пока нет отчётов",
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.SemiBold,
                             color = MaterialTheme.colorScheme.onBackground
                         )
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
-                            text = "Приложение работает штатно и без сбоев.",
+                            text = "Здесь появятся сохранённые сведения о сбоях.",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -211,7 +214,7 @@ fun CrashReportsScreen(
                             modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(InstrumentDimens.radiusMedium),
                             color = MaterialTheme.colorScheme.surface,
-                            border = BorderStroke(1.dp, if (item.isSent) SemanticGreen else MaterialTheme.colorScheme.outline)
+                            border = BorderStroke(1.dp, if (item.isSent) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.outline)
                         ) {
                             Column(
                                 modifier = Modifier.padding(InstrumentDimens.space16),
@@ -223,14 +226,14 @@ fun CrashReportsScreen(
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Surface(
-                                        color = if (item.isSent) SemanticGreenBg else SemanticRedBg,
+                                        color = if (item.isSent) MaterialTheme.colorScheme.tertiaryContainer else MaterialTheme.colorScheme.errorContainer,
                                         shape = RoundedCornerShape(4.dp)
                                     ) {
                                         Text(
                                             text = if (item.isSent) "ОТПРАВЛЕНО" else item.type,
                                             style = MaterialTheme.typography.labelSmall,
                                             fontWeight = FontWeight.Bold,
-                                            color = if (item.isSent) SemanticGreen else SemanticRed,
+                                            color = if (item.isSent) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.error,
                                             modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                                         )
                                     }
@@ -265,7 +268,7 @@ fun CrashReportsScreen(
                                         modifier = Modifier.weight(1f),
                                         shape = RoundedCornerShape(InstrumentDimens.radiusSmall)
                                     ) {
-                                        Text("Просмотр", fontSize = 13.sp)
+                                        Text("Просмотр", fontSize = 14.sp)
                                     }
 
                                     Button(
@@ -275,19 +278,19 @@ fun CrashReportsScreen(
                                         },
                                         enabled = !isSending,
                                         modifier = Modifier.weight(1f),
-                                        colors = ButtonDefaults.buttonColors(containerColor = SignalOrange),
+                                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
                                         shape = RoundedCornerShape(InstrumentDimens.radiusSmall)
                                     ) {
                                         if (isSending) {
                                             CircularProgressIndicator(
                                                 modifier = Modifier.size(16.dp),
-                                                color = Color.White,
+                                                color = MaterialTheme.colorScheme.onPrimary,
                                                 strokeWidth = 2.dp
                                             )
                                         } else {
                                             Icon(Icons.Default.CloudUpload, contentDescription = null, modifier = Modifier.size(16.dp))
                                             Spacer(modifier = Modifier.width(4.dp))
-                                            Text("В GitHub", fontSize = 13.sp)
+                                            Text("В GitHub", fontSize = 14.sp)
                                         }
                                     }
                                 }
@@ -364,7 +367,7 @@ fun CrashReportsScreen(
                             }
                         }
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = SignalOrange)
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
                 ) {
                     Text("Разрешить и отправить")
                 }
@@ -425,12 +428,12 @@ fun CrashReportsScreen(
                         text = "Ошибка: ${detail.message}",
                         style = MaterialTheme.typography.bodyMedium,
                         fontWeight = FontWeight.Bold,
-                        color = SemanticRed
+                        color = MaterialTheme.colorScheme.error
                     )
 
                     Surface(
                         modifier = Modifier.fillMaxWidth().weight(1f),
-                        color = MineralBackground,
+                        color = MaterialTheme.colorScheme.background,
                         shape = RoundedCornerShape(InstrumentDimens.radiusSmall),
                         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
                     ) {
@@ -439,8 +442,8 @@ fun CrashReportsScreen(
                                 Text(
                                     text = detail.stackTrace.ifBlank { "Нет дополнительного стека вызовов." },
                                     fontFamily = FontFamily.Monospace,
-                                    fontSize = 11.sp,
-                                    color = GraphiteSecondary
+                                    fontSize = 14.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
                         }
@@ -454,7 +457,7 @@ fun CrashReportsScreen(
                         pendingSendCrash = detail
                         showConsentDialog = true
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = SignalOrange)
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
                 ) {
                     Text("Отправить в GitHub")
                 }

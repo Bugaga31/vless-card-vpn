@@ -1,11 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <style name="Theme.VlessCardVpn" parent="android:Theme.Material.NoActionBar">
-        <item name="android:windowBackground">#10151F</item>
-        <item name="android:colorBackground">#10151F</item>
-        <item name="android:statusBarColor">#10151F</item>
-        <item name="android:navigationBarColor">#10151F</item>
-        <item name="android:windowLightStatusBar">false</item>
-        <item name="android:windowLightNavigationBar">false</item>
+        <item name="android:windowBackground">#F5F5F7</item>
+        <item name="android:colorBackground">#F5F5F7</item>
+        <item name="android:statusBarColor">#F5F5F7</item>
+        <item name="android:navigationBarColor">#F5F5F7</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowLightNavigationBar">true</item>
     </style>
 </resources>
