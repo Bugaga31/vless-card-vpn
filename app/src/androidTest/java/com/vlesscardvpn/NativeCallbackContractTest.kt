@@ -43,6 +43,24 @@ class NativeCallbackContractTest {
         assertEquals(-1, platform.findConnectionOwner(6, null, 0, null, 0).userId)
     }
 
+    @Test fun everyPlatformInterfaceAddressHasValidPrefixAndNoIpv6Zone() {
+        val platform = LibboxPlatformInterface(AttachedVpnService(context)) { }
+        val interfaces = platform.getInterfaces()
+        while (interfaces.hasNext()) {
+            val iface = interfaces.next()
+            assertTrue(iface.flags and android.system.OsConstants.IFF_UP != 0)
+            val addresses = iface.addresses
+            while (addresses.hasNext()) {
+                val prefix = addresses.next()
+                assertTrue(prefix.contains('/'))
+                assertFalse(prefix.contains('%'))
+                val address = java.net.InetAddress.getByName(prefix.substringBefore('/'))
+                val length = prefix.substringAfterLast('/').toInt()
+                assertTrue(length in 0..(address.address.size * 8))
+            }
+        }
+    }
+
     private class AttachedVpnService(context: Context) : VpnService() {
         init { attachBaseContext(context) }
     }

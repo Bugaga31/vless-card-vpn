@@ -8,6 +8,7 @@ import android.net.NetworkCapabilities
 import android.net.VpnService
 import android.os.Build
 import android.os.ParcelFileDescriptor
+import android.system.OsConstants
 import android.util.Log
 import io.nekohasekai.libbox.*
 import java.net.Inet4Address
@@ -179,16 +180,26 @@ class LibboxPlatformInterface(
             for (iface in interfaces) {
                 if (iface.isUp) {
                     val addrsList = mutableListOf<String>()
-                    for (addr in Collections.list(iface.inetAddresses)) {
-                        if (!addr.isLoopbackAddress) {
-                            addrsList.add(addr.hostAddress ?: "")
-                        }
+                    // libbox uses netip.MustParsePrefix, NOT ParseAddr. A bare IP
+                    // or IPv6 zone identifier causes a Go panic outside Kotlin catches.
+                    for (linkAddress in iface.interfaceAddresses) {
+                        val address = linkAddress.address ?: continue
+                        if (address.isLoopbackAddress) continue
+                        InterfacePrefixFormatter.format(address, linkAddress.networkPrefixLength.toInt())
+                            ?.let(addrsList::add)
                     }
 
                     val ni = NetworkInterface().apply {
                         name = iface.name
                         index = iface.index
-                        mtu = try { iface.mtu } catch (_: Exception) { 1500 }
+                        mtu = try { iface.mtu.takeIf { it > 0 } ?: 1500 } catch (_: Exception) { 1500 }
+                        flags = OsConstants.IFF_UP or OsConstants.IFF_RUNNING
+                        if (iface.isLoopback) flags = flags or OsConstants.IFF_LOOPBACK
+                        if (iface.isPointToPoint) flags = flags or OsConstants.IFF_POINTOPOINT
+                        if (iface.supportsMulticast()) flags = flags or OsConstants.IFF_MULTICAST
+                        if (iface.interfaceAddresses.any { it.broadcast != null }) {
+                            flags = flags or OsConstants.IFF_BROADCAST
+                        }
                         addresses = object : StringIterator {
                             private var aIdx = 0
                             override fun hasNext(): Boolean = aIdx < addrsList.size

@@ -29,10 +29,10 @@ class VlessApplication : Application() {
             text = text.replace(Regex("[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"), "[REDACTED_UUID]")
 
             // 2. Sanitize Reality public keys and passwords in query params
-            text = text.replace(Regex("(pbk|public_key|password|secret|key|token|uuid|sid|short_id)=([^&\\s,;\"'}{]+)", RegexOption.IGNORE_CASE), "$1=[REDACTED]")
+            text = text.replace(Regex("(pbk|public_key|password|secret|key|token|uuid|sid|short_id|sni|host)=([^&\\s,;\"'}{]+)", RegexOption.IGNORE_CASE), "$1=[REDACTED]")
 
             // 3. Sanitize JSON fields for keys and secrets
-            text = text.replace(Regex("\"(uuid|password|public_key|private_key|short_id|secret|token)\"\\s*:\\s*\"[^\"]+\"", RegexOption.IGNORE_CASE), "\"$1\":\"[REDACTED]\"")
+            text = text.replace(Regex("\"(uuid|password|public_key|private_key|short_id|secret|token|server_name|sni|server|address)\"\\s*:\\s*\"[^\"]+\"", RegexOption.IGNORE_CASE), "\"$1\":\"[REDACTED]\"")
 
             // 4. Sanitize full protocol links (vless://, vmess://, trojan://, ss://)
             text = text.replace(Regex("(vless|vmess|trojan|ss)://[^\\s]+", RegexOption.IGNORE_CASE), "$1://[REDACTED_NODE_CONFIG]")

@@ -1,3 +1,5 @@
+> Historical notes for 1.0.42. The user still reported a native abort on realme RMX3624. See `docs/native-interface-panic-fix.md` for the subsequent interface-prefix correction and native tombstone diagnostics in 1.0.43.
+
 # Connection-crash diagnostic build (Android 13)
 
 ## Confirmed code defects

@@ -664,9 +664,14 @@ class CoreUnitTests {
 
     @Test
     fun testSniPoolRandomCdnSni() {
-        val sni = SniPool.randomCdnSni()
-        assertTrue(sni.isNotBlank())
-        assertTrue("CDN SNI must be a global domain", sni.endsWith(".com") || sni.endsWith(".org") || sni.endsWith(".net") || sni.endsWith(".io"))
+        // The existing pool also contains .tv, .us, .so and .co vendor domains.
+        // Restricting this random test to four TLDs made valid results fail intermittently.
+        val allowedTlds = setOf("com", "org", "net", "io", "tv", "us", "so", "co")
+        repeat(100) {
+            val sni = SniPool.randomCdnSni()
+            assertTrue("CDN SNI must be a bare domain", sni.matches(Regex("[a-z0-9-]+(\\.[a-z0-9-]+)+")))
+            assertTrue("CDN SNI must use a configured vendor TLD", sni.substringAfterLast('.') in allowedTlds)
+        }
     }
 
     @Test
