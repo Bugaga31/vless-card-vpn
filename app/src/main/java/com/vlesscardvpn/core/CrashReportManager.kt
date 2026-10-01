@@ -1,5 +1,7 @@
 package com.vlesscardvpn.core
 
+import android.app.ActivityManager
+import android.app.ApplicationExitInfo
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -44,6 +46,34 @@ object CrashReportManager {
         .connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(10, TimeUnit.SECONDS)
         .build()
+
+    /** Native aborts bypass Java's uncaught-exception handler. Read only our own exit metadata. */
+    fun recordPreviousNativeExits(context: Context) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return
+        try {
+            val preferences = context.getSharedPreferences("native_exit_reports", Context.MODE_PRIVATE)
+            val lastSeen = preferences.getLong("last_exit_timestamp", 0L)
+            val manager = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+            val exits = manager.getHistoricalProcessExitReasons(context.packageName, 0, 5)
+            val newExits = exits.filter { it.timestamp > lastSeen }.sortedBy { it.timestamp }
+            for (exit in newExits) {
+                if (exit.reason == ApplicationExitInfo.REASON_CRASH_NATIVE ||
+                    exit.reason == ApplicationExitInfo.REASON_ANR) {
+                    // Do not import tombstones or logcat: they may contain user configuration.
+                    val reason = if (exit.reason == ApplicationExitInfo.REASON_CRASH_NATIVE) "NATIVE_CRASH" else "ANR"
+                    val metadata = "Android recorded $reason: status=${exit.status}, " +
+                        "exitTimestamp=${exit.timestamp}, importance=${exit.importance}. " +
+                        "This is exit metadata, not a native stack trace."
+                    recordException(context, Thread.currentThread(), IllegalStateException(metadata), reason)
+                }
+            }
+            newExits.lastOrNull()?.let {
+                preferences.edit().putLong("last_exit_timestamp", it.timestamp).apply()
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not read previous process exit metadata", e)
+        }
+    }
 
     fun recordException(context: Context, thread: Thread, throwable: Throwable, type: String = "CRASH") {
         try {

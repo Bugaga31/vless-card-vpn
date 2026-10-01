@@ -44,6 +44,9 @@ class VlessApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         setupUncaughtExceptionHandler()
+        // Read previous native-crash metadata off the main thread on Android 11+.
+        Thread({ CrashReportManager.recordPreviousNativeExits(applicationContext) },
+            "native-exit-report-reader").start()
     }
 
     /**

@@ -16,6 +16,7 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.vlesscardvpn.MainActivity
 import com.vlesscardvpn.core.LibboxPlatformInterface
+import com.vlesscardvpn.core.NativeCallbackValues
 import com.vlesscardvpn.core.NetworkProfileManager
 import com.vlesscardvpn.core.SingBoxManager
 import com.vlesscardvpn.core.CrashReportManager
@@ -297,7 +298,9 @@ class VlessVpnService : VpnService() {
             platformAdapter = adapter
 
             val serverHandler = object : CommandServerHandler {
-                override fun getSystemProxyStatus(): SystemProxyStatus? = null
+                // Android VPN mode has no system HTTP proxy, but libbox requires an object.
+                override fun getSystemProxyStatus(): SystemProxyStatus =
+                    NativeCallbackValues.disabledSystemProxy()
                 override fun serviceReload() {}
                 override fun serviceStop() {
                     // Core stopped unexpectedly

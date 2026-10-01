@@ -12,6 +12,7 @@ import android.util.Log
 import io.nekohasekai.libbox.*
 import java.net.Inet4Address
 import java.net.Inet6Address
+import java.net.InetSocketAddress
 import java.net.NetworkInterface as JavaNetInterface
 import java.util.Collections
 
@@ -143,8 +144,32 @@ class LibboxPlatformInterface(
         srcPort: Int,
         destIp: String?,
         destPort: Int
-    ): ConnectionOwner? {
-        return null
+    ): ConnectionOwner {
+        // gomobile forwards null as (nil, nil). libbox then dereferences it in Go,
+        // which can terminate the process outside Kotlin's exception handlers.
+        val owner = NativeCallbackValues.unknownConnectionOwner()
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q ||
+            (ipProtocol != 6 && ipProtocol != 17) ||
+            srcIp.isNullOrBlank() || destIp.isNullOrBlank() ||
+            srcPort !in 1..65535 || destPort !in 1..65535) return owner
+
+        try {
+            val uid = connectivityManager.getConnectionOwnerUid(
+                ipProtocol,
+                InetSocketAddress(srcIp, srcPort),
+                InetSocketAddress(destIp, destPort)
+            )
+            // Android returns INVALID_UID (-1) if the flow is already gone.
+            if (uid >= 0) {
+                owner.userId = uid
+                owner.androidPackageName = vpnService.packageManager
+                    .getPackagesForUid(uid)?.firstOrNull().orEmpty()
+            }
+        } catch (_: Exception) {
+            // A race with VPN revocation or an unavailable owner is not fatal.
+            // Keep an explicit unknown UID; do not fabricate root/system UID 0.
+        }
+        return owner
     }
 
     override fun getInterfaces(): NetworkInterfaceIterator {
@@ -258,9 +283,7 @@ class LibboxPlatformInterface(
                 }
 
                 // Per-app split tunneling: exclude user-selected apps (banks, gov, etc.)
-                // at the VpnService level. This actually works, unlike a sing-box
-                // package_name route rule, which stays a no-op while findConnectionOwner
-                // returns null.
+                // at the VpnService level, independent of connection-owner lookup.
                 for (pkg in bypassApps) {
                     if (pkg.isBlank() || pkg == vpnService.packageName) continue
                     try {
