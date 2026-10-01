@@ -36,51 +36,15 @@ data class ServiceReachabilityResult(val target: ServiceTarget, val samples: Lis
     }
 }
 
-/** Current Android route, not a per-outbound core URLTest and not a throughput test. */
+/** Always checks the active native outbound; never falls back to the excluded app route. */
 object ServiceReachability {
-    private val client = OkHttpClient.Builder()
-        .connectTimeout(4, TimeUnit.SECONDS)
-        .readTimeout(4, TimeUnit.SECONDS)
-        .callTimeout(4, TimeUnit.SECONDS)
-        .followRedirects(false)
-        .followSslRedirects(false)
-        .retryOnConnectionFailure(false)
-        .build()
-
-    suspend fun checkBoth(): List<ServiceReachabilityResult> = withTimeout(15000L) {
-        coroutineScope {
-            ServiceTarget.values().map { target -> async {
-                val samples = mutableListOf<ServiceProbe>()
-                repeat(3) { index ->
-                    samples += probe(target)
-                    if (index < 2) delay(150L)
-                }
-                ServiceReachabilityResult(target, samples)
-            } }.awaitAll()
-        }
-    }
-
-    private suspend fun probe(target: ServiceTarget): ServiceProbe = suspendCancellableCoroutine { continuation ->
-        val request = Request.Builder().url(target.url)
-            .header("Cache-Control", "no-cache, no-store")
-            .header("User-Agent", "VlessCard-ServiceCheck/1.0")
-            .apply { if (target == ServiceTarget.TELEGRAM) head() else get() }
-            .build()
-        val call = client.newCall(request)
-        val started = System.nanoTime()
-        continuation.invokeOnCancellation { call.cancel() }
-        call.enqueue(object : Callback {
-            override fun onFailure(call: Call, e: IOException) {
-                if (continuation.isActive) continuation.resume(ServiceProbe(error = "Таймаут или сетевая ошибка"))
+    suspend fun checkBoth(): List<ServiceReachabilityResult> = coroutineScope {
+        ServiceTarget.values().map { target -> async {
+            val samples = mutableListOf<ServiceProbe>()
+            repeat(3) {
+                samples += TunnelHealthChecker.probe(TunnelHealthChecker.activeProxy, target.url, target.expectedCode, 4000)
             }
-            override fun onResponse(call: Call, response: Response) {
-                val sample = response.use {
-                    val elapsed = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started).coerceIn(1L, Int.MAX_VALUE.toLong()).toInt()
-                    ServiceProbe(latencyMs = elapsed, httpCode = it.code,
-                        error = if (it.code == target.expectedCode) null else "Неожиданный HTTP ${it.code}")
-                }
-                if (continuation.isActive) continuation.resume(sample)
-            }
-        })
+            ServiceReachabilityResult(target, samples)
+        } }.awaitAll()
     }
 }

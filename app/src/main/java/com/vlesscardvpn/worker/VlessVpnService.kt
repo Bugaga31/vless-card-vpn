@@ -27,6 +27,11 @@ import com.vlesscardvpn.data.AppRepository
 import com.vlesscardvpn.domain.AppSettings
 import com.vlesscardvpn.domain.PingTester
 import com.vlesscardvpn.domain.VlessConfig
+import com.vlesscardvpn.domain.AutoConnectPolicy
+import com.vlesscardvpn.domain.LocalProbeProxy
+import com.vlesscardvpn.domain.TunnelHealthChecker
+import com.vlesscardvpn.domain.TunnelHealthReport
+import com.vlesscardvpn.data.PublicConfigFetcher
 import io.nekohasekai.libbox.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -53,13 +58,18 @@ data class VpnSessionStats(
     val bytesOut: Long = 0L,
     val uploadSpeedBps: Long = 0L,
     val downloadSpeedBps: Long = 0L,
-    val errorMessage: String? = null
+    val errorMessage: String? = null,
+    val progressMessage: String = "",
+    val autoMode: Boolean = false,
+    val health: TunnelHealthReport = TunnelHealthReport(),
+    val profileLabel: String = "Параметры сервера"
 )
 
 class VlessVpnService : VpnService() {
 
     companion object {
         const val ACTION_CONNECT = "com.vlesscardvpn.CONNECT"
+        const val ACTION_AUTO = "com.vlesscardvpn.AUTO"
         const val ACTION_DISCONNECT = "com.vlesscardvpn.DISCONNECT"
         const val EXTRA_CONFIG_ID = "config_id"
 
@@ -87,6 +97,19 @@ class VlessVpnService : VpnService() {
             }
         }
 
+        fun startAuto(context: Context, recovery: Boolean = false) {
+            val intent = Intent(context, VlessVpnService::class.java).apply {
+                action = ACTION_AUTO; putExtra("auto_recovery", recovery)
+            }
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) context.startForegroundService(intent)
+                else context.startService(intent)
+            } catch (_: Exception) {
+                _vpnStats.value = VpnSessionStats(status = VpnStatus.ERROR,
+                    errorMessage = "Не удалось запустить автоматический подбор")
+            }
+        }
+
         fun stopVpn(context: Context) {
             val intent = Intent(context, VlessVpnService::class.java).apply {
                 action = ACTION_DISCONNECT
@@ -95,6 +118,7 @@ class VlessVpnService : VpnService() {
         }
     }
 
+    private var probeProxy: LocalProbeProxy? = null
     private var vpnInterface: ParcelFileDescriptor? = null
     private val backgroundErrors: CoroutineExceptionHandler = CoroutineExceptionHandler { _, failure ->
         CrashReportManager.recordException(applicationContext, Thread.currentThread(), failure, "VPN_BACKGROUND")
@@ -117,6 +141,8 @@ class VlessVpnService : VpnService() {
 
     private var connectionJob: Job? = null
     private var statsJob: Job? = null
+    private var healthJob: Job? = null
+    private var autoRecoveryAttempts = 0
     private var commandServer: CommandServer? = null
     private var commandClient: CommandClient? = null
     private var platformAdapter: LibboxPlatformInterface? = null
@@ -188,8 +214,9 @@ class VlessVpnService : VpnService() {
         }
 
         when (intent.action) {
-            ACTION_CONNECT -> {
+            ACTION_CONNECT, ACTION_AUTO -> {
                 val configId = intent.getStringExtra(EXTRA_CONFIG_ID) ?: ""
+                if (intent.action == ACTION_AUTO && !intent.getBooleanExtra("auto_recovery", false)) autoRecoveryAttempts = 0
                 val sessionId = sessionSequence.incrementAndGet()
 
                 // CRITICAL FIX: MUST call startForeground synchronously (Android 12+ / 14+ FGS rules)
@@ -201,7 +228,10 @@ class VlessVpnService : VpnService() {
 
                 connectionJob?.cancel()
                 connectionJob = serviceScope.launch {
-                    handleConnect(configId, sessionId)
+                    if (intent.action == ACTION_AUTO) {
+                        operationMutex.withLock { handleAutoConnectLocked(sessionId) }
+                        if (_vpnStats.value.status == VpnStatus.ERROR) stopSelf()
+                    } else handleConnect(configId, sessionId)
                 }
             }
             ACTION_DISCONNECT -> {
@@ -224,7 +254,72 @@ class VlessVpnService : VpnService() {
         }
     }
 
-    private suspend fun handleConnectLocked(configId: String, sessionId: Long) {
+    /** Explicit foreground Auto action: bounded, cancellable selection using real authenticated tunnels. */
+    private suspend fun handleAutoConnectLocked(sessionId: Long) {
+        if (sessionId != sessionSequence.get()) return
+        cleanupResources()
+        _vpnStats.value = VpnSessionStats(status = VpnStatus.CONNECTING, autoMode = true,
+            progressMessage = "Авто: проверяем сохранённые серверы")
+        val settings = repository.settingsFlow.value
+        val identities = mutableSetOf<String>()
+        var attempts = 0
+        var lastReport = TunnelHealthReport()
+        suspend fun tryPool(pool: List<VlessConfig>, limit: Int = AutoConnectPolicy.MAX_ATTEMPTS): Boolean {
+            val candidates = AutoConnectPolicy.rank(pool, settings.autopilotAllowedOnlyFavorites).take(24)
+            // A TCP probe only orders candidates; it never marks a VPN healthy.
+            val reachable = coroutineScope {
+                candidates.chunked(8).flatMap { group ->
+                    group.map { c -> async { c to PingTester.pingConfig(c, 1200) } }.awaitAll()
+                }
+            }.filter { it.second > 0 }.sortedWith(compareByDescending<Pair<VlessConfig, Int>> { it.first.isFavorite }
+                .thenBy { it.second })
+            for ((config, ping) in reachable) {
+                currentCoroutineContext().ensureActive()
+                if (sessionId != sessionSequence.get() || attempts >= limit) return false
+                if (!identities.add(AutoConnectPolicy.identity(config))) continue
+                repository.addConfig(config.copy(pingMs = ping, healthState = "UNKNOWN"))
+                for (fragment in listOf(false, true)) {
+                    if (fragment && !AutoConnectPolicy.canFragment(config)) continue
+                    if (attempts >= limit) return false
+                    attempts++
+                    _vpnStats.value = VpnSessionStats(status = VpnStatus.CONNECTING, autoMode = true,
+                        activeConfig = config, progressMessage = "Авто: маршрут $attempts/${AutoConnectPolicy.MAX_ATTEMPTS}")
+                    safeStartForeground(1, createNotification(config, "Авто: проверка $attempts/${AutoConnectPolicy.MAX_ATTEMPTS}"))
+                    handleConnectLocked(config.id, sessionId, autoMode = true, fragment = fragment)
+                    currentCoroutineContext().ensureActive()
+                    if (sessionId != sessionSequence.get()) return false
+                    if (_vpnStats.value.status == VpnStatus.CONNECTED) return true
+                    lastReport = _vpnStats.value.health
+                }
+            }
+            return false
+        }
+        try {
+            withTimeout(120_000L) {
+                if (tryPool(repository.getAllConfigs().take(100), if (settings.autopilotAllowedOnlyFavorites) 12 else 6)) return@withTimeout
+                if (sessionId != sessionSequence.get()) return@withTimeout
+                if (!settings.autopilotAllowedOnlyFavorites && attempts < AutoConnectPolicy.MAX_ATTEMPTS) {
+                    _vpnStats.value = VpnSessionStats(status = VpnStatus.CONNECTING, autoMode = true,
+                        progressMessage = "Обновляем публичные конфигурации")
+                    val fresh = PublicConfigFetcher.fetchCandidates { message ->
+                        if (sessionId == sessionSequence.get()) _vpnStats.value = _vpnStats.value.copy(progressMessage = message)
+                    }
+                    repository.addConfigs(fresh)
+                    tryPool(fresh)
+                }
+            }
+        } catch (_: TimeoutCancellationException) {
+            // Overall selection deadline, not an endless scan on a weak connection.
+        }
+        currentCoroutineContext().ensureActive()
+        if (sessionId != sessionSequence.get() || _vpnStats.value.status == VpnStatus.CONNECTED) return
+        cleanupResources()
+        _vpnStats.value = VpnSessionStats(status = VpnStatus.ERROR, autoMode = true, health = lastReport,
+            errorMessage = "Рабочий маршрут не найден. Авто не будет показывать фиктивное подключение. Добавьте надёжную подписку или повторите поиск")
+        stopForeground(STOP_FOREGROUND_REMOVE)
+    }
+
+    private suspend fun handleConnectLocked(configId: String, sessionId: Long, autoMode: Boolean = false, fragment: Boolean = false) {
         if (sessionId != sessionSequence.get()) return
 
         // 0. DEFENSIVE: Verify VPN permission BEFORE any heavy work (prevents crash on Connect)
@@ -235,7 +330,7 @@ class VlessVpnService : VpnService() {
                 status = VpnStatus.ERROR,
                 errorMessage = "Нет разрешения VPN. Предоставьте разрешение в системных настройках."
             )
-            stopForeground(STOP_FOREGROUND_REMOVE)
+            if (!autoMode) stopForeground(STOP_FOREGROUND_REMOVE)
             return
         }
 
@@ -250,13 +345,15 @@ class VlessVpnService : VpnService() {
             val err = if (config == null) "Конфигурация сервера не найдена" else "Некорректные параметры сервера (UUID/Адрес)"
             cleanupResources()
             _vpnStats.value = VpnSessionStats(status = VpnStatus.ERROR, activeConfig = config, errorMessage = err)
-            stopForeground(STOP_FOREGROUND_REMOVE)
+            if (!autoMode) stopForeground(STOP_FOREGROUND_REMOVE)
             return
         }
 
-        val settingsSnapshot: AppSettings = repository.settingsFlow.value
+        val base = repository.settingsFlow.value
+        val settingsSnapshot: AppSettings = if (autoMode) AutoConnectPolicy.settings(base, fragment) else base
 
-        _vpnStats.value = VpnSessionStats(status = VpnStatus.CONNECTING, activeConfig = config)
+        _vpnStats.value = VpnSessionStats(status = VpnStatus.CONNECTING, activeConfig = config,
+            autoMode = autoMode, progressMessage = if (fragment) "Проверяем TLS-фрагментацию" else "Запускаем и проверяем маршрут")
         // Keep foreground alive (already started in onStartCommand)
         if (!safeStartForeground(1, createNotification(config, "Инициализация ядра связи…"))) {
             cleanupResources()
@@ -280,11 +377,14 @@ class VlessVpnService : VpnService() {
             initLibboxEnvironment()
 
             // 4. Launch via Sing-Box Engine (Full unified support for VLESS Reality, VMess, Trojan, ShadowTLS, uTLS)
+            val localProbe = LocalProbeProxy.allocate()
+            probeProxy = localProbe
             val singBoxJson = SingBoxManager.generateConfig(
                 context = this@VlessVpnService,
                 config = config,
                 settings = settingsSnapshot,
-                networkProfile = netProfile
+                networkProfile = netProfile,
+                probeProxy = localProbe
             )
 
             SingBoxManager.validateGeneratedConfig(singBoxJson).getOrThrow()
@@ -313,7 +413,7 @@ class VlessVpnService : VpnService() {
                                     activeConfig = config,
                                     errorMessage = "Ядро туннеля было остановлено системой"
                                 )
-                                stopForeground(STOP_FOREGROUND_REMOVE)
+                                if (!autoMode) stopForeground(STOP_FOREGROUND_REMOVE)
                             }
                         }
                     }
@@ -341,7 +441,7 @@ class VlessVpnService : VpnService() {
                     activeConfig = config,
                     errorMessage = "Ошибка запуска ядра sing-box: ${sanitizeError(t.message)}"
                 )
-                stopForeground(STOP_FOREGROUND_REMOVE)
+                if (!autoMode) stopForeground(STOP_FOREGROUND_REMOVE)
                 return
             }
             commandServer = server
@@ -354,25 +454,35 @@ class VlessVpnService : VpnService() {
                 return
             }
 
-            // 7. Establish CONNECTED status immediately once TUN is opened and core is running
-            val startTime = System.currentTimeMillis()
-            _vpnStats.value = VpnSessionStats(
-                status = VpnStatus.CONNECTED,
-                activeConfig = config,
-                connectedSinceTimestamp = startTime
-            )
-            safeStartForeground(1, createNotification(config, "Подключено • Защищено"))
-            startStatsUpdater(startTime)
-
-            // 8. Background non-blocking verification to report latency or mark network profile
-            serviceScope.launch(Dispatchers.IO) {
-                if (sessionId != sessionSequence.get()) return@launch
-                val (isOk, latency) = PingTester.verifyEndToEndConnection(timeoutMs = 2500)
-                if (sessionId == sessionSequence.get() && isOk) {
-                    NetworkProfileManager.markProfileWorking(netProfile)
-                    safeStartForeground(1, createNotification(config, "Подключено • ${latency} мс"))
-                }
+            // Do not publish CONNECTED just because a TUN interface exists.
+            TunnelHealthChecker.activeProxy = localProbe
+            _vpnStats.value = _vpnStats.value.copy(progressMessage = "Проверяем HTTPS через выбранный сервер")
+            safeStartForeground(1, createNotification(config, "Проверка реального маршрута…"))
+            val report = TunnelHealthChecker.check(localProbe, timeoutMs = 4000)
+            currentCoroutineContext().ensureActive()
+            if (sessionId != sessionSequence.get()) { cleanupResources(); return }
+            if (!report.internet || autoMode && !report.preferredServices) {
+                cleanupResources()
+                repository.updateConfig(config.copy(healthState = "DEGRADED", httpLatencyMs = -1,
+                    lastCheck = System.currentTimeMillis(), failureCount = config.failureCount + 1))
+                _vpnStats.value = VpnSessionStats(status = VpnStatus.ERROR, activeConfig = config,
+                    autoMode = autoMode, health = report,
+                    errorMessage = if (report.internet) "HTTPS работает, но YouTube/Telegram веб не прошли проверку"
+                        else "Сервер не передаёт HTTPS. Пинг порта не подтверждает работу VPN")
+                if (!autoMode) stopForeground(STOP_FOREGROUND_REMOVE)
+                return
             }
+            val startTime = System.currentTimeMillis()
+            repository.updateConfig(config.copy(healthState = "HEALTHY", httpLatencyMs = report.latencyMs,
+                lastCheck = startTime, failureCount = 0))
+            repository.setActive(config.id)
+            NetworkProfileManager.markProfileWorking(netProfile)
+            _vpnStats.value = VpnSessionStats(status = VpnStatus.CONNECTED, activeConfig = config,
+                connectedSinceTimestamp = startTime, autoMode = autoMode, health = report,
+                profileLabel = if (fragment) "TLS-фрагментация" else if (autoMode) "Совместимый TLS" else "Параметры сервера")
+            safeStartForeground(1, createNotification(config, "Маршрут проверен • ${report.latencyMs} мс"))
+            startStatsUpdater(startTime)
+            if (autoMode) startAutoHealthMonitor(sessionId)
 
         } catch (e: CancellationException) {
             cleanupResources()
@@ -385,7 +495,7 @@ class VlessVpnService : VpnService() {
                 activeConfig = config,
                 errorMessage = "SecurityException: ${sanitizeError(se.message)}"
             )
-            stopForeground(STOP_FOREGROUND_REMOVE)
+            if (!autoMode) stopForeground(STOP_FOREGROUND_REMOVE)
         } catch (ise: IllegalStateException) {
             Log.e("VlessVpnService", "IllegalState during VPN setup (possible TUN or libbox issue)", ise)
             cleanupResources()
@@ -394,7 +504,7 @@ class VlessVpnService : VpnService() {
                 activeConfig = config,
                 errorMessage = "IllegalState: ${sanitizeError(ise.message)} (TUN creation or libbox failure)"
             )
-            stopForeground(STOP_FOREGROUND_REMOVE)
+            if (!autoMode) stopForeground(STOP_FOREGROUND_REMOVE)
         } catch (ioe: java.io.IOException) {
             Log.e("VlessVpnService", "IO error during VPN setup", ioe)
             cleanupResources()
@@ -403,7 +513,7 @@ class VlessVpnService : VpnService() {
                 activeConfig = config,
                 errorMessage = "IO error: ${sanitizeError(ioe.message)}"
             )
-            stopForeground(STOP_FOREGROUND_REMOVE)
+            if (!autoMode) stopForeground(STOP_FOREGROUND_REMOVE)
         } catch (t: Throwable) {
             // Catches JVM/linkage failures, NOT SIGSEGV/abort in native code.
             CrashReportManager.recordException(applicationContext, Thread.currentThread(), t, "VPN_START")
@@ -414,7 +524,7 @@ class VlessVpnService : VpnService() {
                 activeConfig = config,
                 errorMessage = "Native error: ${sanitizeError(t.message ?: t.javaClass.simpleName)}"
             )
-            stopForeground(STOP_FOREGROUND_REMOVE)
+            if (!autoMode) stopForeground(STOP_FOREGROUND_REMOVE)
         }
     }
 
@@ -478,6 +588,36 @@ class VlessVpnService : VpnService() {
         }
     }
 
+    private fun startAutoHealthMonitor(sessionId: Long) {
+        healthJob?.cancel()
+        healthJob = serviceScope.launch {
+            var failures = 0
+            while (isActive && sessionId == sessionSequence.get()) {
+                delay(if (isScreenInteractive) 30_000L else 60_000L)
+                val proxy = probeProxy ?: return@launch
+                val report = TunnelHealthChecker.check(proxy)
+                if (sessionId != sessionSequence.get() || probeProxy !== proxy) return@launch
+                _vpnStats.value = _vpnStats.value.copy(health = report)
+                failures = if (report.preferredServices) 0 else failures + 1
+                if (failures >= 3) {
+                    if (repository.settingsFlow.value.failoverEnabled && autoRecoveryAttempts < 2) {
+                        autoRecoveryAttempts++
+                        startAuto(this@VlessVpnService, recovery = true)
+                    } else operationMutex.withLock {
+                        if (sessionId == sessionSequence.get()) {
+                            cleanupResources()
+                            _vpnStats.value = VpnSessionStats(status = VpnStatus.ERROR, autoMode = true,
+                                health = report, errorMessage = "Маршрут перестал работать. Автоповторы ограничены; нажмите «Авто» для новой проверки")
+                            stopForeground(STOP_FOREGROUND_REMOVE)
+                            stopSelf()
+                        }
+                    }
+                    return@launch
+                }
+            }
+        }
+    }
+
     private fun startStatsUpdater(startTime: Long) {
         statsJob?.cancel()
         statsJob = serviceScope.launch {
@@ -500,6 +640,10 @@ class VlessVpnService : VpnService() {
         // Idempotent, safe cleanup. Never call stopSelf inside here.
         statsJob?.cancel()
         statsJob = null
+        healthJob?.cancel()
+        healthJob = null
+        val localProbe = probeProxy.also { probeProxy = null }
+        TunnelHealthChecker.clear(localProbe)
 
         val client = commandClient.also { commandClient = null }
         val server = commandServer.also { commandServer = null }
@@ -599,6 +743,7 @@ class VlessVpnService : VpnService() {
         // Never race closeService against a synchronous native start on Dispatchers.IO.
         serviceScope.launch(NonCancellable) {
             operationMutex.withLock { cleanupResources() }
+            repository.close()
             serviceScope.cancel()
         }
         super.onDestroy()

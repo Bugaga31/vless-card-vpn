@@ -27,6 +27,13 @@ class NativeConfigValidationTest {
             fixAndroidStack = true
         })
     }
+    @Test fun authenticatedProbeAndDomainBootstrapPassNativeSchema() {
+        val node = VlessConfig(name = "Test", address = "vpn.example.org", port = 443,
+            uuid = "00000000-0000-4000-8000-000000000001", security = "tls", flow = "", sni = "vpn.example.org")
+        Libbox.checkConfig(SingBoxManager.generateConfig(null, node,
+            com.vlesscardvpn.domain.AutoConnectPolicy.settings(AppSettings(), false),
+            probeProxy = com.vlesscardvpn.domain.LocalProbeProxy(10810, "probe", "test-password")))
+    }
     @Test fun stableTlsPassesNativeSchema() {
         val node = VlessConfig(name = "Test", address = "vpn.example.org", port = 443,
             uuid = "00000000-0000-4000-8000-000000000001", security = "tls", flow = "", sni = "vpn.example.org")

@@ -3,6 +3,7 @@ package com.vlesscardvpn.core
 import android.content.Context
 import com.vlesscardvpn.domain.AppSettings
 import com.vlesscardvpn.domain.VlessConfig
+import com.vlesscardvpn.domain.LocalProbeProxy
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -90,7 +91,8 @@ object SingBoxManager {
         context: Context?,
         config: VlessConfig,
         settings: AppSettings = AppSettings(),
-        networkProfile: EvaluatedNetworkProfile? = null
+        networkProfile: EvaluatedNetworkProfile? = null,
+        probeProxy: LocalProbeProxy? = null
     ): String {
         val effectiveSni = resolveEffectiveSni(config, settings, networkProfile)
         val effectiveMtu = (networkProfile?.optimalMtu ?: settings.mtuSize).coerceIn(1280, 1500)
@@ -112,10 +114,17 @@ object SingBoxManager {
             else -> createVlessOutbound(config, effectiveSni, settings)
         }
 
+        // Resolve the VPN server's hostname outside its own tunnel: avoid DNS detour cycles.
+        proxyOutbound.put("domain_resolver", "local-dns")
+
         // Rules array using sing-box 1.13 rule-action syntax. The legacy special
         // outbounds (block / dns) and inbound.sniff were removed in sing-box 1.13.0,
         // so they are replaced by the rule actions sniff / hijack-dns / reject.
         val rulesArray = JSONArray().apply {
+            if (probeProxy != null) put(JSONObject().apply {
+                put("inbound", JSONArray(listOf("probe-in")))
+                put("outbound", "proxy")
+            })
             // 0. Sniff protocols & TLS SNI before routing (replaces removed inbound.sniff).
             //    Required so domain_suffix rules (RU direct, ad-block) can actually match.
             put(JSONObject().apply {
@@ -176,6 +185,7 @@ object SingBoxManager {
             put("rules", rulesArray)
             put("final", "proxy")
             put("auto_detect_interface", true)
+            put("default_domain_resolver", "local-dns")
         }
 
         val dnsRulesArray = JSONArray().apply {
@@ -210,6 +220,15 @@ object SingBoxManager {
         }
 
         val inboundsArray = JSONArray().apply {
+            if (probeProxy != null) put(JSONObject().apply {
+                put("type", "socks")
+                put("tag", "probe-in")
+                put("listen", "127.0.0.1")
+                put("listen_port", probeProxy.port)
+                put("users", JSONArray().put(JSONObject().apply {
+                    put("username", probeProxy.username); put("password", probeProxy.password)
+                }))
+            })
             put(JSONObject().apply {
                 put("type", "tun")
                 put("tag", "tun-in")

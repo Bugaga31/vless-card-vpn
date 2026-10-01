@@ -39,10 +39,13 @@ object UniversalConfigParser {
 
     fun decodeBase64Safe(text: String): ByteArray? {
         val clean = text.replace("\r", "").replace("\n", "").replace(" ", "").trim()
-        if (clean.isBlank()) return null
+        if (clean.isBlank() || !clean.matches(Regex("[A-Za-z0-9+/_-]+={0,2}")) ||
+            clean.trimEnd('=').length % 4 == 1 || clean.endsWith('=') && clean.length % 4 != 0) return null
+        val urlSafe = clean.contains('-') || clean.contains('_')
+        if (urlSafe && (clean.contains('+') || clean.contains('/'))) return null
         // java.util.Base64 was added in Android 8/API 26. The app also supports API 24/25.
         // Use the platform decoder first; reflection keeps JVM unit tests independent of Android stubs.
-        for (flags in listOf(0, 8)) { // DEFAULT, URL_SAFE
+        for (flags in listOf(if (urlSafe) 8 else 0)) { // DEFAULT, URL_SAFE
             try {
                 val clazz = Class.forName("android.util.Base64")
                 val bytes = clazz.getMethod("decode", String::class.java, Int::class.javaPrimitiveType)
@@ -50,7 +53,7 @@ object UniversalConfigParser {
                 if (bytes != null) return bytes
             } catch (_: Exception) {}
         }
-        for (factory in listOf("getDecoder", "getUrlDecoder")) {
+        for (factory in listOf(if (urlSafe) "getUrlDecoder" else "getDecoder")) {
             try {
                 val clazz = Class.forName("java.util.Base64")
                 val decoder = clazz.getMethod(factory).invoke(null)

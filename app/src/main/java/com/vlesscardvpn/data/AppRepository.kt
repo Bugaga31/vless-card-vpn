@@ -27,6 +27,10 @@ class AppRepository(private val context: Context) {
     private val passportPrefs: SharedPreferences = context.getSharedPreferences("server_passport_prefs", Context.MODE_PRIVATE)
     private val _settingsFlow = MutableStateFlow(loadSettingsFromPrefs())
     val settingsFlow = _settingsFlow.asStateFlow()
+    private val preferenceListener = SharedPreferences.OnSharedPreferenceChangeListener { _, _ ->
+        _settingsFlow.value = loadSettingsFromPrefs()
+    }
+    init { prefs.registerOnSharedPreferenceChangeListener(preferenceListener) }
 
     val configsFlow: Flow<List<VlessConfig>> = db.vlessConfigDao().getAllFlow().map { list -> list.map { it.toDomain() } }
 
@@ -65,7 +69,7 @@ class AppRepository(private val context: Context) {
                                 pingMs = ping,
                                 tcpLatencyMs = breakdown.tcpMs,
                                 tlsLatencyMs = breakdown.tlsMs,
-                                healthState = if (ping > 0) "HEALTHY" else "DEAD",
+                                healthState = "UNKNOWN",
                                 lastCheck = System.currentTimeMillis()
                             )
                         )
@@ -80,7 +84,7 @@ class AppRepository(private val context: Context) {
     // The database is a process-wide singleton shared with VlessVpnService and
     // SubscriptionUpdateWorker — closing it here would break them. Lifecycle is
     // owned by the process, so close() is intentionally a no-op.
-    fun close() = Unit
+    fun close() { prefs.unregisterOnSharedPreferenceChangeListener(preferenceListener) }
 
     fun saveRescueProfile(profile: com.vlesscardvpn.domain.RescueProfile) {
         rescuePrefs.edit().putString("rescue_${profile.configId}", profile.toJson()).apply()

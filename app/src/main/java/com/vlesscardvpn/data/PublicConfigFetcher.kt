@@ -1,6 +1,7 @@
 package com.vlesscardvpn.data
 
 import com.vlesscardvpn.domain.PingTester
+import com.vlesscardvpn.domain.AutoConnectPolicy
 import com.vlesscardvpn.domain.VlessConfig
 import com.vlesscardvpn.util.UniversalConfigParser
 import kotlinx.coroutines.CancellationException
@@ -11,6 +12,13 @@ import okhttp3.ResponseBody
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.suspendCancellableCoroutine
+import okhttp3.Callback
+import okhttp3.Call
+import okhttp3.Response
+import java.io.IOException
+import kotlin.coroutines.resume
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.util.concurrent.TimeUnit
@@ -35,7 +43,7 @@ object PublicConfigFetcher {
         return source.readUtf8()
     }
 
-    // Curated high-yield Russia TSPU/DPI-tested VLESS Reality sources prioritized
+    // Community sources: availability and privacy are not independently certified.
     val DEFAULT_PUBLIC_SOURCES = listOf(
         // 1. High Priority: Curated Russia Reality & White-list sources (Fastest & Active)
         "https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/main/Vless-Reality-White-Lists-Rus-Mobile.txt",
@@ -53,56 +61,64 @@ object PublicConfigFetcher {
         "https://raw.githubusercontent.com/barry-far/V2ray-Config/main/Splitted-By-Protocol/vless.txt"
     )
 
+    /** Public feeds are untrusted candidates, never "working VPNs" merely because a port opens. */
+    suspend fun fetchCandidates(
+        sources: List<String> = DEFAULT_PUBLIC_SOURCES,
+        onProgress: (String) -> Unit = {}
+    ): List<VlessConfig> = withContext(Dispatchers.IO) {
+        val parsed = mutableListOf<VlessConfig>()
+        for (group in sources.filter { it.startsWith("https://", true) }.distinct().take(12).chunked(4)) {
+            coroutineContext.ensureActive()
+            val results = coroutineScope {
+                group.map { url -> async {
+                    val body = fetchBody(url) ?: return@async emptyList<VlessConfig>()
+                    UniversalConfigParser.parseAny(body).filter(AutoConnectPolicy::supports).take(60)
+                        .map { it.copy(isFree = true, healthState = "UNKNOWN", source = "public", pingMs = -1) }
+                } }.awaitAll()
+            }
+            // Round-robin sources instead of letting the first large feed fill the pool.
+            repeat(60) { index -> results.forEach { nodes -> nodes.getOrNull(index)?.let(parsed::add) } }
+            onProgress("Получено ${parsed.size} кандидатов; работа туннеля ещё не проверена")
+            if (parsed.size >= MAX_CANDIDATES) break
+        }
+        parsed.distinctBy(AutoConnectPolicy::identity).take(MAX_CANDIDATES)
+    }
+
+    private suspend fun fetchBody(url: String): String? = suspendCancellableCoroutine { continuation ->
+        val call = client.newCall(Request.Builder().url(url).build())
+        continuation.invokeOnCancellation { call.cancel() }
+        call.enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) {
+                if (continuation.isActive) continuation.resume(null)
+            }
+            override fun onResponse(call: Call, response: Response) {
+                val body = try { response.use { if (it.isSuccessful) readBoundedBody(it.body) else null } }
+                    catch (_: Exception) { null }
+                if (continuation.isActive) continuation.resume(body)
+            }
+        })
+    }
+
     suspend fun fetchAndFilterWorkingConfigs(
         sources: List<String> = DEFAULT_PUBLIC_SOURCES,
         maxWorkingCount: Int = 150,
         onProgress: (Int, Int, String) -> Unit = { _, _, _ -> }
     ): List<VlessConfig> = withContext(Dispatchers.IO) {
-        val parsed = mutableListOf<VlessConfig>()
         require(maxWorkingCount in 1..150)
-        for (sourceUrl in sources.take(24)) {
-            coroutineContext.ensureActive()
-            if (parsed.size >= MAX_CANDIDATES) break
-            if (!sourceUrl.startsWith("https://", ignoreCase = true)) continue
-            try {
-                onProgress(parsed.size, 0, "Loading ${sourceUrl.substringAfterLast('/')}...")
-                client.newCall(Request.Builder().url(sourceUrl).build()).execute().use { response ->
-                    if (!response.isSuccessful) return@use
-                    val body = readBoundedBody(response.body)
-                    if (sourceUrl.endsWith("sources.txt")) {
-                        body.lines().map { it.trim() }.filter { it.startsWith("https://") }.take(6).forEach { nestedUrl ->
-                            try {
-                                client.newCall(Request.Builder().url(nestedUrl).build()).execute().use { nested ->
-                                    if (nested.isSuccessful) parsed += UniversalConfigParser.parseAny(readBoundedBody(nested.body))
-                                        .take((MAX_CANDIDATES - parsed.size).coerceAtLeast(0))
-                                }
-                            } catch (cancelled: CancellationException) { throw cancelled } catch (_: Exception) {}
-                        }
-                    } else parsed += UniversalConfigParser.parseAny(body).take((MAX_CANDIDATES - parsed.size).coerceAtLeast(0))
-                }
-            } catch (cancelled: CancellationException) { throw cancelled } catch (_: Exception) {}
-        }
-
-        val unique = parsed.distinctBy {
-            "${it.protocolType}|${it.address}|${it.port}|${it.uuid}|${it.security}|${it.sni}|${it.publicKey}|${it.shortId}"
-        }.take(500)
+        val candidates = fetchCandidates(sources) { onProgress(0, 0, it) }
         var tested = 0
-        val working = mutableListOf<VlessConfig>()
-        for (chunk in unique.chunked(24)) {
+        val reachable = mutableListOf<VlessConfig>()
+        for (chunk in candidates.chunked(8)) {
             coroutineContext.ensureActive()
-            chunk.map { cfg -> async { cfg to PingTester.pingConfig(cfg) } }.awaitAll().forEach { (cfg, ping) ->
+            coroutineScope {
+                chunk.map { cfg -> async { cfg to PingTester.pingConfig(cfg, 1500) } }.awaitAll()
+            }.forEach { (cfg, ping) ->
                 tested++
-                if (ping in 1..2500) {
-                    working += cfg.copy(
-                        pingMs = ping,
-                        isFree = true,
-                        name = if (cfg.name.contains("Node", true) || cfg.name.isBlank()) "⚡ ${cfg.protocolType.uppercase()} • ${cfg.address.take(16)}" else cfg.name
-                    )
-                }
-                onProgress(tested, working.size, "Testing reachability...")
+                if (ping > 0) reachable += cfg.copy(pingMs = ping, healthState = "UNKNOWN")
+                onProgress(tested, reachable.size, "Проверяем TCP-порты, не работу VPN")
             }
-            if (working.size >= maxWorkingCount) break
+            if (reachable.size >= maxWorkingCount) break
         }
-        working.sortedBy { it.pingMs }.take(maxWorkingCount)
+        reachable.sortedBy { it.pingMs }.take(maxWorkingCount)
     }
 }

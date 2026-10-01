@@ -12,195 +12,172 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.vlesscardvpn.data.AppRepository
 import com.vlesscardvpn.domain.*
-import com.vlesscardvpn.ui.theme.SemanticGreen
 import com.vlesscardvpn.worker.VpnSessionStats
 import com.vlesscardvpn.worker.VpnStatus
 import java.util.Locale
 
-/** Static, scrollable control panel: no permanent animation loop on the home screen. */
 @Composable
 fun HomeScreen(
-    repo: AppRepository,
-    autoPilotEngine: AutoPilotEngine,
-    vpnStats: VpnSessionStats,
-    onToggleConnect: (VlessConfig?) -> Unit,
-    onNavigateToServers: () -> Unit,
-    onNavigateToAutopilot: () -> Unit,
-    onNavigateToDiagnostic: () -> Unit,
-    onNavigateToSettings: () -> Unit,
-    onPanicTrigger: () -> Unit,
-    preparingConnection: Boolean = false,
-    onNavigateToCrashReports: () -> Unit = {}
+    repo: AppRepository, autoPilotEngine: AutoPilotEngine, vpnStats: VpnSessionStats,
+    onToggleConnect: (VlessConfig?) -> Unit, onNavigateToServers: () -> Unit,
+    onNavigateToAutopilot: () -> Unit, onNavigateToDiagnostic: () -> Unit,
+    onNavigateToSettings: () -> Unit, onPanicTrigger: () -> Unit,
+    preparingConnection: Boolean = false, onNavigateToCrashReports: () -> Unit = {},
+    onAutoConnect: () -> Unit = { onToggleConnect(null) }
 ) {
     val configs by repo.configsFlow.collectAsState(initial = emptyList())
-    val settings by repo.settingsFlow.collectAsState()
-    val autopilot by autoPilotEngine.state.collectAsState()
-    val connected = vpnStats.status == VpnStatus.CONNECTED
-    val connecting = vpnStats.status == VpnStatus.CONNECTING || preparingConnection
-    val stopping = vpnStats.status == VpnStatus.STOPPING
-    val selected = if (connected || vpnStats.status == VpnStatus.CONNECTING) vpnStats.activeConfig else
-        configs.firstOrNull { it.isActive } ?: configs.firstOrNull()
-    val colors = MaterialTheme.colorScheme
-    var details by remember { mutableStateOf(false) }
-    var target by remember { mutableStateOf("") }
-    val status = when {
-        preparingConnection -> "Подбираем сервер"
-        connected -> "Туннель запущен"
-        connecting -> "Подключение"
-        stopping -> "Отключение"
-        vpnStats.status == VpnStatus.ERROR -> "Нужна проверка"
-        else -> "Готов к подключению"
-    }
-    val statusColor = when {
-        connected -> SemanticGreen
-        vpnStats.status == VpnStatus.ERROR -> colors.error
-        else -> colors.primary
-    }
+    val selected = vpnStats.activeConfig ?: configs.firstOrNull { it.isActive } ?: configs.firstOrNull()
+    HomeDashboard(vpnStats, selected, configs.size, preparingConnection,
+        onConnect = { onToggleConnect(selected) }, onAuto = onAutoConnect,
+        onServers = onNavigateToServers, onSettings = onNavigateToSettings,
+        onDiagnostics = onNavigateToDiagnostic, onReports = onNavigateToCrashReports)
+}
 
-    Column(
-        Modifier.fillMaxSize().background(colors.background).safeDrawingPadding()
-            .verticalScroll(rememberScrollState()).padding(20.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
-    ) {
+/** Pure presentational screen, shared by device tests and actual Compose snapshot rendering. */
+@Composable
+fun HomeDashboard(
+    stats: VpnSessionStats, selected: VlessConfig? = null, configCount: Int = 0,
+    preparing: Boolean = false, onConnect: () -> Unit = {}, onAuto: () -> Unit = {},
+    onServers: () -> Unit = {}, onSettings: () -> Unit = {}, onDiagnostics: () -> Unit = {},
+    onReports: () -> Unit = {}
+) {
+    val colors = MaterialTheme.colorScheme
+    val working = stats.status == VpnStatus.CONNECTED && stats.health.internet
+    val busy = stats.status == VpnStatus.CONNECTING || preparing
+    val stopping = stats.status == VpnStatus.STOPPING
+    val error = stats.status == VpnStatus.ERROR
+    val success = Color(0xFF8BDFB3)
+    val headline = when {
+        busy -> "Ищем рабочий\nмаршрут"
+        working -> "Вы в сети"
+        error -> "Маршрут пока\nне найден"
+        stats.status == VpnStatus.CONNECTED -> "Проверяем связь"
+        else -> "Интернет без\nлишних настроек"
+    }
+    CompositionLocalProvider(LocalContentColor provides colors.onBackground) {
+    Column(Modifier.fillMaxSize().background(colors.background).safeDrawingPadding()
+        .verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(20.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text("VLESS / CARD", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                Text("Ваш центр подключения", style = MaterialTheme.typography.bodyMedium, color = colors.onSurfaceVariant)
+            Surface(shape = RoundedCornerShape(12.dp), color = colors.primaryContainer) {
+                Icon(Icons.Default.Shield, null, tint = colors.primary, modifier = Modifier.padding(12.dp).size(24.dp))
             }
-            IconButton(onClick = onNavigateToSettings, modifier = Modifier.size(48.dp)) {
-                Icon(Icons.Default.Settings, contentDescription = "Настройки")
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text("VLESS Card", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = colors.onBackground)
+                Text("Один рабочий маршрут", style = MaterialTheme.typography.bodyMedium, color = colors.onSurfaceVariant)
+            }
+            IconButton(onClick = onSettings, modifier = Modifier.size(48.dp)) { Icon(Icons.Default.Settings, "Настройки", tint = colors.onBackground) }
+        }
+        Surface(shape = RoundedCornerShape(20.dp), color = colors.surface,
+            border = BorderStroke(1.dp, if (working) success.copy(alpha = .5f) else colors.outline.copy(alpha = .6f))) {
+            Column(Modifier.fillMaxWidth().padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(if (working) Icons.Default.CheckCircle else if (error) Icons.Default.Info else Icons.Default.Public,
+                        null, tint = if (working) success else colors.primary, modifier = Modifier.size(20.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text(when { working -> "HTTPS через сервер подтверждён"; busy -> "АВТО / ПРОВЕРКА"; error -> "Нужен другой сервер"; else -> "ГОТОВ К ПОДКЛЮЧЕНИЮ" },
+                        style = MaterialTheme.typography.bodyMedium, color = if (working) success else colors.onSurfaceVariant)
+                }
+                Text(headline, fontSize = 30.sp, lineHeight = 36.sp, fontWeight = FontWeight.SemiBold)
+                Text(when {
+                    busy -> stats.progressMessage.ifBlank { "Проверяем конфигурацию и реальную передачу трафика" }
+                    working -> "${if (stats.autoMode) "Авто" else "Ваш сервер"} · ${stats.profileLabel} · ${stats.health.latencyMs} мс"
+                    error -> stats.errorMessage ?: "Сервер не прошёл сквозную проверку"
+                    else -> "Нажмите «Авто». Приложение найдёт сервер и проверит HTTPS, YouTube и Telegram веб."
+                }, style = MaterialTheme.typography.bodyLarge, color = colors.onSurfaceVariant)
+                ConnectionActions(stats.status == VpnStatus.CONNECTED, busy, stopping,
+                    selected != null, onConnect, onAuto)
+                if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
+                if (!working && !busy && !error) Text("Авто использует ваши и публичные серверы; выполняет сетевые проверки.",
+                    style = MaterialTheme.typography.bodyMedium, color = colors.onSurfaceVariant)
             }
         }
-        Surface(shape = RoundedCornerShape(24.dp), color = colors.surface,
-            border = BorderStroke(1.dp, statusColor.copy(alpha = 0.65f))) {
-            Column(Modifier.fillMaxWidth().padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                Icon(if (connected) Icons.Default.Shield else Icons.Default.VpnKey,
-                    contentDescription = null, tint = statusColor, modifier = Modifier.size(40.dp))
-                Text(status, style = MaterialTheme.typography.titleLarge, color = statusColor)
-                Text(when {
-                    preparingConnection -> "Загружаем подписки и проверяем доступность узлов. Поиск можно отменить."
-                    connecting -> "Проверяем конфигурацию и запускаем ядро."
-                    connected -> "${selected?.protocolType?.uppercase(Locale.ROOT) ?: "VPN"} · ${selected?.security?.uppercase(Locale.ROOT) ?: "—"}. Доступность сайтов проверьте в диагностике."
-                    vpnStats.status == VpnStatus.ERROR -> vpnStats.errorMessage ?: "Откройте отчёт об ошибке или проверьте сервер."
-                    else -> "Выберите свой сервер или запустите автоматический подбор."
-                }, style = MaterialTheme.typography.bodyLarge, color = colors.onSurfaceVariant)
-                Button(onClick = { onToggleConnect(if (settings.autoSelect) null else selected) },
-                    enabled = !stopping,
-                    modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp), shape = RoundedCornerShape(12.dp)) {
-                    if (connecting) CircularProgressIndicator(Modifier.size(20.dp), color = colors.onPrimary, strokeWidth = 2.dp)
-                    else Icon(Icons.Default.PowerSettingsNew, contentDescription = null)
-                    Spacer(Modifier.width(12.dp))
-                    Text(when {
-                        connected -> "Отключить"
-                        connecting -> "Отменить"
-                        stopping -> "Отключение…"
-                        selected == null || settings.autoSelect -> "Подключить автоматически"
-                        else -> "Подключить"
-                    }, fontWeight = FontWeight.SemiBold)
+        Surface(onClick = onServers, shape = RoundedCornerShape(16.dp), color = colors.surface) {
+            Row(Modifier.fillMaxWidth().padding(18.dp), verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.Dns, null, tint = colors.primary, modifier = Modifier.size(24.dp))
+                Spacer(Modifier.width(14.dp))
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("СЕРВЕРЫ / $configCount", style = MaterialTheme.typography.bodyMedium, color = colors.onSurfaceVariant)
+                    Text(selected?.name?.ifBlank { "Сервер из подписки" } ?: "Добавить подписку",
+                        style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    Text(if (selected != null) "${selected.protocolType.uppercase(Locale.ROOT)} · ${selected.security.uppercase(Locale.ROOT)}" else "Или доверьте подбор кнопке «Авто»",
+                        style = MaterialTheme.typography.bodyMedium, color = colors.onSurfaceVariant)
                 }
-                if (vpnStats.status == VpnStatus.ERROR && !preparingConnection) {
-                    TextButton(onClick = onNavigateToCrashReports, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
-                        Text("Открыть отчёты об ошибках")
+                Icon(Icons.Default.ChevronRight, null, tint = colors.onSurfaceVariant)
+            }
+        }
+        Surface(shape = RoundedCornerShape(16.dp), color = colors.surface) {
+            Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text("Проверка маршрута", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
+                    IconButton(onClick = onDiagnostics, modifier = Modifier.size(48.dp)) { Icon(Icons.Default.OpenInNew, "Диагностика") }
+                }
+                for ((label, passed) in listOf("HTTPS через VPN" to stats.health.internet,
+                    "YouTube · HTTPS" to stats.health.youtube, "Telegram · веб" to stats.health.telegram)) {
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Text(label, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+                        val checked = stats.health.checkedAt > 0
+                        Icon(if (!checked) Icons.Default.Remove else if (passed) Icons.Default.CheckCircle else Icons.Default.ErrorOutline,
+                            if (!checked) "Не проверено" else if (passed) "Ожидаемый ответ получен" else "Проверка не пройдена",
+                            tint = if (!checked) colors.onSurfaceVariant else if (passed) success else colors.error, modifier = Modifier.size(20.dp))
                     }
                 }
+                Text("Веб-проверка не гарантирует видео, MTProto или звонки.", style = MaterialTheme.typography.bodyMedium, color = colors.onSurfaceVariant)
             }
         }
-        Surface(onClick = onNavigateToServers, shape = RoundedCornerShape(16.dp), color = colors.surface,
-            border = BorderStroke(1.dp, colors.outline)) {
-            Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Default.Public, contentDescription = null, tint = colors.primary)
-                Spacer(Modifier.width(16.dp))
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("Сервер", style = MaterialTheme.typography.bodyMedium, color = colors.onSurfaceVariant)
-                    Text(selected?.name?.ifBlank { selected.address } ?: "Добавить или выбрать",
-                        style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                    Text(selected?.let { if (it.pingMs > 0) "Доступность узла: ${it.pingMs} мс" else "Доступность не проверена" }
-                        ?: "${configs.size} конфигураций", style = MaterialTheme.typography.bodyMedium, color = colors.onSurfaceVariant)
-                }
-                Icon(Icons.Default.ChevronRight, contentDescription = null)
-            }
+        if (working) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            StatCell("Загрузка", speed(stats.downloadSpeedBps), Modifier.weight(1f))
+            StatCell("В сети", time(stats.durationSeconds), Modifier.weight(1f))
         }
-        // Two columns, not three cramped gauges. Text wraps at large system font sizes.
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            ConnectionMetric("Загрузка ↓", if (connected) formatSpeed(vpnStats.downloadSpeedBps) else "—",
-                if (connected) "↑ ${formatSpeed(vpnStats.uploadSpeedBps)}" else "Нет активной сессии", Modifier.weight(1f))
-            ConnectionMetric("Время", if (connected) duration(vpnStats.durationSeconds) else "—",
-                if (connected) bytes(vpnStats.bytesIn + vpnStats.bytesOut) else "Трафик: —", Modifier.weight(1f))
+        if (error) OutlinedButton(onClick = onReports, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp), shape = RoundedCornerShape(12.dp)) {
+            Text("Отчёты об ошибках")
         }
-        OutlinedButton(onClick = onNavigateToAutopilot, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
-            shape = RoundedCornerShape(12.dp)) {
-            Icon(Icons.Default.Tune, contentDescription = null)
-            Spacer(Modifier.width(8.dp))
-            Text(if (autopilot.isEnabled) "Автопилот включён · управление" else "Настроить автопилот")
+        Text("SNI, ключи и параметры сервера сохраняются. Случайная подмена доменов отключена в «Авто».",
+            style = MaterialTheme.typography.bodyMedium, color = colors.onSurfaceVariant)
+        Spacer(Modifier.height(4.dp))
+    }
+    }
+}
+@Composable
+private fun ConnectionActions(connected: Boolean, busy: Boolean, stopping: Boolean, hasServer: Boolean,
+    onConnect: () -> Unit, onAuto: () -> Unit) {
+    val connect: @Composable (Modifier) -> Unit = { modifier ->
+        OutlinedButton(onClick = onConnect, enabled = !stopping && (hasServer || busy || connected),
+            modifier = modifier.heightIn(min = 56.dp), shape = RoundedCornerShape(12.dp),
+            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 12.dp)) {
+            Icon(Icons.Default.PowerSettingsNew, null, Modifier.size(20.dp)); Spacer(Modifier.width(6.dp))
+            Text(if (busy) "Отменить" else if (connected) "Отключить" else "Подключить", fontSize = 14.sp)
         }
-        Surface(shape = RoundedCornerShape(16.dp), color = colors.primaryContainer) {
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Стабильный TLS", style = MaterialTheme.typography.titleMedium, color = colors.onPrimaryContainer)
-                Text("SNI и отпечаток из конфигурации, без случайной подмены и экспериментальной фрагментации. Проверка сертификата включена.",
-                    style = MaterialTheme.typography.bodyMedium, color = colors.onPrimaryContainer)
-                if (settings.evasionStrategy == "stable_tls" && !settings.enableFragmentation && !settings.enableSniRotation) {
-                    Text("Профиль выбран · применяется при следующем подключении", style = MaterialTheme.typography.bodyMedium,
-                        color = colors.onPrimaryContainer)
-                } else {
-                    OutlinedButton(onClick = {
-                        repo.updateSettings { it.copy(evasionStrategy = "stable_tls", enableFragmentation = false,
-                            enableSniRotation = false, customSniOverride = "auto") }
-                    }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("Применить профиль") }
-                }
-                Text("Эффективность зависит от сервера и сети. Обход блокировок не гарантирован.",
-                    style = MaterialTheme.typography.bodySmall, color = colors.onPrimaryContainer)
-            }
+    }
+    val auto: @Composable (Modifier) -> Unit = { modifier ->
+        Button(onClick = onAuto, enabled = !busy && !stopping,
+            modifier = modifier.heightIn(min = 56.dp), shape = RoundedCornerShape(12.dp),
+            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 12.dp)) {
+            Icon(Icons.Default.AutoAwesome, null, Modifier.size(20.dp)); Spacer(Modifier.width(8.dp))
+            Text("Авто", fontWeight = FontWeight.Bold, fontSize = 16.sp)
         }
-        OutlinedButton(onClick = onNavigateToDiagnostic, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
-            Text("Проверить подключение")
-        }
-        TextButton(onClick = { details = !details }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
-            Text(if (details) "Скрыть маршруты" else "Маршруты и исключения")
-        }
-        if (details) {
-            Text(if (settings.enableRuDirect) "Часть российских сайтов и локальные адреса идут напрямую, без VPN."
-                else "Для локальных адресов и выбранных приложений могут действовать исключения.",
-                style = MaterialTheme.typography.bodyMedium, color = colors.onSurfaceVariant)
-            OutlinedTextField(value = target, onValueChange = { target = it.take(253) }, label = { Text("Домен или IP") },
-                singleLine = true, modifier = Modifier.fillMaxWidth())
-            if (target.isNotBlank()) {
-                val match = DiagnosticEngine.inspectRouteDecision(target, settings)
-                Text(match.explanation, style = MaterialTheme.typography.bodyMedium)
-                Text("Оценка правил, не проверка фактического трафика.", style = MaterialTheme.typography.bodySmall,
-                    color = colors.onSurfaceVariant)
-            }
-        }
-        TextButton(onClick = onPanicTrigger, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
-            Text("Отключить VPN и закрыть приложение", color = colors.error)
-        }
+    }
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        if (maxWidth < 240.dp || LocalDensity.current.fontScale > 1.15f) {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { auto(Modifier.fillMaxWidth()); connect(Modifier.fillMaxWidth()) }
+        } else Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) { connect(Modifier.weight(1f)); auto(Modifier.weight(1f)) }
     }
 }
 
-@Composable
-private fun ConnectionMetric(label: String, value: String, detail: String, modifier: Modifier) {
-    Surface(modifier = modifier, shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surface) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(label, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text(value, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-            Text(detail, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
+@Composable private fun StatCell(label: String, value: String, modifier: Modifier) {
+    Column(modifier.padding(horizontal = 4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(label, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(value, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onBackground)
     }
 }
-private fun formatSpeed(bytesPerSec: Long): String = when {
-    bytesPerSec <= 0 -> "0 КБ/с"
-    bytesPerSec < 1024 -> "$bytesPerSec Б/с"
-    bytesPerSec < 1048576 -> String.format(Locale.ROOT, "%.1f КБ/с", bytesPerSec / 1024.0)
-    else -> String.format(Locale.ROOT, "%.2f МБ/с", bytesPerSec / 1048576.0)
-}
-private fun duration(seconds: Long): String = String.format(Locale.ROOT, "%02d:%02d:%02d", seconds / 3600, seconds / 60 % 60, seconds % 60)
-private fun bytes(value: Long): String = when {
-    value < 1024 -> "$value Б"
-    value < 1048576 -> String.format(Locale.ROOT, "%.1f КБ", value / 1024.0)
-    value < 1073741824 -> String.format(Locale.ROOT, "%.1f МБ", value / 1048576.0)
-    else -> String.format(Locale.ROOT, "%.2f ГБ", value / 1073741824.0)
-}
+private fun speed(bps: Long): String = when { bps < 1024 -> "$bps Б/с"; bps < 1048576 -> "${bps / 1024} КБ/с"; else -> String.format(Locale.ROOT, "%.1f МБ/с", bps / 1048576.0) }
+private fun time(seconds: Long) = String.format(Locale.ROOT, "%02d:%02d:%02d", seconds / 3600, seconds / 60 % 60, seconds % 60)

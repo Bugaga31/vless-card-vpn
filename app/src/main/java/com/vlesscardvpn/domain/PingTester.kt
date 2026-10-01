@@ -37,23 +37,7 @@ object PingTester {
                 socket.connect(InetSocketAddress(config.address.trim(), config.port), timeoutMs)
                 tcpLatency = (System.currentTimeMillis() - tcpStart).toInt().coerceAtLeast(1)
 
-                // Generic TLS cannot authenticate Reality. Report TCP reachability here;
-                // authenticated tunnel health is verified by verifyEndToEndConnection().
-                if (config.security.equals("tls", true)) {
-                    val sslSocket = (SSLSocketFactory.getDefault() as SSLSocketFactory)
-                        .createSocket(socket, config.address.trim(), config.port, false) as SSLSocket
-                    sslSocket.sslParameters = SSLParameters().apply {
-                        serverNames = listOf(SNIHostName(config.sni.ifBlank { config.address }.trim()))
-                    }
-                    sslSocket.soTimeout = timeoutMs
-                    val tlsStart = System.currentTimeMillis()
-                    try {
-                        sslSocket.startHandshake()
-                        tlsLatency = (System.currentTimeMillis() - tlsStart).toInt().coerceAtLeast(1)
-                    } catch (e: Exception) {
-                        return LatencyBreakdown(tcpLatency, -1, -1, false, "TLS handshake failed: ${e.localizedMessage ?: "Unknown SSL error"}")
-                    }
-                }
+                // This is TCP-port reachability only, never TLS/Reality authentication.
             }
             LatencyBreakdown(tcpLatency, tlsLatency, -1, tcpLatency > 0)
         } catch (e: Exception) {
@@ -74,82 +58,13 @@ object PingTester {
         testUrl: String = "https://speed.cloudflare.com/__down?bytes=1048576",
         timeoutMs: Int = 8000
     ): Long = withContext(Dispatchers.IO) {
-        var connection: javax.net.ssl.HttpsURLConnection? = null
-        try {
-            val url = URL(testUrl)
-            connection = url.openConnection() as javax.net.ssl.HttpsURLConnection
-            connection.connectTimeout = timeoutMs
-            connection.readTimeout = timeoutMs
-            connection.setRequestProperty("User-Agent", "VLESS-Card-SpeedTest/1.0")
-            connection.instanceFollowRedirects = true
-
-            val startTime = System.currentTimeMillis()
-            connection.connect()
-
-            if (connection.responseCode != 200) return@withContext -1L
-
-            val buffer = ByteArray(8192)
-            var totalBytes = 0L
-            connection.inputStream.use { input ->
-                var bytesRead: Int
-                while (input.read(buffer).also { bytesRead = it } != -1) {
-                    totalBytes += bytesRead
-                    if (System.currentTimeMillis() - startTime > timeoutMs) break
-                }
-            }
-
-            val elapsedMs = (System.currentTimeMillis() - startTime).coerceAtLeast(1)
-            (totalBytes * 1000L / elapsedMs)
-        } catch (e: Exception) {
-            -1L
-        } finally {
-            try { connection?.disconnect() } catch (_: Exception) {}
-        }
+        // The application UID is excluded from Android VPN routing. A direct request
+        // would measure the ISP rather than the selected outbound. Do not fabricate it.
+        -1L
     }
 
     suspend fun verifyEndToEndConnection(timeoutMs: Int = 3000): Pair<Boolean, Int> = withContext(Dispatchers.IO) {
-        // Fast endpoints including Cloudflare, Google, Yandex, Apple captive check
-        // HTTPS only — the manifest sets usesCleartextTraffic=false, so plain-http
-        // endpoints would always fail and shrink failover redundancy.
-        val endpoints = listOf(
-            "https://cp.cloudflare.com/generate_204",
-            "https://connectivitycheck.gstatic.com/generate_204",
-            "https://www.google.com/generate_204",
-            "https://captive.apple.com/hotspot-detect.html",
-            "https://ya.ru"
-        )
-        for (endpoint in endpoints) {
-            try {
-                var connection: java.net.HttpURLConnection? = null
-                var stream: InputStream? = null
-                try {
-                    var code = -1
-                    val latency = measureTimeMillis {
-                        connection = (URL(endpoint).openConnection() as java.net.HttpURLConnection).apply {
-                            connectTimeout = timeoutMs
-                            readTimeout = timeoutMs
-                            instanceFollowRedirects = false
-                            useCaches = false
-                            setRequestProperty("User-Agent", "Mozilla/5.0 (Android; Mobile; rv:120.0)")
-                            setRequestProperty("Connection", "close")
-                        }
-                        connection?.connect()
-                        code = connection?.responseCode ?: -1
-                        if (code in 200..399) {
-                            stream = connection?.inputStream
-                        }
-                    }
-                    if (code in 200..399 || code == 204) {
-                        return@withContext true to latency.toInt().coerceAtLeast(1)
-                    }
-                } finally {
-                    try { stream?.close() } catch (_: Exception) {}
-                    try { connection?.disconnect() } catch (_: Exception) {}
-                }
-            } catch (e: CancellationException) {
-                throw e
-            } catch (_: Exception) {}
-        }
-        false to -1
+        val report = TunnelHealthChecker.check(timeoutMs = timeoutMs)
+        report.internet to report.latencyMs
     }
 }

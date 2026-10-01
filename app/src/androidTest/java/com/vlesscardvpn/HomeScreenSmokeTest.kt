@@ -38,9 +38,9 @@ class HomeScreenSmokeTest {
     }
     @Test fun disconnectedScreenHasConnectAndTlsProfile() {
         show()
-        compose.onNodeWithText("Готов к подключению").assertIsDisplayed()
+        compose.onNodeWithText("ГОТОВ К ПОДКЛЮЧЕНИЮ").assertIsDisplayed()
         capture("home-disconnected")
-        compose.onNodeWithText("Стабильный TLS").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Авто").assertIsDisplayed()
         capture("home-profile")
     }
     @Test fun preparingScreenAllowsCancellation() {
@@ -50,7 +50,7 @@ class HomeScreenSmokeTest {
     }
     @Test fun errorScreenOffersCrashReports() {
         show(VpnSessionStats(status = VpnStatus.ERROR, errorMessage = "Тестовая ошибка: проверьте конфигурацию сервера."))
-        compose.onNodeWithText("Открыть отчёты об ошибках").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Отчёты об ошибках").performScrollTo().assertIsDisplayed()
         capture("home-error")
     }
 }

@@ -52,6 +52,11 @@ class StabilityRegressionTest {
         assertNull(UniversalConfigParser.decodeBase64Safe("%%%not-base64%%%"))
         assertNull(UniversalConfigParser.decodeBase64Safe(""))
     }
+    @Test fun base64RejectsMalformedPaddingAndMixedAlphabets() {
+        assertNull(UniversalConfigParser.decodeBase64Safe("YQ="))
+        assertNull(UniversalConfigParser.decodeBase64Safe("+_8="))
+        assertArrayEquals("a".toByteArray(), UniversalConfigParser.decodeBase64Safe("YQ=="))
+    }
     @Test fun boundedFeedAcceptsSmallAndEmptyBodies() {
         "vless://sample".toResponseBody().use {
             assertEquals("vless://sample", PublicConfigFetcher.readBoundedBody(it))

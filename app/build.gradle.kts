@@ -1,4 +1,5 @@
 plugins {
+    id("app.cash.paparazzi")
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("com.google.devtools.ksp")
@@ -13,8 +14,9 @@ android {
     defaultConfig {
         // Install the diagnostic build alongside the release without deleting user data.
         val stabilityPreview = providers.gradleProperty("stabilityPreview").orNull == "true"
-        applicationId = if (stabilityPreview) "com.vlesscardvpn.preview" else "com.vlesscardvpn"
-        manifestPlaceholders["vpnAppLabel"] = if (stabilityPreview) "VLESS Card VPN · Test" else "@string/app_name"
+        val autoPreview = providers.gradleProperty("autoPreview").orNull == "true"
+        applicationId = when { autoPreview -> "com.vlesscardvpn.auto"; stabilityPreview -> "com.vlesscardvpn.preview"; else -> "com.vlesscardvpn" }
+        manifestPlaceholders["vpnAppLabel"] = when { autoPreview -> "VLESS Card VPN · Auto"; stabilityPreview -> "VLESS Card VPN · Test"; else -> "@string/app_name" }
         minSdk = 24
         targetSdk = 34
         versionCode = releaseNumber
@@ -59,6 +61,8 @@ dependencies {
     implementation("androidx.room:room-runtime:2.6.1")
     ksp("androidx.room:room-compiler:2.6.1")
     implementation("androidx.room:room-ktx:2.6.1")
+    testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
+    testImplementation("com.squareup.okhttp3:okhttp-tls:4.12.0")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20240303")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.7.3")

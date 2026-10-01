@@ -93,6 +93,7 @@ fun VlessCardVpnApp(
     val settings by repo.settingsFlow.collectAsState()
 
     var showSplash by remember { mutableStateOf(true) }
+    var pendingAuto by remember { mutableStateOf(false) }
     var pendingConfig by remember { mutableStateOf<VlessConfig?>(null) }
     var preparingConnection by remember { mutableStateOf(false) }
     var preparationJob by remember { mutableStateOf<Job?>(null) }
@@ -112,66 +113,39 @@ fun VlessCardVpnApp(
         contract = ActivityResultContracts.StartActivityForResult()
     ) { result ->
         if (result.resultCode == Activity.RESULT_OK) {
-            pendingConfig?.let { cfg ->
-                scope.launch {
-                    repo.setActive(cfg.id)
-                    VlessVpnService.startVpn(context, cfg)
-                }
-            }
+            if (pendingAuto) VlessVpnService.startAuto(context)
+            else pendingConfig?.let { cfg -> VlessVpnService.startVpn(context, cfg) }
         } else {
             Toast.makeText(context, "Разрешение VPN необходимо для подключения", Toast.LENGTH_SHORT).show()
         }
         pendingConfig = null
+        pendingAuto = false
     }
 
-    val handleConnectToggle: (VlessConfig?) -> Unit = toggle@{ targetConfig ->
-        if (preparingConnection) {
-            preparationJob?.cancel()
+    val handleAutoConnect: () -> Unit = auto@{
+        if (pendingAuto || pendingConfig != null) return@auto
+        if (VlessVpnService.vpnStats.value.status == VpnStatus.CONNECTING) return@auto
+        // Explicit Auto is permission for this route selection, not an application-open trigger.
+        val permission = VpnService.prepare(context)
+        if (permission != null) {
+            pendingAuto = true
+            vpnPermissionLauncher.launch(permission)
+        } else VlessVpnService.startAuto(context)
+    }
+    val handleConnectToggle: (VlessConfig?) -> Unit = toggle@{ target ->
+        if (pendingConfig != null || pendingAuto) return@toggle
+        val current = VlessVpnService.vpnStats.value.status
+        if (current in listOf(VpnStatus.CONNECTED, VpnStatus.CONNECTING)) {
+            autoPilotEngine.stopAutoPilot()
+            VlessVpnService.stopVpn(context)
             return@toggle
         }
-        if (pendingConfig != null) return@toggle // System VPN permission dialog is already open.
-        preparationJob = scope.launch {
-            preparingConnection = true
-            try {
-                if (VlessVpnService.vpnStats.value.status in listOf(VpnStatus.CONNECTED, VpnStatus.CONNECTING)) {
-                    VlessVpnService.stopVpn(context)
-                    repo.setActive("")
-                    return@launch
-                }
-                var cfgToConnect = targetConfig
-                    ?: configs.filter { it.pingMs in 1..1500 }.minByOrNull { it.pingMs }
-                    ?: configs.firstOrNull { it.isActive } ?: configs.firstOrNull()
-                if (cfgToConnect == null) {
-                    val working = PublicConfigFetcher.fetchAndFilterWorkingConfigs(maxWorkingCount = 20)
-                    repo.addConfigs(working)
-                    cfgToConnect = working.firstOrNull()
-                }
-                val config = cfgToConnect
-                if (config == null) {
-                    Toast.makeText(context, "Нет доступных узлов. Добавьте подписку или сервер.", Toast.LENGTH_LONG).show()
-                    return@launch
-                }
-                // A connect click does not override the user's monitoring consent.
-                if (settings.autoSelect && settings.autopilotConsentGiven) {
-                    autoPilotEngine.startAutoPilot(settings.healthCheckInterval)
-                }
-                val prepareIntent = VpnService.prepare(context)
-                if (prepareIntent != null) {
-                    pendingConfig = config
-                    vpnPermissionLauncher.launch(prepareIntent)
-                } else {
-                    repo.setActive(config.id)
-                    VlessVpnService.startVpn(context, config)
-                }
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (error: Exception) {
-                CrashReportManager.recordException(context.applicationContext, Thread.currentThread(), error, "CONNECT_UI")
-                Toast.makeText(context, "Не удалось подготовить подключение. Откройте отчёты об ошибках.", Toast.LENGTH_LONG).show()
-            } finally {
-                preparingConnection = false
-            }
-        }
+        if (target == null) { handleAutoConnect(); return@toggle }
+        val permission = VpnService.prepare(context)
+        if (permission != null) {
+            pendingConfig = target
+            vpnPermissionLauncher.launch(permission)
+        } else VlessVpnService.startVpn(context, target)
     }
 
     var autoConnectAttempted by remember { mutableStateOf(false) }
@@ -208,8 +182,9 @@ fun VlessCardVpnApp(
                         onNavigateToDiagnostic = { navController.navigate("diagnostic") },
                         onNavigateToSettings = { navController.navigate("settings") },
                         onPanicTrigger = onPanicExit,
-                        preparingConnection = preparingConnection,
-                        onNavigateToCrashReports = { navController.navigate("crash_reports") }
+                        preparingConnection = pendingAuto || pendingConfig != null,
+                        onNavigateToCrashReports = { navController.navigate("crash_reports") },
+                        onAutoConnect = handleAutoConnect
                     )
                 }
                 composable("servers") {
