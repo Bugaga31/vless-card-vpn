@@ -13,7 +13,7 @@ data class TunnelProbe(val label: String, val latencyMs: Int = -1, val httpCode:
     val passed: Boolean get() = latencyMs > 0 && httpCode == expectedCode
 }
 data class TunnelHealthReport(val probes: List<TunnelProbe> = emptyList(), val checkedAt: Long = 0L) {
-    val internet: Boolean get() = probes.any { it.label == "Cloudflare" && it.passed || it.label == "YouTube · HTTPS" && it.passed }
+    val internet: Boolean get() = probes.any { it.passed && it.label in setOf("Cloudflare", "YouTube · HTTPS", "Telegram · веб") }
     val youtube: Boolean get() = probes.any { it.label == "YouTube · HTTPS" && it.passed }
     val telegram: Boolean get() = probes.any { it.label == "Telegram · веб" && it.passed }
     val preferredServices: Boolean get() = internet && youtube && telegram

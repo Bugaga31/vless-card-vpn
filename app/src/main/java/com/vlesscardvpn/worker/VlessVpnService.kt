@@ -32,6 +32,8 @@ import com.vlesscardvpn.domain.AppSettings
 import com.vlesscardvpn.domain.PingTester
 import com.vlesscardvpn.domain.VlessConfig
 import com.vlesscardvpn.domain.AutoConnectPolicy
+import com.vlesscardvpn.domain.AutoSearchPolicy
+import com.vlesscardvpn.domain.AutoRouteAttempt
 import com.vlesscardvpn.domain.LocalProbeProxy
 import com.vlesscardvpn.domain.TunnelHealthChecker
 import com.vlesscardvpn.domain.TunnelHealthReport
@@ -267,41 +269,45 @@ class VlessVpnService : VpnService() {
         _vpnStats.value = VpnSessionStats(status = VpnStatus.CONNECTING, autoMode = true,
             progressMessage = "Авто: проверяем сохранённые серверы")
         val settings = repository.settingsFlow.value
-        val identities = mutableSetOf<String>()
+        val tried = mutableSetOf<String>()
         var attempts = 0
         var lastReport = TunnelHealthReport()
+        var bestPartial: Pair<AutoRouteAttempt, TunnelHealthReport>? = null
         suspend fun tryPool(pool: List<VlessConfig>, limit: Int = AutoConnectPolicy.MAX_ATTEMPTS): Boolean {
-            val candidates = AutoConnectPolicy.rank(pool, settings.autopilotAllowedOnlyFavorites).take(24)
-            // A TCP probe only orders candidates; it never marks a VPN healthy.
-            val reachable = coroutineScope {
+            val candidates = AutoConnectPolicy.rank(pool, settings.autopilotAllowedOnlyFavorites)
+                .take(AutoSearchPolicy.MAX_CANDIDATES)
+            val measured = coroutineScope {
                 candidates.chunked(8).flatMap { group ->
                     group.map { c -> async { c to PingTester.pingConfig(c, 1200) } }.awaitAll()
                 }
-            }.filter { it.second > 0 }.sortedWith(compareByDescending<Pair<VlessConfig, Int>> { it.first.isFavorite }
-                .thenBy { it.second })
-            for ((config, ping) in reachable) {
+            }
+            val remembered = candidates.mapNotNull { config ->
+                routeMemory.get(config)?.let { AutoConnectPolicy.identity(config) to it }
+            }.toMap()
+            for (attempt in AutoSearchPolicy.plan(measured, remembered, tried)) {
                 currentCoroutineContext().ensureActive()
                 if (sessionId != sessionSequence.get() || attempts >= limit) return false
-                if (!identities.add(AutoConnectPolicy.identity(config))) continue
-                repository.addConfig(config.copy(pingMs = ping, healthState = "UNKNOWN"))
-                for (profile in AdaptiveRoutePolicy.profiles(config, routeMemory.get(config))) {
-                    if (attempts >= limit) return false
-                    attempts++
-                    _vpnStats.value = VpnSessionStats(status = VpnStatus.CONNECTING, autoMode = true,
-                        activeConfig = config, progressMessage = "Авто: маршрут $attempts/${AutoConnectPolicy.MAX_ATTEMPTS}")
-                    safeStartForeground(1, createNotification(config, "Авто: проверка $attempts/${AutoConnectPolicy.MAX_ATTEMPTS}"))
-                    handleConnectLocked(config.id, sessionId, autoMode = true, profile = profile)
-                    currentCoroutineContext().ensureActive()
-                    if (sessionId != sessionSequence.get()) return false
-                    if (_vpnStats.value.status == VpnStatus.CONNECTED) return true
-                    lastReport = _vpnStats.value.health
+                if (!tried.add(attempt.key)) continue
+                val config = attempt.config
+                repository.addConfig(config.copy(pingMs = attempt.tcpMs, healthState = "UNKNOWN"))
+                attempts++
+                _vpnStats.value = VpnSessionStats(status = VpnStatus.CONNECTING, autoMode = true,
+                    activeConfig = config, progressMessage = "Авто: маршрут $attempts/${AutoConnectPolicy.MAX_ATTEMPTS} · ${attempt.profile.label}")
+                safeStartForeground(1, createNotification(config, "Авто: проверка $attempts/${AutoConnectPolicy.MAX_ATTEMPTS}"))
+                handleConnectLocked(config.id, sessionId, autoMode = true, profile = attempt.profile)
+                currentCoroutineContext().ensureActive()
+                if (sessionId != sessionSequence.get()) return false
+                if (_vpnStats.value.status == VpnStatus.CONNECTED) return true
+                lastReport = _vpnStats.value.health
+                if (AutoSearchPolicy.betterPartial(lastReport, bestPartial?.second)) {
+                    bestPartial = attempt to lastReport
                 }
             }
             return false
         }
         try {
-            withTimeout(120_000L) {
-                if (tryPool(repository.getAllConfigs().take(100), if (settings.autopilotAllowedOnlyFavorites) 12 else 6)) return@withTimeout
+            withTimeout(AutoSearchPolicy.DEADLINE_MS) {
+                if (tryPool(repository.getAllConfigs(), if (settings.autopilotAllowedOnlyFavorites) AutoConnectPolicy.MAX_ATTEMPTS else AutoSearchPolicy.SAVED_ATTEMPTS)) return@withTimeout
                 if (sessionId != sessionSequence.get()) return@withTimeout
                 if (!settings.autopilotAllowedOnlyFavorites && attempts < AutoConnectPolicy.MAX_ATTEMPTS) {
                     _vpnStats.value = VpnSessionStats(status = VpnStatus.CONNECTING, autoMode = true,
@@ -311,7 +317,7 @@ class VlessVpnService : VpnService() {
                         if (sessionId == sessionSequence.get()) _vpnStats.value = _vpnStats.value.copy(progressMessage = message)
                     }
                     repository.mergeCandidates(fresh)
-                    tryPool(fresh)
+                    tryPool(AutoSearchPolicy.importedRows(repository.getAllConfigs(), fresh))
                 }
             }
         } catch (_: TimeoutCancellationException) {
@@ -319,13 +325,27 @@ class VlessVpnService : VpnService() {
         }
         currentCoroutineContext().ensureActive()
         if (sessionId != sessionSequence.get() || _vpnStats.value.status == VpnStatus.CONNECTED) return
+        // Preserve a proven HTTPS route when only the optional web checks failed.
+        // Reconnect and re-check; the old report alone is never enough to claim CONNECTED.
+        bestPartial?.let { (attempt, _) ->
+            _vpnStats.value = VpnSessionStats(status = VpnStatus.CONNECTING, autoMode = true,
+                progressMessage = "Возвращаем HTTPS-маршрут; доступность сервисов ограничена")
+            try {
+                withTimeout(20_000L) {
+                    handleConnectLocked(attempt.config.id, sessionId, autoMode = true,
+                        profile = attempt.profile, requirePreferredServices = false)
+                }
+            } catch (_: TimeoutCancellationException) { }
+            currentCoroutineContext().ensureActive()
+            if (sessionId != sessionSequence.get() || _vpnStats.value.status == VpnStatus.CONNECTED) return
+        }
         cleanupResources()
         _vpnStats.value = VpnSessionStats(status = VpnStatus.ERROR, autoMode = true, health = lastReport,
-            errorMessage = "Рабочий маршрут не найден. Авто не будет показывать фиктивное подключение. Добавьте надёжную подписку или повторите поиск")
+            errorMessage = "Проверено маршрутов: $attempts. HTTPS-маршрут не подтверждён. Пинг порта не означает рабочий VPN. Добавьте надёжную подписку или повторите поиск")
         stopForeground(STOP_FOREGROUND_REMOVE)
     }
 
-    private suspend fun handleConnectLocked(configId: String, sessionId: Long, autoMode: Boolean = false, profile: RouteProfile = RouteProfile.COMPATIBLE) {
+    private suspend fun handleConnectLocked(configId: String, sessionId: Long, autoMode: Boolean = false, profile: RouteProfile = RouteProfile.COMPATIBLE, requirePreferredServices: Boolean = autoMode) {
         if (sessionId != sessionSequence.get()) return
 
         // 0. DEFENSIVE: Verify VPN permission BEFORE any heavy work (prevents crash on Connect)
@@ -470,7 +490,7 @@ class VlessVpnService : VpnService() {
             val report = TunnelHealthChecker.check(localProbe, timeoutMs = 4000)
             currentCoroutineContext().ensureActive()
             if (sessionId != sessionSequence.get()) { cleanupResources(); return }
-            if (!report.internet || autoMode && !report.preferredServices) {
+            if (!report.internet || requirePreferredServices && !report.preferredServices) {
                 cleanupResources()
                 repository.updateConfig(config.copy(healthState = "DEGRADED", httpLatencyMs = -1,
                     lastCheck = System.currentTimeMillis(), failureCount = config.failureCount + 1))
@@ -485,12 +505,12 @@ class VlessVpnService : VpnService() {
             repository.updateConfig(config.copy(healthState = "HEALTHY", httpLatencyMs = report.latencyMs,
                 lastCheck = startTime, failureCount = 0))
             repository.setActive(config.id)
-            if (autoMode) routeMemory.remember(config, profile)
+            if (autoMode && report.preferredServices) routeMemory.remember(config, profile)
             NetworkProfileManager.markProfileWorking(netProfile)
             _vpnStats.value = VpnSessionStats(status = VpnStatus.CONNECTED, activeConfig = config,
                 connectedSinceTimestamp = startTime, autoMode = autoMode, health = report,
                 profileLabel = if (autoMode) profile.label else "Параметры сервера")
-            safeStartForeground(1, createNotification(config, "Маршрут проверен • ${report.latencyMs} мс"))
+            safeStartForeground(1, createNotification(config, if (report.preferredServices) "Маршрут проверен • ${report.latencyMs} мс" else "HTTPS работает; не все сервисы доступны"))
             startStatsUpdater(startTime)
             if (autoMode) startAutoHealthMonitor(sessionId)
 
@@ -608,7 +628,8 @@ class VlessVpnService : VpnService() {
                 val report = TunnelHealthChecker.check(proxy)
                 if (sessionId != sessionSequence.get() || probeProxy !== proxy) return@launch
                 _vpnStats.value = _vpnStats.value.copy(health = report)
-                failures = if (report.preferredServices) 0 else failures + 1
+                // A failed service website must not tear down otherwise proven HTTPS.
+                failures = if (report.internet) 0 else failures + 1
                 if (failures >= 3) {
                     if (repository.settingsFlow.value.failoverEnabled && autoRecoveryAttempts < 2) {
                         autoRecoveryAttempts++

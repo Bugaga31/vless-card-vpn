@@ -6,7 +6,7 @@ import java.util.UUID
 
 /** Small real compatibility cascade; no fabricated fake-packet or random-SNI modes. */
 object AutoConnectPolicy {
-    const val MAX_ATTEMPTS = 12
+    const val MAX_ATTEMPTS = 36
     fun identity(c: VlessConfig): String {
         val raw = listOf(c.protocolType.lowercase(), c.address.lowercase(), c.port.toString(), c.uuid,
             c.security.lowercase(), c.sni.lowercase(), c.publicKey, c.shortId, c.flow, c.fingerprint,
@@ -40,6 +40,7 @@ object AutoConnectPolicy {
         .filter { supports(it) && (!favoritesOnly || it.isFavorite) }.distinctBy(::identity)
         .sortedWith(compareByDescending<VlessConfig> { it.isFavorite }
             .thenByDescending { !it.isFree }
+            .thenBy { it.failureCount.coerceIn(0, 5) }
             .thenBy { if (it.security.equals("reality", true)) 0 else 1 }
             .thenBy { if (it.pingMs > 0) it.pingMs else Int.MAX_VALUE })
     fun settings(base: AppSettings, fragment: Boolean): AppSettings = base.copy(
