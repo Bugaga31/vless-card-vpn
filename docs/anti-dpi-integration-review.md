@@ -29,4 +29,4 @@ Upstream README и текущие исходники нашего приложе
 
 ## Публикация stability preview
 
-Подготовлен шаблон `ci/stability-preview.workflow.yml`: side-by-side APK, unit/lint, Android 13 instrumentation tests, отчёты/скриншоты и prerelease с APK/SHA256 только после успешных проверок. Это пока **не активный workflow**: запись в `.github/workflows/` отклонена текущей GitHub-интеграцией (403). Публикация APK через Releases не завершена. Основная ветка и стабильный latest-release не заменялись.
+Подготовлен шаблон `ci/stability-preview.workflow.yml`: side-by-side APK, unit/lint, Android 13 instrumentation tests, отчёты/скриншоты и prerelease с APK/SHA256 только после успешных проверок. Это пока **не активный workflow**: запись в `.github/workflows/` отклонена текущей GitHub-интеграцией (403). Тестовый APK и SHA256 опубликованы отдельным prerelease: https://github.com/Bugaga31/vless-card-vpn/releases/tag/stability-preview-9813d73. Автоматический workflow по-прежнему не активирован; Android instrumentation tests не запускались. Основная ветка и стабильный latest-release не заменялись.
