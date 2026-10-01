@@ -2,6 +2,16 @@ package com.vlesscardvpn.data
 
 import com.vlesscardvpn.domain.PingTester
 import com.vlesscardvpn.domain.AutoConnectPolicy
+import com.vlesscardvpn.domain.SubscriptionPolicy
+import com.vlesscardvpn.domain.TunnelHealthChecker
+import okhttp3.Credentials
+import okhttp3.Authenticator
+import okhttp3.Route
+import java.net.Proxy
+import java.net.InetSocketAddress
+import okhttp3.Dns
+import java.net.UnknownHostException
+import java.net.InetAddress
 import com.vlesscardvpn.domain.VlessConfig
 import com.vlesscardvpn.util.UniversalConfigParser
 import kotlinx.coroutines.CancellationException
@@ -25,6 +35,12 @@ import java.util.concurrent.TimeUnit
 
 object PublicConfigFetcher {
     private val client = OkHttpClient.Builder()
+        .dns(object : Dns {
+            override fun lookup(hostname: String): List<InetAddress> = Dns.SYSTEM.lookup(hostname).also { addresses ->
+            if (addresses.isEmpty() || addresses.any { !SubscriptionPolicy.publicAddress(it) })
+                throw UnknownHostException("Непубличный адрес источника")
+            }
+        })
         .connectTimeout(8, TimeUnit.SECONDS)
         .readTimeout(8, TimeUnit.SECONDS)
         .callTimeout(12, TimeUnit.SECONDS)
@@ -53,7 +69,7 @@ object PublicConfigFetcher {
         "https://raw.githubusercontent.com/zieng2/wl/main/vless_universal.txt",
         "https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/main/BLACK_VLESS_RUS_mobile.txt",
         "https://raw.githubusercontent.com/kort0881/vpn-vless-configs-russia/main/configs/vless_reality.txt",
-        "https://raw.githubusercontent.com/AvenCores/goida-vpn-configs/raw/refs/heads/main/githubmirror/26.txt",
+        "https://raw.githubusercontent.com/AvenCores/goida-vpn-configs/refs/heads/main/githubmirror/26.txt",
         // 2. Secondary Curated Reality pools
         "https://raw.githubusercontent.com/Mosifree/-FREE2CONFIG/refs/heads/main/Reality",
         "https://raw.githubusercontent.com/0xRadikal/Free-v2ray-Configs/main/verified/configs.txt",
@@ -67,7 +83,7 @@ object PublicConfigFetcher {
         onProgress: (String) -> Unit = {}
     ): List<VlessConfig> = withContext(Dispatchers.IO) {
         val parsed = mutableListOf<VlessConfig>()
-        for (group in sources.filter { it.startsWith("https://", true) }.distinct().take(12).chunked(4)) {
+        for (group in sources.mapNotNull(SubscriptionPolicy::url).distinct().take(12).chunked(4)) {
             coroutineContext.ensureActive()
             val results = coroutineScope {
                 group.map { url -> async {
@@ -84,8 +100,22 @@ object PublicConfigFetcher {
         parsed.distinctBy(AutoConnectPolicy::identity).take(MAX_CANDIDATES)
     }
 
-    private suspend fun fetchBody(url: String): String? = suspendCancellableCoroutine { continuation ->
-        val call = client.newCall(Request.Builder().url(url).build())
+    internal suspend fun fetchBody(url: String): String? = suspendCancellableCoroutine { continuation ->
+        // The application UID is excluded from VPN routing. Explicit authenticated HTTP
+        // CONNECT on the same loopback inbound keeps updates on the active encrypted route.
+        val active = TunnelHealthChecker.activeProxy
+        val http = if (active == null) client else client.newBuilder()
+            .proxy(Proxy(Proxy.Type.HTTP, InetSocketAddress("127.0.0.1", active.port)))
+            .proxyAuthenticator(object : Authenticator {
+                override fun authenticate(route: Route?, response: Response): Request? {
+                    val address = route?.proxy?.address() as? InetSocketAddress ?: return null
+                    if (address.port != active.port || address.hostString != "127.0.0.1" ||
+                        response.request.header("Proxy-Authorization") != null) return null
+                    return response.request.newBuilder().header("Proxy-Authorization", Credentials.basic(active.username, active.password)).build()
+                }
+            }).build()
+        // No automatic direct fallback if that route fails or closes.
+        val call = http.newCall(Request.Builder().url(url).build())
         continuation.invokeOnCancellation { call.cancel() }
         call.enqueue(object : Callback {
             override fun onFailure(call: Call, e: IOException) {
@@ -97,6 +127,12 @@ object PublicConfigFetcher {
                 if (continuation.isActive) continuation.resume(body)
             }
         })
+    }
+
+    suspend fun importSubscription(url: String): List<VlessConfig> {
+        val safe = SubscriptionPolicy.url(url) ?: error("Нужна публичная HTTPS-подписка без логина в адресе")
+        val body = fetchBody(safe) ?: error("Подписка недоступна или слишком большая")
+        return UniversalConfigParser.parseAny(body).take(500).also { require(it.isNotEmpty()) { "Подписка не содержит поддерживаемых конфигураций" } }
     }
 
     suspend fun fetchAndFilterWorkingConfigs(

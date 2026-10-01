@@ -256,26 +256,18 @@ class LibboxPlatformInterface(
                     addRoute("0.0.0.0", 0)
                 }
 
-                // Configure IPv6: support if configured in TunOptions, otherwise exclude/do not route
+                // Route IPv6 through the same core; never silently skip a configured family.
                 val inet6Iterator = options.inet6Address
+                var hasV6 = false
                 while (inet6Iterator != null && inet6Iterator.hasNext()) {
-                    val p6 = inet6Iterator.next()
-                    try {
-                        addAddress(p6.address(), p6.prefix())
-                    } catch (e: Exception) {
-                        Log.w("LibboxPlatform", "IPv6 address add skipped: ${e.message}")
-                    }
+                    val p6 = inet6Iterator.next(); addAddress(p6.address(), p6.prefix()); hasV6 = true
                 }
-
                 val route6Iterator = options.inet6RouteAddress
+                var hasV6Routes = false
                 while (route6Iterator != null && route6Iterator.hasNext()) {
-                    val r6 = route6Iterator.next()
-                    try {
-                        addRoute(r6.address(), r6.prefix())
-                    } catch (e: Exception) {
-                        Log.w("LibboxPlatform", "IPv6 route add skipped: ${e.message}")
-                    }
+                    val r6 = route6Iterator.next(); addRoute(r6.address(), r6.prefix()); hasV6Routes = true
                 }
+                if (hasV6 && !hasV6Routes) addRoute("::", 0)
 
                 // DNS
                 val dnsBox = options.dnsServerAddress
@@ -328,13 +320,7 @@ class LibboxPlatformInterface(
         // Foreground notification handled by VlessVpnService
     }
 
-    override fun systemCertificates(): StringIterator {
-        return object : StringIterator {
-            override fun hasNext(): Boolean = false
-            override fun len(): Int = 0
-            override fun next(): String = ""
-        }
-    }
+    override fun systemCertificates(): StringIterator = AndroidTrustAnchors.iterator()
 
     override fun underNetworkExtension(): Boolean = false
 

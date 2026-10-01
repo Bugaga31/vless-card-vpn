@@ -1,6 +1,7 @@
 package com.vlesscardvpn.core
 
 import android.content.Context
+import com.vlesscardvpn.domain.AutoConnectPolicy
 import com.vlesscardvpn.domain.AppSettings
 import com.vlesscardvpn.domain.VlessConfig
 import com.vlesscardvpn.domain.LocalProbeProxy
@@ -92,7 +93,8 @@ object SingBoxManager {
         config: VlessConfig,
         settings: AppSettings = AppSettings(),
         networkProfile: EvaluatedNetworkProfile? = null,
-        probeProxy: LocalProbeProxy? = null
+        probeProxy: LocalProbeProxy? = null,
+        antiDpiPort: Int? = null
     ): String {
         val effectiveSni = resolveEffectiveSni(config, settings, networkProfile)
         val effectiveMtu = (networkProfile?.optimalMtu ?: settings.mtuSize).coerceIn(1280, 1500)
@@ -116,6 +118,10 @@ object SingBoxManager {
 
         // Resolve the VPN server's hostname outside its own tunnel: avoid DNS detour cycles.
         proxyOutbound.put("domain_resolver", "local-dns")
+        if (antiDpiPort != null) {
+            require(antiDpiPort in 1024..65535 && AutoConnectPolicy.canFragment(config))
+            proxyOutbound.put("detour", "anti-dpi")
+        }
 
         // Rules array using sing-box 1.13 rule-action syntax. The legacy special
         // outbounds (block / dns) and inbound.sniff were removed in sing-box 1.13.0,
@@ -221,7 +227,7 @@ object SingBoxManager {
 
         val inboundsArray = JSONArray().apply {
             if (probeProxy != null) put(JSONObject().apply {
-                put("type", "socks")
+                put("type", "mixed")
                 put("tag", "probe-in")
                 put("listen", "127.0.0.1")
                 put("listen_port", probeProxy.port)
@@ -235,7 +241,7 @@ object SingBoxManager {
                 put("interface_name", "tun0")
                 // sing-box 1.10+ uses "address" (array). The legacy inet4_address
                 // field was removed in 1.12.0, and gso/inbound.sniff in 1.13.0.
-                put("address", JSONArray(listOf("172.19.0.1/30")))
+                put("address", JSONArray(listOf("172.19.0.1/30", "fdfe:dcba:9876::1/126")))
                 put("mtu", effectiveMtu)
                 put("auto_route", true)
                 put("strict_route", true)
@@ -245,6 +251,10 @@ object SingBoxManager {
 
         val outboundsArray = JSONArray().apply {
             put(proxyOutbound)
+            if (antiDpiPort != null) put(JSONObject().apply {
+                put("type", "socks"); put("tag", "anti-dpi"); put("server", "127.0.0.1")
+                put("server_port", antiDpiPort); put("version", "5")
+            })
             put(JSONObject().apply { put("type", "direct"); put("tag", "direct") })
         }
 

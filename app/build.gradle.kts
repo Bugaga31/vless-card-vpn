@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     id("app.cash.paparazzi")
     id("com.android.application")
@@ -23,7 +25,7 @@ android {
         versionName = "1.0.$releaseNumber"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables { useSupportLibrary = true }
-        ndk { abiFilters.addAll(listOf("arm64-v8a", "armeabi-v7a", "x86_64", "x86")) }
+        ndk { abiFilters.addAll(if (autoPreview) listOf("arm64-v8a", "armeabi-v7a") else listOf("arm64-v8a", "armeabi-v7a", "x86_64", "x86")) }
     }
     testOptions { unitTests.isReturnDefaultValues = true }
     buildTypes {
@@ -39,7 +41,11 @@ android {
     kotlinOptions { jvmTarget = "1.8" }
     buildFeatures { compose = true }
     composeOptions { kotlinCompilerExtensionVersion = "1.5.14" }
-    packaging { resources { excludes += "/META-INF/{AL2.0,LGPL2.1}" } }
+    packaging {
+        resources { excludes += "/META-INF/{AL2.0,LGPL2.1}" }
+        jniLibs { useLegacyPackaging = true; keepDebugSymbols += "**/libbyedpi.so" }
+    }
+    sourceSets["main"].jniLibs.srcDir(layout.buildDirectory.dir("generated/byedpi"))
 }
 
 dependencies {
@@ -78,3 +84,19 @@ dependencies {
 tasks.matching { it.name == "assembleDebug" }.configureEach {
     dependsOn("testDebugUnitTest")
 }
+
+// Reproducible source build; install NDK 27.2.12479018 before building.
+val buildByeDpi by tasks.registering(Exec::class) {
+    val sdk = System.getenv("ANDROID_HOME") ?: Properties().apply {
+        rootProject.file("local.properties").inputStream().use { load(it) }
+    }.getProperty("sdk.dir")
+    inputs.dir(rootProject.file("native/byedpi"))
+    inputs.file(rootProject.file("native/build-byedpi.sh"))
+    inputs.file(rootProject.file("native/launcher.c"))
+    inputs.property("armOnly", providers.gradleProperty("autoPreview").orNull ?: "false")
+    outputs.dir(layout.buildDirectory.dir("generated/byedpi"))
+    commandLine("bash", rootProject.file("native/build-byedpi.sh").absolutePath,
+        "$sdk/ndk/27.2.12479018", layout.buildDirectory.dir("generated/byedpi").get().asFile.absolutePath,
+        if (providers.gradleProperty("autoPreview").orNull == "true") "arm" else "all")
+}
+tasks.named("preBuild").configure { dependsOn(buildByeDpi) }

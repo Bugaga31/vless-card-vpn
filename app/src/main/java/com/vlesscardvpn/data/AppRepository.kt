@@ -6,6 +6,9 @@ import com.vlesscardvpn.data.db.AppDatabase
 import com.vlesscardvpn.data.db.toDomain
 import com.vlesscardvpn.data.db.toEntity
 import com.vlesscardvpn.domain.AppSettings
+import com.vlesscardvpn.domain.AutoConnectPolicy
+import com.vlesscardvpn.domain.SubscriptionPolicy
+import com.vlesscardvpn.util.UniversalConfigParser
 import com.vlesscardvpn.domain.PingTester
 import com.vlesscardvpn.domain.VlessConfig
 import kotlinx.coroutines.Dispatchers
@@ -39,6 +42,31 @@ class AppRepository(private val context: Context) {
     suspend fun addConfig(config: VlessConfig) = withContext(Dispatchers.IO) { db.vlessConfigDao().insertOrUpdate(config.toEntity()) }
     suspend fun addConfigs(configs: List<VlessConfig>) = withContext(Dispatchers.IO) { db.vlessConfigDao().insertAll(configs.map { it.toEntity() }) }
     suspend fun updateConfig(config: VlessConfig) = withContext(Dispatchers.IO) { db.vlessConfigDao().update(config.toEntity()) }
+
+    private val subscriptionStore by lazy { SubscriptionStore(context) }
+    fun subscriptionSources(): List<String> = subscriptionStore.load()
+
+    suspend fun mergeCandidates(incoming: List<VlessConfig>): Int = withContext(Dispatchers.IO) {
+        val existing = getAllConfigs().associateBy(AutoConnectPolicy::identity)
+        val unique = incoming.distinctBy(AutoConnectPolicy::identity).take(500)
+        addConfigs(unique.map { fresh -> existing[AutoConnectPolicy.identity(fresh)]?.let { old ->
+            fresh.copy(id = old.id, isFavorite = old.isFavorite, isActive = old.isActive, addedAt = old.addedAt,
+                healthState = old.healthState, httpLatencyMs = old.httpLatencyMs, failureCount = old.failureCount,
+                pingMs = old.pingMs, lastCheck = old.lastCheck, source = old.source, isFree = old.isFree)
+        } ?: fresh })
+        unique.size
+    }
+
+    suspend fun importText(text: String): Int {
+        require(text.length <= SubscriptionPolicy.MAX_TEXT) { "Импорт больше 2 МиБ" }
+        val urls = SubscriptionPolicy.urls(text)
+        val nodes = UniversalConfigParser.parseAny(text).toMutableList()
+        for (url in urls) nodes += PublicConfigFetcher.importSubscription(url).map { it.copy(source = "subscription", isFree = false) }
+        require(nodes.isNotEmpty()) { "Не найдены конфигурации или публичные HTTPS-подписки" }
+        // Encrypt/save only after every requested subscription has parsed successfully.
+        if (urls.isNotEmpty()) subscriptionStore.add(urls)
+        return mergeCandidates(nodes)
+    }
 
     suspend fun setActive(configId: String) = withContext(Dispatchers.IO) {
         db.vlessConfigDao().setActive(configId)

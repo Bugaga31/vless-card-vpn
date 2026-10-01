@@ -18,6 +18,12 @@ object AutoConnectPolicy {
         if (c.transport.lowercase() !in setOf("tcp", "ws", "websocket", "grpc", "gun", "h2", "http2")) return false
         val protocol = c.protocolType.lowercase()
         if (protocol !in setOf("vless", "vmess", "trojan", "ss", "shadowsocks")) return false
+        if (protocol == "ss" || protocol == "shadowsocks") {
+            val method = c.uuid.substringBefore(':').lowercase()
+            if (method !in setOf("aes-128-gcm", "aes-256-gcm", "chacha20-ietf-poly1305",
+                "2022-blake3-aes-128-gcm", "2022-blake3-aes-256-gcm", "2022-blake3-chacha20-poly1305") ||
+                !c.uuid.contains(':') || c.uuid.substringAfter(':').isBlank()) return false
+        }
         if (protocol == "vless" || protocol == "vmess") {
             if (runCatching { UUID.fromString(c.uuid).toString().equals(c.uuid, true) }.getOrDefault(false).not()) return false
             if (c.security.lowercase() !in setOf("tls", "reality")) return false

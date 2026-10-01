@@ -34,6 +34,13 @@ class NativeConfigValidationTest {
             com.vlesscardvpn.domain.AutoConnectPolicy.settings(AppSettings(), false),
             probeProxy = com.vlesscardvpn.domain.LocalProbeProxy(10810, "probe", "test-password")))
     }
+    @Test fun antiDpiDetourPassesNativeSchema() {
+        val node = VlessConfig(name = "Test", address = "vpn.example.org", port = 443,
+            uuid = "00000000-0000-4000-8000-000000000001", security = "tls", flow = "", sni = "vpn.example.org")
+        Libbox.checkConfig(SingBoxManager.generateConfig(null, node,
+            com.vlesscardvpn.domain.AdaptiveRoutePolicy.safeSettings(AppSettings(), com.vlesscardvpn.domain.RouteProfile.BYEDPI),
+            probeProxy = com.vlesscardvpn.domain.LocalProbeProxy(10810, "probe", "password"), antiDpiPort = 10820))
+    }
     @Test fun stableTlsPassesNativeSchema() {
         val node = VlessConfig(name = "Test", address = "vpn.example.org", port = 443,
             uuid = "00000000-0000-4000-8000-000000000001", security = "tls", flow = "", sni = "vpn.example.org")

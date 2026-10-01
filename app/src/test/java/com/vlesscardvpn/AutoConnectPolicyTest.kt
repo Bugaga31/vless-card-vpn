@@ -12,6 +12,10 @@ class AutoConnectPolicyTest {
         assertFalse(AutoConnectPolicy.supports(node().copy(transport = "xhttp")))
         assertTrue(AutoConnectPolicy.supports(node()))
     }
+    @Test fun autoRejectsWeakShadowsocksCiphers() {
+        assertFalse(AutoConnectPolicy.supports(node().copy(protocolType = "ss", security = "none", uuid = "rc4-md5:password")))
+        assertTrue(AutoConnectPolicy.supports(node().copy(protocolType = "ss", security = "none", uuid = "aes-256-gcm:password")))
+    }
     @Test fun rejectsBrokenRealityAndPreservesOnlyCanonicalUuid() {
         assertFalse(AutoConnectPolicy.supports(node().copy(security = "reality", publicKey = "invalid")))
         assertFalse(AutoConnectPolicy.supports(node().copy(uuid = "1-1-1-1-1")))

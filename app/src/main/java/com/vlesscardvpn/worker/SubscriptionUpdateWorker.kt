@@ -6,6 +6,7 @@ import androidx.work.*
 import com.vlesscardvpn.data.AppRepository
 import com.vlesscardvpn.data.PublicConfigFetcher
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.withContext
 import java.util.concurrent.TimeUnit
 
@@ -18,30 +19,15 @@ class SubscriptionUpdateWorker(
         val repo = AppRepository(applicationContext)
         try {
             Log.d("SubscriptionWorker", "Starting automatic background repository sync...")
-            val freshConfigs = PublicConfigFetcher.fetchAndFilterWorkingConfigs(
-                maxWorkingCount = 150
-            ) { progress, working, msg ->
-                Log.d("SubscriptionWorker", "Progress: $progress, working: $working ($msg)")
-            }
-
-            if (freshConfigs.isNotEmpty()) {
-                val existing = repo.getAllConfigs()
-                // Update or insert free configs without duplicating
-                freshConfigs.forEach { cfg ->
-                    val found = existing.find {
-                        it.address == cfg.address && it.port == cfg.port && it.uuid == cfg.uuid
-                    }
-                    if (found != null) {
-                        repo.updateConfig(found.copy(pingMs = cfg.pingMs, lastCheck = System.currentTimeMillis()))
-                    } else {
-                        repo.addConfig(cfg)
-                    }
-                }
-                Log.i("SubscriptionWorker", "Successfully synced ${freshConfigs.size} configs from public repositories")
-            }
+            val sources = repo.subscriptionSources().ifEmpty { PublicConfigFetcher.DEFAULT_PUBLIC_SOURCES }
+            val freshConfigs = PublicConfigFetcher.fetchCandidates(sources)
+            if (freshConfigs.isEmpty()) return@withContext Result.retry()
+            repo.mergeCandidates(freshConfigs.map { it.copy(source = "subscription-refresh", healthState = "UNKNOWN") })
+            Log.i("SubscriptionWorker", "Synced ${freshConfigs.size} candidates; tunnel health not assumed")
             Result.success()
-        } catch (e: Exception) {
-            Log.e("SubscriptionWorker", "Failed to sync configs: ${e.message}")
+        } catch (cancel: CancellationException) { throw cancel }
+        catch (e: Exception) {
+            Log.e("SubscriptionWorker", "Failed to sync configs (${e.javaClass.simpleName})")
             Result.retry()
         } finally {
             repo.close()
@@ -54,6 +40,7 @@ class SubscriptionUpdateWorker(
         fun schedulePeriodic(context: Context) {
             val constraints = Constraints.Builder()
                 .setRequiredNetworkType(NetworkType.CONNECTED)
+                .setRequiresBatteryNotLow(true)
                 .build()
 
             val request = PeriodicWorkRequestBuilder<SubscriptionUpdateWorker>(
@@ -76,6 +63,7 @@ class SubscriptionUpdateWorker(
         fun triggerOnce(context: Context) {
             val constraints = Constraints.Builder()
                 .setRequiredNetworkType(NetworkType.CONNECTED)
+                .setRequiresBatteryNotLow(true)
                 .build()
 
             val request = OneTimeWorkRequestBuilder<SubscriptionUpdateWorker>()

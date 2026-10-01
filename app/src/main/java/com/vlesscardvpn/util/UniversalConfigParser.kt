@@ -8,18 +8,19 @@ import java.nio.charset.StandardCharsets
 object UniversalConfigParser {
 
     fun parseAny(raw: String): List<VlessConfig> {
-        val trimmed = raw.trim()
+        require(raw.length <= 2 * 1024 * 1024) { "Конфигурация больше 2 МиБ" }
+        val trimmed = raw.removePrefix("\uFEFF").trim()
         val results = mutableListOf<VlessConfig>()
 
         // Check if raw is base64 encoded subscription
         val decodedText = tryDecodeBase64(trimmed) ?: trimmed
 
-        decodedText.lines().forEach { line ->
+        decodedText.lineSequence().take(10000).forEach { line ->
             val l = line.trim()
             if (l.isNotBlank()) {
                 val parsed = parseSingleUri(l)
                 if (parsed != null) {
-                    results.add(parsed)
+                    if (results.size < 1000) results.add(parsed)
                 }
             }
         }

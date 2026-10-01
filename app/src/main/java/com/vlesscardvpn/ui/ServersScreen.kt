@@ -28,6 +28,7 @@ import com.vlesscardvpn.ui.components.ServerCard
 import com.vlesscardvpn.ui.theme.*
 import com.vlesscardvpn.util.UniversalConfigParser
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.CancellationException
 
 enum class ServerSortMode(val label: String) {
     LATENCY("По задержке"),
@@ -52,6 +53,7 @@ fun ServersScreen(
     var showImportDialog by remember { mutableStateOf(false) }
     var importText by remember { mutableStateOf("") }
     var importError by remember { mutableStateOf<String?>(null) }
+    var importing by remember { mutableStateOf(false) }
     var isPingingAll by remember { mutableStateOf(false) }
     var selectedPassportConfig by remember { mutableStateOf<VlessConfig?>(null) }
 
@@ -278,7 +280,7 @@ fun ServersScreen(
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(InstrumentDimens.space8)) {
                     Text(
-                        text = "Поддерживаемые форматы: VLESS Reality (vless://), VMess (vmess://), Trojan (trojan://), Shadowsocks (ss://) или Base64 подписка.",
+                        text = "Поддерживаемые форматы: VLESS Reality (vless://), VMess (vmess://), Trojan (trojan://), Shadowsocks (ss://) Base64 или HTTPS-ссылка на подписку. Ссылки подписок сохраняются зашифрованными и обновляются каждые 6 часов.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -311,22 +313,21 @@ fun ServersScreen(
             confirmButton = {
                 Button(
                     onClick = {
-                        val parsed = UniversalConfigParser.parseAny(importText)
-                        if (parsed.isNotEmpty()) {
-                            scope.launch {
-                                repo.addConfigs(parsed)
-                                Toast.makeText(context, "Добавлено серверов: ${parsed.size}", Toast.LENGTH_SHORT).show()
-                            }
-                            showImportDialog = false
-                            importText = ""
-                            importError = null
-                        } else {
-                            importError = "Не удалось распознать конфигурацию. Проверьте формат ссылки (vless://, vmess://, trojan://)."
+                        if (!importing) scope.launch {
+                            importing = true; importError = null
+                            try {
+                                val count = repo.importText(importText)
+                                Toast.makeText(context, "Импортировано: $count. Подписки обновляются автоматически", Toast.LENGTH_SHORT).show()
+                                showImportDialog = false; importText = ""
+                            } catch (cancel: CancellationException) { throw cancel }
+                            catch (_: Exception) { importError = "Импорт не выполнен: проверьте публичную HTTPS-ссылку, доступность источника и формат конфигураций" }
+                            finally { importing = false }
                         }
                     },
+                    enabled = !importing,
                     colors = ButtonDefaults.buttonColors(containerColor = SignalOrange)
                 ) {
-                    Text("Добавить")
+                    Text(if (importing) "Загрузка…" else "Добавить")
                 }
             },
             dismissButton = {
