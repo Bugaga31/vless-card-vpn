@@ -46,11 +46,22 @@ class NativeOutboundFixtureTest {
     @Test fun tlsRecordSplitActuallyTransfersHttps() = exercise(RouteProfile.BYEDPI, ByeDpiPreset.TLS_RECORD_ONLY)
     @Test fun combinedSplitActuallyTransfersHttps() = exercise(RouteProfile.BYEDPI, ByeDpiPreset.COMBINED)
 
-    private fun exercise(profile: RouteProfile, preset: ByeDpiPreset = ByeDpiPreset.COMBINED) = runBlocking {
+    @Test fun liveRealityVisionActuallyTransfersHttps() = exercise(RouteProfile.COMPATIBLE, reality = true)
+    @Test fun wrongRealityKeyCannotPassRouteCheck() = exercise(RouteProfile.COMPATIBLE, reality = true, wrongKey = true, expectFailure = true)
+    @Test fun wrongVlessUuidCannotPassRouteCheck() = exercise(RouteProfile.COMPATIBLE, wrongUuid = true, expectFailure = true)
+    @Test fun innerHttpsHostnameMismatchIsRejected() = exercise(RouteProfile.COMPATIBLE, wrongHostname = true, expectFailure = true)
+
+    private fun exercise(profile: RouteProfile, preset: ByeDpiPreset = ByeDpiPreset.COMBINED,
+        reality: Boolean = false, wrongKey: Boolean = false, wrongUuid: Boolean = false,
+        wrongHostname: Boolean = false, expectFailure: Boolean = false) = runBlocking {
         val args = InstrumentationRegistry.getArguments()
         val host = args.getString("fixture_host") ?: "10.0.2.2"
-        val node = VlessConfig(name = "Local fixture", address = host, port = 24443,
-            uuid = "00000000-0000-4000-8000-000000000001", security = "tls", sni = "vpn.test.local", flow = "")
+        val publicKey = if (reality) File(requireNotNull(args.getString("fixture_reality_key_path"))).readText().trim() else ""
+        val node = VlessConfig(name = "Local fixture", address = host, port = if (reality) 25443 else 24443,
+            uuid = if (wrongUuid) "00000000-0000-4000-8000-000000000002" else "00000000-0000-4000-8000-000000000001",
+            security = if (reality) "reality" else "tls", sni = "vpn.test.local", flow = if (reality) "xtls-rprx-vision" else "",
+            publicKey = if (wrongKey) java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(ByteArray(32) { (it + 10).toByte() }) else publicKey,
+            shortId = if (reality) "aabb" else "")
         val proxy = LocalProbeProxy.allocate()
         val runner = ByeDpiRunner(context)
         var server: CommandServer? = null
@@ -67,7 +78,7 @@ class NativeOutboundFixtureTest {
             val outbounds = json.getJSONArray("outbounds")
             for (i in 0 until outbounds.length()) {
                 val outbound = outbounds.getJSONObject(i)
-                if (outbound.getString("tag") == "proxy") outbound.getJSONObject("tls")
+                if (outbound.getString("tag") == "proxy" && !reality) outbound.getJSONObject("tls")
                     .put("certificate_path", certificate.absolutePath)
             }
             Libbox.checkConfig(json.toString())
@@ -86,7 +97,14 @@ class NativeOutboundFixtureTest {
             val trust = KeyStore.getInstance(KeyStore.getDefaultType()).apply { load(null); setCertificateEntry("fixture", ca) }
             val tm = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm()).apply { init(trust) }
             val tls = SSLContext.getInstance("TLS").apply { init(null, tm.trustManagers, null) }.socketFactory
-            val result = TunnelHealthChecker.probe(proxy, "https://localhost:18443/generate_204", 204, 20000, tls)
+            val result = TunnelHealthChecker.probe(proxy,
+                if (wrongHostname) "https://wrong.fixture.test:18443/generate_204" else "https://localhost:18443/generate_204", 204, 20000, tls)
+            if (expectFailure) {
+                assertNotEquals("Invalid route must not pass", 204, result.httpCode)
+                assertNotEquals(DiagnosticFailure.NONE, result.failure)
+                if (wrongHostname) assertEquals(DiagnosticFailure.TLS, result.failure)
+                return@runBlocking
+            }
             assertEquals("${profile.name}/${preset.name}: ${result.failure}", 204, result.httpCode)
             assertEquals(DiagnosticFailure.NONE, result.failure)
             val redirect = TunnelHealthChecker.probe(proxy, "https://localhost:18443/redirect", 204, 20000, tls)

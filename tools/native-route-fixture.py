@@ -1,55 +1,81 @@
 #!/usr/bin/env python3
-"""Controlled local VLESS/TLS + HTTPS fixture; no live subscription or public node.
-Usage: python3 tools/native-route-fixture.py --sing-box /path/to/sing-box
-Then adb push /printed/path/cert.pem /data/local/tmp/vless-fixture-ca.pem
-Run NativeOutboundFixtureTest with -e fixture_ca_path /data/local/tmp/vless-fixture-ca.pem.
-This tests native outbound/ByeDPI, NOT VpnService TUN or ISP blocking.
+"""Loopback-only VLESS/TLS + REALITY + HTTPS/DNS fixtures. Never a public relay.
+No user config or key is consumed. Generated private keys are temporary.
+Client test certificates are explicitly trusted, never insecure TLS.
 """
-import argparse, http.server, json, pathlib, signal, ssl, subprocess, tempfile, threading
-
+import argparse, http.server, json, pathlib, signal, socketserver, ssl, struct
+import subprocess, tempfile, threading
 p = argparse.ArgumentParser(description=__doc__)
-p.add_argument('--sing-box', required=True, help='Locally installed sing-box executable')
+p.add_argument('--sing-box', required=True)
 a = p.parse_args()
 with tempfile.TemporaryDirectory(prefix='vless-local-fixture-') as directory:
     root = pathlib.Path(directory)
     key, cert = root / 'key.pem', root / 'cert.pem'
     subprocess.run(['openssl', 'req', '-x509', '-newkey', 'rsa:2048', '-nodes',
-                    '-keyout', str(key), '-out', str(cert), '-days', '2',
-                    '-subj', '/CN=vpn.test.local', '-addext',
-                    'subjectAltName=DNS:vpn.test.local,DNS:localhost'],
-                   check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        '-keyout', str(key), '-out', str(cert), '-days', '2', '-subj', '/CN=vpn.test.local',
+        '-addext', 'subjectAltName=DNS:vpn.test.local,DNS:localhost,DNS:fixture.test,IP:198.18.0.1'],
+        check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     key.chmod(0o600)
+    pairs = subprocess.check_output([a.sing_box, 'generate', 'reality-keypair'], text=True)
+    keys = dict(line.split(': ', 1) for line in pairs.strip().splitlines())
+    public_path = root / 'reality-public-key.txt'
+    public_path.write_text(keys['PublicKey'])
     class Handler(http.server.BaseHTTPRequestHandler):
         def do_GET(self):
             self.send_response(204 if self.path == '/generate_204' else 302)
             self.send_header('Content-Length', '0'); self.end_headers()
-        def log_message(self, fmt, *values):
-            print(fmt % values, flush=True)
+        def log_message(self, fmt, *values): print(fmt % values, flush=True)
+    class DNSHandler(socketserver.BaseRequestHandler):
+        def handle(self):
+            data, sock = self.request
+            if not 12 <= len(data) <= 512 or data[4:6] != b'\0\1': return
+            offset, labels = 12, []
+            while offset < len(data):
+                n = data[offset]; offset += 1
+                if n == 0: break
+                if n > 63 or offset + n > len(data): return
+                labels.append(data[offset:offset+n].decode('ascii', errors='replace')); offset += n
+            if offset + 4 > len(data): return
+            qtype, qclass = struct.unpack('!HH', data[offset:offset+4]); end = offset + 4
+            valid = '.'.join(labels).lower() == 'fixture.test' and qclass == 1
+            answer = b''
+            if valid and qtype == 1:
+                answer = b'\xc0\x0c' + struct.pack('!HHIH', 1, 1, 0, 4) + bytes([198,18,0,1])
+            header = data[:2] + struct.pack('!HHHHH', 0x8180 if valid else 0x8183,
+                1, 1 if answer else 0, 0, 0)
+            sock.sendto(header + data[12:end] + answer, self.client_address)
     https = http.server.ThreadingHTTPServer(('127.0.0.1', 18443), Handler)
-    tls = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-    tls.load_cert_chain(str(cert), str(key))
+    tls = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER); tls.load_cert_chain(str(cert), str(key))
     https.socket = tls.wrap_socket(https.socket, server_side=True)
-    config = {'log': {'level': 'info'}, 'inbounds': [{
-        'type': 'vless', 'tag': 'fixture-vless', 'listen': '127.0.0.1', 'listen_port': 24443,
-        'users': [{'uuid': '00000000-0000-4000-8000-000000000001'}],
-        'tls': {'enabled': True, 'certificate_path': str(cert), 'key_path': str(key)}}],
-        'outbounds': [{'type': 'direct', 'tag': 'direct'}]}
-    config_path = root / 'backend.json'
-    config_path.write_text(json.dumps(config))
+    dns = socketserver.ThreadingUDPServer(('127.0.0.1', 15353), DNSHandler)
+    config = {'log': {'level': 'info'}, 'inbounds': [
+        {'type': 'vless', 'tag': 'fixture-vless', 'listen': '127.0.0.1', 'listen_port': 24443,
+         'users': [{'uuid': '00000000-0000-4000-8000-000000000001'}],
+         'tls': {'enabled': True, 'certificate_path': str(cert), 'key_path': str(key)}},
+        {'type': 'vless', 'tag': 'fixture-reality', 'listen': '127.0.0.1', 'listen_port': 25443,
+         'users': [{'uuid': '00000000-0000-4000-8000-000000000001', 'flow': 'xtls-rprx-vision'}],
+         'tls': {'enabled': True, 'server_name': 'vpn.test.local', 'reality': {
+             'enabled': True, 'handshake': {'server': '127.0.0.1', 'server_port': 18443},
+             'private_key': keys['PrivateKey'], 'short_id': ['aabb']}}}],
+        'outbounds': [{'type': 'direct', 'tag': 'direct'}],
+        'route': {'rules': [
+            {'port': 18443, 'action': 'route', 'outbound': 'direct', 'override_address': '127.0.0.1'},
+            {'port': 15353, 'network': 'udp', 'ip_cidr': ['127.0.0.1/32'], 'action': 'route', 'outbound': 'direct'},
+            {'action': 'reject'}]}}
+    config_path = root / 'backend.json'; config_path.write_text(json.dumps(config)); config_path.chmod(0o600)
     subprocess.run([a.sing_box, 'check', '-c', str(config_path)], check=True)
-    thread = threading.Thread(target=https.serve_forever, daemon=True); thread.start()
+    for server in [https, dns]: threading.Thread(target=server.serve_forever, daemon=True).start()
     backend = subprocess.Popen([a.sing_box, 'run', '-c', str(config_path)])
-    def stop(*_):
-        raise KeyboardInterrupt
+    def stop(*_): raise KeyboardInterrupt
     signal.signal(signal.SIGTERM, stop)
     try:
         print(f'Fixture CA (public certificate only): {cert}', flush=True)
-        print('Both fixture listeners are loopback-only. Press Ctrl+C to stop.', flush=True)
+        print(f'Fixture REALITY public key file: {public_path}', flush=True)
+        print('Fixture listeners are loopback-only; unknown destinations rejected.', flush=True)
         backend.wait()
-    except KeyboardInterrupt:
-        pass
+    except KeyboardInterrupt: pass
     finally:
         backend.terminate()
         try: backend.wait(timeout=5)
         except subprocess.TimeoutExpired: backend.kill(); backend.wait()
-        https.shutdown(); https.server_close()
+        for server in [https, dns]: server.shutdown(); server.server_close()

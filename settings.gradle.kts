@@ -15,3 +15,6 @@ dependencyResolutionManagement {
 rootProject.name = "VlessCardVpn"
 include(":app")
 include(":xray-test")
+
+// Separate UID used only by explicit emulator instrumentation; not shipped in the VPN APK.
+include(":vpn-test-probe")
