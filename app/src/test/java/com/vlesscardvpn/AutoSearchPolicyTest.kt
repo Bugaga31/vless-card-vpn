@@ -3,6 +3,11 @@ import com.vlesscardvpn.domain.*
 import org.junit.Assert.*
 import org.junit.Test
 class AutoSearchPolicyTest {
+    @Test fun quickSearchBudgetIsBounded() {
+        assertEquals(60000L, AutoSearchPolicy.DEADLINE_MS)
+        assertEquals(6, AutoSearchPolicy.SAVED_ATTEMPTS)
+        assertEquals(24, AutoSearchPolicy.MAX_CANDIDATES)
+    }
     private fun node(n: Int) = VlessConfig(name = "Node $n", address = "n$n.example.org", port = 443,
         uuid = "00000000-0000-4000-8000-000000000001", security = "tls", flow = "", sni = "example.org")
     @Test fun failedTcpIsNotDiscardedAndGetsAlternativeFirst() {

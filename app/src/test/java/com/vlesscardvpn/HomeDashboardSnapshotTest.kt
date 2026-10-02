@@ -42,4 +42,7 @@ class HomeDashboardSnapshotTest {
                 TunnelProbe("Telegram · веб", 170, 200, 200)), 1)), server, 24, scrollState = androidx.compose.foundation.ScrollState(1500))
     } } }
 
+    @Test fun manualConnecting() { paparazzi.snapshot { VlessCardVpnTheme(false) { HomeDashboard(VpnSessionStats(status = VpnStatus.CONNECTING, autoMode = false,
+        activeConfig = server, progressMessage = "Запускаем выбранный сервер"), server, 24) } } }
+
 }

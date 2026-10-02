@@ -80,10 +80,12 @@ object PublicConfigFetcher {
     /** Public feeds are untrusted candidates, never "working VPNs" merely because a port opens. */
     suspend fun fetchCandidates(
         sources: List<String> = DEFAULT_PUBLIC_SOURCES,
+        maxSources: Int = 12,
         onProgress: (String) -> Unit = {}
     ): List<VlessConfig> = withContext(Dispatchers.IO) {
+        require(maxSources in 1..12)
         val parsed = mutableListOf<VlessConfig>()
-        for (group in sources.mapNotNull(SubscriptionPolicy::url).distinct().take(12).chunked(4)) {
+        for (group in sources.mapNotNull(SubscriptionPolicy::url).distinct().take(maxSources).chunked(4)) {
             coroutineContext.ensureActive()
             val results = coroutineScope {
                 group.map { url -> async {

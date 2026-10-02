@@ -88,6 +88,9 @@ class VlessVpnService : VpnService() {
         val vpnStats = _vpnStats.asStateFlow()
 
         fun startVpn(context: Context, config: VlessConfig) {
+            // Give immediate feedback and prevent duplicate connect taps while Android starts the service.
+            _vpnStats.value = VpnSessionStats(status = VpnStatus.CONNECTING, activeConfig = config,
+                progressMessage = "Запускаем выбранный сервер")
             try {
                 val intent = Intent(context, VlessVpnService::class.java).apply {
                     action = ACTION_CONNECT
@@ -109,6 +112,8 @@ class VlessVpnService : VpnService() {
         }
 
         fun startAuto(context: Context, recovery: Boolean = false) {
+            _vpnStats.value = VpnSessionStats(status = VpnStatus.CONNECTING, autoMode = true,
+                progressMessage = "Начинаем проверку серверов")
             val intent = Intent(context, VlessVpnService::class.java).apply {
                 action = ACTION_AUTO; putExtra("auto_recovery", recovery)
             }
@@ -318,8 +323,8 @@ class VlessVpnService : VpnService() {
                 if (!settings.autopilotAllowedOnlyFavorites && attempts < AutoConnectPolicy.MAX_ATTEMPTS) {
                     _vpnStats.value = VpnSessionStats(status = VpnStatus.CONNECTING, autoMode = true,
                         progressMessage = "Обновляем публичные конфигурации")
-                    val sources = repository.subscriptionSources() + PublicConfigFetcher.DEFAULT_PUBLIC_SOURCES
-                    val fresh = PublicConfigFetcher.fetchCandidates(sources) { message ->
+                    val sources = (repository.subscriptionSources().take(2) + PublicConfigFetcher.DEFAULT_PUBLIC_SOURCES.take(4)).distinct().take(4)
+                    val fresh = PublicConfigFetcher.fetchCandidates(sources, maxSources = 4) { message ->
                         if (sessionId == sessionSequence.get()) _vpnStats.value = _vpnStats.value.copy(progressMessage = message)
                     }
                     repository.mergeCandidates(fresh)
@@ -337,7 +342,7 @@ class VlessVpnService : VpnService() {
             _vpnStats.value = VpnSessionStats(status = VpnStatus.CONNECTING, autoMode = true,
                 progressMessage = "Возвращаем HTTPS-маршрут; доступность сервисов ограничена")
             try {
-                withTimeout(20_000L) {
+                withTimeout(10_000L) {
                     handleConnectLocked(attempt.config.id, sessionId, autoMode = true,
                         profile = attempt.profile, requirePreferredServices = false, byeDpiPreset = attempt.byeDpiPreset ?: ByeDpiPreset.COMBINED)
                 }
@@ -355,6 +360,7 @@ class VlessVpnService : VpnService() {
         if (sessionId != sessionSequence.get()) return
 
         // 0. DEFENSIVE: Verify VPN permission BEFORE any heavy work (prevents crash on Connect)
+        NetworkDiagnosticLog.record(NetworkDiagnosticEvent(phase = DiagnosticPhase.PERMISSION_CHECK))
         val prepare = prepareVpnPermission()
         if (prepare != null) {
             cleanupResources()
@@ -367,6 +373,7 @@ class VlessVpnService : VpnService() {
         }
 
         // 1. Load validated config
+        NetworkDiagnosticLog.record(NetworkDiagnosticEvent(phase = DiagnosticPhase.CONFIG_LOAD))
         val config = if (configId.isNotBlank()) {
             repository.getAllConfigs().firstOrNull { it.id == configId }
         } else {
@@ -409,6 +416,7 @@ class VlessVpnService : VpnService() {
             // 3. Teardown any lingering core instance cleanly before spawning new
             cleanupResources()
 
+            NetworkDiagnosticLog.record(NetworkDiagnosticEvent(phase = DiagnosticPhase.CORE_INIT))
             initLibboxEnvironment()
 
             // 4. Launch via Sing-Box Engine (Full unified support for VLESS Reality, VMess, Trojan, ShadowTLS, uTLS)
@@ -425,6 +433,7 @@ class VlessVpnService : VpnService() {
                 probeProxy = localProbe, antiDpiPort = antiDpiPort
             )
 
+            NetworkDiagnosticLog.record(NetworkDiagnosticEvent(phase = DiagnosticPhase.CONFIG_VALIDATE))
             SingBoxManager.validateGeneratedConfig(singBoxJson).getOrThrow()
             // Structural JSON checks alone cannot detect native schema incompatibility.
             Libbox.checkConfig(singBoxJson)
@@ -432,6 +441,7 @@ class VlessVpnService : VpnService() {
             // 5. Setup LibboxPlatformInterface and CommandServer
             val adapter = LibboxPlatformInterface(this@VlessVpnService, settingsSnapshot.bypassApps) { pfd ->
                 vpnInterface = pfd
+                NetworkDiagnosticLog.record(NetworkDiagnosticEvent(phase = DiagnosticPhase.TUN_READY))
             }
             platformAdapter = adapter
 
@@ -463,6 +473,7 @@ class VlessVpnService : VpnService() {
             }
 
             // 5b. Start CommandServer and load config - protected boundary for libbox/JNI
+            NetworkDiagnosticLog.record(NetworkDiagnosticEvent(phase = DiagnosticPhase.CORE_START))
             val server = try {
                 val s = CommandServer(serverHandler, adapter)
                 // Retain ownership before any operation which may fail.

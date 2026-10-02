@@ -34,7 +34,8 @@ fun HomeScreen(repo: AppRepository, autoPilotEngine: AutoPilotEngine, vpnStats: 
     onAutoConnect: () -> Unit = { onToggleConnect(null) }) {
     val configs by repo.configsFlow.collectAsState(initial = emptyList())
     val storageIssue by repo.storageIssueFlow.collectAsState()
-    val selected = vpnStats.activeConfig ?: configs.firstOrNull { it.isActive } ?: configs.firstOrNull()
+    val selected = ConnectionSelection.current(configs, vpnStats.activeConfig,
+        vpnStats.status in setOf(VpnStatus.CONNECTING, VpnStatus.CONNECTED, VpnStatus.STOPPING))
     HomeDashboard(vpnStats, selected, configs.size, preparingConnection,
         { onToggleConnect(selected) }, onAutoConnect, onNavigateToServers, onNavigateToSettings,
         onNavigateToDiagnostic, onNavigateToCrashReports, storageIssue = storageIssue)
@@ -53,8 +54,8 @@ fun HomeDashboard(stats: VpnSessionStats, selected: VlessConfig? = null, configC
     val busy = stats.status == VpnStatus.CONNECTING || preparing
     val stopping = stats.status == VpnStatus.STOPPING
     val error = stats.status == VpnStatus.ERROR
-    val headline = when { busy -> "Подбираем маршрут"; stopping -> "Отключаемся"; limited -> "Частичный доступ"; working -> "Подключено"; storageIssue != null -> "Подключение недоступно"
-        error -> "Маршрут не найден"; connected -> "Проверяем связь"; else -> "Не подключено" }
+    val headline = when { busy && preparing -> "Разрешение VPN"; busy && stats.autoMode -> "Подбираем маршрут"; busy -> "Подключаемся"; stopping -> "Отключаемся"; limited -> "Частичный доступ"; working -> "Подключено"; storageIssue != null -> "Подключение недоступно"
+        error && !stats.autoMode -> "Не удалось подключиться"; error -> "Маршрут не найден"; connected -> "Проверяем связь"; else -> "Не подключено" }
     val description = when {
         busy -> stats.progressMessage.ifBlank { "Проверяем сервер и передачу данных." }
         stopping -> "Завершаем сеанс и освобождаем ресурсы."
@@ -62,7 +63,7 @@ fun HomeDashboard(stats: VpnSessionStats, selected: VlessConfig? = null, configC
         working -> stats.profileLabel.ifBlank { "Связь через выбранный сервер подтверждена." }
         storageIssue != null -> "Сначала восстановите доступ к сохранённым данным."
         error -> stats.errorMessage ?: "Авто не нашло рабочий сервер. Можно повторить поиск или добавить подписку."
-        else -> "Авто найдёт сервер и проверит связь."
+        else -> if (selected != null) "Подключите выбранный сервер или запустите Авто." else "Добавьте подписку или запустите поиск Авто."
     }
     val stateColor = when { limited -> c.primary; working -> c.tertiary; error -> c.error; busy -> c.primary; else -> c.onSurfaceVariant }
     CompositionLocalProvider(LocalContentColor provides c.onBackground) {
@@ -106,12 +107,14 @@ fun HomeDashboard(stats: VpnSessionStats, selected: VlessConfig? = null, configC
                                 Icon(Icons.Default.AutoAwesome, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)); Text("Авто", fontSize = 16.sp)
                             }
                         } else {
-                            Button(onClick = onAuto, enabled = storageIssue == null, modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp), shape = RoundedCornerShape(12.dp)) {
-                                Icon(Icons.Default.AutoAwesome, null, Modifier.size(20.dp)); Spacer(Modifier.width(10.dp))
-                                Text("Авто", fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+                            Button(onClick = if (selected != null) onConnect else onAuto, enabled = storageIssue == null,
+                                modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp), shape = RoundedCornerShape(12.dp)) {
+                                Icon(if (selected != null) Icons.Default.PowerSettingsNew else Icons.Default.AutoAwesome, null, Modifier.size(20.dp))
+                                Spacer(Modifier.width(10.dp))
+                                Text(if (selected != null) "Подключить" else "Авто", fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
                             }
-                            if (selected != null) TextButton(onClick = onConnect, enabled = storageIssue == null, modifier = Modifier.heightIn(min = 48.dp)) {
-                                Text("Подключить выбранный сервер", fontSize = 14.sp,
+                            if (selected != null) TextButton(onClick = onAuto, enabled = storageIssue == null, modifier = Modifier.heightIn(min = 48.dp)) {
+                                Text("Авто · найти другой маршрут", fontSize = 14.sp,
                                     textAlign = androidx.compose.ui.text.style.TextAlign.Center)
                             }
                         }

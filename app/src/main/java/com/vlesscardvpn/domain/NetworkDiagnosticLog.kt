@@ -3,7 +3,7 @@ package com.vlesscardvpn.domain
 import java.io.File
 
 /** Allow-listed fields only: no arbitrary strings, configs, URLs, exception messages or IDs. */
-enum class DiagnosticPhase { AUTO_START, ROUTE_START, HTTPS_CHECK, CORE_FAILURE, CONNECTED, PARTIAL, STOPPED }
+enum class DiagnosticPhase { AUTO_START, ROUTE_START, PERMISSION_CHECK, CONFIG_LOAD, CORE_INIT, CONFIG_VALIDATE, CORE_START, TUN_READY, HTTPS_CHECK, CORE_FAILURE, CONNECTED, PARTIAL, STOPPED }
 enum class DiagnosticTarget { NONE, INTERNET, YOUTUBE, TELEGRAM }
 enum class DiagnosticFailure { NONE, CONNECT, PROXY, TLS, HTTP, TIMEOUT, CORE, NO_ROUTE }
 data class NetworkDiagnosticEvent(

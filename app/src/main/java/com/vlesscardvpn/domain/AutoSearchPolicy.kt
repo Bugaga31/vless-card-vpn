@@ -7,10 +7,10 @@ data class AutoRouteAttempt(val config: VlessConfig, val profile: RouteProfile, 
     val label: String get() = if (profile == RouteProfile.BYEDPI) (byeDpiPreset ?: ByeDpiPreset.COMBINED).label else profile.label
 }
 object AutoSearchPolicy {
-    const val MAX_CANDIDATES = 48
+    const val MAX_CANDIDATES = 24
     const val MAX_NODES_PER_POOL = 12
-    const val SAVED_ATTEMPTS = 18
-    const val DEADLINE_MS = 180_000L
+    const val SAVED_ATTEMPTS = 6
+    const val DEADLINE_MS = 60_000L
     fun plan(
         candidates: List<Pair<VlessConfig, Int>>,
         remembered: Map<String, String> = emptyMap(),
