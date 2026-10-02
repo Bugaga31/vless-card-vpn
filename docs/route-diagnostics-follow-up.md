@@ -14,6 +14,12 @@
 
 Local: 224 JVM tests, zero failures/errors/skips; Android instrumentation sources and the separate test-only helper compiled successfully. New coverage includes legacy journal rows, stage injection rejection, old-session cleanup, exact profile/preset attribution, refused listener, TLS timeout and HTTP timeout.
 
-The strict Android gate increases from 29 to 31 cases with two live platform callback checks. A new API 26 / API 33 run must verify this source commit. Prior green Android 13 results are not a result for this patch. API 26 full-TUN timeouts remain unresolved until a new executed run demonstrates otherwise; changing network flags is not assumed to fix them.
+Executed source commit: `7317278fefc4eb959e8a568a0cddfc7ccc126d1b`.
+
+CI: https://github.com/Bugaga31/vless-card-vpn/actions/runs/37029481502
+
+- API 33 / Android 13: success, strict gate requires all **31 instrumented tests**, with no failed/skipped cases. This includes two new live platform callback checks and the six controlled full-TUN cases. JVM build/regression step also succeeded.
+- API 26 / Android 8: build/JVM and backend preparation succeeded; the emulator execution step failed after approximately 19 seconds. No instrumented fixture assertion annotation was produced. Detailed job-log retrieval is access-restricted, so the exact cause is not established. Do not label this a new six-test TUN failure or a verified fix. The earlier API 26 full-TUN timeout issue remains open.
+- The matrix is **not fully green**. These results are controlled x86_64 emulator checks, not real-device, Auto UI, Russian ISP, YouTube video or Telegram MTProto evidence.
 
 No main merge, new signing key, user APK or release is produced by this change. Lab 1.0.49 already installed on a phone does not receive source-only fixes. Realme ARM hardware, Russian-ISP behavior, YouTube video, Telegram MTProto and foreground-service/Auto UI lifecycle remain outside these controlled tests.
