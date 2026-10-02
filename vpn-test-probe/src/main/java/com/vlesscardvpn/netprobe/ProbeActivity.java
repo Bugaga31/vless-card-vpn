@@ -38,6 +38,7 @@ public final class ProbeActivity extends Activity {
             boolean vpn = caps != null && caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN);
             result.put("vpn", vpn);
             if (!vpn) throw new IllegalStateException("No VPN for helper UID");
+            result.put("stage", "DNS");
             InetAddress address = InetAddress.getByName("fixture.test");
             result.put("address", address.getHostAddress());
             if (!"198.18.0.1".equals(address.getHostAddress())) throw new IOException("Unexpected fixture DNS answer");
@@ -50,12 +51,15 @@ public final class ProbeActivity extends Activity {
             TrustManagerFactory tm = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm()); tm.init(trust);
             SSLContext tls = SSLContext.getInstance("TLS"); tls.init(null, tm.getTrustManagers(), null);
             try (Socket raw = new Socket()) {
+                result.put("stage", "TCP_CONNECT");
                 raw.connect(new InetSocketAddress(address, 18443), 15000); raw.setSoTimeout(15000);
                 try (SSLSocket socket = (SSLSocket) tls.getSocketFactory().createSocket(raw, "fixture.test", 18443, true)) {
                     socket.setSoTimeout(15000);
                     SSLParameters params = socket.getSSLParameters(); params.setEndpointIdentificationAlgorithm("HTTPS");
                     params.setServerNames(Collections.singletonList(new SNIHostName("fixture.test"))); socket.setSSLParameters(params);
+                    result.put("stage", "TLS_HANDSHAKE");
                     socket.startHandshake();
+                    result.put("stage", "HTTP_STATUS");
                     socket.getOutputStream().write("GET /generate_204 HTTP/1.1\r\nHost: fixture.test\r\nConnection: close\r\n\r\n".getBytes("US-ASCII"));
                     socket.getOutputStream().flush();
                     StringBuilder line = new StringBuilder(); InputStream in = socket.getInputStream();

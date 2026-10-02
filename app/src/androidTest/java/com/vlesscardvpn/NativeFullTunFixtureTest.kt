@@ -37,13 +37,14 @@ class NativeFullTunFixtureTest {
             workingPath = basePath; tempPath = context.cacheDir.absolutePath; fixAndroidStack = true
         })
     }
+    @Test fun gvisorCompatibleTunDnsHttpsAndRestart() = exercise(RouteProfile.COMPATIBLE, stack = "gvisor")
     @Test fun compatibleTunDnsHttpsAndRestart() = exercise(RouteProfile.COMPATIBLE)
     @Test fun fragmentedTunDnsHttpsAndRestart() = exercise(RouteProfile.FRAGMENT)
     @Test fun tcpSplitTunDnsHttpsAndRestart() = exercise(RouteProfile.BYEDPI, ByeDpiPreset.TCP_ONLY)
     @Test fun recordSplitTunDnsHttpsAndRestart() = exercise(RouteProfile.BYEDPI, ByeDpiPreset.TLS_RECORD_ONLY)
     @Test fun combinedSplitTunDnsHttpsAndRestart() = exercise(RouteProfile.BYEDPI, ByeDpiPreset.COMBINED)
 
-    private fun exercise(profile: RouteProfile, preset: ByeDpiPreset = ByeDpiPreset.COMBINED) = runBlocking {
+    private fun exercise(profile: RouteProfile, preset: ByeDpiPreset = ByeDpiPreset.COMBINED, stack: String = "mixed") = runBlocking {
         val args = InstrumentationRegistry.getArguments()
         val host = args.getString("fixture_host") ?: "10.0.2.2"
         val node = VlessConfig(name = "Full TUN fixture", address = host, port = 24443,
@@ -61,6 +62,10 @@ class NativeFullTunFixtureTest {
             }
             config.getJSONObject("dns").getJSONArray("servers").getJSONObject(0)
                 .put("address", "udp://127.0.0.1:15353").put("detour", "proxy")
+            val inbounds = config.getJSONArray("inbounds")
+            for (i in 0 until inbounds.length()) if (inbounds.getJSONObject(i).getString("tag") == "tun-in") {
+                inbounds.getJSONObject(i).put("stack", stack)
+            }
             Libbox.checkConfig(config.toString())
             // Re-open the actual TUN after clean shutdown. Each cycle uses a fresh helper nonce.
             repeat(2) { cycle ->
@@ -92,7 +97,7 @@ class NativeFullTunFixtureTest {
                     assertNotEquals("Helper must not share the excluded VPN UID", context.applicationInfo.uid, result!!.getInt("uid"))
                     assertTrue("Cycle $cycle: helper must use the Android VPN network", result!!.optBoolean("vpn"))
                     assertEquals("Cycle $cycle: DNS must go through the controlled tunnel", "198.18.0.1", result!!.optString("address"))
-                    assertEquals("$profile/$preset cycle $cycle: ${result!!.optString("failure")}", 204, result!!.optInt("code", -1))
+                    assertEquals("$profile/$preset/$stack cycle $cycle: ${result!!.optString("stage")}/${result!!.optString("failure")}", 204, result!!.optInt("code", -1))
                 } finally {
                     runCatching { server?.closeService() }; server?.close()
                     runCatching { descriptor?.close() }
