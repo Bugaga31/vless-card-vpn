@@ -23,6 +23,14 @@ Five new JVM tests cover scope, API 26/33 config selection, unknown-platform beh
 
 The seven existing default-profile full-TUN cases now exercise the application's actual selected stack instead of forcing mixed on every SDK. They assert generated policy before opening TUN. Every DNS, HTTPS, separate UID, default-network stability, VPN-bound path and reopen assertion remains mandatory; no cases are skipped or removed. An additional native check validates the context-derived policy against the running Android SDK and bundled core, bringing the strict gate from 39 to **40 tests**.
 
-This is a documented production compatibility change, not a relabeling of failed mixed tests as passed. The prior mixed failures remain recorded above. A new run must verify all profiles on the selected stack; previous gvisor success with one compatible profile is insufficient evidence for the whole patch.
+This is a documented production compatibility change, not a relabeling of failed mixed tests as passed. The prior mixed failures remain recorded above. Executed policy source: `0d0ccd5a79cda6bebd1ae767ed3daa8ecf38dec3`.
+CI: https://github.com/Bugaga31/vless-card-vpn/actions/runs/37056542029
+
+- API 33: **all 40 instrumented tests passed**, no failed/skipped cases; the mixed default stayed unchanged.
+- API 26: **40 executed, 35 passed / 5 failed**, all five at DNS rather than the prior mixed TCP timeouts. In three cases (SNI_EDGES and FRAGMENT after reopen, compatible default after reopen), the normal DNS path failed but the explicitly bound VPN path completed verified HTTPS 204. In the explicit gvisor and TLS_RECORD_ONLY cases, both paths failed DNS. This contrasts with the earlier run where every mixed-stack profile case timed out at TCP on both paths.
+- The fallback is **only a partial mitigation**. Do not call Android 8 fixed or the complete matrix green. DNS/cache/framework/fixture interactions need further isolation; the contrast is not proof of a single root cause.
+- JVM build steps succeeded with the new public safe test summaries. Prior unexplained API 26 build failure was not reproduced; its cause remains unestablished.
+
+No certificate checks or mandatory default-path assertions were disabled. The default-failed/pinned-passed cases still correctly fail the strict gate. Previous success with one gvisor-compatible profile never served as proof for the complete patch.
 
 No main merge or user APK release. Realme hardware, Auto/foreground-service UI lifecycle, Russian providers, YouTube video and Telegram MTProto remain outside this fixture.
