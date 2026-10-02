@@ -227,16 +227,7 @@ fun ServersScreen(
                             onPing = {
                                 scope.launch {
                                     val breakdown = com.vlesscardvpn.domain.PingTester.testDetailedLatency(config)
-                                    val ping = if (breakdown.success) {
-                                        if (breakdown.tlsMs > 0) breakdown.tlsMs else breakdown.tcpMs
-                                    } else -1
-                                    repo.updateConfig(config.copy(
-                                        pingMs = ping,
-                                        tcpLatencyMs = breakdown.tcpMs,
-                                        tlsLatencyMs = breakdown.tlsMs,
-                                        healthState = if (ping > 0) "UNKNOWN" else "DEGRADED",
-                                        lastCheck = System.currentTimeMillis()
-                                    ))
+                                    repo.recordPortCheck(config.id, breakdown)
                                 }
                             },
                             onDelete = {

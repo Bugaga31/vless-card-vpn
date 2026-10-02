@@ -19,7 +19,7 @@ class LauncherStartupTest {
         prefs.edit().putBoolean("autoSelect", true).commit()
         compose.activityRule.scenario.recreate()
         Thread.sleep(4000)
-        compose.onNodeWithText("Готов к подключению").assertIsDisplayed()
-        compose.onNodeWithText("Подключить автоматически").assertIsDisplayed()
+        compose.onNodeWithText("Не подключено").assertIsDisplayed()
+        compose.onNodeWithText("Авто").assertIsDisplayed()
     }
 }

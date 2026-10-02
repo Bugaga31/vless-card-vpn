@@ -65,6 +65,18 @@ class AppRepository(private val context: Context) {
     suspend fun addConfigs(configs: List<VlessConfig>) = withContext(Dispatchers.IO) { ensureStorageWritable(); db.vlessConfigDao().insertAll(configs.map { it.toEntity() }) }
     suspend fun updateConfig(config: VlessConfig) = withContext(Dispatchers.IO) { ensureStorageWritable(); db.vlessConfigDao().update(config.toEntity()) }
 
+    suspend fun recordPortCheck(id: String, result: com.vlesscardvpn.domain.LatencyBreakdown) = withContext(Dispatchers.IO) {
+        ensureStorageWritable()
+        val ping = if (result.success) (if (result.tlsMs > 0) result.tlsMs else result.tcpMs) else -1
+        db.vlessConfigDao().recordPortCheck(id, ping, result.tcpMs, result.tlsMs, System.currentTimeMillis())
+    }
+    suspend fun recordAutoTcpHint(id: String, ping: Int) = withContext(Dispatchers.IO) {
+        ensureStorageWritable(); db.vlessConfigDao().recordAutoTcpHint(id, ping)
+    }
+    suspend fun recordTunnelHealth(id: String, healthy: Boolean, latency: Int) = withContext(Dispatchers.IO) {
+        ensureStorageWritable(); db.vlessConfigDao().recordTunnelHealth(id, healthy, latency, System.currentTimeMillis())
+    }
+
     private val subscriptionStore by lazy { SubscriptionStore(context) }
     fun subscriptionSources(): List<String> = subscriptionStore.load()
 
@@ -99,8 +111,7 @@ class AppRepository(private val context: Context) {
     suspend fun clearFreeNodes() = withContext(Dispatchers.IO) { db.vlessConfigDao().clearFreeNodes() }
 
     suspend fun toggleFavorite(id: String) = withContext(Dispatchers.IO) {
-        val entity = db.vlessConfigDao().getById(id) ?: return@withContext
-        db.vlessConfigDao().update(entity.copy(isFavorite = !entity.isFavorite))
+        db.vlessConfigDao().toggleFavorite(id)
     }
 
     suspend fun testAllConfigs() = withContext(Dispatchers.IO) {
@@ -111,18 +122,7 @@ class AppRepository(private val context: Context) {
                 chunk.map { item ->
                     async {
                         val breakdown = PingTester.testDetailedLatency(item.toDomain(), timeoutMs = 1500)
-                        val ping = if (breakdown.success) {
-                            if (breakdown.tlsMs > 0) breakdown.tlsMs else breakdown.tcpMs
-                        } else -1
-                        db.vlessConfigDao().update(
-                            item.copy(
-                                pingMs = ping,
-                                tcpLatencyMs = breakdown.tcpMs,
-                                tlsLatencyMs = breakdown.tlsMs,
-                                healthState = "UNKNOWN",
-                                lastCheck = System.currentTimeMillis()
-                            )
-                        )
+                        recordPortCheck(item.id, breakdown)
                     }
                 }.awaitAll()
             }

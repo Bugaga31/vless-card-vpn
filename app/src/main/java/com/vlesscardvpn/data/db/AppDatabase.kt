@@ -112,6 +112,20 @@ interface VlessConfigDao {
     @Update
     suspend fun update(entity: VlessConfigEntity)
 
+    // Background measurements must never replace a stale entity: that can undo
+    // a newer selection/favorite, overwrite encrypted payload, or resurrect deletion.
+    @Query("UPDATE vless_configs SET pingMs = :ping, tcpLatencyMs = :tcp, tlsLatencyMs = :tls, healthState = CASE WHEN :ping > 0 THEN 'UNKNOWN' ELSE 'DEGRADED' END, lastCheck = :checkedAt WHERE id = :id")
+    suspend fun recordPortCheck(id: String, ping: Int, tcp: Int, tls: Int, checkedAt: Long)
+
+    @Query("UPDATE vless_configs SET pingMs = :ping, healthState = 'UNKNOWN' WHERE id = :id")
+    suspend fun recordAutoTcpHint(id: String, ping: Int)
+
+    @Query("UPDATE vless_configs SET healthState = CASE WHEN :healthy THEN 'HEALTHY' ELSE 'DEGRADED' END, httpLatencyMs = :latency, lastCheck = :checkedAt, failureCount = CASE WHEN :healthy THEN 0 ELSE failureCount + 1 END WHERE id = :id")
+    suspend fun recordTunnelHealth(id: String, healthy: Boolean, latency: Int, checkedAt: Long)
+
+    @Query("UPDATE vless_configs SET isFavorite = NOT isFavorite WHERE id = :id")
+    suspend fun toggleFavorite(id: String)
+
     @Query("UPDATE vless_configs SET isActive = (id = :activeId)")
     suspend fun setActive(activeId: String)
 

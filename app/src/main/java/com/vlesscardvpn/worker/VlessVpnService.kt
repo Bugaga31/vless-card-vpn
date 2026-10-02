@@ -300,7 +300,7 @@ class VlessVpnService : VpnService() {
                 if (sessionId != sessionSequence.get() || attempts >= limit) return false
                 if (!tried.add(attempt.key)) continue
                 val config = attempt.config
-                repository.addConfig(config.copy(pingMs = attempt.tcpMs, healthState = "UNKNOWN"))
+                repository.recordAutoTcpHint(config.id, attempt.tcpMs)
                 attempts++
                 _vpnStats.value = VpnSessionStats(status = VpnStatus.CONNECTING, autoMode = true,
                     activeConfig = config, progressMessage = "Авто: маршрут $attempts/${AutoConnectPolicy.MAX_ATTEMPTS} · ${attempt.label}")
@@ -513,8 +513,7 @@ class VlessVpnService : VpnService() {
             if (sessionId != sessionSequence.get()) { cleanupResources(); return }
             if (!report.internet || requirePreferredServices && !report.preferredServices) {
                 cleanupResources()
-                repository.updateConfig(config.copy(healthState = "DEGRADED", httpLatencyMs = -1,
-                    lastCheck = System.currentTimeMillis(), failureCount = config.failureCount + 1))
+                repository.recordTunnelHealth(config.id, healthy = false, latency = -1)
                 _vpnStats.value = VpnSessionStats(status = VpnStatus.ERROR, activeConfig = config,
                     autoMode = autoMode, health = report,
                     errorMessage = if (report.internet) "HTTPS работает, но YouTube/Telegram веб не прошли проверку"
@@ -525,8 +524,7 @@ class VlessVpnService : VpnService() {
             NetworkDiagnosticLog.record(NetworkDiagnosticEvent(phase = if (report.preferredServices) DiagnosticPhase.CONNECTED else DiagnosticPhase.PARTIAL,
                 profile = profile, preset = if (profile == RouteProfile.BYEDPI) byeDpiPreset else null))
             val startTime = System.currentTimeMillis()
-            repository.updateConfig(config.copy(healthState = "HEALTHY", httpLatencyMs = report.latencyMs,
-                lastCheck = startTime, failureCount = 0))
+            repository.recordTunnelHealth(config.id, healthy = true, latency = report.latencyMs)
             repository.setActive(config.id)
             if (autoMode && report.preferredServices) routeMemory.remember(config, profile, byeDpiPreset)
             NetworkProfileManager.markProfileWorking(netProfile)
