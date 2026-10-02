@@ -11,7 +11,7 @@ mkdir -p release
 bt="$ANDROID_HOME/build-tools/34.0.0"
 "$bt/zipalign" -f -p 4 app/build/outputs/apk/release/app-release-unsigned.apk release/lab-aligned.apk
 "$bt/apksigner" sign --ks "$LAB_KEYSTORE" --ks-key-alias lab \
-  --ks-pass "file:$LAB_PASSWORD_FILE" --key-pass "file:$LAB_PASSWORD_FILE" \
+  --ks-pass "file:$LAB_PASSWORD_FILE" \
   --out "release/VLESS-Card-Lab-1.0.$version.apk" release/lab-aligned.apk
 "$bt/apksigner" verify --verbose --print-certs "release/VLESS-Card-Lab-1.0.$version.apk"
 "$bt/zipalign" -c -p 4 "release/VLESS-Card-Lab-1.0.$version.apk"

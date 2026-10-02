@@ -46,3 +46,7 @@ The YouTube homepage returned 200 from two RU datacenter networks. `/generate_20
 
 ## Verification so far
 210 JVM tests passed (0 failures/errors). Three Linux ByeDPI preset smoke tests preserved verified TLS/HTTPS 204 and checked TLS-record shape. The local cache-parser regression harness passed host ASan/UBSan. 36 Compose frames rendered; all eight new/changed frames and the settings bottom frame were individually inspected, the other 28 remain byte-identical to previously inspected frames. Device execution remains pending.
+
+Final build: release APK assembled, Android Lint 0 errors / 41 warnings, ZIP integrity and zipalign pass, APK v2/v3 signatures verified, ARM64 and ARMv7 libbox/ByeDPI bundled. Non-debuggable package `com.vlesscardvpn.lab`, version 49 / 1.0.49.
+
+APK SHA-256: `0958e03e24706bb6e3e7063dfa8ffbe115b1fe7076ff7138a646e0c6352a0e21`. Lab certificate SHA-256: `c845d8fcfdd25c951416623c9039e861f4f30b20094b40b345d3c1b4ef300969`. Signature/package checks do not replace device installation/connectivity testing.
