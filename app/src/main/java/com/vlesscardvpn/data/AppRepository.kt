@@ -15,6 +15,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -35,13 +38,32 @@ class AppRepository(private val context: Context) {
     }
     init { prefs.registerOnSharedPreferenceChangeListener(preferenceListener) }
 
-    val configsFlow: Flow<List<VlessConfig>> = db.vlessConfigDao().getAllFlow().map { list -> list.map { it.toDomain() } }
+    private val _storageIssue = MutableStateFlow<String?>(null)
+    val storageIssueFlow = _storageIssue.asStateFlow()
+    private val storageIssueText = "Ключ или защищённая запись недоступны. Данные не удалены. Не переустанавливайте приложение без резервной копии."
+    val configsFlow: Flow<List<VlessConfig>> = db.vlessConfigDao().getAllFlow()
+        .map { list -> list.map { it.toDomain() } }
+        .catch { error ->
+            if (error is CancellationException) throw error
+            _storageIssue.value = storageIssueText
+            emit(emptyList())
+        }.flowOn(Dispatchers.IO)
 
-    suspend fun getAllConfigs(): List<VlessConfig> = withContext(Dispatchers.IO) { db.vlessConfigDao().getAll().map { it.toDomain() } }
-    suspend fun getActiveConfig(): VlessConfig? = withContext(Dispatchers.IO) { db.vlessConfigDao().getActiveConfig()?.toDomain() }
-    suspend fun addConfig(config: VlessConfig) = withContext(Dispatchers.IO) { db.vlessConfigDao().insertOrUpdate(config.toEntity()) }
-    suspend fun addConfigs(configs: List<VlessConfig>) = withContext(Dispatchers.IO) { db.vlessConfigDao().insertAll(configs.map { it.toEntity() }) }
-    suspend fun updateConfig(config: VlessConfig) = withContext(Dispatchers.IO) { db.vlessConfigDao().update(config.toEntity()) }
+    private suspend fun <T> guardedRead(block: suspend () -> T): T = try {
+        block()
+    } catch (e: CancellationException) { throw e }
+    catch (e: Exception) { _storageIssue.value = storageIssueText; throw e }
+    private suspend fun ensureStorageWritable() {
+        check(_storageIssue.value == null) { storageIssueText }
+        // Do not create a replacement key while unreadable encrypted rows already exist.
+        guardedRead { db.vlessConfigDao().getAll().firstOrNull()?.toDomain() }
+    }
+
+    suspend fun getAllConfigs(): List<VlessConfig> = withContext(Dispatchers.IO) { guardedRead { db.vlessConfigDao().getAll().map { it.toDomain() } } }
+    suspend fun getActiveConfig(): VlessConfig? = withContext(Dispatchers.IO) { guardedRead { db.vlessConfigDao().getActiveConfig()?.toDomain() } }
+    suspend fun addConfig(config: VlessConfig) = withContext(Dispatchers.IO) { ensureStorageWritable(); db.vlessConfigDao().insertOrUpdate(config.toEntity()) }
+    suspend fun addConfigs(configs: List<VlessConfig>) = withContext(Dispatchers.IO) { ensureStorageWritable(); db.vlessConfigDao().insertAll(configs.map { it.toEntity() }) }
+    suspend fun updateConfig(config: VlessConfig) = withContext(Dispatchers.IO) { ensureStorageWritable(); db.vlessConfigDao().update(config.toEntity()) }
 
     private val subscriptionStore by lazy { SubscriptionStore(context) }
     fun subscriptionSources(): List<String> = subscriptionStore.load()

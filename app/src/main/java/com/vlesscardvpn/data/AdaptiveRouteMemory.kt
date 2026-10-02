@@ -25,11 +25,11 @@ class AdaptiveRouteMemory(context: Context) {
         if (System.currentTimeMillis() - prefs.getLong("${k}_time", 0) > 7 * 86400_000L) return null
         return prefs.getString(k, null)
     }
-    fun remember(config: VlessConfig, profile: RouteProfile) {
+    fun remember(config: VlessConfig, profile: RouteProfile, preset: ByeDpiPreset = ByeDpiPreset.COMBINED) {
         val editor = prefs.edit()
         prefs.all.keys.filter { it.endsWith("_time") }.sortedBy { prefs.getLong(it, 0) }.dropLast(63).forEach {
             editor.remove(it).remove(it.removeSuffix("_time"))
         }
-        val k = key(config); editor.putString(k, profile.name).putLong("${k}_time", System.currentTimeMillis()).apply()
+        val k = key(config); editor.putString(k, if (profile == RouteProfile.BYEDPI) "BYEDPI#${preset.name}" else profile.name).putLong("${k}_time", System.currentTimeMillis()).apply()
     }
 }

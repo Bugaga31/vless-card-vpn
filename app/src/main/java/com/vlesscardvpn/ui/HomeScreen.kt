@@ -33,10 +33,11 @@ fun HomeScreen(repo: AppRepository, autoPilotEngine: AutoPilotEngine, vpnStats: 
     preparingConnection: Boolean = false, onNavigateToCrashReports: () -> Unit = {},
     onAutoConnect: () -> Unit = { onToggleConnect(null) }) {
     val configs by repo.configsFlow.collectAsState(initial = emptyList())
+    val storageIssue by repo.storageIssueFlow.collectAsState()
     val selected = vpnStats.activeConfig ?: configs.firstOrNull { it.isActive } ?: configs.firstOrNull()
     HomeDashboard(vpnStats, selected, configs.size, preparingConnection,
         { onToggleConnect(selected) }, onAutoConnect, onNavigateToServers, onNavigateToSettings,
-        onNavigateToDiagnostic, onNavigateToCrashReports)
+        onNavigateToDiagnostic, onNavigateToCrashReports, storageIssue = storageIssue)
 }
 
 /** Real Compose UI: presentation cannot start a tunnel or infer health from a TCP ping. */
@@ -44,23 +45,26 @@ fun HomeScreen(repo: AppRepository, autoPilotEngine: AutoPilotEngine, vpnStats: 
 fun HomeDashboard(stats: VpnSessionStats, selected: VlessConfig? = null, configCount: Int = 0,
     preparing: Boolean = false, onConnect: () -> Unit = {}, onAuto: () -> Unit = {},
     onServers: () -> Unit = {}, onSettings: () -> Unit = {}, onDiagnostics: () -> Unit = {},
-    onReports: () -> Unit = {}, scrollState: androidx.compose.foundation.ScrollState = rememberScrollState()) {
+    onReports: () -> Unit = {}, scrollState: androidx.compose.foundation.ScrollState = rememberScrollState(), storageIssue: String? = null) {
     val c = MaterialTheme.colorScheme
     val connected = stats.status == VpnStatus.CONNECTED
     val working = connected && stats.health.internet
+    val limited = working && !stats.health.preferredServices
     val busy = stats.status == VpnStatus.CONNECTING || preparing
     val stopping = stats.status == VpnStatus.STOPPING
     val error = stats.status == VpnStatus.ERROR
-    val headline = when { busy -> "Подбираем маршрут"; stopping -> "Отключаемся"; working -> "Подключено"
+    val headline = when { busy -> "Подбираем маршрут"; stopping -> "Отключаемся"; limited -> "Частичный доступ"; working -> "Подключено"; storageIssue != null -> "Подключение недоступно"
         error -> "Маршрут не найден"; connected -> "Проверяем связь"; else -> "Не подключено" }
     val description = when {
         busy -> stats.progressMessage.ifBlank { "Проверяем сервер и передачу данных." }
         stopping -> "Завершаем сеанс и освобождаем ресурсы."
+        limited -> "HTTPS работает. Не все сервисы прошли проверку."
         working -> stats.profileLabel.ifBlank { "Связь через выбранный сервер подтверждена." }
+        storageIssue != null -> "Сначала восстановите доступ к сохранённым данным."
         error -> stats.errorMessage ?: "Авто не нашло рабочий сервер. Можно повторить поиск или добавить подписку."
         else -> "Авто найдёт сервер и проверит связь."
     }
-    val stateColor = when { working -> c.tertiary; error -> c.error; busy -> c.primary; else -> c.onSurfaceVariant }
+    val stateColor = when { limited -> c.primary; working -> c.tertiary; error -> c.error; busy -> c.primary; else -> c.onSurfaceVariant }
     CompositionLocalProvider(LocalContentColor provides c.onBackground) {
         Column(Modifier.fillMaxSize().background(c.background).safeDrawingPadding()
             .verticalScroll(scrollState).padding(horizontal = 20.dp, vertical = 16.dp),
@@ -76,12 +80,13 @@ fun HomeDashboard(stats: VpnSessionStats, selected: VlessConfig? = null, configC
                     Icon(Icons.Default.Settings, "Настройки", tint = c.onSurfaceVariant)
                 }
             }
+            if (storageIssue != null) StorageProtectionPanel(storageIssue)
             Surface(shape = RoundedCornerShape(20.dp), color = c.surface,
                 border = BorderStroke(1.dp, c.outlineVariant)) {
                 Column(Modifier.fillMaxWidth().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                    Surface(shape = CircleShape, color = when { working -> c.tertiaryContainer; error -> c.errorContainer; else -> c.primaryContainer }) {
-                        Icon(if (working) Icons.Default.Check else if (error) Icons.Default.Info else Icons.Default.PowerSettingsNew,
+                    Surface(shape = CircleShape, color = when { limited -> c.primaryContainer; working -> c.tertiaryContainer; error -> c.errorContainer; else -> c.primaryContainer }) {
+                        Icon(if (limited) Icons.Default.Info else if (working) Icons.Default.Check else if (error) Icons.Default.Info else Icons.Default.PowerSettingsNew,
                             null, tint = stateColor, modifier = Modifier.padding(20.dp).size(32.dp))
                     }
                     Text(headline, Modifier.semantics { heading() }, fontSize = 28.sp, lineHeight = 34.sp,
@@ -101,11 +106,11 @@ fun HomeDashboard(stats: VpnSessionStats, selected: VlessConfig? = null, configC
                                 Icon(Icons.Default.AutoAwesome, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)); Text("Авто", fontSize = 16.sp)
                             }
                         } else {
-                            Button(onClick = onAuto, modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp), shape = RoundedCornerShape(12.dp)) {
+                            Button(onClick = onAuto, enabled = storageIssue == null, modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp), shape = RoundedCornerShape(12.dp)) {
                                 Icon(Icons.Default.AutoAwesome, null, Modifier.size(20.dp)); Spacer(Modifier.width(10.dp))
                                 Text("Авто", fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
                             }
-                            if (selected != null) TextButton(onClick = onConnect, modifier = Modifier.heightIn(min = 48.dp)) {
+                            if (selected != null) TextButton(onClick = onConnect, enabled = storageIssue == null, modifier = Modifier.heightIn(min = 48.dp)) {
                                 Text("Подключить выбранный сервер", fontSize = 14.sp,
                                     textAlign = androidx.compose.ui.text.style.TextAlign.Center)
                             }
@@ -115,15 +120,15 @@ fun HomeDashboard(stats: VpnSessionStats, selected: VlessConfig? = null, configC
             }
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 SectionLabel("Маршрут")
-                Surface(onClick = onServers, shape = RoundedCornerShape(16.dp), color = c.surface,
+                Surface(onClick = onServers, enabled = storageIssue == null, shape = RoundedCornerShape(16.dp), color = c.surface,
                     border = BorderStroke(1.dp, c.outlineVariant)) {
                     Row(Modifier.fillMaxWidth().padding(16.dp).heightIn(min = 56.dp), verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Default.Dns, null, tint = c.primary, modifier = Modifier.size(24.dp))
                         Spacer(Modifier.width(12.dp))
                         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Text(selected?.name?.ifBlank { "Сервер из подписки" } ?: "Добавить подписку", fontSize = 16.sp,
+                            Text(if (storageIssue != null) "Серверы недоступны" else selected?.name?.ifBlank { "Сервер из подписки" } ?: "Добавить подписку", fontSize = 16.sp,
                                 fontWeight = FontWeight.Medium, color = c.onSurface, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                            Text(if (selected == null) "Авто также использует публичные серверы" else
+                            Text(if (storageIssue != null) "Сохранённые данные не удалены" else if (selected == null) "Авто также использует публичные серверы" else
                                 "${selected.protocolType.uppercase(Locale.ROOT)} · ${selected.security.uppercase(Locale.ROOT)} · $configCount серверов",
                                 fontSize = 14.sp, lineHeight = 20.sp, color = c.onSurfaceVariant)
                         }

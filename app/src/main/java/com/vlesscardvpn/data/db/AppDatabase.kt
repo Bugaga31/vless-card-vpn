@@ -1,5 +1,6 @@
 package com.vlesscardvpn.data.db
 
+import androidx.room.ColumnInfo
 import androidx.room.Dao
 import androidx.room.Database
 import androidx.room.Entity
@@ -10,6 +11,9 @@ import androidx.room.Query
 import androidx.room.RoomDatabase
 import androidx.room.Update
 import com.vlesscardvpn.domain.VlessConfig
+import com.vlesscardvpn.data.security.EnvelopeCipher
+import com.vlesscardvpn.data.security.NodeSecrets
+import com.vlesscardvpn.data.security.NodePayload
 import kotlinx.coroutines.flow.Flow
 
 @Entity(tableName = "vless_configs")
@@ -39,10 +43,11 @@ data class VlessConfigEntity(
     val isFavorite: Boolean = false,
     val tcpLatencyMs: Int = -1,
     val tlsLatencyMs: Int = -1,
-    val httpLatencyMs: Int = -1
+    val httpLatencyMs: Int = -1,
+    @ColumnInfo(defaultValue = "''") val encryptedPayload: String = ""
 )
 
-fun VlessConfigEntity.toDomain(): VlessConfig = VlessConfig(
+internal fun VlessConfigEntity.legacyDomain(): VlessConfig = VlessConfig(
     id = id,
     name = name,
     address = address,
@@ -71,33 +76,17 @@ fun VlessConfigEntity.toDomain(): VlessConfig = VlessConfig(
     httpLatencyMs = httpLatencyMs
 )
 
-fun VlessConfig.toEntity(): VlessConfigEntity = VlessConfigEntity(
-    id = id,
-    name = name,
-    address = address,
-    port = port,
-    uuid = uuid,
-    protocolType = protocolType,
-    flow = flow,
-    security = security,
-    sni = sni,
-    fingerprint = fingerprint,
-    publicKey = publicKey,
-    shortId = shortId,
-    remark = remark,
-    isActive = isActive,
-    pingMs = pingMs,
-    isFree = isFree,
-    country = country,
-    addedAt = addedAt,
-    lastCheck = lastCheck,
-    healthState = healthState,
-    failureCount = failureCount,
-    source = source,
-    isFavorite = isFavorite,
-    tcpLatencyMs = tcpLatencyMs,
-    tlsLatencyMs = tlsLatencyMs,
-    httpLatencyMs = httpLatencyMs
+/** Reads fail closed; only the explicit v1 migration is allowed to read plaintext. */
+fun VlessConfigEntity.toDomain(cipher: EnvelopeCipher = NodeSecrets.cipher): VlessConfig =
+    NodePayload.decode(legacyDomain(), cipher.open(id, encryptedPayload))
+
+fun VlessConfig.toEntity(cipher: EnvelopeCipher = NodeSecrets.cipher): VlessConfigEntity = VlessConfigEntity(
+    id = id, name = "", address = "", port = 0, uuid = "", protocolType = "", flow = "", security = "",
+    sni = "", fingerprint = "", publicKey = "", shortId = "", remark = "", country = "", source = "",
+    isActive = isActive, pingMs = pingMs, isFree = isFree, addedAt = addedAt, lastCheck = lastCheck,
+    healthState = healthState, failureCount = failureCount, isFavorite = isFavorite,
+    tcpLatencyMs = tcpLatencyMs, tlsLatencyMs = tlsLatencyMs, httpLatencyMs = httpLatencyMs,
+    encryptedPayload = cipher.seal(id, NodePayload.encode(this))
 )
 
 @Dao
@@ -139,7 +128,7 @@ interface VlessConfigDao {
     suspend fun clearAll()
 }
 
-@Database(entities = [VlessConfigEntity::class], version = 1, exportSchema = false)
+@Database(entities = [VlessConfigEntity::class], version = 2, exportSchema = true)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun vlessConfigDao(): VlessConfigDao
 
@@ -159,7 +148,8 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "vless_vpn.db"
                 )
-                    .fallbackToDestructiveMigration()
+                    .addMigrations(NodeStorageMigration(NodeSecrets.cipher))
+                    .setJournalMode(RoomDatabase.JournalMode.TRUNCATE)
                     .enableMultiInstanceInvalidation()
                     .build()
                     .also { instance = it }

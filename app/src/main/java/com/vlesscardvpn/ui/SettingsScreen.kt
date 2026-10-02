@@ -44,6 +44,7 @@ fun SettingsScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val settings by repo.settingsFlow.collectAsState()
+    val storageIssue by repo.storageIssueFlow.collectAsState()
     var customSni by remember(settings) { mutableStateOf(settings.customSniOverride) }
 
     Scaffold(
@@ -76,6 +77,7 @@ fun SettingsScreen(
             verticalArrangement = Arrangement.spacedBy(InstrumentDimens.space16)
         ) {
             AppearancePanel(settings.themeMode) { mode -> repo.updateSettings { it.copy(themeMode = mode) } }
+            StorageProtectionPanel(storageIssue)
 
             // Group 1: Подключение & Автопилот
             GroupCard(title = "Подключение и автопилот") {

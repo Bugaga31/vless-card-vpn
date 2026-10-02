@@ -2,6 +2,7 @@ package com.vlesscardvpn.core
 
 import android.content.Context
 import android.os.Build
+import com.vlesscardvpn.domain.ByeDpiPreset
 import kotlinx.coroutines.*
 import java.io.File
 import java.net.InetAddress
@@ -13,14 +14,13 @@ import java.util.concurrent.TimeUnit
 /** Only the encrypted server connection is chained here. Never silently route apps directly. */
 class ByeDpiRunner(private val context: Context) : AutoCloseable {
     private var process: Process? = null
-    suspend fun start(): Int = withContext(Dispatchers.IO) {
+    suspend fun start(preset: ByeDpiPreset = ByeDpiPreset.COMBINED): Int = withContext(Dispatchers.IO) {
         close()
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) throw UnsupportedOperationException("ByeDPI требует Android 8 или новее")
         val executable = File(context.applicationInfo.nativeLibraryDir, "libbyedpi.so")
         check(executable.isFile && executable.canExecute()) { "Встроенный ByeDPI недоступен для этой архитектуры" }
         val port = ServerSocket(0, 1, InetAddress.getByName("127.0.0.1")).use { it.localPort }
-        val child = ProcessBuilder(executable.absolutePath, "--ip", "127.0.0.1", "--port", "$port",
-            "--max-conn", "128", "--timeout", "4", "--split", "1+s", "--tlsrec", "1+s")
+        val child = ProcessBuilder(listOf(executable.absolutePath) + preset.arguments(port))
             .redirectOutput(File("/dev/null")).redirectError(File("/dev/null")).start()
         process = child
         try {

@@ -17,7 +17,7 @@ class HomeDashboardSnapshotTest {
     @Test fun lightDisconnected() { paparazzi.snapshot { VlessCardVpnTheme(false) { HomeDashboard(VpnSessionStats(), server, 24) } } }
     @Test fun darkDisconnected() { paparazzi.snapshot { VlessCardVpnTheme(true) { HomeDashboard(VpnSessionStats(), server, 24) } } }
     @Test fun searching() { paparazzi.snapshot { VlessCardVpnTheme(false) { HomeDashboard(VpnSessionStats(status = VpnStatus.CONNECTING,
-        autoMode = true, progressMessage = "Маршрут 3/12 · проверяем HTTPS"), server, 24) } } }
+        autoMode = true, progressMessage = "Маршрут 3/36 · VPN + ByeDPI · проверяем HTTPS"), server, 24) } } }
     @Test fun connected() { paparazzi.snapshot { VlessCardVpnTheme(true) { HomeDashboard(VpnSessionStats(status = VpnStatus.CONNECTED,
         activeConfig = server, autoMode = true, profileLabel = "VPN + ByeDPI", durationSeconds = 342, health = TunnelHealthReport(listOf(
             TunnelProbe("Cloudflare", 120, 204), TunnelProbe("YouTube · HTTPS", 210, 204), TunnelProbe("Telegram · веб", 170, 200, 200)), 1L)), server, 24) } } }

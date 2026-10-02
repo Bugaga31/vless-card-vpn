@@ -25,6 +25,7 @@ class ScreenDesignSnapshotTest {
     private val repo = mockk<AppRepository>(relaxed = true)
     private val pilot = mockk<AutoPilotEngine>(relaxed = true)
     @Before fun setup() {
+        every { repo.storageIssueFlow } returns MutableStateFlow<String?>(null)
         every { repo.settingsFlow } returns MutableStateFlow(AppSettings(themeMode = "system"))
         every { repo.configsFlow } returns MutableStateFlow(listOf(server, server.copy(id = "second", name = "Запасной сервер", isActive = false, isFavorite = false)))
         every { pilot.state } returns MutableStateFlow(NetworkAutopilotState())

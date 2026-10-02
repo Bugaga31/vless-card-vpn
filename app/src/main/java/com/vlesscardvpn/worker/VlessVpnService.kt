@@ -34,6 +34,7 @@ import com.vlesscardvpn.domain.VlessConfig
 import com.vlesscardvpn.domain.AutoConnectPolicy
 import com.vlesscardvpn.domain.AutoSearchPolicy
 import com.vlesscardvpn.domain.AutoRouteAttempt
+import com.vlesscardvpn.domain.ByeDpiPreset
 import com.vlesscardvpn.domain.LocalProbeProxy
 import com.vlesscardvpn.domain.TunnelHealthChecker
 import com.vlesscardvpn.domain.TunnelHealthReport
@@ -292,9 +293,9 @@ class VlessVpnService : VpnService() {
                 repository.addConfig(config.copy(pingMs = attempt.tcpMs, healthState = "UNKNOWN"))
                 attempts++
                 _vpnStats.value = VpnSessionStats(status = VpnStatus.CONNECTING, autoMode = true,
-                    activeConfig = config, progressMessage = "Авто: маршрут $attempts/${AutoConnectPolicy.MAX_ATTEMPTS} · ${attempt.profile.label}")
+                    activeConfig = config, progressMessage = "Авто: маршрут $attempts/${AutoConnectPolicy.MAX_ATTEMPTS} · ${attempt.label}")
                 safeStartForeground(1, createNotification(config, "Авто: проверка $attempts/${AutoConnectPolicy.MAX_ATTEMPTS}"))
-                handleConnectLocked(config.id, sessionId, autoMode = true, profile = attempt.profile)
+                handleConnectLocked(config.id, sessionId, autoMode = true, profile = attempt.profile, byeDpiPreset = attempt.byeDpiPreset ?: ByeDpiPreset.COMBINED)
                 currentCoroutineContext().ensureActive()
                 if (sessionId != sessionSequence.get()) return false
                 if (_vpnStats.value.status == VpnStatus.CONNECTED) return true
@@ -333,7 +334,7 @@ class VlessVpnService : VpnService() {
             try {
                 withTimeout(20_000L) {
                     handleConnectLocked(attempt.config.id, sessionId, autoMode = true,
-                        profile = attempt.profile, requirePreferredServices = false)
+                        profile = attempt.profile, requirePreferredServices = false, byeDpiPreset = attempt.byeDpiPreset ?: ByeDpiPreset.COMBINED)
                 }
             } catch (_: TimeoutCancellationException) { }
             currentCoroutineContext().ensureActive()
@@ -345,7 +346,7 @@ class VlessVpnService : VpnService() {
         stopForeground(STOP_FOREGROUND_REMOVE)
     }
 
-    private suspend fun handleConnectLocked(configId: String, sessionId: Long, autoMode: Boolean = false, profile: RouteProfile = RouteProfile.COMPATIBLE, requirePreferredServices: Boolean = autoMode) {
+    private suspend fun handleConnectLocked(configId: String, sessionId: Long, autoMode: Boolean = false, profile: RouteProfile = RouteProfile.COMPATIBLE, requirePreferredServices: Boolean = autoMode, byeDpiPreset: ByeDpiPreset = ByeDpiPreset.COMBINED) {
         if (sessionId != sessionSequence.get()) return
 
         // 0. DEFENSIVE: Verify VPN permission BEFORE any heavy work (prevents crash on Connect)
@@ -376,10 +377,11 @@ class VlessVpnService : VpnService() {
         }
 
         val base = repository.settingsFlow.value
+        val routeLabel = if (profile == RouteProfile.BYEDPI) byeDpiPreset.label else profile.label
         val settingsSnapshot: AppSettings = if (autoMode) AdaptiveRoutePolicy.safeSettings(base, profile) else base
 
         _vpnStats.value = VpnSessionStats(status = VpnStatus.CONNECTING, activeConfig = config,
-            autoMode = autoMode, progressMessage = if (autoMode) "Проверяем ${profile.label}" else "Запускаем и проверяем маршрут")
+            autoMode = autoMode, progressMessage = if (autoMode) "Проверяем $routeLabel" else "Запускаем и проверяем маршрут")
         // Keep foreground alive (already started in onStartCommand)
         if (!safeStartForeground(1, createNotification(config, "Инициализация ядра связи…"))) {
             cleanupResources()
@@ -406,7 +408,7 @@ class VlessVpnService : VpnService() {
             val localProbe = LocalProbeProxy.allocate()
             probeProxy = localProbe
             val antiDpiPort = if (autoMode && profile == RouteProfile.BYEDPI) {
-                val runner = ByeDpiRunner(this@VlessVpnService); byeDpi = runner; runner.start()
+                val runner = ByeDpiRunner(this@VlessVpnService); byeDpi = runner; runner.start(byeDpiPreset)
             } else null
             val singBoxJson = SingBoxManager.generateConfig(
                 context = this@VlessVpnService,
@@ -505,11 +507,11 @@ class VlessVpnService : VpnService() {
             repository.updateConfig(config.copy(healthState = "HEALTHY", httpLatencyMs = report.latencyMs,
                 lastCheck = startTime, failureCount = 0))
             repository.setActive(config.id)
-            if (autoMode && report.preferredServices) routeMemory.remember(config, profile)
+            if (autoMode && report.preferredServices) routeMemory.remember(config, profile, byeDpiPreset)
             NetworkProfileManager.markProfileWorking(netProfile)
             _vpnStats.value = VpnSessionStats(status = VpnStatus.CONNECTED, activeConfig = config,
                 connectedSinceTimestamp = startTime, autoMode = autoMode, health = report,
-                profileLabel = if (autoMode) profile.label else "Параметры сервера")
+                profileLabel = if (autoMode) routeLabel else "Параметры сервера")
             safeStartForeground(1, createNotification(config, if (report.preferredServices) "Маршрут проверен • ${report.latencyMs} мс" else "HTTPS работает; не все сервисы доступны"))
             startStatsUpdater(startTime)
             if (autoMode) startAutoHealthMonitor(sessionId)

@@ -32,7 +32,7 @@ fun StealthProfileScreen(repo: AppRepository, onBack: () -> Unit = {}) {
             listOf(
                 "Совместимый TLS" to "Параметры из конфигурации сервера. Без случайной подмены доменов и без отключения проверки сертификатов.",
                 "TLS-фрагментация" to "Поддерживаемая фрагментация ядра для совместимых TLS-подключений. Не гарантирует обход в любой сети.",
-                "VPN + ByeDPI" to "Реальный локальный движок меняет передачу внешнего TCP/TLS-потока. Приложения остаются за зашифрованным VPN-туннелем."
+                "VPN + ByeDPI" to "Авто пробует TCP-разбиение, разделение TLS-записей и их сочетание во внешнем соединении VPN. Результат проверяется через сервер."
             ).forEach { (title, body) ->
                 Surface(color = c.surface, shape = RoundedCornerShape(16.dp), border = BorderStroke(1.dp, c.outlineVariant)) {
                     Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {

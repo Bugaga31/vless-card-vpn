@@ -1,8 +1,10 @@
 package com.vlesscardvpn.domain
 
 /** Bounded breadth-first search. TCP is a hint, never admission or success evidence. */
-data class AutoRouteAttempt(val config: VlessConfig, val profile: RouteProfile, val tcpMs: Int) {
-    val key: String get() = AutoConnectPolicy.identity(config) + ":" + profile.name
+data class AutoRouteAttempt(val config: VlessConfig, val profile: RouteProfile, val tcpMs: Int, val byeDpiPreset: ByeDpiPreset? = null) {
+    val key: String get() = AutoConnectPolicy.identity(config) + ":" + profile.name +
+        if (profile == RouteProfile.BYEDPI) "#${(byeDpiPreset ?: ByeDpiPreset.COMBINED).name}" else ""
+    val label: String get() = if (profile == RouteProfile.BYEDPI) (byeDpiPreset ?: ByeDpiPreset.COMBINED).label else profile.label
 }
 object AutoSearchPolicy {
     const val MAX_CANDIDATES = 48
@@ -20,24 +22,30 @@ object AutoSearchPolicy {
                 .thenByDescending { !it.first.isFree }
                 .thenBy { it.first.failureCount.coerceIn(0, 5) }
                 .thenBy { if (it.second > 0) it.second else Int.MAX_VALUE })
-            .filter { (config, _) ->
-                AdaptiveRoutePolicy.profiles(config).any { profile ->
-                    AutoConnectPolicy.identity(config) + ":" + profile.name !in tried
-                }
-            }
+            .filter { (config, ping) -> choices(config, ping, remembered[AutoConnectPolicy.identity(config)], 0).any { it.key !in tried } }
             .take(MAX_NODES_PER_POOL)
-        val routes = ordered.map { (config, ping) ->
-            val identity = AutoConnectPolicy.identity(config)
-            val allowed = AdaptiveRoutePolicy.profiles(config)
-            val defaultOrder = if (ping <= 0)
-                listOf(RouteProfile.BYEDPI, RouteProfile.COMPATIBLE, RouteProfile.FRAGMENT)
-            else listOf(RouteProfile.COMPATIBLE, RouteProfile.BYEDPI, RouteProfile.FRAGMENT)
-            val prioritized = defaultOrder.filter { it in allowed }
-                .sortedBy { if (it.name == remembered[identity]) 0 else 1 }
-            prioritized.map { AutoRouteAttempt(config, it, ping) }
+        // Spread the first ByeDPI variant across nodes; do not spend every attempt on one preset.
+        val routes = ordered.mapIndexed { index, (config, ping) ->
+            choices(config, ping, remembered[AutoConnectPolicy.identity(config)], index)
         }
-        return (0..2).flatMap { round -> routes.mapNotNull { it.getOrNull(round) } }
-            .filterNot { it.key in tried }
+        return (0 until 5).flatMap { round -> routes.mapNotNull { it.getOrNull(round) } }
+            .filterNot { it.key in tried }.take(AutoConnectPolicy.MAX_ATTEMPTS)
+    }
+    private fun choices(config: VlessConfig, ping: Int, remembered: String?, index: Int): List<AutoRouteAttempt> {
+        val allowed = AdaptiveRoutePolicy.profiles(config)
+        val presets = ByeDpiPreset.order(config.failureCount.coerceAtLeast(0) + index, remembered)
+        val ordinary = AutoRouteAttempt(config, RouteProfile.COMPATIBLE, ping)
+        val fragment = AutoRouteAttempt(config, RouteProfile.FRAGMENT, ping)
+        val dpi = presets.map { AutoRouteAttempt(config, RouteProfile.BYEDPI, ping, it) }
+        if (RouteProfile.BYEDPI !in allowed) return listOf(ordinary)
+        val rememberedProfile = remembered?.substringBefore('#')
+        return when (rememberedProfile) {
+            "BYEDPI" -> listOf(dpi[0], ordinary, fragment, dpi[1], dpi[2])
+            "FRAGMENT" -> listOf(fragment, ordinary, dpi[0], dpi[1], dpi[2])
+            "COMPATIBLE" -> listOf(ordinary, dpi[0], fragment, dpi[1], dpi[2])
+            else -> if (ping <= 0) listOf(dpi[0], ordinary, fragment, dpi[1], dpi[2])
+                else listOf(ordinary, dpi[0], fragment, dpi[1], dpi[2])
+        }
     }
     /** Use persisted IDs/metadata after import; parser-created IDs are not canonical. */
     fun importedRows(persisted: List<VlessConfig>, incoming: List<VlessConfig>): List<VlessConfig> {

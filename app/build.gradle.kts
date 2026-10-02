@@ -101,3 +101,6 @@ val buildByeDpi by tasks.registering(Exec::class) {
         if (providers.gradleProperty("autoPreview").orNull == "true") "arm" else "all")
 }
 tasks.named("preBuild").configure { dependsOn(buildByeDpi) }
+
+// Export future schemas for migration review and testing.
+ksp { arg("room.schemaLocation", "$projectDir/schemas") }
