@@ -53,78 +53,81 @@ class NativeFullTunFixtureTest {
         val host = args.getString("fixture_host") ?: "10.0.2.2"
         val node = VlessConfig(name = "Full TUN fixture", address = host, port = 24443,
             uuid = "00000000-0000-4000-8000-000000000001", security = "tls", sni = "vpn.test.local", flow = "")
-        val proxy = LocalProbeProxy.allocate()
-        val runner = ByeDpiRunner(context)
-        try {
-            val dpiPort = if (profile == RouteProfile.BYEDPI) runner.start(preset) else null
-            val config = JSONObject(SingBoxManager.generateConfig(null, node,
-                AdaptiveRoutePolicy.safeSettings(AppSettings(), profile), probeProxy = proxy, antiDpiPort = dpiPort))
-            // Fixture-only CA and DNS resolver. Production trust/security settings are unchanged.
-            val outs = config.getJSONArray("outbounds")
-            for (i in 0 until outs.length()) if (outs.getJSONObject(i).getString("tag") == "proxy") {
-                outs.getJSONObject(i).getJSONObject("tls").put("certificate_path", requireNotNull(args.getString("fixture_ca_path")))
-            }
-            config.getJSONObject("dns").getJSONArray("servers").getJSONObject(0)
-                .put("address", "udp://127.0.0.1:15353").put("detour", "proxy")
-            val inbounds = config.getJSONArray("inbounds")
-            for (i in 0 until inbounds.length()) if (inbounds.getJSONObject(i).getString("tag") == "tun-in") {
-                inbounds.getJSONObject(i).put("stack", stack)
-            }
-            config.getJSONObject("log").put("level", "debug") // Controlled fixtures only, not production logging.
-            Libbox.checkConfig(config.toString())
-            // Re-open the actual TUN after clean shutdown. Each cycle uses a fresh helper nonce.
-            repeat(2) { cycle ->
-                var server: CommandServer? = null
-                var descriptor: ParcelFileDescriptor? = null
-                val messages = AtomicInteger(); val tunTcp = AtomicInteger(); val tunUdp = AtomicInteger(); val proxyTcp = AtomicInteger()
-                try {
-                    val adapter = LibboxPlatformInterface(registeredVpnService(context)) { descriptor = it }
-                    val handler = object : CommandServerHandler {
-                        override fun getSystemProxyStatus(): SystemProxyStatus = NativeCallbackValues.disabledSystemProxy()
-                        override fun serviceReload() {}
-                        override fun serviceStop() {}
-                        override fun setSystemProxyEnabled(enabled: Boolean) {}
-                        override fun writeDebugMessage(message: String?) {
-                            // Export counters only, not arbitrary native messages or addresses.
-                            val text = message.orEmpty(); messages.incrementAndGet()
-                            if (text.contains("inbound/tun[tun-in]") && text.contains("inbound connection")) tunTcp.incrementAndGet()
-                            if (text.contains("inbound/tun[tun-in]") && text.contains("inbound packet connection")) tunUdp.incrementAndGet()
-                            if (text.contains("outbound/vless[proxy]") && text.contains("outbound connection")) proxyTcp.incrementAndGet()
-                        }
-                    }
-                    server = CommandServer(handler, adapter); server.start(); server.startOrReloadService(config.toString(), OverrideOptions())
-                    assertNotNull("Native core must actually call VpnService.Builder.establish", descriptor)
-                    val nonce = UUID.randomUUID().toString().replace("-", "")
-                    shell("am force-stop com.vlesscardvpn.netprobe")
-                    shell("am start -W -n com.vlesscardvpn.netprobe/.ProbeActivity --es nonce $nonce")
-                    val deadline = android.os.SystemClock.elapsedRealtime() + 60000
-                    var result: JSONObject? = null
-                    while (android.os.SystemClock.elapsedRealtime() < deadline) {
-                        val text = shell("run-as com.vlesscardvpn.netprobe cat files/result.json")
-                        val parsed = runCatching { JSONObject(text) }.getOrNull()
-                        if (parsed?.optString("nonce") == nonce) { result = parsed; break }
-                        Thread.sleep(100)
-                    }
-                    val counts = "coreMsgs=${messages.get()},tunTcp=${tunTcp.get()},tunUdp=${tunUdp.get()},proxyTcp=${proxyTcp.get()}"
-                    assertNotNull("Separate-UID helper did not finish; $counts", result)
-                    assertNotEquals("Helper must not share the excluded VPN UID", context.applicationInfo.uid, result!!.getInt("uid"))
-                    val pinned = result!!.optJSONObject("pinned")
-                    val comparison = "defaultSame=${result!!.optBoolean("default_network_same")},dnsCount=${result!!.optInt("dns_count")},routes=${result!!.optInt("route_count")},mtu=${result!!.optInt("mtu")},pinned=${pinned?.optString("stage")}/${pinned?.optString("failure")}/${pinned?.optInt("code", -1)}"
-                    assertTrue("Cycle $cycle: helper must use the Android VPN network", result!!.optBoolean("vpn"))
-                    assertEquals("$profile/$stack cycle $cycle: ${result!!.optString("stage")}/${result!!.optString("failure")}; $counts; $comparison; DNS", "198.18.0.1", result!!.optString("address"))
-                    assertEquals("$profile/$preset/$stack cycle $cycle: ${result!!.optString("stage")}/${result!!.optString("failure")}; $counts; $comparison", 204, result!!.optInt("code", -1))
-                    assertTrue("Default network must not change during the default probe; $comparison", result!!.optBoolean("default_network_same"))
-                    assertNotNull("Pinned VPN comparison must finish; $comparison", pinned)
-                    assertTrue("Pinned network must remain a VPN; $comparison", result!!.optBoolean("pinned_network_still_vpn"))
-                    assertEquals("Pinned VPN must also resolve fixture DNS; $comparison", "198.18.0.1", pinned!!.optString("address"))
-                    assertEquals("Pinned VPN must also transfer verified HTTPS; $comparison", 204, pinned!!.optInt("code", -1))
-                } finally {
-                    runCatching { server?.closeService() }; server?.close()
-                    runCatching { descriptor?.close() }
-                    shell("am force-stop com.vlesscardvpn.netprobe")
+        // Production allocates a fresh probe and ByeDPI child for every restart.
+        // Match that ownership rather than reusing a child/port across native instances.
+        repeat(2) { cycle ->
+            val proxy = LocalProbeProxy.allocate()
+            val runner = ByeDpiRunner(context)
+            var server: CommandServer? = null
+            var descriptor: ParcelFileDescriptor? = null
+            var adapter: LibboxPlatformInterface? = null
+            val messages = AtomicInteger(); val tunTcp = AtomicInteger(); val tunUdp = AtomicInteger(); val proxyTcp = AtomicInteger()
+            try {
+                val dpiPort = if (profile == RouteProfile.BYEDPI) runner.start(preset) else null
+                val config = JSONObject(SingBoxManager.generateConfig(null, node,
+                    AdaptiveRoutePolicy.safeSettings(AppSettings(), profile), probeProxy = proxy, antiDpiPort = dpiPort))
+                // Fixture-only CA and DNS resolver. Production trust/security settings are unchanged.
+                val outs = config.getJSONArray("outbounds")
+                for (i in 0 until outs.length()) if (outs.getJSONObject(i).getString("tag") == "proxy") {
+                    outs.getJSONObject(i).getJSONObject("tls").put("certificate_path", requireNotNull(args.getString("fixture_ca_path")))
                 }
+                config.getJSONObject("dns").getJSONArray("servers").getJSONObject(0)
+                    .put("address", "udp://127.0.0.1:15353").put("detour", "proxy")
+                val inbounds = config.getJSONArray("inbounds")
+                for (i in 0 until inbounds.length()) if (inbounds.getJSONObject(i).getString("tag") == "tun-in") {
+                    inbounds.getJSONObject(i).put("stack", stack)
+                }
+                config.getJSONObject("log").put("level", "debug") // Controlled fixtures only, not production logging.
+                Libbox.checkConfig(config.toString())
+                adapter = LibboxPlatformInterface(registeredVpnService(context)) { descriptor = it }
+                val handler = object : CommandServerHandler {
+                    override fun getSystemProxyStatus(): SystemProxyStatus = NativeCallbackValues.disabledSystemProxy()
+                    override fun serviceReload() {}
+                    override fun serviceStop() {}
+                    override fun setSystemProxyEnabled(enabled: Boolean) {}
+                    override fun writeDebugMessage(message: String?) {
+                        // Export counters only, not arbitrary native messages or addresses.
+                        val text = message.orEmpty(); messages.incrementAndGet()
+                        if (text.contains("inbound/tun[tun-in]") && text.contains("inbound connection")) tunTcp.incrementAndGet()
+                        if (text.contains("inbound/tun[tun-in]") && text.contains("inbound packet connection")) tunUdp.incrementAndGet()
+                        if (text.contains("outbound/vless[proxy]") && text.contains("outbound connection")) proxyTcp.incrementAndGet()
+                    }
+                }
+                server = CommandServer(handler, adapter); server.start(); server.startOrReloadService(config.toString(), OverrideOptions())
+                assertNotNull("Native core must actually call VpnService.Builder.establish", descriptor)
+                val nonce = UUID.randomUUID().toString().replace("-", "")
+                shell("am force-stop com.vlesscardvpn.netprobe")
+                shell("am start -W -n com.vlesscardvpn.netprobe/.ProbeActivity --es nonce $nonce")
+                val deadline = android.os.SystemClock.elapsedRealtime() + 60000
+                var result: JSONObject? = null
+                while (android.os.SystemClock.elapsedRealtime() < deadline) {
+                    val text = shell("run-as com.vlesscardvpn.netprobe cat files/result.json")
+                    val parsed = runCatching { JSONObject(text) }.getOrNull()
+                    if (parsed?.optString("nonce") == nonce) { result = parsed; break }
+                    Thread.sleep(100)
+                }
+                val counts = "coreMsgs=${messages.get()},tunTcp=${tunTcp.get()},tunUdp=${tunUdp.get()},proxyTcp=${proxyTcp.get()}"
+                assertNotNull("Separate-UID helper did not finish; $counts", result)
+                assertNotEquals("Helper must not share the excluded VPN UID", context.applicationInfo.uid, result!!.getInt("uid"))
+                val pinned = result!!.optJSONObject("pinned")
+                val comparison = "defaultSame=${result!!.optBoolean("default_network_same")},dnsCount=${result!!.optInt("dns_count")},routes=${result!!.optInt("route_count")},mtu=${result!!.optInt("mtu")},pinned=${pinned?.optString("stage")}/${pinned?.optString("failure")}/${pinned?.optInt("code", -1)}"
+                assertTrue("Cycle $cycle: helper must use the Android VPN network", result!!.optBoolean("vpn"))
+                assertEquals("$profile/$stack cycle $cycle: ${result!!.optString("stage")}/${result!!.optString("failure")}; $counts; $comparison; DNS", "198.18.0.1", result!!.optString("address"))
+                assertEquals("$profile/$preset/$stack cycle $cycle: ${result!!.optString("stage")}/${result!!.optString("failure")}; $counts; $comparison", 204, result!!.optInt("code", -1))
+                assertTrue("Default network must not change during the default probe; $comparison", result!!.optBoolean("default_network_same"))
+                assertNotNull("Pinned VPN comparison must finish; $comparison", pinned)
+                assertTrue("Pinned network must remain a VPN; $comparison", result!!.optBoolean("pinned_network_still_vpn"))
+                assertEquals("Pinned VPN must also resolve fixture DNS; $comparison", "198.18.0.1", pinned!!.optString("address"))
+                assertEquals("Pinned VPN must also transfer verified HTTPS; $comparison", 204, pinned!!.optInt("code", -1))
+            } finally {
+                runCatching { server?.closeService() }
+                runCatching { server?.close() }
+                runCatching { adapter?.closeDefaultInterfaceMonitor(null) }
+                runCatching { descriptor?.close() }
+                runner.close()
+                shell("am force-stop com.vlesscardvpn.netprobe")
             }
-        } finally { runner.close() }
+        }
     }
     private fun shell(command: String): String =
         InstrumentationRegistry.getInstrumentation().uiAutomation.executeShellCommand(command).use { fd ->

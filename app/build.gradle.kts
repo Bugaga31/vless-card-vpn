@@ -105,3 +105,27 @@ tasks.named("preBuild").configure { dependsOn(buildByeDpi) }
 
 // Export future schemas for migration review and testing.
 ksp { arg("room.schemaLocation", "$projectDir/schemas") }
+
+// Public CI diagnostics expose test identifiers/counts only, never exception messages,
+// URLs, credentials, captured console output or complete test artifacts.
+tasks.withType<org.gradle.api.tasks.testing.Test>().configureEach {
+    if (System.getenv("GITHUB_ACTIONS") == "true") {
+        addTestListener(object : org.gradle.api.tasks.testing.TestListener {
+            override fun beforeSuite(suite: org.gradle.api.tasks.testing.TestDescriptor) {}
+            override fun beforeTest(test: org.gradle.api.tasks.testing.TestDescriptor) {}
+            override fun afterTest(test: org.gradle.api.tasks.testing.TestDescriptor, result: org.gradle.api.tasks.testing.TestResult) {
+                if (result.resultType == org.gradle.api.tasks.testing.TestResult.ResultType.FAILURE) {
+                    val label = "${test.className}.${test.name}".replace(Regex("[^A-Za-z0-9_.$ -]"), "_").take(240)
+                    println("::error title=JVM regression assertion::$label")
+                }
+            }
+            override fun afterSuite(suite: org.gradle.api.tasks.testing.TestDescriptor, result: org.gradle.api.tasks.testing.TestResult) {
+                if (suite.parent == null) {
+                    val totals = "tests=${result.testCount},failed=${result.failedTestCount},skipped=${result.skippedTestCount}"
+                    println("JVM regression totals: $totals")
+                    if (result.failedTestCount > 0) println("::error title=JVM regression summary::$totals")
+                }
+            }
+        })
+    }
+}

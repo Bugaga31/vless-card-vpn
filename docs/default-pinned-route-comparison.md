@@ -12,7 +12,20 @@ Results include phase/error/code for the pinned path, whether the default networ
 
 Each probe has a 20-second caller deadline; cancellation closes its active socket and uses an explicit cancellation flag to prevent a late DNS completion from starting another connection. The system DNS resolver itself is not cancellable; any remaining helper daemon is owned by emulator force-stop. The fixture waits at most 60 seconds for the pair. These are test-only deadlines and do not increase production Auto timeouts.
 
-Executed locally: 236 JVM tests, zero failures/errors/skips; updated Android instrumentation compiled and the separate helper APK assembled. No emulator/KVM is available in the local sandbox. The strict Android gate stays at 39 tests; a fresh API 26/33 run is required for this patch.
+Executed locally: 236 JVM tests, zero failures/errors/skips; updated Android instrumentation compiled and the separate helper APK assembled. No emulator/KVM is available in the local sandbox. The strict Android gate stays at 39 tests.
+
+Executed first comparison source: `e4096a7b22a5134dc62055d309e95b61825a4667`.
+CI: https://github.com/Bugaga31/vless-card-vpn/actions/runs/37051706890
+- API 33: 39 tests executed, two full-TUN reopen failures. In both cases the default and pinned paths failed at the same stage. The default network remained unchanged, with one DNS server, four routes and MTU 1400. The gvisor case failed DNS in both paths; TLS_RECORD_ONLY failed TCP connect in both. Explicit binding alone does not fix these observed failures.
+- API 26: stopped during the build/JVM step, before instrumented tests. Public annotations did not establish the reason. Detailed job logs require a separate browser sign-in; no failure cause was guessed and this is not a new measured TUN result.
+
+Follow-up test changes, not yet executed on Android:
+- Every reopen allocates a fresh local probe endpoint and starts/stops a fresh ByeDPI child where needed, matching production resource ownership rather than retaining a child/port across core instances.
+- Teardown independently closes the service, command server, default-interface monitor and descriptor. Production already uses independent cleanup; this is fixture alignment, not a claimed production fix.
+- All default, pinned, DNS, HTTPS, UID and reopen assertions remain enabled; no failure was removed or retried until success.
+- Public JVM CI annotations now expose only failing class/method identifiers and totals, not exception messages, URLs, keys or captured output. A temporary controlled negative test verified the failure annotation and absence of its sentinel message; the temporary class was removed. The complete 236-case suite was rerun green and instrumentation compiled afterward.
+
+A fresh CI run is required for this strengthened fixture. The cause of restart failures remains unresolved until evidence distinguishes lifecycle/fixture/core behavior.
 
 Prior blocker run: https://github.com/Bugaga31/vless-card-vpn/actions/runs/37037069233. API 33 had one default-path DNS failure on reopen; API 26 had eight full-TUN failures. New SNI profiles passed authenticated VLESS/TLS and REALITY record observation. A default/pinned contrast is evidence to investigate, not automatic proof of a kernel or framework defect.
 
