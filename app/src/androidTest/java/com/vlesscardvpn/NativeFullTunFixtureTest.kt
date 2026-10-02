@@ -97,9 +97,9 @@ class NativeFullTunFixtureTest {
                     val nonce = UUID.randomUUID().toString().replace("-", "")
                     shell("am force-stop com.vlesscardvpn.netprobe")
                     shell("am start -W -n com.vlesscardvpn.netprobe/.ProbeActivity --es nonce $nonce")
-                    val deadline = System.currentTimeMillis() + 30000
+                    val deadline = android.os.SystemClock.elapsedRealtime() + 60000
                     var result: JSONObject? = null
-                    while (System.currentTimeMillis() < deadline) {
+                    while (android.os.SystemClock.elapsedRealtime() < deadline) {
                         val text = shell("run-as com.vlesscardvpn.netprobe cat files/result.json")
                         val parsed = runCatching { JSONObject(text) }.getOrNull()
                         if (parsed?.optString("nonce") == nonce) { result = parsed; break }
@@ -108,9 +108,16 @@ class NativeFullTunFixtureTest {
                     val counts = "coreMsgs=${messages.get()},tunTcp=${tunTcp.get()},tunUdp=${tunUdp.get()},proxyTcp=${proxyTcp.get()}"
                     assertNotNull("Separate-UID helper did not finish; $counts", result)
                     assertNotEquals("Helper must not share the excluded VPN UID", context.applicationInfo.uid, result!!.getInt("uid"))
+                    val pinned = result!!.optJSONObject("pinned")
+                    val comparison = "defaultSame=${result!!.optBoolean("default_network_same")},dnsCount=${result!!.optInt("dns_count")},routes=${result!!.optInt("route_count")},mtu=${result!!.optInt("mtu")},pinned=${pinned?.optString("stage")}/${pinned?.optString("failure")}/${pinned?.optInt("code", -1)}"
                     assertTrue("Cycle $cycle: helper must use the Android VPN network", result!!.optBoolean("vpn"))
-                    assertEquals("$profile/$stack cycle $cycle: ${result!!.optString("stage")}/${result!!.optString("failure")}; $counts; DNS", "198.18.0.1", result!!.optString("address"))
-                    assertEquals("$profile/$preset/$stack cycle $cycle: ${result!!.optString("stage")}/${result!!.optString("failure")}; $counts", 204, result!!.optInt("code", -1))
+                    assertEquals("$profile/$stack cycle $cycle: ${result!!.optString("stage")}/${result!!.optString("failure")}; $counts; $comparison; DNS", "198.18.0.1", result!!.optString("address"))
+                    assertEquals("$profile/$preset/$stack cycle $cycle: ${result!!.optString("stage")}/${result!!.optString("failure")}; $counts; $comparison", 204, result!!.optInt("code", -1))
+                    assertTrue("Default network must not change during the default probe; $comparison", result!!.optBoolean("default_network_same"))
+                    assertNotNull("Pinned VPN comparison must finish; $comparison", pinned)
+                    assertTrue("Pinned network must remain a VPN; $comparison", result!!.optBoolean("pinned_network_still_vpn"))
+                    assertEquals("Pinned VPN must also resolve fixture DNS; $comparison", "198.18.0.1", pinned!!.optString("address"))
+                    assertEquals("Pinned VPN must also transfer verified HTTPS; $comparison", 204, pinned!!.optInt("code", -1))
                 } finally {
                     runCatching { server?.closeService() }; server?.close()
                     runCatching { descriptor?.close() }
