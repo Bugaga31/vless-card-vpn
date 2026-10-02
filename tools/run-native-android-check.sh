@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 # Permission automation belongs only on controlled emulator fixtures, never a user's phone.
+python3 -m unittest discover -s tools -p 'test_tls_record_observer.py'
+bash tools/run-byedpi-host-check.sh
 test "$(adb shell getprop ro.kernel.qemu | tr -d '\r')" = "1"
 ./gradlew --no-daemon --max-workers=2 :vpn-test-probe:assembleDebug
 python3 tools/native-route-fixture.py --sing-box "$PWD/sing-box-1.14.2-linux-amd64/sing-box" > fixture.log 2>&1 &
@@ -30,12 +32,12 @@ python3 - <<'CHECK'
 from pathlib import Path
 import re, os
 text = Path("native-results.txt").read_text()
-passed = os.environ["INSTRUMENT_EXIT"] == "0" and "OK (33 tests)" in text and not re.search(r"FAILURES!!!|INSTRUMENTATION_FAILED|Process crashed|INSTRUMENTATION_STATUS_CODE: -[1-4]", text)
+passed = os.environ["INSTRUMENT_EXIT"] == "0" and "OK (39 tests)" in text and not re.search(r"FAILURES!!!|INSTRUMENTATION_FAILED|Process crashed|INSTRUMENTATION_STATUS_CODE: -[1-4]", text)
 if not passed:
     summary = text[text.rfind("Time:"):] if "Time:" in text else text[-3500:]
     summary = "\n".join(line for line in summary.splitlines() if not line.lstrip().startswith(("at ", "... ")))
     summary = summary[:3500].replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
     print("::error title=Native Android fixture assertions::" + summary)
     raise SystemExit(1)
-print("Confirmed: 33 instrumented fixture checks, no skipped/failed tests")
+print("Confirmed: 39 instrumented fixture checks, no skipped/failed tests")
 CHECK

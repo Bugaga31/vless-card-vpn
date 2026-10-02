@@ -45,6 +45,9 @@ class NativeFullTunFixtureTest {
     @Test fun recordSplitTunDnsHttpsAndRestart() = exercise(RouteProfile.BYEDPI, ByeDpiPreset.TLS_RECORD_ONLY)
     @Test fun combinedSplitTunDnsHttpsAndRestart() = exercise(RouteProfile.BYEDPI, ByeDpiPreset.COMBINED)
 
+    @Test fun middleSniTunDnsHttpsAndRestart() = exercise(RouteProfile.BYEDPI, ByeDpiPreset.SNI_MIDDLE)
+    @Test fun edgeSniTunDnsHttpsAndRestart() = exercise(RouteProfile.BYEDPI, ByeDpiPreset.SNI_EDGES)
+
     private fun exercise(profile: RouteProfile, preset: ByeDpiPreset = ByeDpiPreset.COMBINED, stack: String = "mixed") = runBlocking {
         val args = InstrumentationRegistry.getArguments()
         val host = args.getString("fixture_host") ?: "10.0.2.2"

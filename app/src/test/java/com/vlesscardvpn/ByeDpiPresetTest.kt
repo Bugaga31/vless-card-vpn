@@ -32,7 +32,7 @@ class ByeDpiPresetTest {
     @Test fun allVariantsExistForSingleNodeWithoutReplacingItsCredentials() {
         val c = node(1); val plan = AutoSearchPolicy.plan(listOf(c to -1))
         assertEquals(ByeDpiPreset.entries.toSet(), plan.filter { it.profile == RouteProfile.BYEDPI }.map { it.byeDpiPreset }.toSet())
-        assertTrue(plan.all { it.config == c }); assertEquals(5, plan.size)
+        assertTrue(plan.all { it.config == c }); assertEquals(7, plan.size)
     }
     @Test fun confirmedVariantMemoryIsRestoredBeforeOtherRoutes() {
         val c = node(1)
@@ -43,4 +43,20 @@ class ByeDpiPresetTest {
         val keys = AutoSearchPolicy.plan(listOf(node(1) to 1)).map { it.key }
         assertEquals(keys.size, keys.toSet().size)
     }
+    @Test fun newSniOffsetsUsePinnedNativeSyntaxAndDoNotReplaceDomains() {
+        assertEquals(listOf("--split", "0+sm", "--tlsrec", "0+sm"), ByeDpiPreset.SNI_MIDDLE.extraArgs)
+        assertEquals(listOf("--split", "1+s", "--split", "-1+se", "--tlsrec", "1+s", "--tlsrec", "-1+se"), ByeDpiPreset.SNI_EDGES.extraArgs)
+        assertTrue(ByeDpiPreset.entries.all { "--fake-sni" !in it.extraArgs && "--tlsminor" !in it.extraArgs })
+    }
+    @Test fun newPresetsRestoreFromMemoryAndAllFiveAreReachableForOneNode() {
+        val c = node(1)
+        for (preset in listOf(ByeDpiPreset.SNI_MIDDLE, ByeDpiPreset.SNI_EDGES)) {
+            val p = AutoSearchPolicy.plan(listOf(c to 1), mapOf(AutoConnectPolicy.identity(c) to "BYEDPI#${preset.name}"))
+            assertEquals(preset, p.first().byeDpiPreset)
+            assertEquals(7, p.size)
+            assertEquals(ByeDpiPreset.entries.toSet(), p.mapNotNull { it.byeDpiPreset }.toSet())
+            assertTrue(p.all { it.config == c })
+        }
+    }
+
 }

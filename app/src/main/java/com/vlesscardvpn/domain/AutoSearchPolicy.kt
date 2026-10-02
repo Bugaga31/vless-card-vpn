@@ -42,7 +42,7 @@ object AutoSearchPolicy {
         val routes = ordered.mapIndexed { index, (config, ping) ->
             choices(config, ping, remembered[AutoConnectPolicy.identity(config)], index)
         }
-        return (0 until 5).flatMap { round -> routes.mapNotNull { it.getOrNull(round) } }
+        return (0 until (ByeDpiPreset.entries.size + 2)).flatMap { round -> routes.mapNotNull { it.getOrNull(round) } }
             .filterNot { it.key in tried }.take(AutoConnectPolicy.MAX_ATTEMPTS)
     }
     private fun choices(config: VlessConfig, ping: Int, remembered: String?, index: Int): List<AutoRouteAttempt> {
@@ -54,11 +54,11 @@ object AutoSearchPolicy {
         if (RouteProfile.BYEDPI !in allowed) return listOf(ordinary)
         val rememberedProfile = remembered?.substringBefore('#')
         return when (rememberedProfile) {
-            "BYEDPI" -> listOf(dpi[0], ordinary, fragment, dpi[1], dpi[2])
-            "FRAGMENT" -> listOf(fragment, ordinary, dpi[0], dpi[1], dpi[2])
-            "COMPATIBLE" -> listOf(ordinary, dpi[0], fragment, dpi[1], dpi[2])
-            else -> if (ping <= 0) listOf(dpi[0], ordinary, fragment, dpi[1], dpi[2])
-                else listOf(ordinary, dpi[0], fragment, dpi[1], dpi[2])
+            "BYEDPI" -> listOf(dpi[0], ordinary, fragment) + dpi.drop(1)
+            "FRAGMENT" -> listOf(fragment, ordinary) + dpi
+            "COMPATIBLE" -> listOf(ordinary, dpi[0], fragment) + dpi.drop(1)
+            else -> if (ping <= 0) listOf(dpi[0], ordinary, fragment) + dpi.drop(1)
+                else listOf(ordinary, dpi[0], fragment) + dpi.drop(1)
         }
     }
     /** Use persisted IDs/metadata after import; parser-created IDs are not canonical. */
