@@ -21,11 +21,12 @@ data class LocalProbeProxy(val port: Int, val username: String, val password: St
 
 /** Remote DNS via SOCKS: no direct fallback, no JVM-global Authenticator. */
 internal object Socks5Client {
-    fun connect(socket: Socket, proxy: LocalProbeProxy, host: String, port: Int, timeoutMs: Int) {
+    fun connect(socket: Socket, proxy: LocalProbeProxy, host: String, port: Int, timeoutMs: Int, onConnected: () -> Unit = {}) {
         require(port in 1..65535)
         val target = host.toByteArray(Charsets.US_ASCII)
         require(target.size in 1..253 && host.none { it.isWhitespace() })
         socket.connect(InetSocketAddress("127.0.0.1", proxy.port), timeoutMs)
+        onConnected() // Local TCP succeeded; subsequent failures belong to SOCKS/remote route.
         socket.soTimeout = timeoutMs
         val input = DataInputStream(socket.getInputStream())
         val output = socket.getOutputStream()

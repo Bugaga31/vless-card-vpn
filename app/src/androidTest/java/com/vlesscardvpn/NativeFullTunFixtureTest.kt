@@ -20,6 +20,7 @@ import org.junit.Assert.*
 import org.junit.runner.RunWith
 import java.io.File
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicInteger
 
 /** Opt-in emulator-only real TUN + UDP DNS + verified HTTPS from another application UID. */
 @RunWith(AndroidJUnit4::class)
@@ -66,11 +67,13 @@ class NativeFullTunFixtureTest {
             for (i in 0 until inbounds.length()) if (inbounds.getJSONObject(i).getString("tag") == "tun-in") {
                 inbounds.getJSONObject(i).put("stack", stack)
             }
+            config.getJSONObject("log").put("level", "debug") // Controlled fixtures only, not production logging.
             Libbox.checkConfig(config.toString())
             // Re-open the actual TUN after clean shutdown. Each cycle uses a fresh helper nonce.
             repeat(2) { cycle ->
                 var server: CommandServer? = null
                 var descriptor: ParcelFileDescriptor? = null
+                val messages = AtomicInteger(); val tunTcp = AtomicInteger(); val tunUdp = AtomicInteger(); val proxyTcp = AtomicInteger()
                 try {
                     val adapter = LibboxPlatformInterface(registeredVpnService(context)) { descriptor = it }
                     val handler = object : CommandServerHandler {
@@ -78,7 +81,13 @@ class NativeFullTunFixtureTest {
                         override fun serviceReload() {}
                         override fun serviceStop() {}
                         override fun setSystemProxyEnabled(enabled: Boolean) {}
-                        override fun writeDebugMessage(message: String?) { android.util.Log.d("FullTunFixture", message.orEmpty()) }
+                        override fun writeDebugMessage(message: String?) {
+                            // Export counters only, not arbitrary native messages or addresses.
+                            val text = message.orEmpty(); messages.incrementAndGet()
+                            if (text.contains("inbound/tun[tun-in]") && text.contains("inbound connection")) tunTcp.incrementAndGet()
+                            if (text.contains("inbound/tun[tun-in]") && text.contains("inbound packet connection")) tunUdp.incrementAndGet()
+                            if (text.contains("outbound/vless[proxy]") && text.contains("outbound connection")) proxyTcp.incrementAndGet()
+                        }
                     }
                     server = CommandServer(handler, adapter); server.start(); server.startOrReloadService(config.toString(), OverrideOptions())
                     assertNotNull("Native core must actually call VpnService.Builder.establish", descriptor)
@@ -93,11 +102,12 @@ class NativeFullTunFixtureTest {
                         if (parsed?.optString("nonce") == nonce) { result = parsed; break }
                         Thread.sleep(100)
                     }
-                    assertNotNull("Separate-UID helper did not finish", result)
+                    val counts = "coreMsgs=${messages.get()},tunTcp=${tunTcp.get()},tunUdp=${tunUdp.get()},proxyTcp=${proxyTcp.get()}"
+                    assertNotNull("Separate-UID helper did not finish; $counts", result)
                     assertNotEquals("Helper must not share the excluded VPN UID", context.applicationInfo.uid, result!!.getInt("uid"))
                     assertTrue("Cycle $cycle: helper must use the Android VPN network", result!!.optBoolean("vpn"))
-                    assertEquals("Cycle $cycle: DNS must go through the controlled tunnel", "198.18.0.1", result!!.optString("address"))
-                    assertEquals("$profile/$preset/$stack cycle $cycle: ${result!!.optString("stage")}/${result!!.optString("failure")}", 204, result!!.optInt("code", -1))
+                    assertEquals("$profile/$stack cycle $cycle: ${result!!.optString("stage")}/${result!!.optString("failure")}; $counts; DNS", "198.18.0.1", result!!.optString("address"))
+                    assertEquals("$profile/$preset/$stack cycle $cycle: ${result!!.optString("stage")}/${result!!.optString("failure")}; $counts", 204, result!!.optInt("code", -1))
                 } finally {
                     runCatching { server?.closeService() }; server?.close()
                     runCatching { descriptor?.close() }

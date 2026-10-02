@@ -1,6 +1,11 @@
 package com.vlesscardvpn
 
 import android.content.Context
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
+import io.nekohasekai.libbox.InterfaceUpdateListener
+import java.util.concurrent.atomic.AtomicReference
 import android.net.VpnService
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -59,6 +64,41 @@ class NativeCallbackContractTest {
                 assertTrue(length in 0..(address.address.size * 8))
             }
         }
+    }
+
+    @Test fun monitorReportsNetworkCostNotAddressFamilies() {
+        val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        val active = requireNotNull(cm.activeNetwork)
+        val caps = requireNotNull(cm.getNetworkCapabilities(active))
+        val reported = AtomicReference<Pair<Boolean, Boolean>>()
+        val listener = object : InterfaceUpdateListener {
+            override fun updateDefaultInterface(name: String?, index: Int, expensive: Boolean, constrained: Boolean) {
+                if (index >= 0) reported.set(expensive to constrained)
+            }
+        }
+        val platform = LibboxPlatformInterface(AttachedVpnService(context)) { }
+        try {
+            platform.startDefaultInterfaceMonitor(listener)
+            assertNotNull(reported.get())
+            assertEquals(!caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED), reported.get().first)
+            assertFalse(reported.get().second)
+        } finally { platform.closeDefaultInterfaceMonitor(listener) }
+    }
+
+    @Test fun lateLossOfAnotherNetworkDoesNotClearCurrentInterface() {
+        val reported = AtomicReference<Int>()
+        val listener = object : InterfaceUpdateListener {
+            override fun updateDefaultInterface(name: String?, index: Int, expensive: Boolean, constrained: Boolean) { reported.set(index) }
+        }
+        val platform = LibboxPlatformInterface(AttachedVpnService(context)) { }
+        try {
+            platform.startDefaultInterfaceMonitor(listener)
+            assertTrue(reported.get() >= 0)
+            val field = LibboxPlatformInterface::class.java.getDeclaredField("defaultNetworkCallback").apply { isAccessible = true }
+            val callback = field.get(platform) as ConnectivityManager.NetworkCallback
+            callback.onLost(Network.fromNetworkHandle((123456L shl 32) or 0xcafed00dL)) // Controlled out-of-order loss, not the active emulator network.
+            assertTrue("The current route must remain available", reported.get() >= 0)
+        } finally { platform.closeDefaultInterfaceMonitor(listener) }
     }
 
     private class AttachedVpnService(context: Context) : VpnService() {

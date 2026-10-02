@@ -13,6 +13,7 @@ import java.net.InetAddress
 import java.net.ServerSocket
 import java.net.Socket
 import java.util.concurrent.atomic.AtomicReference
+import java.util.concurrent.TimeUnit
 import javax.net.ssl.SSLSocketFactory
 
 class TunnelProbeTest {
@@ -101,13 +102,40 @@ class TunnelProbeTest {
         val result = TunnelHealthChecker.probe(null, "https://example.org/", 204, 100)
         assertNotNull(result.error); assertNull(result.httpCode)
     }
+    @Test fun stalledTlsRetainsHandshakeStage(): Unit = runBlocking {
+        ServerSocket(0, 1, InetAddress.getByName("127.0.0.1")).use { target ->
+            val accepted = AtomicReference<Socket>()
+            Thread { try { accepted.set(target.accept()) } catch (_: Exception) {} }.apply { isDaemon = true; start() }
+            try {
+                Proxy(target.localPort).use { proxy ->
+                    val result = TunnelHealthChecker.probe(proxy.endpoint, "https://localhost:${target.localPort}/", 204, 800)
+                    assertEquals(DiagnosticFailure.TIMEOUT, result.failure)
+                    assertEquals(DiagnosticFailure.TLS, result.stage)
+                    assertTrue(result.latencyMs!! > 0)
+                }
+            } finally { accepted.get()?.close() }
+        }
+    }
+    @Test fun stalledHttpRetainsResponseStage(): Unit = runBlocking {
+        val (server, tls, _) = fixtures()
+        server.use {
+            it.enqueue(MockResponse().setResponseCode(204).setHeadersDelay(3, TimeUnit.SECONDS))
+            Proxy(it.port).use { proxy ->
+                val result = TunnelHealthChecker.probe(proxy.endpoint, "https://localhost:${it.port}/", 204, 1000, tls)
+                assertNotNull(it.takeRequest(1, TimeUnit.SECONDS))
+                assertEquals(DiagnosticFailure.TIMEOUT, result.failure)
+                assertEquals(DiagnosticFailure.HTTP, result.stage)
+            }
+        }
+    }
     @Test fun stalledProxyIsClosedAtDeadline(): Unit = runBlocking {
         ServerSocket(0, 1, InetAddress.getByName("127.0.0.1")).use { server ->
             val accepted = AtomicReference<Socket>()
             Thread { try { accepted.set(server.accept()) } catch (_: Exception) {} }.apply { isDaemon = true; start() }
             val started = System.nanoTime()
             val result = TunnelHealthChecker.probe(LocalProbeProxy(server.localPort, "user", "password"), "https://example.org/", 204, 200)
-            assertNotNull(result.error); assertTrue((System.nanoTime() - started) / 1_000_000 < 2000)
+            assertNotNull(result.error); assertEquals(DiagnosticFailure.TIMEOUT, result.failure); assertEquals(DiagnosticFailure.PROXY, result.stage)
+            assertTrue(result.latencyMs!! > 0); assertTrue((System.nanoTime() - started) / 1_000_000 < 2000)
             accepted.get()?.close()
         }
     }

@@ -441,7 +441,8 @@ class VlessVpnService : VpnService() {
             // 5. Setup LibboxPlatformInterface and CommandServer
             val adapter = LibboxPlatformInterface(this@VlessVpnService, settingsSnapshot.bypassApps) { pfd ->
                 vpnInterface = pfd
-                NetworkDiagnosticLog.record(NetworkDiagnosticEvent(phase = DiagnosticPhase.TUN_READY))
+                NetworkDiagnosticLog.record(NetworkDiagnosticEvent(phase = DiagnosticPhase.TUN_READY,
+                    profile = if (autoMode) profile else null, preset = if (autoMode && profile == RouteProfile.BYEDPI) byeDpiPreset else null))
             }
             platformAdapter = adapter
 
@@ -505,7 +506,9 @@ class VlessVpnService : VpnService() {
             }
 
             // Do not publish CONNECTED just because a TUN interface exists.
-            TunnelHealthChecker.activeProxy = localProbe
+            check(vpnInterface != null) { "Ядро не создало Android VPN-туннель" }
+            TunnelHealthChecker.activate(localProbe, if (autoMode) profile else null,
+                if (autoMode && profile == RouteProfile.BYEDPI) byeDpiPreset else null)
             _vpnStats.value = _vpnStats.value.copy(progressMessage = "Проверяем HTTPS через выбранный сервер")
             safeStartForeground(1, createNotification(config, "Проверка реального маршрута…"))
             val report = TunnelHealthChecker.check(localProbe, timeoutMs = 4000)

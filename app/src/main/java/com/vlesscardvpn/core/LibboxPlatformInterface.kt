@@ -64,7 +64,14 @@ class LibboxPlatformInterface(
                 }
 
                 override fun onLost(network: Network) {
-                    activeMonitorListener?.updateDefaultInterface("", -1, false, false)
+                    // Loss of an old Wi-Fi network must not clear a replacement cellular route.
+                    val replacement = connectivityManager.activeNetwork
+                    if (replacement != null && replacement != network) reportNetworkUpdate(replacement)
+                    else activeMonitorListener?.updateDefaultInterface("", -1, false, false)
+                }
+
+                override fun onCapabilitiesChanged(network: Network, capabilities: NetworkCapabilities) {
+                    if (network == connectivityManager.activeNetwork) reportNetworkUpdate(network)
                 }
             }
 
@@ -112,17 +119,6 @@ class LibboxPlatformInterface(
 
             val ifaceName = lp.interfaceName ?: ""
             var ifaceIndex = -1
-            var hasV4 = false
-            var hasV6 = false
-
-            for (linkAddr in lp.linkAddresses) {
-                val addr = linkAddr.address
-                if (addr is Inet4Address && !addr.isLoopbackAddress && !addr.isLinkLocalAddress) {
-                    hasV4 = true
-                } else if (addr is Inet6Address && !addr.isLoopbackAddress && !addr.isLinkLocalAddress) {
-                    hasV6 = true
-                }
-            }
 
             if (ifaceName.isNotBlank()) {
                 try {
@@ -133,7 +129,10 @@ class LibboxPlatformInterface(
                 } catch (_: Exception) {}
             }
 
-            listener.updateDefaultInterface(ifaceName, ifaceIndex, hasV4, hasV6)
+            // libbox 1.11+ takes isExpensive/isConstrained, NOT hasIPv4/hasIPv6.
+            // Address families are already reported through getInterfaces().
+            val isExpensive = !caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED)
+            listener.updateDefaultInterface(ifaceName, ifaceIndex, isExpensive, false)
         } catch (e: Exception) {
             Log.e("LibboxPlatform", "Error reporting network update", e)
         }

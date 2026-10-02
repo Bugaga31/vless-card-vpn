@@ -16,7 +16,7 @@ class NetworkDiagnosticsTest {
     }
     @Test fun clampsNumericFields() {
         val e = NetworkDiagnosticEvent(phase = DiagnosticPhase.HTTPS_CHECK, httpCode = 9999, latencyMs = 900000)
-        assertTrue(e.line().endsWith("-1 | 60000"))
+        assertTrue(e.line().endsWith("-1 | 60000 | NONE"))
     }
     @Test fun clearAndOversizedFile() {
         val f = file(); f.writeText("x".repeat(150001)); val ring = DiagnosticRing(f)

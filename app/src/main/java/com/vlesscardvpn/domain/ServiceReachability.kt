@@ -20,7 +20,7 @@ enum class ServiceTarget(val label: String, val url: String, val expectedCode: I
     YOUTUBE("YouTube · HTTPS", "https://www.youtube.com/generate_204", 204)
 }
 
-data class ServiceProbe(val latencyMs: Int? = null, val httpCode: Int? = null, val error: String? = null, val failure: DiagnosticFailure = DiagnosticFailure.NONE)
+data class ServiceProbe(val latencyMs: Int? = null, val httpCode: Int? = null, val error: String? = null, val failure: DiagnosticFailure = DiagnosticFailure.NONE, val stage: DiagnosticFailure = DiagnosticFailure.NONE)
 data class ServiceReachabilityResult(val target: ServiceTarget, val samples: List<ServiceProbe>) {
     val successful: List<ServiceProbe> get() = samples.filter { it.error == null && it.httpCode == target.expectedCode && it.latencyMs != null }
     val medianMs: Int? get() {
@@ -39,10 +39,11 @@ data class ServiceReachabilityResult(val target: ServiceTarget, val samples: Lis
 /** Always checks the active native outbound; never falls back to the excluded app route. */
 object ServiceReachability {
     suspend fun checkBoth(): List<ServiceReachabilityResult> = coroutineScope {
+        val proxy = TunnelHealthChecker.activeProxy // One session for every sample, never mix two routes.
         ServiceTarget.values().map { target -> async {
             val samples = mutableListOf<ServiceProbe>()
             repeat(3) {
-                samples += TunnelHealthChecker.probe(TunnelHealthChecker.activeProxy, target.url, target.expectedCode, 4000)
+                samples += TunnelHealthChecker.probe(proxy, target.url, target.expectedCode, 4000)
             }
             ServiceReachabilityResult(target, samples)
         } }.awaitAll()
