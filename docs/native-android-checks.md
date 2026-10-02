@@ -58,36 +58,59 @@ The host listeners bind only to loopback. Ports 18443 and 24443 must be free.
 The CI host backend is sing-box 1.14.2 with SHA-256-verified archive. The client
 remains the repository's bundled libbox; this is not a core migration.
 
-## Automated Android matrix
+## Automated Android matrix — executed
 
-`Android native route checks` is prepared locally for pushes to the stability
-work branch or manual dispatch; it has NOT been added to GitHub. The connector
-rejected a commit containing `.github/workflows/native-android-check.yml` with
-403, while the same source/test changes without that workflow succeeded.
-Publishing the workflow needs a connection authorized to write workflows.
-The prepared workflow It builds debug/test APKs, executes JVM tests, and runs 19
-instrumented JNI/Room/fixture checks on API 26 and API 33 x86_64 emulators with
-KVM. Results are uploaded as test artifacts, not published as a release APK.
-The runner is commit-pinned. Its script launches one Bash file so fixture PID,
-CA path, failure handling and cleanup share the same shell.
+`Android native route checks` is now published and runs on pushes to the
+stability work branch or manual dispatch. The connector could not write the
+workflow; publication was completed after explicit GitHub CLI authorization.
 
-There is no Actions run from this prepared workflow yet. Even publishing it
-would not be evidence that it passed; check an actual run. This matrix does not cover ARM/ARM64, OEM firmware, every Android version,
+The first infrastructure run failed because setup-android's default package list
+included the removed legacy `tools` package. The workflow now explicitly requests
+platform-tools, API 34 and build-tools 34.0.0. SDK and emulator actions are
+commit-pinned. The emulator runner invokes one Bash file so fixture PID, CA path,
+failure handling and cleanup share the same shell.
+
+The first actual instrumented run executed all 19 checks on both API 26 and API 33.
+It found two migration failures per OS while all five controlled outbound modes
+passed. The migration called `execSQL("PRAGMA secure_delete=ON")`, but Android
+SQLite rejects row-returning statements through execSQL. This aborted migration
+before legacy servers could load. The fix uses query, consumes the returned row
+and verifies secure_delete is enabled. The transaction/rollback behavior is kept;
+no database reset, record deletion or TLS-security relaxation was introduced.
+This is a reproduced defect, not proof of the cause of every reported VPN failure.
+
+### Verified successful run
+
+- Source commit: `1f9c83b7ff9e54212c914c89c3ebd7cc13752a5f`.
+- Run: https://github.com/Bugaga31/vless-card-vpn/actions/runs/37005630860
+- API 26 x86_64: **OK (19 tests)**, verified from the uploaded native-results artifact.
+- API 33 x86_64: **OK (19 tests)**, verified from the uploaded native-results artifact.
+- Both migration success/rollback checks, Android Keystore, metadata interleavings,
+  JNI callback contracts, native configuration validation and all five controlled
+  VLESS/TLS outbound modes passed.
+
+The workflow builds debug/test APKs and runs JVM tests before instrumentation.
+It uploads diagnostic/test artifacts, not a signed release APK. The tested
+REALITY case is schema validation only; the live controlled fixture is VLESS/TLS.
+
+This matrix does not cover ARM/ARM64, realme firmware, every Android version,
 mobile networks, power-saving policies, full TUN routing or all countries.
+A passing loopback/native outbound fixture is not a YouTube/video, Telegram
+MTProto/call or Russian-ISP bypass result.
 
 ## Local execution limitation
 
 The local Linux host has no `/dev/kvm`. An API 33 x86_64 emulator was launched
 with software emulation, but its first boot did not reach `sys.boot_completed=1`
 within approximately 25 minutes. Installation attempts hit Android services
-that were not yet initialized. No local instrumented test result is claimed
-from that emulator. The blocked emulator was stopped; native/test APKs and
-JVM regression checks were built separately. The complete local build passed
-(`testDebugUnitTest`, release Kotlin compilation, debug APK and Android-test APK).
-All 217 JVM tests passed, with no failures/errors/skips. The generated host
-fixture also passed verified TLS/HTTPS 204/302 and temporary-key cleanup.
-The 19 Android instrumentation tests compiled but were not executed.
-CI execution is blocked on workflow authorization and is not claimed.
+that were not yet initialized. No local instrumented result is claimed from
+that emulator. The actual device-style results above came from hosted CI with KVM.
+
+After the migration fix, local JVM regression tests, release Kotlin compilation
+and Android-test Kotlin compilation passed. All **217 JVM tests** passed with
+no failures/errors/skips. The generated host fixture also passed verified
+TLS/HTTPS 204/302 and temporary-key cleanup; that host smoke test alone is not
+Android/native/TUN evidence.
 
 This change is source/test infrastructure only; no signed Lab update is included.
-Do not uninstall the installed application or erase its protected data to test it.
+Do not uninstall the installed application or erase protected data to test it.
