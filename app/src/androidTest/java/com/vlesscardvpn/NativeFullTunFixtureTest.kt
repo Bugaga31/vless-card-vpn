@@ -1,6 +1,8 @@
 package com.vlesscardvpn
 
 import android.content.Context
+import android.content.ContextWrapper
+import com.vlesscardvpn.worker.VlessVpnService
 import android.net.VpnService
 import android.os.Build
 import android.os.ParcelFileDescriptor
@@ -65,7 +67,7 @@ class NativeFullTunFixtureTest {
                 var server: CommandServer? = null
                 var descriptor: ParcelFileDescriptor? = null
                 try {
-                    val adapter = LibboxPlatformInterface(AttachedVpnService(context)) { descriptor = it }
+                    val adapter = LibboxPlatformInterface(registeredVpnService(context)) { descriptor = it }
                     val handler = object : CommandServerHandler {
                         override fun getSystemProxyStatus(): SystemProxyStatus = NativeCallbackValues.disabledSystemProxy()
                         override fun serviceReload() {}
@@ -103,5 +105,14 @@ class NativeFullTunFixtureTest {
         InstrumentationRegistry.getInstrumentation().uiAutomation.executeShellCommand(command).use { fd ->
             ParcelFileDescriptor.AutoCloseInputStream(fd).bufferedReader().use { it.readText() }
         }
-    private class AttachedVpnService(context: Context) : VpnService() { init { attachBaseContext(context) } }
+    // Android Builder identifies the service by its actual class name. An anonymous
+    // VpnService subclass cannot establish a TUN unless it is in the manifest.
+    // Attach only the public SDK ContextWrapper base context; do not bypass VPN
+    // permissions or invoke hidden Service.attach APIs. Service lifecycle/Auto are
+    // intentionally outside this platform-adapter fixture.
+    private fun registeredVpnService(context: Context): VpnService = VlessVpnService().also { service ->
+        ContextWrapper::class.java.getDeclaredMethod("attachBaseContext", Context::class.java).apply {
+            isAccessible = true
+        }.invoke(service, context)
+    }
 }

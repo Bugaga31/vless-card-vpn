@@ -9,3 +9,5 @@ The helper module is separate from the VPN APK, marked testOnly, accepts only a 
 Limits: clean native-core stop/reopen is not a simulation of Wi-Fi-to-cellular recovery, UI Auto selection or a real operator outage. Controlled HTTPS is not YouTube playback, Telegram MTProto, a Russian-ISP test, an ARM-device test, a packet-shape assessment or proof that public subscriptions work. Production bootstrap DNS, slow mobile-route timeout policy, device power management and user-network diagnostics still require separate investigation.
 
 Local checks: JVM regressions passed; the new instrumentation sources and helper APK compiled. The host fixture passed controlled HTTPS, UDP DNS and a REALITY/Vision smoke test. Android execution results are recorded only after CI finishes; adding or compiling a test is not a passed Android test.
+
+First Android run: the five new TUN tests failed because their unregistered VpnService subclass was rejected by Android Builder. The fixture now uses the manifest-declared VlessVpnService class with a test-attached ContextWrapper. This does not exercise production onStartCommand / Auto UI lifecycle. A new matrix run is required.
