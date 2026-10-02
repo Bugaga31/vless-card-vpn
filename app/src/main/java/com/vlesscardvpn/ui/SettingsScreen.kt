@@ -78,6 +78,7 @@ fun SettingsScreen(
         ) {
             AppearancePanel(settings.themeMode) { mode -> repo.updateSettings { it.copy(themeMode = mode) } }
             StorageProtectionPanel(storageIssue)
+            NetworkDiagnosticsPanel()
 
             // Group 1: Подключение & Автопилот
             GroupCard(title = "Подключение и автопилот") {

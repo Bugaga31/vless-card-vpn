@@ -23,6 +23,10 @@ import com.vlesscardvpn.core.ByeDpiRunner
 import com.vlesscardvpn.data.AdaptiveRouteMemory
 import com.vlesscardvpn.domain.RouteProfile
 import com.vlesscardvpn.domain.AdaptiveRoutePolicy
+import com.vlesscardvpn.domain.NetworkDiagnosticLog
+import com.vlesscardvpn.domain.NetworkDiagnosticEvent
+import com.vlesscardvpn.domain.DiagnosticPhase
+import com.vlesscardvpn.domain.DiagnosticFailure
 import com.vlesscardvpn.core.CrashReportManager
 import com.vlesscardvpn.VlessApplication
 import go.Seq
@@ -265,6 +269,7 @@ class VlessVpnService : VpnService() {
 
     /** Explicit foreground Auto action: bounded, cancellable selection using real authenticated tunnels. */
     private suspend fun handleAutoConnectLocked(sessionId: Long) {
+        NetworkDiagnosticLog.record(NetworkDiagnosticEvent(phase = DiagnosticPhase.AUTO_START))
         if (sessionId != sessionSequence.get()) return
         cleanupResources()
         _vpnStats.value = VpnSessionStats(status = VpnStatus.CONNECTING, autoMode = true,
@@ -377,6 +382,8 @@ class VlessVpnService : VpnService() {
         }
 
         val base = repository.settingsFlow.value
+        NetworkDiagnosticLog.record(NetworkDiagnosticEvent(phase = DiagnosticPhase.ROUTE_START, profile = profile,
+            preset = if (profile == RouteProfile.BYEDPI) byeDpiPreset else null))
         val routeLabel = if (profile == RouteProfile.BYEDPI) byeDpiPreset.label else profile.label
         val settingsSnapshot: AppSettings = if (autoMode) AdaptiveRoutePolicy.safeSettings(base, profile) else base
 
@@ -465,6 +472,7 @@ class VlessVpnService : VpnService() {
                 s
             } catch (t: Throwable) {
                 Log.e("VlessVpnService", "CommandServer startOrReloadService failed (libbox/JNI)", t)
+                NetworkDiagnosticLog.record(NetworkDiagnosticEvent(phase = DiagnosticPhase.CORE_FAILURE, failure = DiagnosticFailure.CORE))
                 CrashReportManager.recordException(applicationContext, Thread.currentThread(), t, "VPN_START")
                 cleanupResources()
                 _vpnStats.value = VpnSessionStats(
@@ -503,6 +511,8 @@ class VlessVpnService : VpnService() {
                 if (!autoMode) stopForeground(STOP_FOREGROUND_REMOVE)
                 return
             }
+            NetworkDiagnosticLog.record(NetworkDiagnosticEvent(phase = if (report.preferredServices) DiagnosticPhase.CONNECTED else DiagnosticPhase.PARTIAL,
+                profile = profile, preset = if (profile == RouteProfile.BYEDPI) byeDpiPreset else null))
             val startTime = System.currentTimeMillis()
             repository.updateConfig(config.copy(healthState = "HEALTHY", httpLatencyMs = report.latencyMs,
                 lastCheck = startTime, failureCount = 0))
@@ -548,7 +558,8 @@ class VlessVpnService : VpnService() {
             if (!autoMode) stopForeground(STOP_FOREGROUND_REMOVE)
         } catch (t: Throwable) {
             // Catches JVM/linkage failures, NOT SIGSEGV/abort in native code.
-            CrashReportManager.recordException(applicationContext, Thread.currentThread(), t, "VPN_START")
+            NetworkDiagnosticLog.record(NetworkDiagnosticEvent(phase = DiagnosticPhase.CORE_FAILURE, failure = DiagnosticFailure.CORE))
+                CrashReportManager.recordException(applicationContext, Thread.currentThread(), t, "VPN_START")
             Log.e("VlessVpnService", "FATAL Throwable in VPN tunnel setup (JNI/libbox)", t)
             cleanupResources()
             _vpnStats.value = VpnSessionStats(
@@ -768,6 +779,7 @@ class VlessVpnService : VpnService() {
     }
 
     override fun onDestroy() {
+        NetworkDiagnosticLog.record(NetworkDiagnosticEvent(phase = DiagnosticPhase.STOPPED))
         sessionSequence.incrementAndGet()
         connectionJob?.cancel()
         screenStateReceiver?.let {

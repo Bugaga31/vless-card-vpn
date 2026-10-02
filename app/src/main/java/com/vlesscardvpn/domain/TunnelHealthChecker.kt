@@ -34,6 +34,9 @@ object TunnelHealthChecker {
                 Triple(ServiceTarget.TELEGRAM.label, ServiceTarget.TELEGRAM.url, ServiceTarget.TELEGRAM.expectedCode)
             ).map { (label, url, expected) -> async {
                 val result = probe(proxy, url, expected, timeoutMs)
+                NetworkDiagnosticLog.record(NetworkDiagnosticEvent(phase = DiagnosticPhase.HTTPS_CHECK,
+                    target = when (label) { "Cloudflare" -> DiagnosticTarget.INTERNET; ServiceTarget.YOUTUBE.label -> DiagnosticTarget.YOUTUBE; else -> DiagnosticTarget.TELEGRAM },
+                    failure = result.failure, httpCode = result.httpCode ?: -1, latencyMs = result.latencyMs ?: -1))
                 TunnelProbe(label, result.latencyMs ?: -1, result.httpCode ?: -1, expected)
             } }.awaitAll().let { TunnelHealthReport(it, System.currentTimeMillis()) }
         }
@@ -43,7 +46,7 @@ object TunnelHealthChecker {
         proxy: LocalProbeProxy?, url: String, expectedCode: Int, timeoutMs: Int,
         tlsFactory: SSLSocketFactory = SSLSocketFactory.getDefault() as SSLSocketFactory
     ): ServiceProbe {
-        if (proxy == null) return ServiceProbe(error = "Нет активного проверяемого маршрута")
+        if (proxy == null) return ServiceProbe(error = "Нет активного проверяемого маршрута", failure = DiagnosticFailure.NO_ROUTE)
         val uri = URI(url)
         require(uri.scheme == "https" && uri.host != null && uri.userInfo == null && uri.fragment == null)
         return try {
@@ -53,8 +56,10 @@ object TunnelHealthChecker {
                     continuation.invokeOnCancellation { try { socket.close() } catch (_: Exception) {} }
                     CoroutineScope(continuation.context + Dispatchers.IO).launch {
                         val started = System.nanoTime()
+                        var stage = DiagnosticFailure.CONNECT
                         val result = try {
                             socket.use {
+                                stage = DiagnosticFailure.PROXY
                                 Socks5Client.connect(socket, proxy, uri.host, if (uri.port > 0) uri.port else 443, timeoutMs)
                                 (tlsFactory.createSocket(socket, uri.host, if (uri.port > 0) uri.port else 443, true) as SSLSocket).use { tls ->
                                     tls.soTimeout = timeoutMs
@@ -62,7 +67,9 @@ object TunnelHealthChecker {
                                         endpointIdentificationAlgorithm = "HTTPS"
                                         serverNames = listOf(SNIHostName(uri.host))
                                     }
+                                    stage = DiagnosticFailure.TLS
                                     tls.startHandshake()
+                                    stage = DiagnosticFailure.HTTP
                                     val path = uri.rawPath.ifBlank { "/" } + (uri.rawQuery?.let { "?$it" } ?: "")
                                     val hostHeader = uri.host + if (uri.port > 0 && uri.port != 443) ":${uri.port}" else ""
                                     tls.getOutputStream().apply {
@@ -78,14 +85,16 @@ object TunnelHealthChecker {
                                     val match = Regex("^HTTP/1\\.[01] ([0-9]{3})(?: .*|)$").matchEntire(status.toString())
                                     val code = match?.groupValues?.get(1)?.toInt() ?: error("Invalid HTTP status")
                                     val elapsed = ((System.nanoTime() - started) / 1_000_000).coerceIn(1, Int.MAX_VALUE.toLong()).toInt()
-                                    ServiceProbe(elapsed, code, if (code == expectedCode) null else "Неожиданный HTTP $code")
+                                    ServiceProbe(elapsed, code, if (code == expectedCode) null else "Неожиданный HTTP $code",
+                                        if (code == expectedCode) DiagnosticFailure.NONE else DiagnosticFailure.HTTP)
                                 }
                             }
-                        } catch (_: Exception) { ServiceProbe(error = "Маршрут, TLS или сервер недоступны") }
+                        } catch (e: Exception) { ServiceProbe(error = "Маршрут, TLS или сервер недоступны",
+                            failure = if (e is java.net.SocketTimeoutException) DiagnosticFailure.TIMEOUT else stage) }
                         if (continuation.isActive) continuation.resume(result)
                     }
                 }
             }
-        } catch (_: TimeoutCancellationException) { ServiceProbe(error = "Таймаут маршрута") }
+        } catch (_: TimeoutCancellationException) { ServiceProbe(error = "Таймаут маршрута", failure = DiagnosticFailure.TIMEOUT) }
     }
 }

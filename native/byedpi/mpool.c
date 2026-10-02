@@ -190,13 +190,17 @@ void load_cache(struct mphdr *hdr, FILE *in, struct desync_params *dp)
         
         int bitlen;
         uint16_t port;
+        intmax_t parsed_time;
         time_t cache_time;
         
-        int c = fscanf(in, "0 %39s %d %hu %jd %255s\n", 
-            addr_str, &bitlen, &port, &cache_time, host);
-        if (c < 1) {
+        int c = fscanf(in, "0 %45s %d %hu %jd %255s\n",
+            addr_str, &bitlen, &port, &parsed_time, host);
+        if (c != 5) {
             return;
         }
+        if (bitlen < 0 || bitlen > 128) { continue; }
+        cache_time = (time_t)parsed_time;
+        if ((intmax_t)cache_time != parsed_time) { continue; }
         struct cache_key key = { 0 };
         int key_size = offsetof(struct cache_key, ip.v4);
         bitlen += key_size * 8;

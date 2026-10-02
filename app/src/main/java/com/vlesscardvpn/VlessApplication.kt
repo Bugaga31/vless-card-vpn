@@ -43,6 +43,7 @@ class VlessApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        com.vlesscardvpn.domain.NetworkDiagnosticLog.ring = com.vlesscardvpn.domain.DiagnosticRing(File(noBackupFilesDir, "network-diagnostics.log"))
         setupUncaughtExceptionHandler()
         // Read previous native-crash metadata off the main thread on Android 11+.
         Thread({ CrashReportManager.recordPreviousNativeExits(applicationContext) },

@@ -17,15 +17,16 @@ android {
         // Install the diagnostic build alongside the release without deleting user data.
         val stabilityPreview = providers.gradleProperty("stabilityPreview").orNull == "true"
         val autoPreview = providers.gradleProperty("autoPreview").orNull == "true"
-        applicationId = when { autoPreview -> "com.vlesscardvpn.auto"; stabilityPreview -> "com.vlesscardvpn.preview"; else -> "com.vlesscardvpn" }
-        manifestPlaceholders["vpnAppLabel"] = when { autoPreview -> "VLESS Card VPN · Auto"; stabilityPreview -> "VLESS Card VPN · Test"; else -> "@string/app_name" }
+        val labPreview = providers.gradleProperty("labPreview").orNull == "true"
+        applicationId = when { labPreview -> "com.vlesscardvpn.lab"; autoPreview -> "com.vlesscardvpn.auto"; stabilityPreview -> "com.vlesscardvpn.preview"; else -> "com.vlesscardvpn" }
+        manifestPlaceholders["vpnAppLabel"] = when { labPreview -> "VLESS Card · Lab"; autoPreview -> "VLESS Card VPN · Auto"; stabilityPreview -> "VLESS Card VPN · Test"; else -> "@string/app_name" }
         minSdk = 24
         targetSdk = 34
         versionCode = releaseNumber
         versionName = "1.0.$releaseNumber"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables { useSupportLibrary = true }
-        ndk { abiFilters.addAll(if (autoPreview) listOf("arm64-v8a", "armeabi-v7a") else listOf("arm64-v8a", "armeabi-v7a", "x86_64", "x86")) }
+        ndk { abiFilters.addAll(if (autoPreview || labPreview) listOf("arm64-v8a", "armeabi-v7a") else listOf("arm64-v8a", "armeabi-v7a", "x86_64", "x86")) }
     }
     testOptions { unitTests.isReturnDefaultValues = true }
     buildTypes {
@@ -94,11 +95,11 @@ val buildByeDpi by tasks.registering(Exec::class) {
     inputs.dir(rootProject.file("native/byedpi"))
     inputs.file(rootProject.file("native/build-byedpi.sh"))
     inputs.file(rootProject.file("native/launcher.c"))
-    inputs.property("armOnly", providers.gradleProperty("autoPreview").orNull ?: "false")
+    inputs.property("armOnly", providers.gradleProperty("autoPreview").orNull == "true" || providers.gradleProperty("labPreview").orNull == "true")
     outputs.dir(layout.buildDirectory.dir("generated/byedpi"))
     commandLine("bash", rootProject.file("native/build-byedpi.sh").absolutePath,
         "$sdk/ndk/27.2.12479018", layout.buildDirectory.dir("generated/byedpi").get().asFile.absolutePath,
-        if (providers.gradleProperty("autoPreview").orNull == "true") "arm" else "all")
+        if (providers.gradleProperty("autoPreview").orNull == "true" || providers.gradleProperty("labPreview").orNull == "true") "arm" else "all")
 }
 tasks.named("preBuild").configure { dependsOn(buildByeDpi) }
 

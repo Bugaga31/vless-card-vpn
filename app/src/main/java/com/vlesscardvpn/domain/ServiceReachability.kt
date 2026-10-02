@@ -20,7 +20,7 @@ enum class ServiceTarget(val label: String, val url: String, val expectedCode: I
     YOUTUBE("YouTube · HTTPS", "https://www.youtube.com/generate_204", 204)
 }
 
-data class ServiceProbe(val latencyMs: Int? = null, val httpCode: Int? = null, val error: String? = null)
+data class ServiceProbe(val latencyMs: Int? = null, val httpCode: Int? = null, val error: String? = null, val failure: DiagnosticFailure = DiagnosticFailure.NONE)
 data class ServiceReachabilityResult(val target: ServiceTarget, val samples: List<ServiceProbe>) {
     val successful: List<ServiceProbe> get() = samples.filter { it.error == null && it.httpCode == target.expectedCode && it.latencyMs != null }
     val medianMs: Int? get() {
