@@ -1,6 +1,8 @@
 package com.vlesscardvpn.core
 
 import android.content.Context
+import android.os.Build
+import com.vlesscardvpn.domain.TunStackPolicy
 import com.vlesscardvpn.domain.AutoConnectPolicy
 import com.vlesscardvpn.domain.AppSettings
 import com.vlesscardvpn.domain.VlessConfig
@@ -94,7 +96,8 @@ object SingBoxManager {
         settings: AppSettings = AppSettings(),
         networkProfile: EvaluatedNetworkProfile? = null,
         probeProxy: LocalProbeProxy? = null,
-        antiDpiPort: Int? = null
+        antiDpiPort: Int? = null,
+        platformSdk: Int? = null
     ): String {
         val effectiveSni = resolveEffectiveSni(config, settings, networkProfile)
         val effectiveMtu = (networkProfile?.optimalMtu ?: settings.mtuSize).coerceIn(1280, 1500)
@@ -245,7 +248,9 @@ object SingBoxManager {
                 put("mtu", effectiveMtu)
                 put("auto_route", true)
                 put("strict_route", true)
-                put("stack", "mixed")
+                // API 26 mixed TUN timed out in executed fixtures; use the observed
+                // compatible userspace stack there without weakening DNS/TLS routing.
+                put("stack", TunStackPolicy.forSdk(platformSdk ?: context?.let { Build.VERSION.SDK_INT }))
             })
         }
 

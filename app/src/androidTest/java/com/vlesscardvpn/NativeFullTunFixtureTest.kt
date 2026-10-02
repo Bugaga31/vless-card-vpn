@@ -38,6 +38,15 @@ class NativeFullTunFixtureTest {
             workingPath = basePath; tempPath = context.cacheDir.absolutePath; fixAndroidStack = true
         })
     }
+    @Test fun generatedTunStackMatchesRunningAndroidPolicy() {
+        val node = VlessConfig(name = "Policy fixture", address = "fixture.test", port = 443,
+            uuid = "00000000-0000-4000-8000-000000000001", security = "tls", sni = "fixture.test", flow = "")
+        val json = JSONObject(SingBoxManager.generateConfig(context, node, AppSettings()))
+        val inbounds = json.getJSONArray("inbounds")
+        val tun = (0 until inbounds.length()).map { inbounds.getJSONObject(it) }.single { it.getString("tag") == "tun-in" }
+        assertEquals(TunStackPolicy.forSdk(Build.VERSION.SDK_INT), tun.getString("stack"))
+        Libbox.checkConfig(json.toString())
+    }
     @Test fun gvisorCompatibleTunDnsHttpsAndRestart() = exercise(RouteProfile.COMPATIBLE, stack = "gvisor")
     @Test fun compatibleTunDnsHttpsAndRestart() = exercise(RouteProfile.COMPATIBLE)
     @Test fun fragmentedTunDnsHttpsAndRestart() = exercise(RouteProfile.FRAGMENT)
@@ -48,8 +57,9 @@ class NativeFullTunFixtureTest {
     @Test fun middleSniTunDnsHttpsAndRestart() = exercise(RouteProfile.BYEDPI, ByeDpiPreset.SNI_MIDDLE)
     @Test fun edgeSniTunDnsHttpsAndRestart() = exercise(RouteProfile.BYEDPI, ByeDpiPreset.SNI_EDGES)
 
-    private fun exercise(profile: RouteProfile, preset: ByeDpiPreset = ByeDpiPreset.COMBINED, stack: String = "mixed") = runBlocking {
+    private fun exercise(profile: RouteProfile, preset: ByeDpiPreset = ByeDpiPreset.COMBINED, stack: String? = null) = runBlocking {
         val args = InstrumentationRegistry.getArguments()
+        val selectedStack = stack ?: TunStackPolicy.forSdk(Build.VERSION.SDK_INT)
         val host = args.getString("fixture_host") ?: "10.0.2.2"
         val node = VlessConfig(name = "Full TUN fixture", address = host, port = 24443,
             uuid = "00000000-0000-4000-8000-000000000001", security = "tls", sni = "vpn.test.local", flow = "")
@@ -65,7 +75,7 @@ class NativeFullTunFixtureTest {
             try {
                 val dpiPort = if (profile == RouteProfile.BYEDPI) runner.start(preset) else null
                 val config = JSONObject(SingBoxManager.generateConfig(null, node,
-                    AdaptiveRoutePolicy.safeSettings(AppSettings(), profile), probeProxy = proxy, antiDpiPort = dpiPort))
+                    AdaptiveRoutePolicy.safeSettings(AppSettings(), profile), probeProxy = proxy, antiDpiPort = dpiPort, platformSdk = Build.VERSION.SDK_INT))
                 // Fixture-only CA and DNS resolver. Production trust/security settings are unchanged.
                 val outs = config.getJSONArray("outbounds")
                 for (i in 0 until outs.length()) if (outs.getJSONObject(i).getString("tag") == "proxy") {
@@ -75,7 +85,9 @@ class NativeFullTunFixtureTest {
                     .put("address", "udp://127.0.0.1:15353").put("detour", "proxy")
                 val inbounds = config.getJSONArray("inbounds")
                 for (i in 0 until inbounds.length()) if (inbounds.getJSONObject(i).getString("tag") == "tun-in") {
-                    inbounds.getJSONObject(i).put("stack", stack)
+                    if (stack == null) assertEquals("Fixture must exercise the actual production stack policy", selectedStack,
+                        inbounds.getJSONObject(i).getString("stack"))
+                    else inbounds.getJSONObject(i).put("stack", stack)
                 }
                 config.getJSONObject("log").put("level", "debug") // Controlled fixtures only, not production logging.
                 Libbox.checkConfig(config.toString())
@@ -112,8 +124,8 @@ class NativeFullTunFixtureTest {
                 val pinned = result!!.optJSONObject("pinned")
                 val comparison = "defaultSame=${result!!.optBoolean("default_network_same")},dnsCount=${result!!.optInt("dns_count")},routes=${result!!.optInt("route_count")},mtu=${result!!.optInt("mtu")},pinned=${pinned?.optString("stage")}/${pinned?.optString("failure")}/${pinned?.optInt("code", -1)}"
                 assertTrue("Cycle $cycle: helper must use the Android VPN network", result!!.optBoolean("vpn"))
-                assertEquals("$profile/$stack cycle $cycle: ${result!!.optString("stage")}/${result!!.optString("failure")}; $counts; $comparison; DNS", "198.18.0.1", result!!.optString("address"))
-                assertEquals("$profile/$preset/$stack cycle $cycle: ${result!!.optString("stage")}/${result!!.optString("failure")}; $counts; $comparison", 204, result!!.optInt("code", -1))
+                assertEquals("$profile/$selectedStack cycle $cycle: ${result!!.optString("stage")}/${result!!.optString("failure")}; $counts; $comparison; DNS", "198.18.0.1", result!!.optString("address"))
+                assertEquals("$profile/$preset/$selectedStack cycle $cycle: ${result!!.optString("stage")}/${result!!.optString("failure")}; $counts; $comparison", 204, result!!.optInt("code", -1))
                 assertTrue("Default network must not change during the default probe; $comparison", result!!.optBoolean("default_network_same"))
                 assertNotNull("Pinned VPN comparison must finish; $comparison", pinned)
                 assertTrue("Pinned network must remain a VPN; $comparison", result!!.optBoolean("pinned_network_still_vpn"))
