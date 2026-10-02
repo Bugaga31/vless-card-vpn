@@ -9,7 +9,13 @@ import com.vlesscardvpn.domain.VlessConfig
 /** Room runs the migration transactionally: failures must roll back, never delete user records. */
 class NodeStorageMigration(private val cipher: EnvelopeCipher) : Migration(1, 2) {
     override fun migrate(db: SupportSQLiteDatabase) {
-        db.execSQL("PRAGMA secure_delete=ON")
+        // This PRAGMA returns a row on Android SQLite. execSQL rejects row-returning
+        // statements and aborts the migration before any server can be loaded.
+        db.query("PRAGMA secure_delete=ON").use { result ->
+            check(result.moveToFirst() && result.getInt(0) == 1) {
+                "SQLite secure_delete could not be enabled"
+            }
+        }
         db.execSQL("ALTER TABLE vless_configs ADD COLUMN encryptedPayload TEXT NOT NULL DEFAULT ''")
         db.query("SELECT * FROM vless_configs").use { rows ->
             while (rows.moveToNext()) {

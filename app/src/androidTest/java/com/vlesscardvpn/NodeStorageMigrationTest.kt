@@ -14,7 +14,7 @@ import org.junit.*
 import org.junit.Assert.*
 import org.junit.runner.RunWith
 
-/** Device tests: compiled in this change; execution requires an Android device/emulator. */
+/** Actual Android migration, rollback, secure-delete and Keystore regressions. */
 @RunWith(AndroidJUnit4::class)
 class NodeStorageMigrationTest {
     private val context = ApplicationProvider.getApplicationContext<android.content.Context>()
@@ -44,6 +44,10 @@ class NodeStorageMigrationTest {
             .addMigrations(NodeStorageMigration(cipher)).setJournalMode(androidx.room.RoomDatabase.JournalMode.TRUNCATE).build()
         try {
             val row = room.vlessConfigDao().getAll().single()
+            room.openHelper.writableDatabase.query("PRAGMA secure_delete").use { result ->
+                assertTrue(result.moveToFirst())
+                assertEquals(1, result.getInt(0))
+            }
             assertEquals("", row.uuid); assertEquals("", row.address); assertEquals("", row.source)
             assertTrue(row.encryptedPayload.startsWith("v1:"))
             val node = row.toDomain(cipher)
