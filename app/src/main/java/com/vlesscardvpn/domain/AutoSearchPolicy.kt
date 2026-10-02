@@ -11,6 +11,19 @@ object AutoSearchPolicy {
     const val MAX_NODES_PER_POOL = 12
     const val SAVED_ATTEMPTS = 6
     const val DEADLINE_MS = 60_000L
+    private fun hasRememberedProfile(config: VlessConfig, remembered: Map<String, String>): Boolean {
+        val value = remembered[AutoConnectPolicy.identity(config)] ?: return false
+        val profile = RouteProfile.entries.firstOrNull { it.name == value.substringBefore('#') } ?: return false
+        return profile in AdaptiveRoutePolicy.profiles(config) &&
+            (if (profile == RouteProfile.BYEDPI) ByeDpiPreset.remembered(value) != null else value == profile.name)
+    }
+    /** Keep favorites first, then routes verified on this network, before the candidate cap. */
+    fun candidates(configs: List<VlessConfig>, remembered: Map<String, String>, favoritesOnly: Boolean = false): List<VlessConfig> =
+        AutoConnectPolicy.rank(configs, favoritesOnly)
+            .sortedWith(compareByDescending<VlessConfig> { it.isFavorite }
+                .thenByDescending { hasRememberedProfile(it, remembered) })
+            .take(MAX_CANDIDATES)
+
     fun plan(
         candidates: List<Pair<VlessConfig, Int>>,
         remembered: Map<String, String> = emptyMap(),
@@ -19,6 +32,7 @@ object AutoSearchPolicy {
         val ordered = candidates.filter { AutoConnectPolicy.supports(it.first) }
             .distinctBy { AutoConnectPolicy.identity(it.first) }
             .sortedWith(compareByDescending<Pair<VlessConfig, Int>> { it.first.isFavorite }
+                .thenByDescending { hasRememberedProfile(it.first, remembered) }
                 .thenByDescending { !it.first.isFree }
                 .thenBy { it.first.failureCount.coerceIn(0, 5) }
                 .thenBy { if (it.second > 0) it.second else Int.MAX_VALUE })

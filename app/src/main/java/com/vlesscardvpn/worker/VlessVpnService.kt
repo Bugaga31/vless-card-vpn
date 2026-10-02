@@ -36,6 +36,7 @@ import com.vlesscardvpn.domain.AppSettings
 import com.vlesscardvpn.domain.PingTester
 import com.vlesscardvpn.domain.VlessConfig
 import com.vlesscardvpn.domain.AutoConnectPolicy
+import com.vlesscardvpn.domain.AutoTcpPreflight
 import com.vlesscardvpn.domain.AutoSearchPolicy
 import com.vlesscardvpn.domain.AutoRouteAttempt
 import com.vlesscardvpn.domain.ByeDpiPreset
@@ -285,16 +286,13 @@ class VlessVpnService : VpnService() {
         var lastReport = TunnelHealthReport()
         var bestPartial: Pair<AutoRouteAttempt, TunnelHealthReport>? = null
         suspend fun tryPool(pool: List<VlessConfig>, limit: Int = AutoConnectPolicy.MAX_ATTEMPTS): Boolean {
-            val candidates = AutoConnectPolicy.rank(pool, settings.autopilotAllowedOnlyFavorites)
-                .take(AutoSearchPolicy.MAX_CANDIDATES)
-            val measured = coroutineScope {
-                candidates.chunked(8).flatMap { group ->
-                    group.map { c -> async { c to PingTester.pingConfig(c, 1200) } }.awaitAll()
-                }
-            }
-            val remembered = candidates.mapNotNull { config ->
+            val supported = AutoConnectPolicy.rank(pool, settings.autopilotAllowedOnlyFavorites)
+            val remembered = supported.mapNotNull { config ->
                 routeMemory.get(config)?.let { AutoConnectPolicy.identity(config) to it }
             }.toMap()
+            val candidates = AutoSearchPolicy.candidates(supported, remembered, settings.autopilotAllowedOnlyFavorites)
+            _vpnStats.value = _vpnStats.value.copy(progressMessage = "Авто: быстрая проверка портов; затем проверим VPN")
+            val measured = AutoTcpPreflight.measure(candidates)
             for (attempt in AutoSearchPolicy.plan(measured, remembered, tried)) {
                 currentCoroutineContext().ensureActive()
                 if (sessionId != sessionSequence.get() || attempts >= limit) return false

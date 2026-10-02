@@ -92,4 +92,29 @@ class AutoSearchPolicyTest {
         assertTrue(AutoSearchPolicy.importedRows(listOf(node(1)), listOf(node(2))).isEmpty())
     }
 
+    @Test fun rememberedRouteOutsideOldCandidateCapIsNotLost() {
+        val rows = (1..40).map { node(it).copy(pingMs = it) }
+        val remembered = mapOf(AutoConnectPolicy.identity(rows.last()) to "FRAGMENT")
+        val selected = AutoSearchPolicy.candidates(rows, remembered)
+        assertEquals(24, selected.size)
+        assertEquals(rows.last().address, selected.first().address)
+        assertEquals(rows.last().address, AutoSearchPolicy.plan(selected.map { it to -1 }, remembered).first().config.address)
+    }
+    @Test fun favoritePreferenceAndFavoritesOnlyRemainRespected() {
+        val favorite = node(1).copy(isFavorite = true)
+        val working = node(2)
+        val memory = mapOf(AutoConnectPolicy.identity(working) to "BYEDPI#TCP_ONLY")
+        assertEquals(favorite, AutoSearchPolicy.candidates(listOf(working, favorite), memory).first())
+        assertEquals(listOf(favorite), AutoSearchPolicy.candidates(listOf(working, favorite), memory, true))
+    }
+    @Test fun malformedOrIncompatibleMemoryCannotGetPriority() {
+        val normal = node(1)
+        val invalid = node(2)
+        val shadowsocks = node(3).copy(protocolType = "ss", uuid = "aes-128-gcm:password", security = "none")
+        val memory = mapOf(AutoConnectPolicy.identity(invalid) to "BYEDPI#UNKNOWN",
+            AutoConnectPolicy.identity(shadowsocks) to "FRAGMENT")
+        val ordered = AutoSearchPolicy.candidates(listOf(normal, invalid, shadowsocks), memory)
+        assertEquals(normal, ordered.first())
+    }
+
 }
