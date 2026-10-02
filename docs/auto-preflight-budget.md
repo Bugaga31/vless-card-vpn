@@ -14,6 +14,12 @@ This is an Auto-search responsiveness improvement, not a new cipher or a demonst
 
 Local executed: **234 JVM tests**, zero failures/errors/skips; Android instrumentation compiled successfully. Ten additional JVM cases cover the deadline, concurrency/candidate caps, parent cancellation, duplicate IDs, empty pools, real local sockets, a stalled connector, memory priority, favorite filtering and incompatible/malformed memory.
 
-Two additional controlled Android socket/deadline cases were added. The strict API 26 / 33 fixture gate now requires **33 instrumented tests**, with no failed/skipped tests. Their execution is pending a new CI run; previous 31-case results do not validate this source patch.
+Executed commit: `135ca36130e6fee14c1aee8175fd583c22608214`.
+CI: https://github.com/Bugaga31/vless-card-vpn/actions/runs/37033232141
+
+- API 33: all **33 instrumented tests passed**, strict gate with no failures/skips.
+- API 26: 33 cases executed, seven failures. The two new socket/deadline cases passed. Six existing full-TUN cases failed (mostly TCP_CONNECT timeouts; the gvisor comparison failed DNS during reopen). An additional older callback test used `Network.fromNetworkHandle`, unavailable on API 26, causing NoSuchMethodError. This is a test compatibility bug, not an app networking failure; replacing it with the public Parcelable CREATOR needs a fresh run.
+- Zero native-log counters in the assertion output are not proof that no packets were sent; those counters did not expose an explanation for the full-TUN failures.
+- The full matrix remains red. Do not claim Auto is fixed on every device or a new bypass method is proven.
 
 Not validated here: the entire Auto foreground-service/UI lifecycle, real ARM phone behavior, Russian ISP filtering, YouTube video or Telegram MTProto. No main merge, APK or release signing-key changes.

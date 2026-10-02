@@ -3,6 +3,7 @@ package com.vlesscardvpn
 import android.content.Context
 import android.net.ConnectivityManager
 import android.net.Network
+import android.os.Parcel
 import android.net.NetworkCapabilities
 import io.nekohasekai.libbox.InterfaceUpdateListener
 import java.util.concurrent.atomic.AtomicReference
@@ -86,6 +87,7 @@ class NativeCallbackContractTest {
     }
 
     @Test fun lateLossOfAnotherNetworkDoesNotClearCurrentInterface() {
+        val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
         val reported = AtomicReference<Int>()
         val listener = object : InterfaceUpdateListener {
             override fun updateDefaultInterface(name: String?, index: Int, expensive: Boolean, constrained: Boolean) { reported.set(index) }
@@ -96,7 +98,15 @@ class NativeCallbackContractTest {
             assertTrue(reported.get() >= 0)
             val field = LibboxPlatformInterface::class.java.getDeclaredField("defaultNetworkCallback").apply { isAccessible = true }
             val callback = field.get(platform) as ConnectivityManager.NetworkCallback
-            callback.onLost(Network.fromNetworkHandle((123456L shl 32) or 0xcafed00dL)) // Controlled out-of-order loss, not the active emulator network.
+            // Network.fromNetworkHandle is public only from API 28. The API 26
+            // Parcelable contract contains netId; use its public CREATOR, no hidden constructor.
+            val parcel = Parcel.obtain()
+            val lost = try {
+                parcel.writeInt(123456); parcel.setDataPosition(0)
+                Network.CREATOR.createFromParcel(parcel)
+            } finally { parcel.recycle() }
+            assertNotEquals(cm.activeNetwork, lost)
+            callback.onLost(lost) // Controlled out-of-order loss, not the active emulator network.
             assertTrue("The current route must remain available", reported.get() >= 0)
         } finally { platform.closeDefaultInterfaceMonitor(listener) }
     }
