@@ -59,13 +59,13 @@ public final class ProbeActivity extends Activity {
             SSLContext tls = SSLContext.getInstance("TLS"); tls.init(null, tm.getTrustManagers(), null);
             // Default path runs FIRST. A successful explicitly bound probe cannot warm
             // DNS before or replace the default-route result required by the strict gate.
-            JSONObject normal = measure(null, tls.getSocketFactory());
+            JSONObject normal = measure(null, tls.getSocketFactory(), nonce + "-default.fixture.test");
             result.put("stage", normal.optString("stage", "NONE"));
             result.put("address", normal.optString("address", ""));
             result.put("code", normal.optInt("code", -1));
             result.put("failure", normal.optString("failure", "OTHER"));
             result.put("default_network_same", network.equals(cm.getActiveNetwork()));
-            result.put("pinned", measure(network, tls.getSocketFactory()));
+            result.put("pinned", measure(network, tls.getSocketFactory(), nonce + "-bound.fixture.test"));
             NetworkCapabilities after = cm.getNetworkCapabilities(network);
             result.put("pinned_network_still_vpn", after != null && after.hasTransport(NetworkCapabilities.TRANSPORT_VPN));
         } catch (Exception error) {
@@ -79,14 +79,14 @@ public final class ProbeActivity extends Activity {
             runOnUiThread(this::finish);
         }
     }
-    private JSONObject measure(Network network, SSLSocketFactory tls) {
+    private JSONObject measure(Network network, SSLSocketFactory tls, String hostname) {
         AtomicReference<String> stage = new AtomicReference<>("DNS");
         AtomicReference<String> address = new AtomicReference<>("");
         AtomicReference<Socket> active = new AtomicReference<>();
         AtomicBoolean cancelled = new AtomicBoolean(false);
         FutureTask<JSONObject> task = new FutureTask<>(() -> {
             try {
-                InetAddress resolved = network == null ? InetAddress.getByName("fixture.test") : network.getByName("fixture.test");
+                InetAddress resolved = network == null ? InetAddress.getByName(hostname) : network.getByName(hostname);
                 if (!"198.18.0.1".equals(resolved.getHostAddress())) throw new IOException("Unexpected fixture DNS answer");
                 address.set("198.18.0.1");
                 if (cancelled.get() || Thread.currentThread().isInterrupted()) throw new InterruptedException();
@@ -96,15 +96,16 @@ public final class ProbeActivity extends Activity {
                     if (network != null) { stage.set("NETWORK_BIND"); network.bindSocket(raw); }
                     stage.set("TCP_CONNECT");
                     raw.connect(new InetSocketAddress(resolved, 18443), 15000); raw.setSoTimeout(15000);
-                    try (SSLSocket socket = (SSLSocket) tls.createSocket(raw, "fixture.test", 18443, true)) {
+                    try (SSLSocket socket = (SSLSocket) tls.createSocket(raw, hostname, 18443, true)) {
                         socket.setSoTimeout(15000);
                         SSLParameters params = socket.getSSLParameters(); params.setEndpointIdentificationAlgorithm("HTTPS");
-                        params.setServerNames(Collections.singletonList(new SNIHostName("fixture.test"))); socket.setSSLParameters(params);
+                        params.setServerNames(Collections.singletonList(new SNIHostName(hostname))); socket.setSSLParameters(params);
                         stage.set("TLS_HANDSHAKE"); socket.startHandshake(); stage.set("HTTP_STATUS");
-                        socket.getOutputStream().write("GET /generate_204 HTTP/1.1\r\nHost: fixture.test\r\nConnection: close\r\n\r\n".getBytes("US-ASCII"));
+                        socket.getOutputStream().write(("GET /generate_204 HTTP/1.1\r\nHost: " + hostname + "\r\nConnection: close\r\n\r\n").getBytes("US-ASCII"));
                         socket.getOutputStream().flush();
-                        StringBuilder line = new StringBuilder(); InputStream in = socket.getInputStream();
-                        while (line.length() < 512) { int b = in.read(); if (b < 0) throw new EOFException(); if (b == 10) break; if (b != 13) line.append((char) b); }
+                        StringBuilder line = new StringBuilder(); InputStream in = socket.getInputStream(); boolean terminated = false;
+                        while (line.length() < 512) { int b = in.read(); if (b < 0) throw new EOFException(); if (b == 10) { terminated = true; break; } if (b != 13) line.append((char) b); }
+                        if (!terminated) throw new IOException("HTTP status too long");
                         if (!line.toString().matches("HTTP/1\\.[01] 204(?: .*|)")) throw new IOException("Unexpected HTTP status");
                         return outcome(stage.get(), address.get(), 204, "NONE");
                     }

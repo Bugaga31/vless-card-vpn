@@ -139,4 +139,17 @@ class TunnelProbeTest {
             accepted.get()?.close()
         }
     }
+    @Test fun oversizedHttpStatusLineCannotCountAsHealthy(): Unit = runBlocking {
+        val (server, tls, _) = fixtures()
+        server.use {
+            it.enqueue(MockResponse().setStatus("HTTP/1.1 204 " + "x".repeat(600)))
+            Proxy(it.port).use { proxy ->
+                val result = TunnelHealthChecker.probe(proxy.endpoint, "https://localhost:${it.port}/", 204, 3000, tls)
+                assertNull("A truncated status line is not an HTTP response", result.httpCode)
+                assertEquals(DiagnosticFailure.HTTP, result.failure)
+                assertEquals(DiagnosticFailure.HTTP, result.stage)
+            }
+        }
+    }
+
 }

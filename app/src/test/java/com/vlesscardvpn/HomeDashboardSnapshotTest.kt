@@ -45,4 +45,16 @@ class HomeDashboardSnapshotTest {
     @Test fun manualConnecting() { paparazzi.snapshot { VlessCardVpnTheme(false) { HomeDashboard(VpnSessionStats(status = VpnStatus.CONNECTING, autoMode = false,
         activeConfig = server, progressMessage = "Запускаем выбранный сервер"), server, 24) } } }
 
+    @Test fun realTlsFailureDetails() { paparazzi.snapshot { VlessCardVpnTheme(true) {
+        HomeDashboard(VpnSessionStats(status = VpnStatus.CONNECTED, activeConfig = server,
+            health = TunnelHealthReport(listOf(TunnelProbe("Cloudflare", 80, 204),
+                TunnelProbe("YouTube · HTTPS", 4000, failure = DiagnosticFailure.TIMEOUT, stage = DiagnosticFailure.TLS),
+                TunnelProbe("Telegram · веб", 190, 403, 200, DiagnosticFailure.HTTP, DiagnosticFailure.HTTP)), 1L)), server, 24)
+    } } }
+    @Test fun enlargedManualActions() { paparazzi.snapshot { VlessCardVpnTheme(false) {
+        CompositionLocalProvider(LocalDensity provides Density(LocalDensity.current.density, 1.5f)) {
+            HomeDashboard(VpnSessionStats(), server, 24)
+        }
+    } } }
+
 }

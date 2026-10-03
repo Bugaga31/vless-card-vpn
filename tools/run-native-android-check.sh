@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 # Permission automation belongs only on controlled emulator fixtures, never a user's phone.
-python3 -m unittest discover -s tools -p 'test_tls_record_observer.py'
+python3 -m unittest discover -s tools -p 'test_*.py'
 bash tools/run-byedpi-host-check.sh
 test "$(adb shell getprop ro.kernel.qemu | tr -d '\r')" = "1"
 ./gradlew --no-daemon --max-workers=2 :vpn-test-probe:assembleDebug
@@ -21,7 +21,7 @@ adb install -r -t vpn-test-probe/build/outputs/apk/debug/vpn-test-probe-debug.ap
 adb shell appops set com.vlesscardvpn.preview ACTIVATE_VPN allow
 set +e
 adb shell am instrument -w -r -e fixture_ca_path /data/local/tmp/vless-fixture-ca.pem -e fixture_reality_key_path /data/local/tmp/vless-fixture-reality-public.txt -e fixture_full_tun 1 \
-  -e class com.vlesscardvpn.AutoTcpPreflightAndroidTest,com.vlesscardvpn.NativeConfigValidationTest,com.vlesscardvpn.NativeCallbackContractTest,com.vlesscardvpn.NodeStorageMigrationTest,com.vlesscardvpn.NodeMetadataUpdateTest,com.vlesscardvpn.NativeOutboundFixtureTest,com.vlesscardvpn.NativeFullTunFixtureTest \
+  -e class com.vlesscardvpn.AutoTcpPreflightAndroidTest,com.vlesscardvpn.NativeConfigValidationTest,com.vlesscardvpn.NativeCallbackContractTest,com.vlesscardvpn.NodeStorageMigrationTest,com.vlesscardvpn.NodeMetadataUpdateTest,com.vlesscardvpn.NativeOutboundFixtureTest,com.vlesscardvpn.NativeFullTunFixtureTest,com.vlesscardvpn.HomeScreenSmokeTest,com.vlesscardvpn.LauncherStartupTest,com.vlesscardvpn.VpnServiceCancellationFixtureTest \
   com.vlesscardvpn.preview.test/androidx.test.runner.AndroidJUnitRunner | tee native-results.txt
 INSTRUMENT_EXIT=${PIPESTATUS[0]}
 set -e
@@ -32,12 +32,12 @@ python3 - <<'CHECK'
 from pathlib import Path
 import re, os
 text = Path("native-results.txt").read_text()
-passed = os.environ["INSTRUMENT_EXIT"] == "0" and "OK (40 tests)" in text and not re.search(r"FAILURES!!!|INSTRUMENTATION_FAILED|Process crashed|INSTRUMENTATION_STATUS_CODE: -[1-4]", text)
+passed = os.environ["INSTRUMENT_EXIT"] == "0" and "OK (49 tests)" in text and not re.search(r"FAILURES!!!|INSTRUMENTATION_FAILED|Process crashed|INSTRUMENTATION_STATUS_CODE: -[1-4]", text)
 if not passed:
     summary = text[text.rfind("Time:"):] if "Time:" in text else text[-3500:]
     summary = "\n".join(line for line in summary.splitlines() if not line.lstrip().startswith(("at ", "... ")))
     summary = summary[:3500].replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
     print("::error title=Native Android fixture assertions::" + summary)
     raise SystemExit(1)
-print("Confirmed: 40 instrumented fixture checks, no skipped/failed tests")
+print("Confirmed: 49 instrumented fixture checks, no skipped/failed tests")
 CHECK

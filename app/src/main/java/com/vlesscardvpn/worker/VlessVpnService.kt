@@ -293,7 +293,7 @@ class VlessVpnService : VpnService() {
             val candidates = AutoSearchPolicy.candidates(supported, remembered, settings.autopilotAllowedOnlyFavorites)
             _vpnStats.value = _vpnStats.value.copy(progressMessage = "Авто: быстрая проверка портов; затем проверим VPN")
             val measured = AutoTcpPreflight.measure(candidates)
-            for (attempt in AutoSearchPolicy.plan(measured, remembered, tried)) {
+            for (attempt in AutoSearchPolicy.plan(measured, remembered, tried, attemptLimit = limit - attempts)) {
                 currentCoroutineContext().ensureActive()
                 if (sessionId != sessionSequence.get() || attempts >= limit) return false
                 if (!tried.add(attempt.key)) continue

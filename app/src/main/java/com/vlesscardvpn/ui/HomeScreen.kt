@@ -85,17 +85,18 @@ fun HomeDashboard(stats: VpnSessionStats, selected: VlessConfig? = null, configC
             if (storageIssue != null) StorageProtectionPanel(storageIssue)
             Surface(shape = RoundedCornerShape(20.dp), color = c.surface,
                 border = BorderStroke(1.dp, c.outlineVariant)) {
-                Column(Modifier.fillMaxWidth().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally,
+                Column(Modifier.fillMaxWidth().padding(20.dp),
                     verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                    Surface(shape = CircleShape, color = when { limited -> c.primaryContainer; working -> c.tertiaryContainer; error -> c.errorContainer; else -> c.primaryContainer }) {
-                        Icon(if (limited) Icons.Default.Info else if (working) Icons.Default.Check else if (error) Icons.Default.Info else Icons.Default.PowerSettingsNew,
-                            null, tint = stateColor, modifier = Modifier.padding(20.dp).size(32.dp))
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Surface(shape = RoundedCornerShape(12.dp), color = when { limited -> c.primaryContainer; working -> c.tertiaryContainer; error -> c.errorContainer; else -> c.primaryContainer }) {
+                            Icon(if (limited) Icons.Default.Info else if (working) Icons.Default.Check else if (error) Icons.Default.Info else Icons.Default.PowerSettingsNew,
+                                null, tint = stateColor, modifier = Modifier.padding(12.dp).size(24.dp))
+                        }
+                        Text(headline, Modifier.weight(1f).semantics { heading() }, fontSize = 26.sp, lineHeight = 32.sp,
+                            fontWeight = FontWeight.SemiBold, color = c.onSurface)
                     }
-                    Text(headline, Modifier.semantics { heading() }, fontSize = 28.sp, lineHeight = 34.sp,
-                        fontWeight = FontWeight.SemiBold, color = c.onSurface,
-                        textAlign = androidx.compose.ui.text.style.TextAlign.Center)
-                    Text(description, fontSize = 16.sp, lineHeight = 24.sp, color = c.onSurfaceVariant,
-                        textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                    Text(description, fontSize = 16.sp, lineHeight = 24.sp, color = c.onSurfaceVariant)
                     if (busy) LinearProgressIndicator(modifier = Modifier.fillMaxWidth().height(4.dp),
                         color = c.primary, trackColor = c.surfaceVariant)
                     Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -108,15 +109,12 @@ fun HomeDashboard(stats: VpnSessionStats, selected: VlessConfig? = null, configC
                                 Icon(Icons.Default.AutoAwesome, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)); Text("Авто", fontSize = 16.sp)
                             }
                         } else {
-                            Button(onClick = if (selected != null) onConnect else onAuto, enabled = storageIssue == null,
+                            if (selected != null) ManualAutoActions(onConnect, onAuto, storageIssue == null)
+                            else Button(onClick = onAuto, enabled = storageIssue == null,
                                 modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp), shape = RoundedCornerShape(12.dp)) {
-                                Icon(if (selected != null) Icons.Default.PowerSettingsNew else Icons.Default.AutoAwesome, null, Modifier.size(20.dp))
+                                Icon(Icons.Default.AutoAwesome, null, Modifier.size(20.dp))
                                 Spacer(Modifier.width(10.dp))
-                                Text(if (selected != null) "Подключить" else "Авто", fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
-                            }
-                            if (selected != null) TextButton(onClick = onAuto, enabled = storageIssue == null, modifier = Modifier.heightIn(min = 48.dp)) {
-                                Text("Авто · найти другой маршрут", fontSize = 14.sp,
-                                    textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                                Text("Авто", fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
                             }
                         }
                     }
@@ -162,9 +160,11 @@ fun HomeDashboard(stats: VpnSessionStats, selected: VlessConfig? = null, configC
                 Surface(shape = RoundedCornerShape(16.dp), color = c.surface, border = BorderStroke(1.dp, c.outlineVariant)) {
                     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
                         val checked = stats.health.checkedAt > 0
-                        val rows = listOf("Интернет · HTTPS" to stats.health.internet, "YouTube · HTTPS" to stats.health.youtube, "Telegram · веб" to stats.health.telegram)
-                        rows.forEachIndexed { index, (label, passed) ->
-                            CheckRow(label, checked, passed)
+                        val rows = listOf("Контрольный HTTPS" to stats.health.probes.firstOrNull { it.label == "Cloudflare" },
+                            "YouTube · HTTPS" to stats.health.probes.firstOrNull { it.label == "YouTube · HTTPS" },
+                            "Telegram · веб" to stats.health.probes.firstOrNull { it.label == "Telegram · веб" })
+                        rows.forEachIndexed { index, (label, probe) ->
+                            CheckRow(label, checked, probe)
                             if (index < rows.lastIndex) HorizontalDivider(color = c.outlineVariant)
                         }
                     }
@@ -184,20 +184,48 @@ fun HomeDashboard(stats: VpnSessionStats, selected: VlessConfig? = null, configC
         }
     }
 }
+/** Side-by-side at normal text size; stacked on narrow layouts / enlarged accessibility text. */
+@Composable private fun ManualAutoActions(onConnect: () -> Unit, onAuto: () -> Unit, enabled: Boolean) {
+    val scale = LocalDensity.current.fontScale
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        if (maxWidth >= 280.dp && scale <= 1.25f) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            ManualConnectAction(onConnect, enabled, Modifier.weight(1.5f))
+            AutoConnectAction(onAuto, enabled, Modifier.weight(1f))
+        } else Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            ManualConnectAction(onConnect, enabled, Modifier.fillMaxWidth())
+            AutoConnectAction(onAuto, enabled, Modifier.fillMaxWidth())
+        }
+    }
+}
+@Composable private fun ManualConnectAction(onClick: () -> Unit, enabled: Boolean, modifier: Modifier) {
+    Button(onClick = onClick, enabled = enabled, modifier = modifier.heightIn(min = 56.dp), shape = RoundedCornerShape(12.dp)) {
+        Icon(Icons.Default.PowerSettingsNew, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp))
+        Text("Подключить", fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+    }
+}
+@Composable private fun AutoConnectAction(onClick: () -> Unit, enabled: Boolean, modifier: Modifier) {
+    OutlinedButton(onClick = onClick, enabled = enabled, modifier = modifier.heightIn(min = 56.dp), shape = RoundedCornerShape(12.dp)) {
+        Icon(Icons.Default.AutoAwesome, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp))
+        Text("Авто", fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+    }
+}
 @Composable private fun SectionLabel(text: String, modifier: Modifier = Modifier) {
     Text(text, modifier.semantics { heading() }, fontSize = 16.sp, fontWeight = FontWeight.SemiBold,
         color = MaterialTheme.colorScheme.onBackground)
 }
-@Composable private fun CheckRow(label: String, checked: Boolean, passed: Boolean) {
+@Composable private fun CheckRow(label: String, checked: Boolean, probe: TunnelProbe?) {
     val c = MaterialTheme.colorScheme
-    val text = if (!checked) "Не проверено" else if (passed) "Доступен" else "Ошибка"
-    val color = if (!checked) c.onSurfaceVariant else if (passed) c.tertiary else c.error
+    val passed = probe?.passed == true
+    val measured = checked && probe != null
+    val text = TunnelProbePresentation.status(probe, checked)
+    val color = if (!measured) c.onSurfaceVariant else if (passed) c.tertiary else c.error
     Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(label, Modifier.weight(1f), fontSize = 14.sp, lineHeight = 20.sp, color = c.onSurface)
         Spacer(Modifier.width(12.dp))
-        Icon(if (!checked) Icons.Default.Remove else if (passed) Icons.Default.CheckCircle else Icons.Default.ErrorOutline,
+        Icon(if (!measured) Icons.Default.Remove else if (passed) Icons.Default.CheckCircle else Icons.Default.ErrorOutline,
             null, tint = color, modifier = Modifier.size(18.dp))
-        Spacer(Modifier.width(6.dp)); Text(text, fontSize = 14.sp, lineHeight = 20.sp, color = color)
+        Spacer(Modifier.width(6.dp)); Text(text, Modifier.weight(1f), fontSize = 14.sp, lineHeight = 20.sp, color = color,
+            textAlign = androidx.compose.ui.text.style.TextAlign.End)
     }
 }
 @Composable private fun Metric(label: String, value: String, modifier: Modifier) {

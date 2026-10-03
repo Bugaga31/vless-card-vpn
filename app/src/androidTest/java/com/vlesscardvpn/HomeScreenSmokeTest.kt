@@ -5,7 +5,8 @@ import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.test.platform.app.InstrumentationRegistry
 import com.vlesscardvpn.data.AppRepository
-import com.vlesscardvpn.domain.AutoPilotEngine
+import com.vlesscardvpn.domain.*
+import com.vlesscardvpn.ui.HomeDashboard
 import com.vlesscardvpn.ui.HomeScreen
 import com.vlesscardvpn.ui.theme.VlessCardVpnTheme
 import com.vlesscardvpn.worker.VpnSessionStats
@@ -57,4 +58,36 @@ class HomeScreenSmokeTest {
         compose.onNodeWithText("Отчёты об ошибках").performScrollTo().assertIsDisplayed()
         capture("home-error")
     }
+    @Test fun manualAndAutoActionsStaySeparate() {
+        val manual = java.util.concurrent.atomic.AtomicInteger()
+        val automatic = java.util.concurrent.atomic.AtomicInteger()
+        compose.setContent { VlessCardVpnTheme {
+            HomeDashboard(VpnSessionStats(), VlessConfig(name = "Fixture", address = "127.0.0.1", port = 443, uuid = "fixture"),
+                onConnect = { manual.incrementAndGet() }, onAuto = { automatic.incrementAndGet() })
+        } }
+        compose.onNodeWithText("Подключить").performClick()
+        org.junit.Assert.assertEquals(1, manual.get()); org.junit.Assert.assertEquals(0, automatic.get())
+        compose.onNodeWithText("Авто").performClick()
+        org.junit.Assert.assertEquals(1, manual.get()); org.junit.Assert.assertEquals(1, automatic.get())
+    }
+    @Test fun failedServiceShowsActualTlsStage() {
+        compose.setContent { VlessCardVpnTheme {
+            HomeDashboard(VpnSessionStats(status = VpnStatus.CONNECTED, health = TunnelHealthReport(listOf(
+                TunnelProbe("Cloudflare", 50, 204), TunnelProbe("YouTube · HTTPS", 4000, failure = DiagnosticFailure.TIMEOUT,
+                    stage = DiagnosticFailure.TLS)), 1)))
+        } }
+        compose.onNodeWithText("Таймаут TLS").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Нет результата").assertIsDisplayed()
+    }
+    @Test fun enlargedTextKeepsBothActionsReachable() {
+        compose.setContent { VlessCardVpnTheme {
+            androidx.compose.runtime.CompositionLocalProvider(androidx.compose.ui.platform.LocalDensity provides
+                androidx.compose.ui.unit.Density(androidx.compose.ui.platform.LocalDensity.current.density, 1.5f)) {
+                HomeDashboard(VpnSessionStats(), VlessConfig(name = "Fixture", address = "127.0.0.1", port = 443, uuid = "fixture"))
+            }
+        } }
+        compose.onNodeWithText("Подключить").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Авто").performScrollTo().assertIsDisplayed()
+    }
+
 }

@@ -117,4 +117,37 @@ class AutoSearchPolicyTest {
         assertEquals(normal, ordered.first())
     }
 
+    @Test fun savedBudgetTestsAlternativesInsteadOfOnlyOrdinaryTls() {
+        // Six saved attempts must not be consumed by six first-choice profiles.
+        val limited = AutoSearchPolicy.plan((1..12).map { node(it) to it }, attemptLimit = AutoSearchPolicy.SAVED_ATTEMPTS)
+        assertTrue("Saved quota must contain a supported alternate profile", limited.any { it.profile != RouteProfile.COMPATIBLE })
+    }
+
+    @Test fun sixAttemptSavedQuotaCoversTwoNodesAndThreeProfiles() {
+        val limited = AutoSearchPolicy.plan((1..12).map { node(it) to it }, attemptLimit = 6)
+        assertEquals(6, limited.size)
+        assertEquals(2, limited.map { it.config.address }.distinct().size)
+        limited.groupBy { it.config.address }.values.forEach { routes ->
+            assertEquals(setOf(RouteProfile.COMPATIBLE, RouteProfile.BYEDPI, RouteProfile.FRAGMENT), routes.map { it.profile }.toSet())
+        }
+    }
+    @Test fun remainingBudgetAndExhaustedNodesCannotOverrunQuota() {
+        val rows = (1..12).map { node(it) to it }
+        assertTrue(AutoSearchPolicy.plan(rows, attemptLimit = 0).isEmpty())
+        assertTrue(AutoSearchPolicy.plan(rows, attemptLimit = -1).isEmpty())
+        assertEquals(1, AutoSearchPolicy.plan(rows, attemptLimit = 1).size)
+        assertEquals(36, AutoSearchPolicy.plan(rows, attemptLimit = 1000).size)
+        val tried = AutoSearchPolicy.plan(listOf(rows.first())).map { it.key }.toSet()
+        val limited = AutoSearchPolicy.plan(rows, tried = tried, attemptLimit = 6)
+        assertEquals(6, limited.size)
+        assertFalse(limited.any { it.config.address == rows.first().first.address })
+    }
+    @Test fun rememberedProfileAndFavoritesStillWinWithinSavedQuota() {
+        val favorite = node(10).copy(isFavorite = true)
+        val memory = mapOf(AutoConnectPolicy.identity(favorite) to "BYEDPI#SNI_EDGES")
+        val plan = AutoSearchPolicy.plan((1..12).map { (if (it == 10) favorite else node(it)) to it }, memory, attemptLimit = 6)
+        assertEquals(favorite.address, plan.first().config.address)
+        assertEquals(ByeDpiPreset.SNI_EDGES, plan.first().byeDpiPreset)
+    }
+
 }

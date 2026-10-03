@@ -14,7 +14,7 @@ with tempfile.TemporaryDirectory(prefix='vless-local-fixture-') as directory:
     key, cert = root / 'key.pem', root / 'cert.pem'
     subprocess.run(['openssl', 'req', '-x509', '-newkey', 'rsa:2048', '-nodes',
         '-keyout', str(key), '-out', str(cert), '-days', '2', '-subj', '/CN=vpn.test.local',
-        '-addext', 'subjectAltName=DNS:vpn.test.local,DNS:localhost,DNS:fixture.test,IP:198.18.0.1,IP:10.0.2.2'],
+        '-addext', 'subjectAltName=DNS:vpn.test.local,DNS:localhost,DNS:fixture.test,DNS:*.fixture.test,IP:198.18.0.1,IP:10.0.2.2'],
         check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     key.chmod(0o600)
     pairs = subprocess.check_output([a.sing_box, 'generate', 'reality-keypair'], text=True)
@@ -34,25 +34,13 @@ with tempfile.TemporaryDirectory(prefix='vless-local-fixture-') as directory:
             self.send_response(204 if self.path == '/generate_204' else 302)
             self.send_header('Content-Length', '0'); self.end_headers()
         def log_message(self, fmt, *values): print(fmt % values, flush=True)
+    from fixture_dns import reply as fixture_dns_reply
     class DNSHandler(socketserver.BaseRequestHandler):
         def handle(self):
             data, sock = self.request
-            if not 12 <= len(data) <= 512 or data[4:6] != b'\0\1': return
-            offset, labels = 12, []
-            while offset < len(data):
-                n = data[offset]; offset += 1
-                if n == 0: break
-                if n > 63 or offset + n > len(data): return
-                labels.append(data[offset:offset+n].decode('ascii', errors='replace')); offset += n
-            if offset + 4 > len(data): return
-            qtype, qclass = struct.unpack('!HH', data[offset:offset+4]); end = offset + 4
-            valid = '.'.join(labels).lower() == 'fixture.test' and qclass == 1
-            answer = b''
-            if valid and qtype == 1:
-                answer = b'\xc0\x0c' + struct.pack('!HHIH', 1, 1, 0, 4) + bytes([198,18,0,1])
-            header = data[:2] + struct.pack('!HHHHH', 0x8180 if valid else 0x8183,
-                1, 1 if answer else 0, 0, 0)
-            sock.sendto(header + data[12:end] + answer, self.client_address)
+            answer = fixture_dns_reply(data)
+            if answer is not None:
+                sock.sendto(answer, self.client_address)
     https = http.server.ThreadingHTTPServer(('127.0.0.1', 18443), Handler)
     tls = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER); tls.load_cert_chain(str(cert), str(key))
     https.socket = tls.wrap_socket(https.socket, server_side=True)

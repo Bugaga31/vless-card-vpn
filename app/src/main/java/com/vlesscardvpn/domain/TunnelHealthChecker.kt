@@ -10,8 +10,9 @@ import javax.net.ssl.SSLSocket
 import javax.net.ssl.SSLSocketFactory
 
 /** HTTPS response over the selected native outbound, not the app's excluded Android route. */
-data class TunnelProbe(val label: String, val latencyMs: Int = -1, val httpCode: Int = -1, val expectedCode: Int = 204) {
-    val passed: Boolean get() = latencyMs > 0 && httpCode == expectedCode
+data class TunnelProbe(val label: String, val latencyMs: Int = -1, val httpCode: Int = -1, val expectedCode: Int = 204,
+    val failure: DiagnosticFailure = DiagnosticFailure.NONE, val stage: DiagnosticFailure = DiagnosticFailure.NONE) {
+    val passed: Boolean get() = latencyMs > 0 && httpCode == expectedCode && failure == DiagnosticFailure.NONE
 }
 data class TunnelHealthReport(val probes: List<TunnelProbe> = emptyList(), val checkedAt: Long = 0L) {
     val internet: Boolean get() = probes.any { it.passed && it.label in setOf("Cloudflare", "YouTube · HTTPS", "Telegram · веб") }
@@ -47,7 +48,7 @@ object TunnelHealthChecker {
                     target = when (label) { "Cloudflare" -> DiagnosticTarget.INTERNET; ServiceTarget.YOUTUBE.label -> DiagnosticTarget.YOUTUBE; else -> DiagnosticTarget.TELEGRAM },
                     profile = route?.profile, preset = route?.preset, stage = result.stage,
                     failure = result.failure, httpCode = result.httpCode ?: -1, latencyMs = result.latencyMs ?: -1))
-                TunnelProbe(label, result.latencyMs ?: -1, result.httpCode ?: -1, expected)
+                TunnelProbe(label, result.latencyMs ?: -1, result.httpCode ?: -1, expected, result.failure, result.stage)
             } }.awaitAll().let { TunnelHealthReport(it, System.currentTimeMillis()) }
         }
     }
@@ -87,11 +88,13 @@ object TunnelHealthChecker {
                                     }
                                     // Read only the status line (bounded); never retain a page body or cookies.
                                     val input = tls.getInputStream(); val status = StringBuilder()
+                                    var terminated = false
                                     while (status.length < 512) {
                                         val b = input.read(); check(b >= 0) { "Missing HTTP status" }
-                                        if (b == 10) break
+                                        if (b == 10) { terminated = true; break }
                                         if (b != 13) status.append(b.toChar())
                                     }
+                                    check(terminated) { "HTTP status line exceeds limit" }
                                     val match = Regex("^HTTP/1\\.[01] ([0-9]{3})(?: .*|)$").matchEntire(status.toString())
                                     val code = match?.groupValues?.get(1)?.toInt() ?: error("Invalid HTTP status")
                                     ServiceProbe(elapsed(), code, if (code == expectedCode) null else "Неожиданный HTTP $code",

@@ -27,8 +27,14 @@ object AutoSearchPolicy {
     fun plan(
         candidates: List<Pair<VlessConfig, Int>>,
         remembered: Map<String, String> = emptyMap(),
-        tried: Set<String> = emptySet()
+        tried: Set<String> = emptySet(),
+        attemptLimit: Int = AutoConnectPolicy.MAX_ATTEMPTS
     ): List<AutoRouteAttempt> {
+        val budget = attemptLimit.coerceIn(0, AutoConnectPolicy.MAX_ATTEMPTS)
+        if (budget == 0) return emptyList()
+        // Reserve room for three compatible choices per node before importing more nodes.
+        // Otherwise a six-attempt saved pool spends its entire quota on ordinary TLS.
+        val nodeBudget = ((budget + 2) / 3).coerceAtMost(MAX_NODES_PER_POOL)
         val ordered = candidates.filter { AutoConnectPolicy.supports(it.first) }
             .distinctBy { AutoConnectPolicy.identity(it.first) }
             .sortedWith(compareByDescending<Pair<VlessConfig, Int>> { it.first.isFavorite }
@@ -37,13 +43,13 @@ object AutoSearchPolicy {
                 .thenBy { it.first.failureCount.coerceIn(0, 5) }
                 .thenBy { if (it.second > 0) it.second else Int.MAX_VALUE })
             .filter { (config, ping) -> choices(config, ping, remembered[AutoConnectPolicy.identity(config)], 0).any { it.key !in tried } }
-            .take(MAX_NODES_PER_POOL)
+            .take(nodeBudget)
         // Spread the first ByeDPI variant across nodes; do not spend every attempt on one preset.
         val routes = ordered.mapIndexed { index, (config, ping) ->
             choices(config, ping, remembered[AutoConnectPolicy.identity(config)], index)
         }
         return (0 until (ByeDpiPreset.entries.size + 2)).flatMap { round -> routes.mapNotNull { it.getOrNull(round) } }
-            .filterNot { it.key in tried }.take(AutoConnectPolicy.MAX_ATTEMPTS)
+            .filterNot { it.key in tried }.take(budget)
     }
     private fun choices(config: VlessConfig, ping: Int, remembered: String?, index: Int): List<AutoRouteAttempt> {
         val allowed = AdaptiveRoutePolicy.profiles(config)
