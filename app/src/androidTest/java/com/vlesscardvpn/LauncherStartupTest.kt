@@ -25,7 +25,12 @@ class LauncherStartupTest {
         assertEquals(VpnStatus.DISCONNECTED, VlessVpnService.vpnStats.value.status)
         prefs.edit().putBoolean("autoSelect", true).commit()
         compose.activityRule.scenario.recreate()
-        Thread.sleep(4000)
+        // Splash delay/AnimatedContent use the Compose test clock. Sleeping only the
+        // instrumentation thread leaves that clock behind after Activity recreation.
+        compose.waitForIdle()
+        compose.mainClock.advanceTimeBy(5000)
+        compose.waitForIdle()
+        Thread.sleep(1000) // Also observe real-time service work; do not advance its clock.
         assertEquals("Opening the launcher must not start a connection", VpnStatus.DISCONNECTED, VlessVpnService.vpnStats.value.status)
         compose.onNodeWithText("Не подключено").performScrollTo().assertIsDisplayed()
         compose.onNodeWithText("Авто").performScrollTo().assertIsDisplayed()

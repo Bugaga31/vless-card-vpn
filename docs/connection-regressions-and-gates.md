@@ -72,3 +72,14 @@ Run: https://github.com/Bugaga31/vless-card-vpn/actions/runs/37131614467
 - Strict next Android gate is **50 cases**. The revised Android tests and new native-schema case require another CI execution; do not infer a green result from local compilation.
 
 No universal network/phone compatibility, perfect camouflage, Russian ISP test, YouTube video or Telegram MTProto success is claimed. Current source remains on the test branch/draft PR; no new user APK or main-branch release is declared.
+
+
+### Executed follow-up (50 cases, commit `8ad2625eae5353236bd8ecc7df899f7f97c85a15`)
+
+https://github.com/Bugaga31/vless-card-vpn/actions/runs/37132709909
+
+- API 33: 50 executed, **1 failed** (launcher UI expectation).
+- API 26: 50 executed, **7 failed** (six DNS/TUN cases plus launcher UI expectation).
+- Actual native transport-schema checks, the wrong-hostname TLS rejection and scrolled service-error UI assertion now passed on both versions. Schema validation is still not a live server-compatibility claim.
+- The launcher state assertion confirms DISCONNECTED, but its home-label expectation did not find the node after recreation. The test had slept the instrumentation thread without advancing Compose's clock for the splash delay/animation. The next revision explicitly advances that UI clock and waits for idle; its outcome needs a fresh execution, not an assumed pass.
+- API 26 DNS failures vary between profiles/cycles across runs. No production DNS repair or green overall gate is claimed.
