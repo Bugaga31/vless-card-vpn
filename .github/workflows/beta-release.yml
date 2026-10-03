@@ -41,14 +41,15 @@ jobs:
           $BT/zipalign -f -p 4 app/build/outputs/apk/release/app-release-unsigned.apk aligned.apk
           $BT/apksigner sign --ks beta.jks --ks-key-alias beta --ks-pass env:KSP --key-pass env:KSP \
             --v1-signing-enabled true --v2-signing-enabled true --v3-signing-enabled true \
-            --min-sdk-version 24 --out release/VLESS-Card-Beta.apk aligned.apk
+            --min-sdk-version 21 --out release/VLESS-Card-Beta.apk aligned.apk
           rm -f beta.jks aligned.apk release/*.idsig
-          $BT/apksigner verify -v --min-sdk-version 24 release/VLESS-Card-Beta.apk | tee verify.txt
+          $BT/apksigner verify -v --min-sdk-version 21 release/VLESS-Card-Beta.apk | tee verify.txt
           grep -q "v1 scheme (JAR signing): true" verify.txt
           grep -q "v2 scheme (APK Signature Scheme v2): true" verify.txt
           $BT/zipalign -c -p 4 release/VLESS-Card-Beta.apk
           $BT/aapt2 dump badging release/VLESS-Card-Beta.apk | grep -E "^package|application-label:|native-code"
           unzip -tq release/VLESS-Card-Beta.apk
+          unzip -l release/VLESS-Card-Beta.apk | grep -E "META-INF/.*\.(RSA|SF)$"
           python3 - <<'PY'
           import glob, xml.etree.ElementTree as E
           t=f=0
