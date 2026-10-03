@@ -19,7 +19,7 @@ android {
         val autoPreview = providers.gradleProperty("autoPreview").orNull == "true"
         val labPreview = providers.gradleProperty("labPreview").orNull == "true"
         val betaPreview = providers.gradleProperty("betaPreview").orNull == "true"
-        applicationId = when { betaPreview -> "com.vlesscardvpn.beta"; labPreview -> "com.vlesscardvpn.lab"; autoPreview -> "com.vlesscardvpn.auto"; stabilityPreview -> "com.vlesscardvpn.preview"; else -> "com.vlesscardvpn" }
+        applicationId = when { betaPreview -> "com.vlesscardvpn.beta2"; labPreview -> "com.vlesscardvpn.lab"; autoPreview -> "com.vlesscardvpn.auto"; stabilityPreview -> "com.vlesscardvpn.preview"; else -> "com.vlesscardvpn" }
         manifestPlaceholders["vpnAppLabel"] = when { betaPreview -> "VLESS Card · Beta"; labPreview -> "VLESS Card · Lab"; autoPreview -> "VLESS Card VPN · Auto"; stabilityPreview -> "VLESS Card VPN · Test"; else -> "@string/app_name" }
         minSdk = 24
         targetSdk = 34
