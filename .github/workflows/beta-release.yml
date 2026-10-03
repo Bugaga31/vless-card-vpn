@@ -71,7 +71,6 @@ jobs:
       matrix:
         include:
           - { api: 30, target: google_apis }
-          - { api: 33, target: google_apis_playstore }
           - { api: 34, target: google_apis }
     steps:
       - uses: actions/checkout@v4
@@ -125,7 +124,7 @@ jobs:
           read T F < tests.txt
           NOTES=../docs/beta-1.0.$V.md
           [ -f "$NOTES" ] || NOTES=/dev/null
-          { cat "$NOTES"; echo; echo "### Автоматические проверки этой сборки"; echo "- JVM-тесты: $T, ошибок: $F"; echo "- Подписи v1 + v2 + v3, постоянный ключ Beta (следующие версии ставятся поверх)"; echo "- Этот же файл установлен и запущен на эмуляторах Android 11, 13 и 14 (ARM-трансляция x86_64)"; echo "- Реальный телефон и сети РФ этим не проверяются"; } > notes.md
+          { cat "$NOTES"; echo; echo "### Автоматические проверки этой сборки"; echo "- JVM-тесты: $T, ошибок: $F"; echo "- Подписи v1 + v2 + v3, постоянный ключ Beta (следующие версии ставятся поверх)"; echo "- Этот же файл установлен и запущен на эмуляторах Android 11 и 14 (ARM-трансляция x86_64)"; echo "- Реальный телефон и сети РФ этим не проверяются"; } > notes.md
           gh release create "beta-v1.0.$V" VLESS-Card-Beta-1.0.$V.apk SHA256SUMS-Beta.txt \
             --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease \
             --title "VLESS Card · Beta 1.0.$V" --notes-file notes.md
