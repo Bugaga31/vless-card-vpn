@@ -1,8 +1,12 @@
 package com.vlesscardvpn.core
 
 import android.content.Context
+import android.os.Build
+import com.vlesscardvpn.domain.TunStackPolicy
+import com.vlesscardvpn.domain.AutoConnectPolicy
 import com.vlesscardvpn.domain.AppSettings
 import com.vlesscardvpn.domain.VlessConfig
+import com.vlesscardvpn.domain.LocalProbeProxy
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -70,12 +74,16 @@ object SingBoxManager {
         settings: AppSettings,
         networkProfile: EvaluatedNetworkProfile?
     ): String {
-        return when {
-            config.sni.isNotBlank() -> config.sni.trim()
-            settings.customSniOverride.isNotBlank() && !settings.customSniOverride.equals("auto", ignoreCase = true) -> settings.customSniOverride.trim()
-            networkProfile != null && networkProfile.recommendedSni.isNotBlank() -> networkProfile.recommendedSni.trim()
-            else -> "yandex.ru"
+        // A server-compatible name is essential for TLS certificate validation and REALITY.
+        // Network/operator domains and random SNI are not valid substitutes.
+        if (config.sni.isNotBlank()) return config.sni.trim()
+        if (settings.customSniOverride.isNotBlank() && !settings.customSniOverride.equals("auto", true)) {
+            return settings.customSniOverride.trim()
         }
+        require(!config.security.equals("reality", true)) {
+            "Для REALITY нужен SNI из конфигурации сервера. Обновите подписку."
+        }
+        return config.address.trim()
     }
 
     /**
@@ -86,15 +94,13 @@ object SingBoxManager {
         context: Context?,
         config: VlessConfig,
         settings: AppSettings = AppSettings(),
-        networkProfile: EvaluatedNetworkProfile? = null
+        networkProfile: EvaluatedNetworkProfile? = null,
+        probeProxy: LocalProbeProxy? = null,
+        antiDpiPort: Int? = null,
+        platformSdk: Int? = null
     ): String {
-        // SNI rotation: pick random Russian SNI if enabled and no explicit config SNI
-        val effectiveSni = when {
-            config.sni.isNotBlank() -> config.sni.trim()
-            settings.enableSniRotation -> SniPool.randomSni()
-            else -> resolveEffectiveSni(config, settings, networkProfile)
-        }
-        val effectiveMtu = networkProfile?.optimalMtu ?: settings.mtuSize.coerceIn(1280, 1500)
+        val effectiveSni = resolveEffectiveSni(config, settings, networkProfile)
+        val effectiveMtu = (networkProfile?.optimalMtu ?: settings.mtuSize).coerceIn(1280, 1500)
 
         val effectiveDns = when {
             settings.customDnsProvider.contains("Google", ignoreCase = true) -> "https://8.8.8.8/dns-query"
@@ -110,13 +116,24 @@ object SingBoxManager {
             "trojan" -> createTrojanOutbound(config, effectiveSni, settings)
             "shadowsocks", "ss" -> createShadowsocksOutbound(config)
             "hysteria2", "hysteria" -> createHysteria2Outbound(config, effectiveSni, settings)
-            else -> createVlessOutbound(config, effectiveSni, settings)
+            else -> error("Неподдерживаемый протокол конфигурации")
+        }
+
+        // Resolve the VPN server's hostname outside its own tunnel: avoid DNS detour cycles.
+        proxyOutbound.put("domain_resolver", "local-dns")
+        if (antiDpiPort != null) {
+            require(antiDpiPort in 1024..65535 && AutoConnectPolicy.canFragment(config))
+            proxyOutbound.put("detour", "anti-dpi")
         }
 
         // Rules array using sing-box 1.13 rule-action syntax. The legacy special
         // outbounds (block / dns) and inbound.sniff were removed in sing-box 1.13.0,
         // so they are replaced by the rule actions sniff / hijack-dns / reject.
         val rulesArray = JSONArray().apply {
+            if (probeProxy != null) put(JSONObject().apply {
+                put("inbound", JSONArray(listOf("probe-in")))
+                put("outbound", "proxy")
+            })
             // 0. Sniff protocols & TLS SNI before routing (replaces removed inbound.sniff).
             //    Required so domain_suffix rules (RU direct, ad-block) can actually match.
             put(JSONObject().apply {
@@ -177,6 +194,7 @@ object SingBoxManager {
             put("rules", rulesArray)
             put("final", "proxy")
             put("auto_detect_interface", true)
+            put("default_domain_resolver", "local-dns")
         }
 
         val dnsRulesArray = JSONArray().apply {
@@ -211,22 +229,37 @@ object SingBoxManager {
         }
 
         val inboundsArray = JSONArray().apply {
+            if (probeProxy != null) put(JSONObject().apply {
+                put("type", "mixed")
+                put("tag", "probe-in")
+                put("listen", "127.0.0.1")
+                put("listen_port", probeProxy.port)
+                put("users", JSONArray().put(JSONObject().apply {
+                    put("username", probeProxy.username); put("password", probeProxy.password)
+                }))
+            })
             put(JSONObject().apply {
                 put("type", "tun")
                 put("tag", "tun-in")
                 put("interface_name", "tun0")
                 // sing-box 1.10+ uses "address" (array). The legacy inet4_address
                 // field was removed in 1.12.0, and gso/inbound.sniff in 1.13.0.
-                put("address", JSONArray(listOf("172.19.0.1/30")))
+                put("address", JSONArray(listOf("172.19.0.1/30", "fdfe:dcba:9876::1/126")))
                 put("mtu", effectiveMtu)
                 put("auto_route", true)
                 put("strict_route", true)
-                put("stack", "mixed")
+                // API 26 mixed TUN timed out in executed fixtures; use the observed
+                // compatible userspace stack there without weakening DNS/TLS routing.
+                put("stack", TunStackPolicy.forSdk(platformSdk ?: context?.let { Build.VERSION.SDK_INT }))
             })
         }
 
         val outboundsArray = JSONArray().apply {
             put(proxyOutbound)
+            if (antiDpiPort != null) put(JSONObject().apply {
+                put("type", "socks"); put("tag", "anti-dpi"); put("server", "127.0.0.1")
+                put("server_port", antiDpiPort); put("version", "5")
+            })
             put(JSONObject().apply { put("type", "direct"); put("tag", "direct") })
         }
 
@@ -259,34 +292,7 @@ object SingBoxManager {
                 put("flow", config.flow.trim())
             }
 
-            // Transport layer: ws, grpc, h2 (tcp is default, omitted)
-            when (config.transport.lowercase()) {
-                "ws", "websocket" -> {
-                    put("transport", JSONObject().apply {
-                        put("type", "ws")
-                        put("path", config.wsPath.ifBlank { "/" })
-                        if (config.wsHost.isNotBlank()) {
-                            put("headers", JSONObject().apply {
-                                put("Host", config.wsHost.trim())
-                            })
-                        }
-                        put("early_data_header_name", "Sec-WebSocket-Protocol")
-                    })
-                }
-                "grpc", "gun" -> {
-                    put("transport", JSONObject().apply {
-                        put("type", "grpc")
-                        put("service_name", config.serviceName.ifBlank { "GunService" })
-                    })
-                }
-                "h2", "http2" -> {
-                    put("transport", JSONObject().apply {
-                        put("type", "http")
-                        put("host", JSONArray(listOf(config.wsHost.ifBlank { effectiveSni })))
-                        put("path", config.wsPath.ifBlank { "/" })
-                    })
-                }
-            }
+            createTransport(config, effectiveSni)?.let { put("transport", it) }
 
             if (settings.enableTcpFastOpen) {
                 put("tcp_fast_open", true)
@@ -331,6 +337,24 @@ object SingBoxManager {
         else -> address
     }
 
+    /** Same declared transport across VLESS, VMess and Trojan; no silent TCP fallback. */
+    private fun createTransport(config: VlessConfig, effectiveSni: String): JSONObject? = when (config.transport.lowercase()) {
+        "tcp" -> null
+        "ws", "websocket" -> JSONObject().apply {
+            put("type", "ws"); put("path", config.wsPath.ifBlank { "/" })
+            if (config.protocolType.equals("vless", true)) put("early_data_header_name", "Sec-WebSocket-Protocol")
+            if (config.wsHost.isNotBlank()) put("headers", JSONObject().put("Host", config.wsHost.trim()))
+        }
+        "grpc", "gun" -> JSONObject().apply {
+            put("type", "grpc"); put("service_name", config.serviceName)
+        }
+        "h2", "http2" -> JSONObject().apply {
+            put("type", "http"); put("host", JSONArray(listOf(config.wsHost.ifBlank { effectiveSni })))
+            put("path", config.wsPath.ifBlank { "/" })
+        }
+        else -> error("Неподдерживаемый транспорт конфигурации")
+    }
+
     private fun createVmessOutbound(config: VlessConfig, effectiveSni: String, settings: AppSettings = AppSettings()): JSONObject {
         return JSONObject().apply {
             put("type", "vmess")
@@ -340,33 +364,7 @@ object SingBoxManager {
             put("uuid", config.uuid.trim())
             put("security", "auto")
 
-            // Transport for VMess
-            when (config.transport.lowercase()) {
-                "ws", "websocket" -> {
-                    put("transport", JSONObject().apply {
-                        put("type", "ws")
-                        put("path", config.wsPath.ifBlank { "/" })
-                        if (config.wsHost.isNotBlank()) {
-                            put("headers", JSONObject().apply {
-                                put("Host", config.wsHost.trim())
-                            })
-                        }
-                    })
-                }
-                "grpc", "gun" -> {
-                    put("transport", JSONObject().apply {
-                        put("type", "grpc")
-                        put("service_name", config.serviceName.ifBlank { "GunService" })
-                    })
-                }
-                "h2", "http2" -> {
-                    put("transport", JSONObject().apply {
-                        put("type", "http")
-                        put("host", JSONArray(listOf(config.wsHost.ifBlank { effectiveSni })))
-                        put("path", config.wsPath.ifBlank { "/" })
-                    })
-                }
-            }
+            createTransport(config, effectiveSni)?.let { put("transport", it) }
 
             if (config.security.equals("tls", ignoreCase = true)) {
                 put("tls", JSONObject().apply {
@@ -389,6 +387,7 @@ object SingBoxManager {
             put("server", config.address.trim())
             put("server_port", config.port)
             put("password", config.uuid.trim())
+            createTransport(config, effectiveSni)?.let { put("transport", it) }
             put("tls", JSONObject().apply {
                 put("enabled", true)
                 put("server_name", effectiveSni)

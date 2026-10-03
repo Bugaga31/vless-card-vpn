@@ -380,6 +380,10 @@ class AutoPilotEngine(
                 addLog(message)
             }
         }
+        if (VlessVpnService.vpnStats.value.autoMode) {
+            pause("Авторежимом управляет VPN-служба: повторная проверка и восстановление выполняются без второй гонки переключения")
+            return
+        }
         if (!allowed()) {
             pause("Автоматическое переключение запрещено настройками или сессия изменилась")
             return

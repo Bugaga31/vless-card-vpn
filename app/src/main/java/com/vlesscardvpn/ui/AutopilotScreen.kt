@@ -73,7 +73,7 @@ fun AutopilotScreen(
                         autoPilotEngine.startAutoPilot(settings.healthCheckInterval)
                         showConsentDialog = false
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = SignalOrange)
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
                 ) {
                     Text("Разрешить и включить")
                 }
@@ -123,7 +123,7 @@ fun AutopilotScreen(
             Surface(
                 shape = RoundedCornerShape(InstrumentDimens.radiusMedium),
                 color = MaterialTheme.colorScheme.surface,
-                border = BorderStroke(1.dp, if (state.isEnabled) SemanticGreen.copy(alpha = 0.5f) else MaterialTheme.colorScheme.outline)
+                border = BorderStroke(1.dp, if (state.isEnabled) MaterialTheme.colorScheme.tertiary.copy(alpha = 0.5f) else MaterialTheme.colorScheme.outline)
             ) {
                 Column(modifier = Modifier.padding(InstrumentDimens.space16)) {
                     Row(
@@ -162,8 +162,8 @@ fun AutopilotScreen(
                                 }
                             },
                             colors = SwitchDefaults.colors(
-                                checkedThumbColor = SignalOrange,
-                                checkedTrackColor = SignalOrangeContainer
+                                checkedThumbColor = MaterialTheme.colorScheme.primary,
+                                checkedTrackColor = MaterialTheme.colorScheme.primaryContainer
                             )
                         )
                     }
@@ -182,11 +182,11 @@ fun AutopilotScreen(
                                     .clip(CircleShape)
                                     .background(
                                         when (state.status) {
-                                            AutopilotStateStatus.STABLE -> SemanticGreen
-                                            AutopilotStateStatus.CHECKING, AutopilotStateStatus.ADAPTING -> SignalOrange
-                                            AutopilotStateStatus.RECOVERING -> SemanticAmber
-                                            AutopilotStateStatus.NEEDS_HELP -> SemanticRed
-                                            AutopilotStateStatus.DISABLED -> GraphiteTertiary
+                                            AutopilotStateStatus.STABLE -> MaterialTheme.colorScheme.tertiary
+                                            AutopilotStateStatus.CHECKING, AutopilotStateStatus.ADAPTING -> MaterialTheme.colorScheme.primary
+                                            AutopilotStateStatus.RECOVERING -> MaterialTheme.colorScheme.secondary
+                                            AutopilotStateStatus.NEEDS_HELP -> MaterialTheme.colorScheme.error
+                                            AutopilotStateStatus.DISABLED -> MaterialTheme.colorScheme.onSurfaceVariant
                                         }
                                     )
                             )
@@ -211,7 +211,7 @@ fun AutopilotScreen(
                             onClick = { scope.launch { autoPilotEngine.triggerManualScan() } },
                             enabled = !state.isBusy && state.isEnabled,
                             shape = RoundedCornerShape(InstrumentDimens.radiusSmall),
-                            colors = ButtonDefaults.buttonColors(containerColor = MineralSurfaceSubtle, contentColor = MaterialTheme.colorScheme.onBackground),
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant, contentColor = MaterialTheme.colorScheme.onBackground),
                             contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
                         ) {
                             Text(if (state.isBusy) "Проверка..." else "Проверить сейчас", style = MaterialTheme.typography.bodySmall)
@@ -284,32 +284,19 @@ fun AutopilotScreen(
                 color = MaterialTheme.colorScheme.surface,
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
             ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(InstrumentDimens.space12),
-                    horizontalArrangement = Arrangement.SpaceAround,
-                    verticalAlignment = Alignment.CenterVertically
+                Column(
+                    modifier = Modifier.fillMaxWidth().padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
-                    MetricCell(
-                        label = "УСПЕШНОСТЬ",
-                        value = "${state.checkSuccessRatePercent}%"
-                    )
-                    Box(modifier = Modifier.width(1.dp).height(24.dp).background(MaterialTheme.colorScheme.outline))
-                    MetricCell(
-                        label = "HTTPS ОТКЛИК",
-                        value = if (state.lastHttpsLatencyMs > 0) "${state.lastHttpsLatencyMs} мс" else "—"
-                    )
-                    Box(modifier = Modifier.width(1.dp).height(24.dp).background(MaterialTheme.colorScheme.outline))
-                    MetricCell(
-                        label = "РАЗБРОС",
-                        value = if (state.latencyVarianceMs > 0) "±${state.latencyVarianceMs} мс" else "0 мс"
-                    )
-                    Box(modifier = Modifier.width(1.dp).height(24.dp).background(MaterialTheme.colorScheme.outline))
-                    MetricCell(
-                        label = "ПЕРЕЗАПУСКОВ",
-                        value = "${state.reconnectCount}"
-                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                        MetricCell("Успешность", if (state.probeCountTotal > 0) "${state.checkSuccessRatePercent}%" else "—", Modifier.weight(1f))
+                        MetricCell("HTTPS-отклик", if (state.lastHttpsLatencyMs > 0) "${state.lastHttpsLatencyMs} мс" else "—", Modifier.weight(1f))
+                    }
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                        MetricCell("Разброс", if (state.probeCountTotal > 1) "${state.latencyVarianceMs} мс" else "—", Modifier.weight(1f))
+                        MetricCell("Перезапуски", "${state.reconnectCount}", Modifier.weight(1f))
+                    }
                 }
             }
 
@@ -348,7 +335,7 @@ fun AutopilotScreen(
             ) {
                 if (state.eventLogs.isEmpty()) {
                     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Text("Событий не зафиксировано.", style = MaterialTheme.typography.bodySmall, color = GraphiteTertiary)
+                        Text("Событий не зафиксировано.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 } else {
                     LazyColumn(
@@ -363,9 +350,9 @@ fun AutopilotScreen(
                                 style = MaterialTheme.typography.bodySmall,
                                 fontFamily = FontFamily.Monospace,
                                 color = when {
-                                    logEntry.contains("Сбой") || logEntry.contains("Внимание") -> SemanticRed
-                                    logEntry.contains("Выбран") || logEntry.contains("Восстановление") -> SignalOrange
-                                    logEntry.contains("запущен") || logEntry.contains("подтверждён") -> SemanticGreen
+                                    logEntry.contains("Сбой") || logEntry.contains("Внимание") -> MaterialTheme.colorScheme.error
+                                    logEntry.contains("Выбран") || logEntry.contains("Восстановление") -> MaterialTheme.colorScheme.primary
+                                    logEntry.contains("запущен") || logEntry.contains("подтверждён") -> MaterialTheme.colorScheme.tertiary
                                     else -> MaterialTheme.colorScheme.onSurfaceVariant
                                 },
                                 modifier = Modifier.padding(vertical = 2.dp)
@@ -381,11 +368,11 @@ fun AutopilotScreen(
 @Composable
 private fun PipelineNode(name: String, health: StepHealth, isCurrent: Boolean) {
     val color = when (health) {
-        StepHealth.SUCCESS -> SemanticGreen
-        StepHealth.IN_PROGRESS -> SignalOrange
-        StepHealth.WARNING -> SemanticAmber
-        StepHealth.FAILURE -> SemanticRed
-        StepHealth.IDLE, StepHealth.UNTESTED -> GraphiteTertiary
+        StepHealth.SUCCESS -> MaterialTheme.colorScheme.tertiary
+        StepHealth.IN_PROGRESS -> MaterialTheme.colorScheme.primary
+        StepHealth.WARNING -> MaterialTheme.colorScheme.secondary
+        StepHealth.FAILURE -> MaterialTheme.colorScheme.error
+        StepHealth.IDLE, StepHealth.UNTESTED -> MaterialTheme.colorScheme.onSurfaceVariant
     }
 
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -393,7 +380,7 @@ private fun PipelineNode(name: String, health: StepHealth, isCurrent: Boolean) {
             modifier = Modifier
                 .size(24.dp)
                 .clip(CircleShape)
-                .background(if (isCurrent) SignalOrangeContainer else MineralSurfaceSubtle)
+                .background(if (isCurrent) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant)
                 .padding(4.dp),
             contentAlignment = Alignment.Center
         ) {
@@ -420,19 +407,18 @@ private fun PipelineArrow() {
         imageVector = Icons.Default.ArrowForward,
         contentDescription = null,
         modifier = Modifier.size(14.dp),
-        tint = GraphiteTertiary
+        tint = MaterialTheme.colorScheme.onSurfaceVariant
     )
 }
 
 @Composable
-private fun MetricCell(label: String, value: String) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+private fun MetricCell(label: String, value: String, modifier: Modifier = Modifier) {
+    Column(modifier = modifier, horizontalAlignment = Alignment.Start) {
         Text(
             text = label,
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
-            fontWeight = FontWeight.Bold,
-            letterSpacing = 0.5.sp
+            fontWeight = FontWeight.Medium
         )
         Spacer(modifier = Modifier.height(2.dp))
         Text(

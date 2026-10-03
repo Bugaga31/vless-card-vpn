@@ -28,6 +28,7 @@ import com.vlesscardvpn.ui.components.ServerCard
 import com.vlesscardvpn.ui.theme.*
 import com.vlesscardvpn.util.UniversalConfigParser
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.CancellationException
 
 enum class ServerSortMode(val label: String) {
     LATENCY("По задержке"),
@@ -36,7 +37,7 @@ enum class ServerSortMode(val label: String) {
     NAME("По имени")
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun ServersScreen(
     repo: AppRepository,
@@ -52,10 +53,12 @@ fun ServersScreen(
     var showImportDialog by remember { mutableStateOf(false) }
     var importText by remember { mutableStateOf("") }
     var importError by remember { mutableStateOf<String?>(null) }
+    var importing by remember { mutableStateOf(false) }
     var isPingingAll by remember { mutableStateOf(false) }
     var selectedPassportConfig by remember { mutableStateOf<VlessConfig?>(null) }
 
     val activeConfig = configs.firstOrNull { it.isActive }
+    val vpnStats by com.vlesscardvpn.worker.VlessVpnService.vpnStats.collectAsState()
 
     val sortedAndFilteredConfigs = remember(configs, searchQuery, sortMode) {
         val filtered = configs.filter {
@@ -79,13 +82,13 @@ fun ServersScreen(
                 title = {
                     Column {
                         Text(
-                            text = "Узлы связи",
+                            text = "Серверы",
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.onBackground
                         )
                         Text(
-                            text = "${configs.size} доступно",
+                            text = "${configs.size} в списке",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -102,13 +105,12 @@ fun ServersScreen(
                         onClick = {
                             isPingingAll = true
                             scope.launch {
-                                repo.testAllConfigs()
-                                isPingingAll = false
+                                try { repo.testAllConfigs() } finally { isPingingAll = false }
                             }
                         }
                     ) {
                         if (isPingingAll) {
-                            CircularProgressIndicator(modifier = Modifier.size(18.dp), color = SignalOrange, strokeWidth = 2.dp)
+                            CircularProgressIndicator(modifier = Modifier.size(18.dp), color = MaterialTheme.colorScheme.primary, strokeWidth = 2.dp)
                         } else {
                             Icon(Icons.Default.Speed, contentDescription = "Проверить все", tint = MaterialTheme.colorScheme.onBackground)
                         }
@@ -121,7 +123,7 @@ fun ServersScreen(
 
                     // Add server
                     IconButton(onClick = { showImportDialog = true }) {
-                        Icon(Icons.Default.Add, contentDescription = "Добавить узел", tint = SignalOrange)
+                        Icon(Icons.Default.Add, contentDescription = "Добавить узел", tint = MaterialTheme.colorScheme.primary)
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface)
@@ -138,7 +140,7 @@ fun ServersScreen(
             OutlinedTextField(
                 value = searchQuery,
                 onValueChange = { searchQuery = it },
-                placeholder = { Text("Поиск по имени, адресу или SNI...", fontSize = 14.sp) },
+                placeholder = { Text("Найти сервер", fontSize = 16.sp) },
                 leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
                 trailingIcon = {
                     if (searchQuery.isNotBlank()) {
@@ -150,7 +152,7 @@ fun ServersScreen(
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
                 colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = SignalOrange,
+                    focusedBorderColor = MaterialTheme.colorScheme.primary,
                     unfocusedBorderColor = MaterialTheme.colorScheme.outline,
                     focusedContainerColor = MaterialTheme.colorScheme.surface,
                     unfocusedContainerColor = MaterialTheme.colorScheme.surface
@@ -161,10 +163,10 @@ fun ServersScreen(
             Spacer(modifier = Modifier.height(InstrumentDimens.space8))
 
             // Sort Filter Chips
-            Row(
+            FlowRow(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(InstrumentDimens.space8),
-                verticalAlignment = Alignment.CenterVertically
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 ServerSortMode.values().forEach { mode ->
                     FilterChip(
@@ -172,8 +174,8 @@ fun ServersScreen(
                         onClick = { sortMode = mode },
                         label = { Text(mode.label, style = MaterialTheme.typography.bodySmall) },
                         colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = SignalOrangeContainer,
-                            selectedLabelColor = SignalOrangeContent
+                            selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
+                            selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
                         )
                     )
                 }
@@ -197,7 +199,7 @@ fun ServersScreen(
                         Spacer(modifier = Modifier.height(InstrumentDimens.space8))
                         Button(
                             onClick = { showImportDialog = true },
-                            colors = ButtonDefaults.buttonColors(containerColor = SignalOrange)
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
                         ) {
                             Text("Добавить сервер")
                         }
@@ -213,7 +215,8 @@ fun ServersScreen(
 
                         ServerCard(
                             config = config,
-                            isConnected = config.isActive,
+                            isConnected = vpnStats.status == com.vlesscardvpn.worker.VpnStatus.CONNECTED &&
+                                vpnStats.health.internet && vpnStats.activeConfig?.id == config.id,
                             isSelected = isSelected,
                             onSelect = {
                                 scope.launch {
@@ -224,15 +227,7 @@ fun ServersScreen(
                             onPing = {
                                 scope.launch {
                                     val breakdown = com.vlesscardvpn.domain.PingTester.testDetailedLatency(config)
-                                    val ping = if (breakdown.success) {
-                                        if (breakdown.tlsMs > 0) breakdown.tlsMs else breakdown.tcpMs
-                                    } else -1
-                                    repo.updateConfig(config.copy(
-                                        pingMs = ping,
-                                        tcpLatencyMs = breakdown.tcpMs,
-                                        tlsLatencyMs = breakdown.tlsMs,
-                                        healthState = if (ping > 0) "HEALTHY" else "DEAD"
-                                    ))
+                                    repo.recordPortCheck(config.id, breakdown)
                                 }
                             },
                             onDelete = {
@@ -278,7 +273,7 @@ fun ServersScreen(
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(InstrumentDimens.space8)) {
                     Text(
-                        text = "Поддерживаемые форматы: VLESS Reality (vless://), VMess (vmess://), Trojan (trojan://), Shadowsocks (ss://) или Base64 подписка.",
+                        text = "Поддерживаемые форматы: VLESS Reality (vless://), VMess (vmess://), Trojan (trojan://), Shadowsocks (ss://) Base64 или HTTPS-ссылка на подписку. Ссылки подписок сохраняются зашифрованными и обновляются каждые 6 часов.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -292,9 +287,9 @@ fun ServersScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(130.dp),
-                        placeholder = { Text("Вставьте ссылку или текст...", fontSize = 12.sp, fontFamily = FontFamily.Monospace) },
+                        placeholder = { Text("Вставьте ссылку или текст...", fontSize = 14.sp, fontFamily = FontFamily.Monospace) },
                         colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = SignalOrange,
+                            focusedBorderColor = MaterialTheme.colorScheme.primary,
                             unfocusedBorderColor = MaterialTheme.colorScheme.outline
                         )
                     )
@@ -303,7 +298,7 @@ fun ServersScreen(
                         Text(
                             text = importError ?: "",
                             style = MaterialTheme.typography.bodySmall,
-                            color = SemanticRed
+                            color = MaterialTheme.colorScheme.error
                         )
                     }
                 }
@@ -311,22 +306,21 @@ fun ServersScreen(
             confirmButton = {
                 Button(
                     onClick = {
-                        val parsed = UniversalConfigParser.parseAny(importText)
-                        if (parsed.isNotEmpty()) {
-                            scope.launch {
-                                repo.addConfigs(parsed)
-                                Toast.makeText(context, "Добавлено серверов: ${parsed.size}", Toast.LENGTH_SHORT).show()
-                            }
-                            showImportDialog = false
-                            importText = ""
-                            importError = null
-                        } else {
-                            importError = "Не удалось распознать конфигурацию. Проверьте формат ссылки (vless://, vmess://, trojan://)."
+                        if (!importing) scope.launch {
+                            importing = true; importError = null
+                            try {
+                                val count = repo.importText(importText)
+                                Toast.makeText(context, "Импортировано: $count. Подписки обновляются автоматически", Toast.LENGTH_SHORT).show()
+                                showImportDialog = false; importText = ""
+                            } catch (cancel: CancellationException) { throw cancel }
+                            catch (_: Exception) { importError = "Импорт не выполнен: проверьте публичную HTTPS-ссылку, доступность источника и формат конфигураций" }
+                            finally { importing = false }
                         }
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = SignalOrange)
+                    enabled = !importing,
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
                 ) {
-                    Text("Добавить")
+                    Text(if (importing) "Загрузка…" else "Добавить")
                 }
             },
             dismissButton = {

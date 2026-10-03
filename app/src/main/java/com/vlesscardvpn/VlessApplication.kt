@@ -4,7 +4,6 @@ import android.app.Application
 import android.content.Context
 import android.util.Log
 import com.vlesscardvpn.core.CrashReportManager
-import go.Seq
 import java.io.File
 import java.io.PrintWriter
 import java.io.StringWriter
@@ -30,10 +29,10 @@ class VlessApplication : Application() {
             text = text.replace(Regex("[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"), "[REDACTED_UUID]")
 
             // 2. Sanitize Reality public keys and passwords in query params
-            text = text.replace(Regex("(pbk|public_key|password|secret|key|token|uuid|sid|short_id)=([^&\\s,;\"'}{]+)", RegexOption.IGNORE_CASE), "$1=[REDACTED]")
+            text = text.replace(Regex("(pbk|public_key|password|secret|key|token|uuid|sid|short_id|sni|host)=([^&\\s,;\"'}{]+)", RegexOption.IGNORE_CASE), "$1=[REDACTED]")
 
             // 3. Sanitize JSON fields for keys and secrets
-            text = text.replace(Regex("\"(uuid|password|public_key|private_key|short_id|secret|token)\"\\s*:\\s*\"[^\"]+\"", RegexOption.IGNORE_CASE), "\"$1\":\"[REDACTED]\"")
+            text = text.replace(Regex("\"(uuid|password|public_key|private_key|short_id|secret|token|server_name|sni|server|address)\"\\s*:\\s*\"[^\"]+\"", RegexOption.IGNORE_CASE), "\"$1\":\"[REDACTED]\"")
 
             // 4. Sanitize full protocol links (vless://, vmess://, trojan://, ss://)
             text = text.replace(Regex("(vless|vmess|trojan|ss)://[^\\s]+", RegexOption.IGNORE_CASE), "$1://[REDACTED_NODE_CONFIG]")
@@ -44,26 +43,11 @@ class VlessApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
-        setupGoSeqContext()
+        com.vlesscardvpn.domain.NetworkDiagnosticLog.ring = com.vlesscardvpn.domain.DiagnosticRing(File(noBackupFilesDir, "network-diagnostics.log"))
         setupUncaughtExceptionHandler()
-    }
-
-    /**
-     * Initializes Go runtime environment context for Go Mobile / Libbox.
-     */
-    private fun setupGoSeqContext() {
-        try {
-            System.loadLibrary("box")
-            Log.i(TAG, "Loaded libbox.so (sing-box native library)")
-        } catch (t: Throwable) {
-            Log.w(TAG, "Could not load libbox: ${t.message}")
-        }
-        try {
-            Seq.setContext(applicationContext)
-            Log.i(TAG, "Go Seq context initialized successfully")
-        } catch (t: Throwable) {
-            Log.e(TAG, "Failed to initialize Go Seq context", t)
-        }
+        // Read previous native-crash metadata off the main thread on Android 11+.
+        Thread({ CrashReportManager.recordPreviousNativeExits(applicationContext) },
+            "native-exit-report-reader").start()
     }
 
     /**

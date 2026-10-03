@@ -32,12 +32,14 @@ object XrayConfigImporter {
         val routingRules = mutableListOf<String>()
 
         return try {
-            val root = JSONObject(jsonString.trim())
+            require(JsonImportLimits.accepts(jsonString)) { "JSON import limit" }
+            val root = JSONObject(jsonString.removePrefix("\uFEFF").trim())
 
             // Parse outbounds
             val outbounds = root.optJSONArray("outbounds")
             if (outbounds != null) {
-                for (i in 0 until outbounds.length()) {
+                if (outbounds.length() > JsonImportLimits.MAX_OUTBOUNDS) warnings.add("Лимит: первые 1000 исходящих профилей")
+                for (i in 0 until minOf(outbounds.length(), JsonImportLimits.MAX_OUTBOUNDS)) {
                     val outbound = outbounds.getJSONObject(i)
                     val protocol = outbound.optString("protocol", "").lowercase()
 
@@ -75,9 +77,23 @@ object XrayConfigImporter {
 
             XrayImportResult(configs, warnings, routingRules)
         } catch (e: Exception) {
-            XrayImportResult(emptyList(), listOf("Failed to parse Xray config: ${e.message}"))
+            XrayImportResult(emptyList(), listOf("Некорректный JSON Xray или превышен лимит импорта"))
         }
     }
+
+    private fun normalizeTransport(network: String): String = when (network.lowercase()) {
+        "ws", "websocket" -> "ws"
+        "grpc", "gun" -> "grpc"
+        "h2", "http", "http2" -> "h2"
+        else -> network.lowercase() // Never silently convert an unsupported transport to TCP.
+    }
+
+    private fun transportHost(settings: JSONObject): String = if (normalizeTransport(settings.optString("network", "tcp")) == "h2")
+        settings.optJSONObject("httpSettings")?.optJSONArray("host")?.optString(0, "") ?: ""
+        else settings.optJSONObject("wsSettings")?.optJSONObject("headers")?.optString("Host", "") ?: ""
+    private fun transportPath(settings: JSONObject): String = if (normalizeTransport(settings.optString("network", "tcp")) == "h2")
+        settings.optJSONObject("httpSettings")?.optString("path", "/") ?: "/"
+        else settings.optJSONObject("wsSettings")?.optString("path", "/") ?: "/"
 
     private fun parseVlessOutbound(outbound: JSONObject): VlessConfig? {
         return try {
@@ -93,8 +109,9 @@ object XrayConfigImporter {
             val user = if (users != null && users.length() > 0) users.getJSONObject(0) else return null
 
             val uuid = user.optString("id", "")
-            val flow = user.optString("flow", "xtls-rprx-vision")
+            val flow = user.optString("flow", "")
             val encryption = user.optString("encryption", "none")
+            if (encryption != "none") return null // Do not silently downgrade unsupported VLESS encryption.
 
             val streamSettings = outbound.optJSONObject("streamSettings") ?: JSONObject()
             val security = streamSettings.optString("security", "none")
@@ -106,7 +123,7 @@ object XrayConfigImporter {
             val sni = when {
                 realitySettings?.optString("serverName", "")?.isNotBlank() == true -> realitySettings.optString("serverName")
                 tlsSettings?.optString("serverName", "")?.isNotBlank() == true -> tlsSettings.optString("serverName")
-                else -> "yandex.ru"
+                else -> if (security.equals("reality", true)) "" else address
             }
 
             val fingerprint = when {
@@ -119,23 +136,10 @@ object XrayConfigImporter {
             val shortId = realitySettings?.optString("shortId", "") ?: ""
 
             // Parse transport settings
-            val wsSettings = streamSettings.optJSONObject("wsSettings")
             val grpcSettings = streamSettings.optJSONObject("grpcSettings")
-            val h2Settings = streamSettings.optJSONObject("httpSettings")
-
-            val wsHost = wsSettings?.optJSONObject("headers")?.optString("Host", "") ?: ""
-            val wsPath = wsSettings?.optString("path", "/") ?: "/"
             val serviceName = grpcSettings?.optString("serviceName", "") ?: ""
 
-            val transport = when (network.lowercase()) {
-                "ws", "websocket" -> "ws"
-                "grpc", "gun" -> "grpc"
-                "h2", "http" -> "h2"
-                "tcp" -> "tcp"
-                "kcp" -> "kcp"
-                "quic" -> "quic"
-                else -> "tcp"
-            }
+            val transport = normalizeTransport(network)
 
             VlessConfig(
                 id = UUID.randomUUID().toString(),
@@ -154,8 +158,8 @@ object XrayConfigImporter {
                 isFree = false,
                 source = "xray-import",
                 transport = transport,
-                wsHost = wsHost,
-                wsPath = wsPath,
+                wsHost = transportHost(streamSettings),
+                wsPath = transportPath(streamSettings),
                 serviceName = serviceName
             )
         } catch (e: Exception) {
@@ -175,18 +179,14 @@ object XrayConfigImporter {
             val user = if (users != null && users.length() > 0) users.getJSONObject(0) else return null
 
             val uuid = user.optString("id", "")
-            val security = user.optString("security", "auto")
 
             val streamSettings = outbound.optJSONObject("streamSettings") ?: JSONObject()
             val tlsSettings = streamSettings.optJSONObject("tlsSettings")
             val tlsSecurity = streamSettings.optString("security", "none")
             val network = streamSettings.optString("network", "tcp")
 
-            val sni = tlsSettings?.optString("serverName", "") ?: "yandex.ru"
+            val sni = tlsSettings?.optString("serverName", "")?.ifBlank { address } ?: address
 
-            val wsSettings = streamSettings.optJSONObject("wsSettings")
-            val wsPath = wsSettings?.optString("path", "/") ?: "/"
-            val wsHost = wsSettings?.optJSONObject("headers")?.optString("Host", "") ?: ""
 
             VlessConfig(
                 id = UUID.randomUUID().toString(),
@@ -200,9 +200,10 @@ object XrayConfigImporter {
                 remark = "Xray: ${outbound.optString("tag", "VMess")}",
                 isFree = false,
                 source = "xray-import",
-                transport = if (network == "ws") "ws" else "tcp",
-                wsPath = wsPath,
-                wsHost = wsHost
+                transport = normalizeTransport(network),
+                serviceName = streamSettings.optJSONObject("grpcSettings")?.optString("serviceName", "") ?: "",
+                wsPath = transportPath(streamSettings),
+                wsHost = transportHost(streamSettings)
             )
         } catch (e: Exception) {
             null
@@ -234,7 +235,11 @@ object XrayConfigImporter {
                 sni = sni,
                 remark = "Xray: ${outbound.optString("tag", "Trojan")}",
                 isFree = false,
-                source = "xray-import"
+                source = "xray-import",
+                transport = normalizeTransport(streamSettings.optString("network", "tcp")),
+                wsHost = transportHost(streamSettings),
+                wsPath = transportPath(streamSettings),
+                serviceName = streamSettings.optJSONObject("grpcSettings")?.optString("serviceName", "") ?: ""
             )
         } catch (e: Exception) {
             null

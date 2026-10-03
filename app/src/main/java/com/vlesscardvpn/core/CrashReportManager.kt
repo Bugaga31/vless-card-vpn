@@ -1,5 +1,7 @@
 package com.vlesscardvpn.core
 
+import android.app.ActivityManager
+import android.app.ApplicationExitInfo
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -45,7 +47,45 @@ object CrashReportManager {
         .readTimeout(10, TimeUnit.SECONDS)
         .build()
 
-    fun recordException(context: Context, thread: Thread, throwable: Throwable, type: String = "CRASH") {
+    /** Native aborts bypass Java's uncaught-exception handler. Read only our own exit metadata. */
+    fun recordPreviousNativeExits(context: Context) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return
+        try {
+            val preferences = context.getSharedPreferences("native_exit_reports", Context.MODE_PRIVATE)
+            val lastSeen = preferences.getLong("last_native_trace_exit_timestamp", 0L)
+            val manager = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+            val exits = manager.getHistoricalProcessExitReasons(context.packageName, 0, 5)
+            val newExits = exits.filter { it.timestamp > lastSeen }.sortedBy { it.timestamp }
+            for (exit in newExits) {
+                if (exit.reason == ApplicationExitInfo.REASON_CRASH_NATIVE ||
+                    exit.reason == ApplicationExitInfo.REASON_ANR) {
+                    // Read only allowlisted tombstone fields, never memory, logcat or FDs.
+                    val reason = if (exit.reason == ApplicationExitInfo.REASON_CRASH_NATIVE) "NATIVE_CRASH" else "ANR"
+                    val metadata = "Android recorded $reason: status=${exit.status}, " +
+                        "exitTimestamp=${exit.timestamp}, importance=${exit.importance}. " +
+                        "See the native stack section; Android may not retain a trace."
+                    val nativeStack = if (exit.reason == ApplicationExitInfo.REASON_CRASH_NATIVE &&
+                        Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                        try {
+                            exit.traceInputStream?.use { NativeTombstoneReader.read(it) }
+                                ?: "Native trace unavailable: Android did not retain a tombstone."
+                        } catch (_: Exception) {
+                            "Native trace unavailable: the system trace could not be decoded safely."
+                        }
+                    } else "Native trace unavailable for this exit record."
+                    recordException(context, Thread.currentThread(), IllegalStateException(metadata),
+                        reason, stackTraceOverride = nativeStack)
+                }
+            }
+            newExits.lastOrNull()?.let {
+                preferences.edit().putLong("last_native_trace_exit_timestamp", it.timestamp).apply()
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not read previous process exit metadata", e)
+        }
+    }
+
+    fun recordException(context: Context, thread: Thread, throwable: Throwable, type: String = "CRASH", stackTraceOverride: String? = null) {
         try {
             val crashDir = File(context.filesDir, "crashes").apply { mkdirs() }
             val timeStamp = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(Date())
@@ -59,7 +99,7 @@ object CrashReportManager {
                 "1.0.0"
             }
 
-            val rawStackTrace = Log.getStackTraceString(throwable)
+            val rawStackTrace = stackTraceOverride ?: Log.getStackTraceString(throwable)
             val sanitizedMsg = VlessApplication.sanitizeLog(throwable.message ?: throwable.javaClass.simpleName)
             val sanitizedStack = VlessApplication.sanitizeLog(rawStackTrace)
 
@@ -174,7 +214,7 @@ object CrashReportManager {
             appendLine("</details>")
             appendLine()
             appendLine("---")
-            appendLine("*Все конфиденциальные данные (UUID, ключи, SNI, пароли) были автоматически обезличены перед отправкой.*")
+            appendLine("*Отчёт очищен от распознаваемых секретов. Перед отправкой проверьте, что в нём нет личных данных.*")
         }
     }
 

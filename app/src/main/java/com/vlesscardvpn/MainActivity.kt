@@ -32,6 +32,10 @@ import com.vlesscardvpn.data.PublicConfigFetcher
 import com.vlesscardvpn.worker.SubscriptionUpdateWorker
 import com.vlesscardvpn.worker.VlessVpnService
 import com.vlesscardvpn.worker.VpnStatus
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineExceptionHandler
+import kotlinx.coroutines.Job
+import com.vlesscardvpn.core.CrashReportManager
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -41,20 +45,9 @@ class MainActivity : ComponentActivity() {
         val shouldAutoConnect = intent?.getBooleanExtra("EXTRA_AUTO_CONNECT", false) ?: false
 
         setContent {
-            VlessCardVpnTheme(darkTheme = true) {
-                Surface(
-                    modifier = Modifier.fillMaxSize(),
-                    color = MaterialTheme.colorScheme.background
-                ) {
-                    VlessCardVpnApp(
-                        autoConnectOnStart = shouldAutoConnect,
-                        onPanicExit = {
-                            VlessVpnService.stopVpn(this@MainActivity)
-                            finishAffinity()
-                        }
-                    )
-                }
-            }
+            VlessCardVpnApp(autoConnectOnStart = shouldAutoConnect, onPanicExit = {
+                VlessVpnService.stopVpn(this@MainActivity); finishAffinity()
+            })
         }
     }
 }
@@ -65,7 +58,13 @@ fun VlessCardVpnApp(
     onPanicExit: () -> Unit = {}
 ) {
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
+    val uiErrors = remember(context) {
+        CoroutineExceptionHandler { _, error ->
+            CrashReportManager.recordException(context.applicationContext, Thread.currentThread(), error, "UI_TASK")
+            Toast.makeText(context, "Ошибка операции. Подробности в отчётах об ошибках.", Toast.LENGTH_LONG).show()
+        }
+    }
+    val scope = rememberCoroutineScope { uiErrors }
     val navController = rememberNavController()
 
     val repo = remember { AppRepository(context.applicationContext) }
@@ -83,102 +82,67 @@ fun VlessCardVpnApp(
     val settings by repo.settingsFlow.collectAsState()
 
     var showSplash by remember { mutableStateOf(true) }
+    var pendingAuto by remember { mutableStateOf(false) }
     var pendingConfig by remember { mutableStateOf<VlessConfig?>(null) }
+    var preparingConnection by remember { mutableStateOf(false) }
+    var preparationJob by remember { mutableStateOf<Job?>(null) }
 
     LaunchedEffect(Unit) {
         SubscriptionUpdateWorker.schedulePeriodic(context.applicationContext)
         delay(800)
         showSplash = false
-        if (settings.autoSelect) autoPilotEngine.startAutoPilot(settings.healthCheckInterval)
+        // Restore monitoring only for a tunnel that was already running. Opening the UI
+        // must not start a tunnel or scan all nodes because a selection setting was saved.
+        if (settings.autoSelect && VlessVpnService.vpnStats.value.status == VpnStatus.CONNECTED) {
+            autoPilotEngine.startAutoPilot(settings.healthCheckInterval)
+        }
     }
 
     val vpnPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
     ) { result ->
         if (result.resultCode == Activity.RESULT_OK) {
-            pendingConfig?.let { cfg ->
-                scope.launch {
-                    repo.setActive(cfg.id)
-                    VlessVpnService.startVpn(context, cfg)
-                }
-            }
+            if (pendingAuto) VlessVpnService.startAuto(context)
+            else pendingConfig?.let { cfg -> VlessVpnService.startVpn(context, cfg) }
         } else {
             Toast.makeText(context, "Разрешение VPN необходимо для подключения", Toast.LENGTH_SHORT).show()
         }
         pendingConfig = null
+        pendingAuto = false
     }
 
-    val handleConnectToggle: (VlessConfig?) -> Unit = { targetConfig ->
-        scope.launch {
-            if (vpnStats.status == VpnStatus.CONNECTED || vpnStats.status == VpnStatus.CONNECTING) {
-                VlessVpnService.stopVpn(context)
-                repo.setActive("")
-                return@launch
-            }
-
-            // 1-Click Full Automation Connect:
-            // 1. If user passed a specific config, use it.
-            // 2. Otherwise find lowest-ping verified config among existing ones.
-            // 3. If none exist or none verified, automatically fetch live subscription pool, ping in parallel, and connect to the fastest node!
-            var cfgToConnect = targetConfig ?: configs.filter { it.pingMs in 1..1500 }.minByOrNull { it.pingMs }
-                ?: configs.firstOrNull { it.isActive }
-                ?: configs.firstOrNull()
-
-            if (cfgToConnect == null || (targetConfig == null && cfgToConnect.pingMs <= 0)) {
-                Toast.makeText(context, "⚡ 1-Click: Сканирование пула подписок и выбор быстрейшего узла…", Toast.LENGTH_SHORT).show()
-                val working = PublicConfigFetcher.fetchAndFilterWorkingConfigs(maxWorkingCount = 20)
-                if (working.isNotEmpty()) {
-                    working.forEach { repo.addConfig(it) }
-                    cfgToConnect = working.minByOrNull { if (it.pingMs > 0) it.pingMs else 9999 } ?: working.first()
-                }
-            }
-
-            if (cfgToConnect != null) {
-                // Кнопка «Подключить» = полный автомат: автопилот всегда идёт в связке
-                // с туннелем — фон-скан подписок, перепинг и failover на быстрейший узел.
-                runCatching { autoPilotEngine.setConsent(true) }
-                runCatching { autoPilotEngine.startAutoPilot(settings.healthCheckInterval) }
-                scope.launch { runCatching { autoPilotEngine.triggerManualScan() } }
-                try {
-                    val prepareIntent = VpnService.prepare(context)
-                    if (prepareIntent != null) {
-                        pendingConfig = cfgToConnect
-                        vpnPermissionLauncher.launch(prepareIntent)
-                    } else {
-                        repo.setActive(cfgToConnect.id)
-                        VlessVpnService.startVpn(context, cfgToConnect)
-                    }
-                } catch (e: Exception) {
-                    android.util.Log.e("MainActivity", "VPN permission prepare failed", e)
-                    Toast.makeText(context, "Ошибка запроса разрешения VPN: ${e.localizedMessage ?: e.javaClass.simpleName}", Toast.LENGTH_LONG).show()
-                }
-            } else {
-                Toast.makeText(context, "Не удалось найти рабочий узел связи. Проверьте интернет-соединение.", Toast.LENGTH_LONG).show()
-            }
+    val handleAutoConnect: () -> Unit = auto@{
+        if (pendingAuto || pendingConfig != null) return@auto
+        if (VlessVpnService.vpnStats.value.status == VpnStatus.CONNECTING) return@auto
+        // Explicit Auto is permission for this route selection, not an application-open trigger.
+        val permission = VpnService.prepare(context)
+        if (permission != null) {
+            pendingAuto = true
+            vpnPermissionLauncher.launch(permission)
+        } else VlessVpnService.startAuto(context)
+    }
+    val handleConnectToggle: (VlessConfig?) -> Unit = toggle@{ target ->
+        if (pendingConfig != null || pendingAuto) return@toggle
+        val current = VlessVpnService.vpnStats.value.status
+        if (current in listOf(VpnStatus.CONNECTED, VpnStatus.CONNECTING)) {
+            autoPilotEngine.stopAutoPilot()
+            VlessVpnService.stopVpn(context)
+            return@toggle
         }
+        if (target == null) { handleAutoConnect(); return@toggle }
+        val permission = VpnService.prepare(context)
+        if (permission != null) {
+            pendingConfig = target
+            vpnPermissionLauncher.launch(permission)
+        } else VlessVpnService.startVpn(context, target)
     }
 
-    // Запрос разрешения VPN сразу при первом запуске (после установки/открытия)
-    var vpnPermissionChecked by remember { mutableStateOf(false) }
     var autoConnectAttempted by remember { mutableStateOf(false) }
 
-    LaunchedEffect(showSplash) {
-        if (!showSplash && !vpnPermissionChecked) {
-            vpnPermissionChecked = true
-            try {
-                val prepareIntent = VpnService.prepare(context)
-                if (prepareIntent != null) {
-                    vpnPermissionLauncher.launch(prepareIntent)
-                }
-            } catch (e: Exception) {
-                android.util.Log.e("MainActivity", "Early VPN permission check failed", e)
-            }
-        }
-    }
-
-    // Полный автомат: однократное автоподключение при старте приложения
-    LaunchedEffect(showSplash, settings.autoSelect, autoConnectOnStart) {
-        if (!showSplash && (settings.autoSelect || autoConnectOnStart) && !autoConnectAttempted) {
+    // Autoselection is not consent to connect on every launcher open.
+    // Only an explicit Quick Settings action requests connection on entry.
+    LaunchedEffect(showSplash, autoConnectOnStart) {
+        if (!showSplash && autoConnectOnStart && !autoConnectAttempted) {
             autoConnectAttempted = true
             delay(1500) // даём подпискам и БД прогрузиться
             if (vpnStats.status == VpnStatus.DISCONNECTED) {
@@ -187,6 +151,9 @@ fun VlessCardVpnApp(
         }
     }
 
+    VlessCardVpnTheme(darkTheme = com.vlesscardvpn.domain.AppAppearance.isDark(settings.themeMode,
+        androidx.compose.foundation.isSystemInDarkTheme())) {
+    Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
     AnimatedContent(
         targetState = showSplash,
         transitionSpec = { fadeIn(animationSpec = tween(280)) togetherWith fadeOut(animationSpec = tween(280)) },
@@ -206,7 +173,10 @@ fun VlessCardVpnApp(
                         onNavigateToAutopilot = { navController.navigate("autopilot") },
                         onNavigateToDiagnostic = { navController.navigate("diagnostic") },
                         onNavigateToSettings = { navController.navigate("settings") },
-                        onPanicTrigger = onPanicExit
+                        onPanicTrigger = onPanicExit,
+                        preparingConnection = pendingAuto || pendingConfig != null,
+                        onNavigateToCrashReports = { navController.navigate("crash_reports") },
+                        onAutoConnect = handleAutoConnect
                     )
                 }
                 composable("servers") {
@@ -220,5 +190,7 @@ fun VlessCardVpnApp(
                 composable("crash_reports") { CrashReportsScreen(repo) { navController.popBackStack() } }
             }
         }
+    }
+    }
     }
 }

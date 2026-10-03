@@ -6,12 +6,18 @@ import com.vlesscardvpn.data.db.AppDatabase
 import com.vlesscardvpn.data.db.toDomain
 import com.vlesscardvpn.data.db.toEntity
 import com.vlesscardvpn.domain.AppSettings
+import com.vlesscardvpn.domain.AutoConnectPolicy
+import com.vlesscardvpn.domain.SubscriptionPolicy
+import com.vlesscardvpn.util.UniversalConfigParser
 import com.vlesscardvpn.domain.PingTester
 import com.vlesscardvpn.domain.VlessConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -27,14 +33,74 @@ class AppRepository(private val context: Context) {
     private val passportPrefs: SharedPreferences = context.getSharedPreferences("server_passport_prefs", Context.MODE_PRIVATE)
     private val _settingsFlow = MutableStateFlow(loadSettingsFromPrefs())
     val settingsFlow = _settingsFlow.asStateFlow()
+    private val preferenceListener = SharedPreferences.OnSharedPreferenceChangeListener { _, _ ->
+        _settingsFlow.value = loadSettingsFromPrefs()
+    }
+    init { prefs.registerOnSharedPreferenceChangeListener(preferenceListener) }
 
-    val configsFlow: Flow<List<VlessConfig>> = db.vlessConfigDao().getAllFlow().map { list -> list.map { it.toDomain() } }
+    private val _storageIssue = MutableStateFlow<String?>(null)
+    val storageIssueFlow = _storageIssue.asStateFlow()
+    private val storageIssueText = "Ключ или защищённая запись недоступны. Данные не удалены. Не переустанавливайте приложение без резервной копии."
+    val configsFlow: Flow<List<VlessConfig>> = db.vlessConfigDao().getAllFlow()
+        .map { list -> list.map { it.toDomain() } }
+        .catch { error ->
+            if (error is CancellationException) throw error
+            _storageIssue.value = storageIssueText
+            emit(emptyList())
+        }.flowOn(Dispatchers.IO)
 
-    suspend fun getAllConfigs(): List<VlessConfig> = withContext(Dispatchers.IO) { db.vlessConfigDao().getAll().map { it.toDomain() } }
-    suspend fun getActiveConfig(): VlessConfig? = withContext(Dispatchers.IO) { db.vlessConfigDao().getActiveConfig()?.toDomain() }
-    suspend fun addConfig(config: VlessConfig) = withContext(Dispatchers.IO) { db.vlessConfigDao().insertOrUpdate(config.toEntity()) }
-    suspend fun addConfigs(configs: List<VlessConfig>) = withContext(Dispatchers.IO) { db.vlessConfigDao().insertAll(configs.map { it.toEntity() }) }
-    suspend fun updateConfig(config: VlessConfig) = withContext(Dispatchers.IO) { db.vlessConfigDao().update(config.toEntity()) }
+    private suspend fun <T> guardedRead(block: suspend () -> T): T = try {
+        block()
+    } catch (e: CancellationException) { throw e }
+    catch (e: Exception) { _storageIssue.value = storageIssueText; throw e }
+    private suspend fun ensureStorageWritable() {
+        check(_storageIssue.value == null) { storageIssueText }
+        // Do not create a replacement key while unreadable encrypted rows already exist.
+        guardedRead { db.vlessConfigDao().getAll().firstOrNull()?.toDomain() }
+    }
+
+    suspend fun getAllConfigs(): List<VlessConfig> = withContext(Dispatchers.IO) { guardedRead { db.vlessConfigDao().getAll().map { it.toDomain() } } }
+    suspend fun getActiveConfig(): VlessConfig? = withContext(Dispatchers.IO) { guardedRead { db.vlessConfigDao().getActiveConfig()?.toDomain() } }
+    suspend fun addConfig(config: VlessConfig) = withContext(Dispatchers.IO) { ensureStorageWritable(); db.vlessConfigDao().insertOrUpdate(config.toEntity()) }
+    suspend fun addConfigs(configs: List<VlessConfig>) = withContext(Dispatchers.IO) { ensureStorageWritable(); db.vlessConfigDao().insertAll(configs.map { it.toEntity() }) }
+    suspend fun updateConfig(config: VlessConfig) = withContext(Dispatchers.IO) { ensureStorageWritable(); db.vlessConfigDao().update(config.toEntity()) }
+
+    suspend fun recordPortCheck(id: String, result: com.vlesscardvpn.domain.LatencyBreakdown) = withContext(Dispatchers.IO) {
+        ensureStorageWritable()
+        val ping = if (result.success) (if (result.tlsMs > 0) result.tlsMs else result.tcpMs) else -1
+        db.vlessConfigDao().recordPortCheck(id, ping, result.tcpMs, result.tlsMs, System.currentTimeMillis())
+    }
+    suspend fun recordAutoTcpHint(id: String, ping: Int) = withContext(Dispatchers.IO) {
+        ensureStorageWritable(); db.vlessConfigDao().recordAutoTcpHint(id, ping)
+    }
+    suspend fun recordTunnelHealth(id: String, healthy: Boolean, latency: Int) = withContext(Dispatchers.IO) {
+        ensureStorageWritable(); db.vlessConfigDao().recordTunnelHealth(id, healthy, latency, System.currentTimeMillis())
+    }
+
+    private val subscriptionStore by lazy { SubscriptionStore(context) }
+    fun subscriptionSources(): List<String> = subscriptionStore.load()
+
+    suspend fun mergeCandidates(incoming: List<VlessConfig>): Int = withContext(Dispatchers.IO) {
+        val existing = getAllConfigs().associateBy(AutoConnectPolicy::identity)
+        val unique = incoming.distinctBy(AutoConnectPolicy::identity).take(500)
+        addConfigs(unique.map { fresh -> existing[AutoConnectPolicy.identity(fresh)]?.let { old ->
+            fresh.copy(id = old.id, isFavorite = old.isFavorite, isActive = old.isActive, addedAt = old.addedAt,
+                healthState = old.healthState, httpLatencyMs = old.httpLatencyMs, failureCount = old.failureCount,
+                pingMs = old.pingMs, lastCheck = old.lastCheck, source = old.source, isFree = old.isFree)
+        } ?: fresh })
+        unique.size
+    }
+
+    suspend fun importText(text: String): Int {
+        require(text.length <= SubscriptionPolicy.MAX_TEXT) { "Импорт больше 2 МиБ" }
+        val urls = SubscriptionPolicy.urls(text)
+        val nodes = UniversalConfigParser.parseAny(text).toMutableList()
+        for (url in urls) nodes += PublicConfigFetcher.importSubscription(url).map { it.copy(source = "subscription", isFree = false) }
+        require(nodes.isNotEmpty()) { "Не найдены конфигурации или публичные HTTPS-подписки" }
+        // Encrypt/save only after every requested subscription has parsed successfully.
+        if (urls.isNotEmpty()) subscriptionStore.add(urls)
+        return mergeCandidates(nodes)
+    }
 
     suspend fun setActive(configId: String) = withContext(Dispatchers.IO) {
         db.vlessConfigDao().setActive(configId)
@@ -45,8 +111,7 @@ class AppRepository(private val context: Context) {
     suspend fun clearFreeNodes() = withContext(Dispatchers.IO) { db.vlessConfigDao().clearFreeNodes() }
 
     suspend fun toggleFavorite(id: String) = withContext(Dispatchers.IO) {
-        val entity = db.vlessConfigDao().getById(id) ?: return@withContext
-        db.vlessConfigDao().update(entity.copy(isFavorite = !entity.isFavorite))
+        db.vlessConfigDao().toggleFavorite(id)
     }
 
     suspend fun testAllConfigs() = withContext(Dispatchers.IO) {
@@ -57,18 +122,7 @@ class AppRepository(private val context: Context) {
                 chunk.map { item ->
                     async {
                         val breakdown = PingTester.testDetailedLatency(item.toDomain(), timeoutMs = 1500)
-                        val ping = if (breakdown.success) {
-                            if (breakdown.tlsMs > 0) breakdown.tlsMs else breakdown.tcpMs
-                        } else -1
-                        db.vlessConfigDao().update(
-                            item.copy(
-                                pingMs = ping,
-                                tcpLatencyMs = breakdown.tcpMs,
-                                tlsLatencyMs = breakdown.tlsMs,
-                                healthState = if (ping > 0) "HEALTHY" else "DEAD",
-                                lastCheck = System.currentTimeMillis()
-                            )
-                        )
+                        recordPortCheck(item.id, breakdown)
                     }
                 }.awaitAll()
             }
@@ -80,7 +134,7 @@ class AppRepository(private val context: Context) {
     // The database is a process-wide singleton shared with VlessVpnService and
     // SubscriptionUpdateWorker — closing it here would break them. Lifecycle is
     // owned by the process, so close() is intentionally a no-op.
-    fun close() = Unit
+    fun close() { prefs.unregisterOnSharedPreferenceChangeListener(preferenceListener) }
 
     fun saveRescueProfile(profile: com.vlesscardvpn.domain.RescueProfile) {
         rescuePrefs.edit().putString("rescue_${profile.configId}", profile.toJson()).apply()
@@ -123,6 +177,7 @@ class AppRepository(private val context: Context) {
 
     private fun loadSettingsFromPrefs() = AppSettings(
         isDarkTheme = prefs.getBoolean("isDarkTheme", true),
+        themeMode = com.vlesscardvpn.domain.AppAppearance.normalize(prefs.getString("themeMode", "system") ?: "system"),
         autoSelect = prefs.getBoolean("autoSelect", false),
         autoSelectBestPing = prefs.getBoolean("autoSelectBestPing", true),
         healthCheckInterval = prefs.getInt("healthCheckInterval", 30),
@@ -156,6 +211,7 @@ class AppRepository(private val context: Context) {
     private fun saveSettingsToPrefs(settings: AppSettings) {
         prefs.edit().apply {
             putBoolean("isDarkTheme", settings.isDarkTheme)
+            putString("themeMode", com.vlesscardvpn.domain.AppAppearance.normalize(settings.themeMode))
             putBoolean("autoSelect", settings.autoSelect)
             putBoolean("autoSelectBestPing", settings.autoSelectBestPing)
             putInt("healthCheckInterval", settings.healthCheckInterval)

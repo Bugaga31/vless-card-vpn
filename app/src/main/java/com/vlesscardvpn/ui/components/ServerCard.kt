@@ -37,207 +37,63 @@ import java.util.Locale
  * favorite star, and quick server passport launcher («Паспорт сервера»).
  */
 @Composable
-fun ServerCard(
-    config: VlessConfig,
-    isConnected: Boolean = false,
-    isSelected: Boolean = false,
-    onSelect: (VlessConfig) -> Unit,
-    onPing: (VlessConfig) -> Unit,
-    onDelete: (VlessConfig) -> Unit,
-    onToggleFavorite: (VlessConfig) -> Unit = {},
-    onOpenPassport: ((VlessConfig) -> Unit)? = null,
-    modifier: Modifier = Modifier
-) {
-    val borderColor = when {
-        isConnected -> SemanticGreen
-        isSelected || config.isActive -> SignalOrange
-        config.isFavorite -> SemanticAmber.copy(alpha = 0.5f)
-        else -> MaterialTheme.colorScheme.outline
-    }
-
-    val cardBg = when {
-        isConnected -> SemanticGreenBg.copy(alpha = 0.4f)
-        isSelected || config.isActive -> SignalOrangeContainer.copy(alpha = 0.25f)
-        else -> MaterialTheme.colorScheme.surface
-    }
-
-    Surface(
-        modifier = modifier
-            .fillMaxWidth()
-            .padding(vertical = InstrumentDimens.space4)
-            .clickable { onSelect(config) },
-        shape = RoundedCornerShape(InstrumentDimens.radiusMedium),
-        border = BorderStroke(if (isConnected || isSelected || config.isActive) 1.5.dp else 1.dp, borderColor),
-        color = cardBg,
-        tonalElevation = 0.dp
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = InstrumentDimens.space12, vertical = InstrumentDimens.space8),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            // Left Status Indicator & Name / Address
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.weight(1f)
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(8.dp)
-                        .clip(CircleShape)
-                        .background(
-                            when {
-                                isConnected -> SemanticGreen
-                                config.healthState == "HEALTHY" || config.pingMs in 1..200 -> SemanticGreen
-                                config.healthState == "DEGRADED" || config.pingMs > 200 -> SemanticAmber
-                                config.healthState == "DEAD" || config.pingMs == -1 -> GraphiteTertiary
-                                else -> SemanticRed
-                            }
-                        )
-                )
-
-                Spacer(modifier = Modifier.width(InstrumentDimens.space12))
-
-                Column(modifier = Modifier.weight(1f)) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(InstrumentDimens.space8)
-                    ) {
-                        Text(
-                            text = config.name.ifBlank { "${config.protocolType.uppercase()} Узел" },
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = if (isConnected || isSelected || config.isActive) FontWeight.Bold else FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onBackground,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f, fill = false)
-                        )
-
-                        Text(
-                            text = config.protocolType.uppercase(),
-                            style = MaterialTheme.typography.bodySmall,
-                            fontFamily = FontFamily.Monospace,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier
-                                .background(MineralSurfaceSubtle, RoundedCornerShape(InstrumentDimens.radiusSmall))
-                                .padding(horizontal = 5.dp, vertical = 2.dp)
-                        )
-
-                        if (isConnected) {
-                            Text(
-                                text = "ПОДКЛЮЧЕНО",
-                                style = MaterialTheme.typography.bodySmall,
-                                fontWeight = FontWeight.Bold,
-                                color = SemanticGreen,
-                                fontSize = 10.sp
-                            )
-                        } else if (isSelected || config.isActive) {
-                            Text(
-                                text = "ВЫБРАН",
-                                style = MaterialTheme.typography.bodySmall,
-                                fontWeight = FontWeight.Bold,
-                                color = SignalOrange,
-                                fontSize = 10.sp
-                            )
-                        }
+fun ServerCard(config: VlessConfig, isConnected: Boolean = false, isSelected: Boolean = false,
+    onSelect: (VlessConfig) -> Unit, onPing: (VlessConfig) -> Unit, onDelete: (VlessConfig) -> Unit,
+    onToggleFavorite: (VlessConfig) -> Unit = {}, onOpenPassport: ((VlessConfig) -> Unit)? = null,
+    modifier: Modifier = Modifier) {
+    val c = MaterialTheme.colorScheme
+    var actions by remember { mutableStateOf(false) }
+    var delete by remember { mutableStateOf(false) }
+    val selected = isSelected || config.isActive
+    Surface(modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp), color = c.surface,
+        border = BorderStroke(1.dp, if (isConnected) c.tertiary else if (selected) c.primary else c.outlineVariant)) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f).clickable { onSelect(config) }.heightIn(min = 48.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(config.name.ifBlank { "Сервер из подписки" }, fontSize = 16.sp, lineHeight = 22.sp,
+                        fontWeight = FontWeight.Medium, color = c.onSurface, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    Text("${config.protocolType.uppercase()} · ${config.security.uppercase()}", fontSize = 14.sp,
+                        color = c.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+                IconButton(onClick = { onToggleFavorite(config) }, modifier = Modifier.size(48.dp)) {
+                    Icon(if (config.isFavorite) Icons.Default.Star else Icons.Outlined.StarBorder,
+                        if (config.isFavorite) "Убрать из избранного" else "В избранное",
+                        tint = if (config.isFavorite) c.secondary else c.onSurfaceVariant)
+                }
+                Box {
+                    IconButton(onClick = { actions = true }, modifier = Modifier.size(48.dp)) {
+                        Icon(Icons.Default.MoreVert, "Действия сервера", tint = c.onSurfaceVariant)
                     }
-
-                    Spacer(modifier = Modifier.height(2.dp))
-
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(InstrumentDimens.space8)
-                    ) {
-                        Text(
-                            text = "${config.address}:${config.port}",
-                            style = MaterialTheme.typography.bodySmall,
-                            fontFamily = FontFamily.Monospace,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        if (config.sni.isNotBlank()) {
-                            Text(
-                                text = "• SNI: ${config.sni}",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = GraphiteTertiary,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
+                    DropdownMenu(expanded = actions, onDismissRequest = { actions = false }) {
+                        DropdownMenuItem(text = { Text("Проверить порт") }, onClick = { actions = false; onPing(config) })
+                        if (onOpenPassport != null) DropdownMenuItem(text = { Text("Информация") }, onClick = { actions = false; onOpenPassport(config) })
+                        DropdownMenuItem(text = { Text("Удалить", color = c.error) }, onClick = { actions = false; delete = true })
                     }
                 }
             }
-
-            Spacer(modifier = Modifier.width(InstrumentDimens.space8))
-
-            // Right Metrics & Actions
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(InstrumentDimens.space4)
-            ) {
-                // Latency Badge
-                val (pingColor, pingBg, pingText) = when {
-                    config.pingMs in 1..150 -> Triple(SemanticGreen, SemanticGreenBg, "${config.pingMs} мс")
-                    config.pingMs in 151..350 -> Triple(SemanticAmber, SemanticAmberBg, "${config.pingMs} мс")
-                    config.pingMs > 350 -> Triple(SemanticRed, SemanticRedBg, "${config.pingMs} мс")
-                    config.pingMs == 0 -> Triple(SignalOrange, SignalOrangeContainer, "тест...")
-                    else -> Triple(GraphiteTertiary, MineralSurfaceSubtle, "Не проверен")
-                }
-
-                Surface(
-                    color = pingBg,
-                    shape = RoundedCornerShape(InstrumentDimens.radiusSmall),
-                    modifier = Modifier.clickable { onPing(config) }
-                ) {
-                    Text(
-                        text = pingText,
-                        color = pingColor,
-                        style = MaterialTheme.typography.bodySmall,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp)
-                    )
-                }
-
-                // Passport button
-                if (onOpenPassport != null) {
-                    IconButton(
-                        onClick = { onOpenPassport(config) },
-                        modifier = Modifier.size(36.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Badge,
-                            contentDescription = "Паспорт сервера",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(18.dp)
-                        )
-                    }
-                }
-
-                // Favorite toggle
-                IconButton(
-                    onClick = { onToggleFavorite(config) },
-                    modifier = Modifier.size(36.dp)
-                ) {
-                    Icon(
-                        imageVector = if (config.isFavorite) Icons.Default.Star else Icons.Outlined.StarBorder,
-                        contentDescription = "Избранное",
-                        tint = if (config.isFavorite) SemanticAmber else GraphiteTertiary,
-                        modifier = Modifier.size(18.dp)
-                    )
+            Text("${config.address}:${config.port}", fontSize = 14.sp, color = c.onSurfaceVariant,
+                maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text(if (isConnected) "Подключено" else if (selected) "Выбран" else "Сохранён",
+                    Modifier.weight(1f), fontSize = 14.sp, color = if (isConnected) c.tertiary else if (selected) c.primary else c.onSurfaceVariant)
+                TextButton(onClick = { onPing(config) }, modifier = Modifier.heightIn(min = 48.dp)) {
+                    Text(if (config.pingMs > 0) "TCP · ${config.pingMs} мс" else "Проверить порт", fontSize = 14.sp)
                 }
             }
         }
     }
+    if (delete) ServerDeleteConfirmation(config.name, onDismiss = { delete = false }, onConfirm = { delete = false; onDelete(config) })
 }
 
-/**
- * 4. «ПАСПОРТ СЕРВЕРА» Dialog
- * Shows confirmed factual data only without fabricated security ratings.
- */
+@Composable
+fun ServerDeleteConfirmation(name: String, onDismiss: () -> Unit, onConfirm: () -> Unit) {
+    AlertDialog(onDismissRequest = onDismiss, title = { Text("Удалить сервер?") },
+        text = { Text("${name.ifBlank { "Выбранный сервер" }} будет удалён из списка. Подписка при следующем обновлении может добавить его снова.") },
+        confirmButton = { TextButton(onClick = onConfirm) { Text("Удалить", color = MaterialTheme.colorScheme.error) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Отмена") } })
+}
+
 @Composable
 fun ServerPassportDialog(
     config: VlessConfig,
@@ -254,7 +110,7 @@ fun ServerPassportDialog(
         onDismissRequest = onDismiss,
         title = {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Default.Badge, contentDescription = null, tint = SignalOrange, modifier = Modifier.size(22.dp))
+                Icon(Icons.Default.Badge, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(22.dp))
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
                     text = "Паспорт узла",
@@ -299,15 +155,15 @@ fun ServerPassportDialog(
                 Text(
                     text = "Примечание: Сервер использует TLS Reality / Vision. Подлинность подтверждается успешным сквозным HTTPS-рукопожатием.",
                     style = MaterialTheme.typography.bodySmall,
-                    color = GraphiteTertiary,
-                    fontSize = 11.sp
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontSize = 14.sp
                 )
             }
         },
         confirmButton = {
             Button(
                 onClick = onDismiss,
-                colors = ButtonDefaults.buttonColors(containerColor = SignalOrange)
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
             ) {
                 Text("Закрыть")
             }

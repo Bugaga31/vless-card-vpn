@@ -1,0 +1,132 @@
+name: Beta release (signed, emulator-verified)
+on:
+  push:
+    tags: ['beta-build-*']
+env:
+  VERSION: ${{ github.ref_name }}
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407
+        with:
+          packages: platform-tools platforms;android-34 build-tools;34.0.0
+          log-accepted-android-sdk-licenses: false
+      - uses: gradle/actions/setup-gradle@v3
+      - name: Install pinned NDK
+        run: sdkmanager 'ndk;27.2.12479018'
+      - name: JVM tests and release build
+        run: |
+          export GITHUB_RUN_NUMBER=${VERSION#beta-build-}
+          chmod +x gradlew
+          ./gradlew -PbetaPreview=true --no-daemon --max-workers=2 :app:testDebugUnitTest :app:assembleRelease
+      - name: Sign with persistent Beta key (v1+v2+v3)
+        env:
+          KS_B64: ${{ secrets.BETA_KEYSTORE_B64 }}
+          KSP: ${{ secrets.BETA_KEYSTORE_PASSWORD }}
+        run: |
+          BT=$ANDROID_HOME/build-tools/34.0.0
+          echo "$KS_B64" | base64 -d > beta.jks
+          mkdir -p release
+          $BT/zipalign -f -p 4 app/build/outputs/apk/release/app-release-unsigned.apk aligned.apk
+          $BT/apksigner sign --ks beta.jks --ks-key-alias beta --ks-pass env:KSP --key-pass env:KSP \
+            --v1-signing-enabled true --v2-signing-enabled true --v3-signing-enabled true \
+            --min-sdk-version 21 --out release/VLESS-Card-Beta.apk aligned.apk
+          rm -f beta.jks aligned.apk release/*.idsig
+          $BT/apksigner verify -v --min-sdk-version 21 release/VLESS-Card-Beta.apk | tee verify.txt
+          grep -q "v1 scheme (JAR signing): true" verify.txt
+          grep -q "v2 scheme (APK Signature Scheme v2): true" verify.txt
+          $BT/zipalign -c -p 4 release/VLESS-Card-Beta.apk
+          $BT/aapt2 dump badging release/VLESS-Card-Beta.apk | grep -E "^package|application-label:|native-code"
+          unzip -tq release/VLESS-Card-Beta.apk
+          $BT/apksigner verify --print-certs -v release/VLESS-Card-Beta.apk | grep -E "key size|SHA-256 digest"
+          $BT/apksigner verify --print-certs -v release/VLESS-Card-Beta.apk | grep -q "key size (bits): 2048"
+          unzip -l release/VLESS-Card-Beta.apk | grep -E "META-INF/.*\.(RSA|SF)$"
+          python3 - <<'PY'
+          import glob, xml.etree.ElementTree as E
+          t=f=0
+          for p in glob.glob('app/build/test-results/testDebugUnitTest/*.xml'):
+              r=E.parse(p).getroot(); t+=int(r.get('tests')); f+=int(r.get('failures'))+int(r.get('errors'))
+          print(f"JVM tests: {t}, failures: {f}"); open('release/tests.txt','w').write(f"{t} {f}")
+          assert f == 0
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: beta-apk
+          path: release/
+  emulator-install:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { api: 30, target: google_apis }
+          - { api: 34, target: google_apis }
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: beta-apk
+          path: release
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - uses: reactivecircus/android-emulator-runner@4c44018e59b437e86cdfc41da381398f93ed8808
+        with:
+          api-level: ${{ matrix.api }}
+          target: ${{ matrix.target }}
+          arch: x86_64
+          disable-animations: true
+          script: bash tools/beta-install-check.sh
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: install-check-api-${{ matrix.api }}
+          path: |
+            screen.png
+            logcat.txt
+          if-no-files-found: ignore
+  publish:
+    needs: [build, emulator-install]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: beta-apk
+          path: release
+      - name: Create prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          V=${VERSION#beta-build-}
+          cd release
+          mv VLESS-Card-Beta.apk VLESS-Card-Beta-1.0.$V.apk
+          sha256sum VLESS-Card-Beta-1.0.$V.apk > SHA256SUMS-Beta.txt
+          read T F < tests.txt || true
+          NOTES=../docs/beta-1.0.$V.md
+          [ -f "$NOTES" ] || NOTES=/dev/null
+          { cat "$NOTES"; echo; echo "### Автоматические проверки этой сборки"; echo "- JVM-тесты: $T, ошибок: $F"; echo "- Подписи v1 + v2 + v3, постоянный ключ Beta (следующие версии ставятся поверх)"; echo "- Этот же файл установлен и запущен на эмуляторах Android 11 и 14 (ARM-трансляция x86_64)"; echo "- Реальный телефон и сети РФ этим не проверяются"; } > notes.md
+          gh release create "beta-v1.0.$V" VLESS-Card-Beta-1.0.$V.apk SHA256SUMS-Beta.txt \
+            --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease --draft \
+            --title "VLESS Card · Beta 1.0.$V" --notes-file notes.md

@@ -1,5 +1,7 @@
 package com.vlesscardvpn.worker
 
+import android.annotation.SuppressLint
+import android.app.PendingIntent
 import android.content.Intent
 import android.graphics.drawable.Icon
 import android.os.Build
@@ -11,6 +13,7 @@ import com.vlesscardvpn.R
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 
@@ -23,6 +26,7 @@ class VlessQuickTileService : TileService() {
     override fun onStartListening() {
         super.onStartListening()
         updateTileState(VlessVpnService.vpnStats.value.status)
+        statsJob?.cancel()
         statsJob = scope.launch {
             VlessVpnService.vpnStats.collectLatest { stats ->
                 updateTileState(stats.status)
@@ -35,6 +39,8 @@ class VlessQuickTileService : TileService() {
         statsJob?.cancel()
     }
 
+    // PendingIntent overload exists only on API 34+. Keep Intent solely on older systems.
+    @SuppressLint("StartActivityAndCollapseDeprecated")
     override fun onClick() {
         super.onClick()
         val currentStatus = VlessVpnService.vpnStats.value.status
@@ -46,8 +52,19 @@ class VlessQuickTileService : TileService() {
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
                 putExtra("EXTRA_AUTO_CONNECT", true)
             }
-            startActivityAndCollapse(intent)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                startActivityAndCollapse(PendingIntent.getActivity(this, 0, intent,
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))
+            } else {
+                @Suppress("DEPRECATION")
+                startActivityAndCollapse(intent)
+            }
         }
+    }
+
+    override fun onDestroy() {
+        scope.cancel()
+        super.onDestroy()
     }
 
     private fun updateTileState(status: VpnStatus) {
