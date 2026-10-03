@@ -50,6 +50,10 @@ class HomeScreenSmokeTest {
     }
     @Test fun errorScreenOffersCrashReports() {
         show(VpnSessionStats(status = VpnStatus.ERROR, errorMessage = "Тестовая ошибка: проверьте конфигурацию сервера."))
+        compose.onNodeWithText("Диагностика подключения").performScrollTo().performClick()
+        compose.onNodeWithText("Журнал и отправка отчёта").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Скрыть диагностику").performScrollTo().performClick()
+        compose.onNodeWithText("Журнал и отправка отчёта").assertDoesNotExist()
         compose.onNodeWithText("Отчёты об ошибках").performScrollTo().assertIsDisplayed()
         capture("home-error")
     }

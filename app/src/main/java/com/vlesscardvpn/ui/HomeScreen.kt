@@ -54,6 +54,7 @@ fun HomeDashboard(stats: VpnSessionStats, selected: VlessConfig? = null, configC
     val busy = stats.status == VpnStatus.CONNECTING || preparing
     val stopping = stats.status == VpnStatus.STOPPING
     val error = stats.status == VpnStatus.ERROR
+    var showNetworkDiagnostics by remember { mutableStateOf(false) }
     val headline = when { busy && preparing -> "Разрешение VPN"; busy && stats.autoMode -> "Подбираем маршрут"; busy -> "Подключаемся"; stopping -> "Отключаемся"; limited -> "Частичный доступ"; working -> "Подключено"; storageIssue != null -> "Подключение недоступно"
         error && !stats.autoMode -> "Не удалось подключиться"; error -> "Маршрут не найден"; connected -> "Проверяем связь"; else -> "Не подключено" }
     val description = when {
@@ -119,6 +120,20 @@ fun HomeDashboard(stats: VpnSessionStats, selected: VlessConfig? = null, configC
                             }
                         }
                     }
+                }
+            }
+            // Connection failures are network events, not necessarily application crashes.
+            // Opening this panel never runs a probe, sends a report or restarts a tunnel.
+            if (storageIssue == null && (error || limited)) {
+                Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    OutlinedButton(onClick = { showNetworkDiagnostics = !showNetworkDiagnostics },
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+                        shape = RoundedCornerShape(12.dp)) {
+                        Icon(Icons.Default.Info, null, Modifier.size(20.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text(if (showNetworkDiagnostics) "Скрыть диагностику" else "Диагностика подключения", fontSize = 16.sp)
+                    }
+                    if (showNetworkDiagnostics) NetworkDiagnosticsPanel()
                 }
             }
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {

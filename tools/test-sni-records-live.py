@@ -29,9 +29,13 @@ with tempfile.TemporaryDirectory(prefix='tls-record-live-') as d:
     backend.socket=server_tls.wrap_socket(backend.socket,server_side=True)
     obs=Observations(); relay=create_relay(obs,listen=('127.0.0.1',0),target=backend.server_address)
     for server in [backend,relay]: threading.Thread(target=server.serve_forever,daemon=True).start()
-    cases=[('TCP_ONLY',['--split','1+s'],1),('SNI_MIDDLE',['--split','0+sm','--tlsrec','0+sm'],2),('SNI_EDGES',['--split','1+s','--split','-1+se','--tlsrec','1+s','--tlsrec','-1+se'],3)]
+    edge_options=['--split','1+s','--split','-1+se','--tlsrec','1+s','--tlsrec','-1+se']
+    cases=[('TCP_ONLY',['--split','1+s'],1,'fixture.test'),
+           ('SNI_MIDDLE',['--split','0+sm','--tlsrec','0+sm'],2,'fixture.test'),
+           ('SNI_EDGES',edge_options,3,'fixture.test'),
+           ('SNI_EDGES_WRONG_HOST',edge_options,3,'wrong.test')]
     try:
-        for label,options,expected in cases:
+        for label,options,expected,hostname in cases:
             port=spare_port()
             child=subprocess.Popen([byedpi,'--ip','127.0.0.1','--port',str(port),'--timeout','4']+options,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
             try:
@@ -47,12 +51,22 @@ with tempfile.TemporaryDirectory(prefix='tls-record-live-') as d:
                     receive(raw,{1:6,4:18}[reply[3]])
                     marker=obs.snapshot()['latest']
                     client_tls=ssl.create_default_context(cafile=str(cert))
-                    with client_tls.wrap_socket(raw,server_hostname='fixture.test') as tls:
-                        tls.sendall(b'GET /generate_204 HTTP/1.1\r\nHost: fixture.test\r\nConnection: close\r\n\r\n')
-                        response=tls.recv(512); assert b' 204 ' in response
+                    rejected = False
+                    try:
+                        with client_tls.wrap_socket(raw,server_hostname=hostname) as tls:
+                            # Do not send an HTTP request in the negative hostname case.
+                            assert hostname == 'fixture.test', 'Wrong hostname was accepted'
+                            tls.sendall(b'GET /generate_204 HTTP/1.1\r\nHost: fixture.test\r\nConnection: close\r\n\r\n')
+                            response=tls.recv(512); assert b' 204 ' in response
+                    except ssl.SSLCertVerificationError as error:
+                        if hostname == 'fixture.test': raise
+                        # OpenSSL X509_V_ERR_HOSTNAME_MISMATCH; not a generic timeout.
+                        assert error.verify_code == 62, error.verify_code
+                        rejected = True
+                    assert rejected == (hostname != 'fixture.test')
                     rows=[r for r in obs.snapshot()['observations'] if r['sequence']>marker]
                     assert rows and all(r['records']==expected for r in rows),rows
-                    print(label,'HTTPS 204; actual outer ClientHello TLS records:',[r['records'] for r in rows])
+                    print(label,'hostname rejected' if rejected else 'HTTPS 204', '; actual outer ClientHello TLS records:',[r['records'] for r in rows])
             finally:
                 child.terminate()
                 try: child.wait(timeout=2)
