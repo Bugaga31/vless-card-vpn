@@ -18,15 +18,16 @@ android {
         val stabilityPreview = providers.gradleProperty("stabilityPreview").orNull == "true"
         val autoPreview = providers.gradleProperty("autoPreview").orNull == "true"
         val labPreview = providers.gradleProperty("labPreview").orNull == "true"
-        applicationId = when { labPreview -> "com.vlesscardvpn.lab"; autoPreview -> "com.vlesscardvpn.auto"; stabilityPreview -> "com.vlesscardvpn.preview"; else -> "com.vlesscardvpn" }
-        manifestPlaceholders["vpnAppLabel"] = when { labPreview -> "VLESS Card · Lab"; autoPreview -> "VLESS Card VPN · Auto"; stabilityPreview -> "VLESS Card VPN · Test"; else -> "@string/app_name" }
+        val betaPreview = providers.gradleProperty("betaPreview").orNull == "true"
+        applicationId = when { betaPreview -> "com.vlesscardvpn.beta"; labPreview -> "com.vlesscardvpn.lab"; autoPreview -> "com.vlesscardvpn.auto"; stabilityPreview -> "com.vlesscardvpn.preview"; else -> "com.vlesscardvpn" }
+        manifestPlaceholders["vpnAppLabel"] = when { betaPreview -> "VLESS Card · Beta"; labPreview -> "VLESS Card · Lab"; autoPreview -> "VLESS Card VPN · Auto"; stabilityPreview -> "VLESS Card VPN · Test"; else -> "@string/app_name" }
         minSdk = 24
         targetSdk = 34
         versionCode = releaseNumber
         versionName = "1.0.$releaseNumber"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables { useSupportLibrary = true }
-        ndk { abiFilters.addAll(if (autoPreview || labPreview) listOf("arm64-v8a", "armeabi-v7a") else listOf("arm64-v8a", "armeabi-v7a", "x86_64", "x86")) }
+        ndk { abiFilters.addAll(if (autoPreview || labPreview || betaPreview) listOf("arm64-v8a", "armeabi-v7a") else listOf("arm64-v8a", "armeabi-v7a", "x86_64", "x86")) }
     }
     testOptions { unitTests.isReturnDefaultValues = true }
     buildTypes {
