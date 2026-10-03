@@ -52,4 +52,16 @@ class NativeConfigValidationTest {
             uuid = "00000000-0000-4000-8000-000000000001", sni = "server.example.org", publicKey = key, shortId = "ab")
         Libbox.checkConfig(SingBoxManager.generateConfig(null, node, AppSettings(evasionStrategy = "stable_tls")))
     }
+    @Test fun declaredTransportsPassTheActualNativeSchema() {
+        val settings = AppSettings(evasionStrategy = "stable_tls", enableFragmentation = false)
+        for (protocol in listOf("vless", "vmess", "trojan")) for (transport in listOf("ws", "grpc", "h2")) {
+            val node = VlessConfig(name = "Transport schema fixture", address = "vpn.fixture.invalid", port = 443,
+                uuid = if (protocol == "trojan") "fixture-password" else "00000000-0000-4000-8000-000000000001",
+                protocolType = protocol, security = "tls", flow = "", sni = "vpn.fixture.invalid", transport = transport,
+                wsHost = "cdn.fixture.invalid", wsPath = "/fixture", serviceName = "fixture-service")
+            Libbox.checkConfig(SingBoxManager.generateConfig(null, node, settings))
+            if (transport == "grpc") Libbox.checkConfig(SingBoxManager.generateConfig(null, node.copy(serviceName = ""), settings))
+        }
+    }
+
 }

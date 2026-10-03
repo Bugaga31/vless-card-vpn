@@ -107,7 +107,7 @@ class NativeOutboundFixtureTest {
             val tls = SSLContext.getInstance("TLS").apply { init(null, tm.trustManagers, null) }.socketFactory
             val observationBefore = if (observedRecords != null) readObservations(host, tls).getInt("latest") else 0
             val result = TunnelHealthChecker.probe(proxy,
-                if (wrongHostname) "https://wrong.fixture.test:18443/generate_204" else "https://localhost:18443/generate_204", 204, 20000, tls)
+                if (wrongHostname) "https://wrong.fixture.invalid:18443/generate_204" else "https://localhost:18443/generate_204", 204, 20000, tls)
             if (expectFailure) {
                 assertNotEquals("Invalid route must not pass", 204, result.httpCode)
                 assertNotEquals(DiagnosticFailure.NONE, result.failure)

@@ -15,6 +15,10 @@ object UniversalConfigParser {
         // Check if raw is base64 encoded subscription
         val decodedText = tryDecodeBase64(trimmed) ?: trimmed
 
+        // Import Xray outbound profiles only; routing/inbounds are not executed or applied.
+        if (decodedText.trimStart().startsWith("{"))
+            return XrayConfigImporter.importFromJson(decodedText).configs.take(JsonImportLimits.MAX_OUTBOUNDS)
+
         decodedText.lineSequence().take(10000).forEach { line ->
             val l = line.trim()
             if (l.isNotBlank()) {
@@ -131,6 +135,7 @@ object UniversalConfigParser {
                 }
             }
 
+            if (queryMap["encryption"]?.let { it != "none" } == true) return null
             val transportType = queryMap["type"] ?: "tcp"
             VlessConfig(
                 name = remark,

@@ -77,7 +77,7 @@ class HomeScreenSmokeTest {
                     stage = DiagnosticFailure.TLS)), 1)))
         } }
         compose.onNodeWithText("Таймаут TLS").performScrollTo().assertIsDisplayed()
-        compose.onNodeWithText("Нет результата").assertIsDisplayed()
+        compose.onNodeWithText("Нет результата").performScrollTo().assertIsDisplayed()
     }
     @Test fun enlargedTextKeepsBothActionsReachable() {
         compose.setContent { VlessCardVpnTheme {

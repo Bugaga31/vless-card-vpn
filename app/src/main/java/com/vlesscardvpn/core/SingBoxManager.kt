@@ -116,7 +116,7 @@ object SingBoxManager {
             "trojan" -> createTrojanOutbound(config, effectiveSni, settings)
             "shadowsocks", "ss" -> createShadowsocksOutbound(config)
             "hysteria2", "hysteria" -> createHysteria2Outbound(config, effectiveSni, settings)
-            else -> createVlessOutbound(config, effectiveSni, settings)
+            else -> error("Неподдерживаемый протокол конфигурации")
         }
 
         // Resolve the VPN server's hostname outside its own tunnel: avoid DNS detour cycles.
@@ -292,34 +292,7 @@ object SingBoxManager {
                 put("flow", config.flow.trim())
             }
 
-            // Transport layer: ws, grpc, h2 (tcp is default, omitted)
-            when (config.transport.lowercase()) {
-                "ws", "websocket" -> {
-                    put("transport", JSONObject().apply {
-                        put("type", "ws")
-                        put("path", config.wsPath.ifBlank { "/" })
-                        if (config.wsHost.isNotBlank()) {
-                            put("headers", JSONObject().apply {
-                                put("Host", config.wsHost.trim())
-                            })
-                        }
-                        put("early_data_header_name", "Sec-WebSocket-Protocol")
-                    })
-                }
-                "grpc", "gun" -> {
-                    put("transport", JSONObject().apply {
-                        put("type", "grpc")
-                        put("service_name", config.serviceName.ifBlank { "GunService" })
-                    })
-                }
-                "h2", "http2" -> {
-                    put("transport", JSONObject().apply {
-                        put("type", "http")
-                        put("host", JSONArray(listOf(config.wsHost.ifBlank { effectiveSni })))
-                        put("path", config.wsPath.ifBlank { "/" })
-                    })
-                }
-            }
+            createTransport(config, effectiveSni)?.let { put("transport", it) }
 
             if (settings.enableTcpFastOpen) {
                 put("tcp_fast_open", true)
@@ -364,6 +337,24 @@ object SingBoxManager {
         else -> address
     }
 
+    /** Same declared transport across VLESS, VMess and Trojan; no silent TCP fallback. */
+    private fun createTransport(config: VlessConfig, effectiveSni: String): JSONObject? = when (config.transport.lowercase()) {
+        "tcp" -> null
+        "ws", "websocket" -> JSONObject().apply {
+            put("type", "ws"); put("path", config.wsPath.ifBlank { "/" })
+            if (config.protocolType.equals("vless", true)) put("early_data_header_name", "Sec-WebSocket-Protocol")
+            if (config.wsHost.isNotBlank()) put("headers", JSONObject().put("Host", config.wsHost.trim()))
+        }
+        "grpc", "gun" -> JSONObject().apply {
+            put("type", "grpc"); put("service_name", config.serviceName)
+        }
+        "h2", "http2" -> JSONObject().apply {
+            put("type", "http"); put("host", JSONArray(listOf(config.wsHost.ifBlank { effectiveSni })))
+            put("path", config.wsPath.ifBlank { "/" })
+        }
+        else -> error("Неподдерживаемый транспорт конфигурации")
+    }
+
     private fun createVmessOutbound(config: VlessConfig, effectiveSni: String, settings: AppSettings = AppSettings()): JSONObject {
         return JSONObject().apply {
             put("type", "vmess")
@@ -373,33 +364,7 @@ object SingBoxManager {
             put("uuid", config.uuid.trim())
             put("security", "auto")
 
-            // Transport for VMess
-            when (config.transport.lowercase()) {
-                "ws", "websocket" -> {
-                    put("transport", JSONObject().apply {
-                        put("type", "ws")
-                        put("path", config.wsPath.ifBlank { "/" })
-                        if (config.wsHost.isNotBlank()) {
-                            put("headers", JSONObject().apply {
-                                put("Host", config.wsHost.trim())
-                            })
-                        }
-                    })
-                }
-                "grpc", "gun" -> {
-                    put("transport", JSONObject().apply {
-                        put("type", "grpc")
-                        put("service_name", config.serviceName.ifBlank { "GunService" })
-                    })
-                }
-                "h2", "http2" -> {
-                    put("transport", JSONObject().apply {
-                        put("type", "http")
-                        put("host", JSONArray(listOf(config.wsHost.ifBlank { effectiveSni })))
-                        put("path", config.wsPath.ifBlank { "/" })
-                    })
-                }
-            }
+            createTransport(config, effectiveSni)?.let { put("transport", it) }
 
             if (config.security.equals("tls", ignoreCase = true)) {
                 put("tls", JSONObject().apply {
@@ -422,6 +387,7 @@ object SingBoxManager {
             put("server", config.address.trim())
             put("server_port", config.port)
             put("password", config.uuid.trim())
+            createTransport(config, effectiveSni)?.let { put("transport", it) }
             put("tls", JSONObject().apply {
                 put("enabled", true)
                 put("server_name", effectiveSni)
