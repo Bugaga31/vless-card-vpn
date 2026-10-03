@@ -1,14 +1,9 @@
 name: Beta release (signed, emulator-verified)
 on:
-  workflow_dispatch:
-    inputs:
-      version:
-        description: 'Version number N for 1.0.N'
-        required: true
-      publish:
-        description: 'Publish GitHub prerelease if all checks pass'
-        type: boolean
-        default: true
+  push:
+    tags: ['beta-build-*']
+env:
+  VERSION: ${{ github.ref_name }}
 permissions:
   contents: read
 jobs:
@@ -31,9 +26,8 @@ jobs:
       - name: Install pinned NDK
         run: sdkmanager 'ndk;27.2.12479018'
       - name: JVM tests and release build
-        env:
-          GITHUB_RUN_NUMBER: ${{ inputs.version }}
         run: |
+          export GITHUB_RUN_NUMBER=${VERSION#beta-build-}
           chmod +x gradlew
           ./gradlew -PbetaPreview=true --no-daemon --max-workers=2 :app:testDebugUnitTest :app:assembleRelease
       - name: Sign with persistent Beta key (v1+v2+v3)
@@ -105,7 +99,6 @@ jobs:
           if-no-files-found: ignore
   publish:
     needs: [build, emulator-install]
-    if: ${{ inputs.publish }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -120,8 +113,8 @@ jobs:
       - name: Create prerelease
         env:
           GH_TOKEN: ${{ github.token }}
-          V: ${{ inputs.version }}
         run: |
+          V=${VERSION#beta-build-}
           cd release
           mv VLESS-Card-Beta.apk VLESS-Card-Beta-1.0.$V.apk
           sha256sum VLESS-Card-Beta-1.0.$V.apk > SHA256SUMS-Beta.txt
