@@ -69,7 +69,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        api: [30, 33, 34]
+        include:
+          - { api: 30, target: google_apis }
+          - { api: 33, target: google_apis_playstore }
+          - { api: 34, target: google_apis }
     steps:
       - uses: actions/checkout@v4
         with:
@@ -86,7 +89,7 @@ jobs:
       - uses: reactivecircus/android-emulator-runner@4c44018e59b437e86cdfc41da381398f93ed8808
         with:
           api-level: ${{ matrix.api }}
-          target: google_apis
+          target: ${{ matrix.target }}
           arch: x86_64
           disable-animations: true
           script: bash tools/beta-install-check.sh
