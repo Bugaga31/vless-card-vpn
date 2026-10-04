@@ -13,12 +13,12 @@ object ByeDpiArgs {
         "ozon.ru", "wildberries.ru", "avito.ru", "rutube.ru", "sberbank.ru", "dzen.ru")
     /** Ready ByeByeDPI-style strategies the user can insert into the editor and edit. */
     val EXAMPLES = listOf(
-        "-d1 -f-1 -t8 -n {sni}",
-        "-f-1 -t8 -n {sni} -Qr",
+        "-d1 -f-1 -t8 -n {sni} -Qo",
+        "-f-1 -t8 -n {sni} -Qr,o",
         "-o1 -At,r,s -d1",
         "-d1 -s1+s -d3+s -s6+s -d9+s -s12+s",
         "-q1 -r1+s",
-        "-d1 -At,r,s -f-1 -t8 -n {sni} -Qr"
+        "-d1 -At,r,s -f-1 -t8 -n {sni} -Qr,o"
     )
     private val maskRegex = Regex("^[a-z0-9?#*](?:[a-z0-9?#*-]{0,61}[a-z0-9?#*])?(?:\\.[a-z0-9?#*](?:[a-z0-9?#*-]{0,61}[a-z0-9?#*])?)+$")
     fun maskDomain(value: String?): String {
@@ -108,6 +108,8 @@ object ByeDpiArgs {
     fun warnings(args: List<String>): List<String> = buildList {
         if ("--md5sig" in args) add("-S (md5sig) не поддерживается ядром многих Android-телефонов: соединения могут не открываться")
         if ("--fake" in args && "--ttl" !in args && "--md5sig" !in args) add("Фейк без -t: используется TTL 8")
+        if ("--fake-sni" in args && args.zipWithNext().none { (k, v) -> k == "--fake-tls-mod" && 'o' in v })
+            add("Без -Qo фейк-SNI может не подставиться в короткий ClientHello")
     }
 
     fun loopbackPrefix(port: Int): List<String> {
