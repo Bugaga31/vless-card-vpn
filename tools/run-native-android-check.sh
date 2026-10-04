@@ -32,7 +32,7 @@ python3 - <<'CHECK'
 from pathlib import Path
 import re, os
 text = Path("native-results.txt").read_text()
-passed = os.environ["INSTRUMENT_EXIT"] == "0" and "OK (50 tests)" in text and not re.search(r"FAILURES!!!|INSTRUMENTATION_FAILED|Process crashed|INSTRUMENTATION_STATUS_CODE: -[1-4]", text)
+passed = os.environ["INSTRUMENT_EXIT"] == "0" and "OK (53 tests)" in text and not re.search(r"FAILURES!!!|INSTRUMENTATION_FAILED|Process crashed|INSTRUMENTATION_STATUS_CODE: -[1-4]", text)
 if not passed:
     summary = text[text.rfind("Time:"):] if "Time:" in text else text[-3500:]
     summary = "\n".join(line for line in summary.splitlines() if not line.lstrip().startswith(("at ", "... ")))

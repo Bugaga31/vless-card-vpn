@@ -12,7 +12,7 @@ class AutoSearchPolicyTest {
         uuid = "00000000-0000-4000-8000-000000000001", security = "tls", flow = "", sni = "example.org")
     @Test fun failedTcpIsNotDiscardedAndGetsAlternativeFirst() {
         val p = AutoSearchPolicy.plan(listOf(node(1) to -1))
-        assertEquals(7, p.size); assertEquals(RouteProfile.BYEDPI, p.first().profile)
+        assertEquals(ByeDpiPreset.entries.size + 2, p.size); assertEquals(RouteProfile.BYEDPI, p.first().profile)
     }
     @Test fun firstRoundTestsDifferentNodesBeforeAnotherProfile() {
         val p = AutoSearchPolicy.plan((1..12).map { node(it) to it })

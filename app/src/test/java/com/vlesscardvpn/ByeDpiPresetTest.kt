@@ -32,7 +32,7 @@ class ByeDpiPresetTest {
     @Test fun allVariantsExistForSingleNodeWithoutReplacingItsCredentials() {
         val c = node(1); val plan = AutoSearchPolicy.plan(listOf(c to -1))
         assertEquals(ByeDpiPreset.entries.toSet(), plan.filter { it.profile == RouteProfile.BYEDPI }.map { it.byeDpiPreset }.toSet())
-        assertTrue(plan.all { it.config == c }); assertEquals(7, plan.size)
+        assertTrue(plan.all { it.config == c }); assertEquals(ByeDpiPreset.entries.size + 2, plan.size)
     }
     @Test fun confirmedVariantMemoryIsRestoredBeforeOtherRoutes() {
         val c = node(1)
@@ -53,10 +53,28 @@ class ByeDpiPresetTest {
         for (preset in listOf(ByeDpiPreset.SNI_MIDDLE, ByeDpiPreset.SNI_EDGES)) {
             val p = AutoSearchPolicy.plan(listOf(c to 1), mapOf(AutoConnectPolicy.identity(c) to "BYEDPI#${preset.name}"))
             assertEquals(preset, p.first().byeDpiPreset)
-            assertEquals(7, p.size)
+            assertEquals(ByeDpiPreset.entries.size + 2, p.size)
             assertEquals(ByeDpiPreset.entries.toSet(), p.mapNotNull { it.byeDpiPreset }.toSet())
             assertTrue(p.all { it.config == c })
         }
     }
-
+    @Test fun competitorDerivedDisorderAndFakeUsePinnedNativeSyntax() {
+        assertEquals(listOf("--disorder", "1"), ByeDpiPreset.DISORDER.extraArgs)
+        assertEquals(listOf("--split", "1+s", "--disorder", "3+s"), ByeDpiPreset.SPLIT_DISORDER.extraArgs)
+        val fake = ByeDpiPreset.DISORDER_THEN_FAKE.extraArgs
+        // Fake is only a fallback group after a DPI reset/timeout, never the first action.
+        assertTrue(fake.indexOf("--auto=torst") in 1 until fake.indexOf("--fake"))
+        assertEquals("8", fake[fake.indexOf("--ttl") + 1])
+        assertTrue(ByeDpiPreset.entries.all { "--md5sig" !in it.extraArgs && "--fake-sni" !in it.extraArgs })
+        assertEquals(8, ByeDpiPreset.entries.size)
+    }
+    @Test fun newStrategiesRestoreFromMemoryAndStayLoopbackOnly() {
+        val c = node(1)
+        for (preset in listOf(ByeDpiPreset.DISORDER, ByeDpiPreset.SPLIT_DISORDER, ByeDpiPreset.DISORDER_THEN_FAKE)) {
+            val p = AutoSearchPolicy.plan(listOf(c to 1), mapOf(AutoConnectPolicy.identity(c) to "BYEDPI#${preset.name}"))
+            assertEquals(preset, p.first().byeDpiPreset)
+            val args = preset.arguments(12400)
+            assertEquals("127.0.0.1", args[args.indexOf("--ip") + 1])
+        }
+    }
 }
