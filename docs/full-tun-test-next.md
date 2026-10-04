@@ -13,6 +13,29 @@ Run: https://github.com/Bugaga31/vless-card-vpn/actions/runs/37013625861
 
 The strict gate requires the exact test count, successful instrumentation, no skipped tests and no failed tests. A failed matrix is not a release-ready result. No production networking change or new user APK was published in this work.
 
+## Current gate (read from HEAD, not from the table above)
+
+The numbers in the table are from the historical source commit. The gate that CI enforces today is defined in `tools/run-native-android-check.sh`: it requires `OK (50 tests)`, instrumentation exit code 0 and no failure markers. Always take the expected count from that script on the SHA being checked; never lower it to make CI green.
+
+On API 33 the current matrix runs three times; on API 26 once. On commit c0875356 API 33 x3 passed and API 26 failed, consistent with issue #7.
+
+## API 26 diagnostic path
+
+When the gate fails, the script publishes a public check annotation (`Native Android fixture assertions`) with assertion summaries only. For full-TUN cases each message already carries:
+
+- probe stage/failure reported by the separate-UID helper (DNS vs TCP_CONNECT vs TLS/HTTP);
+- native counters `coreMsgs`, `tunTcp`, `tunUdp`, `proxyTcp` (counts only, no addresses);
+- the pinned-network comparison (`defaultSame`, `dnsCount`, `routes`, `mtu`, pinned stage/failure/code).
+
+Interpretation to apply before any code change:
+
+1. `tunTcp=0` with DNS resolved: SYN from the helper never reached the core TUN inbound (routing/TUN/emulator), not an outbound problem.
+2. `tunTcp>0`, `proxyTcp=0`: the core accepted the TUN connection but did not open the VLESS outbound (route/stack issue).
+3. `proxyTcp>0` with TCP_CONNECT timeout: the outbound was dialed; investigate the fixture backend and emulator host path.
+4. DNS assertion failures with `tunUdp=0`: UDP DNS did not enter the TUN.
+
+Only after the annotation for a specific SHA is read and classified should a targeted diagnostic or fix be added. Emulator results are not transferred to a physical ARM device.
+
 ## What is exercised
 
 - Real JNI configuration and platform callbacks, Room/Android Keystore migration and metadata update regressions.
