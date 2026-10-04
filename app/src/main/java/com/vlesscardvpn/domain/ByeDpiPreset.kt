@@ -20,10 +20,21 @@ enum class ByeDpiPreset(val label: String, val extraArgs: List<String>) {
     // Upstream disoob (-q1): disordered first part plus OOB byte.
     DISOOB("ByeDPI · OOB + обратный порядок", listOf("--disoob", "1")),
     // ByeByeDPI multi-position disorder/split around the SNI ("-d1 -s1+s -d3+s -s6+s -d9+s -s12+s").
-    MULTI_DISORDER("ByeDPI · многократный порядок", listOf("--disorder", "1", "--split", "1+s", "--disorder", "3+s", "--split", "6+s", "--disorder", "9+s", "--split", "12+s"));
-    fun arguments(port: Int): List<String> {
-        require(port in 1024..65535)
-        return listOf("--ip", "127.0.0.1", "--port", port.toString(), "--max-conn", "128", "--timeout", "4") + extraArgs
+    MULTI_DISORDER("ByeDPI · многократный порядок", listOf("--disorder", "1", "--split", "1+s", "--disorder", "3+s", "--split", "6+s", "--disorder", "9+s", "--split", "12+s")),
+    // Masking (ByeByeDPI/zapret "fake SNI"): a fake ClientHello for a whitelisted domain ({sni}, default ya.ru)
+    // goes first with TTL 8, so it expires before a distant server while the DPI sees the Yandex SNI.
+    // No --md5sig: CI showed TCP_MD5SIG is unavailable on the Android emulator kernel (and many GKI phones).
+    MASK_FAKE("ByeDPI · маскировка фейк-SNI", listOf("--disorder", "1", "--fake", "-1", "--ttl", "8", "--fake-sni", ByeDpiArgs.SNI_PLACEHOLDER, "--fake-tls-mod", "orig")),
+    // "orig": the fake is a copy of the real ClientHello with the SNI replaced. The built-in 517-byte
+    // template cannot shrink to short ClientHellos and then keeps its own SNI (found by CI); a split
+    // fake chunk starts at the template's beginning and may miss the SNI, so the fake is unsplit.
+    MASK_FAKE_RAND("ByeDPI · маскировка + случайный TLS", listOf("--fake", "-1", "--ttl", "8", "--fake-sni", ByeDpiArgs.SNI_PLACEHOLDER, "--fake-tls-mod", "rand,orig")),
+    // Masking only after a DPI reset/timeout of plain disorder: never costs a working route.
+    MASK_AUTO_FAKE("ByeDPI · авто: порядок → маскировка", listOf("--disorder", "1", "--auto=torst", "--fake", "-1", "--ttl", "8", "--fake-sni", ByeDpiArgs.SNI_PLACEHOLDER, "--fake-tls-mod", "rand,orig"));
+    val masked: Boolean get() = ByeDpiArgs.SNI_PLACEHOLDER in extraArgs
+    fun arguments(port: Int, mask: String = ByeDpiArgs.DEFAULT_MASK): List<String> {
+        val domain = ByeDpiArgs.maskDomain(mask)
+        return ByeDpiArgs.loopbackPrefix(port) + extraArgs.map { it.replace(ByeDpiArgs.SNI_PLACEHOLDER, domain) }
     }
     companion object {
         fun remembered(value: String?): ByeDpiPreset? =

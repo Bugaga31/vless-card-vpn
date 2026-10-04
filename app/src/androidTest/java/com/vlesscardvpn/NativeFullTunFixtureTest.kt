@@ -63,8 +63,13 @@ class NativeFullTunFixtureTest {
     @Test fun oobThenDisorderTunDnsHttpsAndRestart() = exercise(RouteProfile.BYEDPI, ByeDpiPreset.OOB_THEN_DISORDER)
     @Test fun disoobTunDnsHttpsAndRestart() = exercise(RouteProfile.BYEDPI, ByeDpiPreset.DISOOB)
     @Test fun multiDisorderTunDnsHttpsAndRestart() = exercise(RouteProfile.BYEDPI, ByeDpiPreset.MULTI_DISORDER)
+    @Test fun maskAutoFakeTunDnsHttpsAndRestart() = exercise(RouteProfile.BYEDPI, ByeDpiPreset.MASK_AUTO_FAKE)
+    // The user's own ByeByeDPI-style line goes through the same validated argv path as production.
+    @Test fun customStrategyTunDnsHttpsAndRestart() = exercise(RouteProfile.BYEDPI,
+        custom = ByeDpiArgs.parse("-o1 -At,r,s -d1 -f-1 -n {sni} -Qr", "ya.ru").getOrThrow())
 
-    private fun exercise(profile: RouteProfile, preset: ByeDpiPreset = ByeDpiPreset.COMBINED, stack: String? = null) = runBlocking {
+    private fun exercise(profile: RouteProfile, preset: ByeDpiPreset = ByeDpiPreset.COMBINED, stack: String? = null,
+                         custom: List<String>? = null) = runBlocking {
         val args = InstrumentationRegistry.getArguments()
         val selectedStack = stack ?: TunStackPolicy.forSdk(Build.VERSION.SDK_INT)
         val host = args.getString("fixture_host") ?: "10.0.2.2"
@@ -80,7 +85,8 @@ class NativeFullTunFixtureTest {
             var adapter: LibboxPlatformInterface? = null
             val messages = AtomicInteger(); val tunTcp = AtomicInteger(); val tunUdp = AtomicInteger(); val proxyTcp = AtomicInteger()
             try {
-                val dpiPort = if (profile == RouteProfile.BYEDPI) runner.start(preset) else null
+                val dpiPort = if (profile != RouteProfile.BYEDPI) null
+                    else if (custom != null) runner.startCustom(custom) else runner.start(preset)
                 val config = JSONObject(SingBoxManager.generateConfig(null, node,
                     AdaptiveRoutePolicy.safeSettings(AppSettings(), profile), probeProxy = proxy, antiDpiPort = dpiPort, platformSdk = Build.VERSION.SDK_INT))
                 // Fixture-only CA and DNS resolver. Production trust/security settings are unchanged.

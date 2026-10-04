@@ -40,6 +40,9 @@ import com.vlesscardvpn.domain.AutoTcpPreflight
 import com.vlesscardvpn.domain.AutoSearchPolicy
 import com.vlesscardvpn.domain.AutoRouteAttempt
 import com.vlesscardvpn.domain.ByeDpiPreset
+import com.vlesscardvpn.domain.ByeDpiArgs
+import com.vlesscardvpn.domain.AutoPingPolicy
+import com.vlesscardvpn.domain.ConnectCheckMode
 import com.vlesscardvpn.domain.LocalProbeProxy
 import com.vlesscardvpn.domain.TunnelHealthChecker
 import com.vlesscardvpn.domain.TunnelHealthReport
@@ -266,7 +269,19 @@ class VlessVpnService : VpnService() {
     }
 
     private suspend fun handleConnect(configId: String, sessionId: Long) {
-        operationMutex.withLock { handleConnectLocked(configId, sessionId) }
+        operationMutex.withLock {
+            val settings = repository.settingsFlow.value
+            val custom = customByeDpi(settings)
+            if (custom?.isFailure == true) {
+                _vpnStats.value = VpnSessionStats(status = VpnStatus.ERROR,
+                    errorMessage = "Своя стратегия ByeDPI: ${custom.exceptionOrNull()?.message}. Исправьте или очистите поле в настройках")
+                stopForeground(STOP_FOREGROUND_REMOVE)
+                return@withLock
+            }
+            handleConnectLocked(configId, sessionId,
+                verifyHttps = ConnectCheckMode.normalize(settings.connectCheckMode) == ConnectCheckMode.HTTPS,
+                customByeDpi = custom?.getOrNull())
+        }
         // A terminal failure must not leave a lingering (START_STICKY) background service.
         if (_vpnStats.value.status == VpnStatus.ERROR) {
             stopSelf()
@@ -281,6 +296,19 @@ class VlessVpnService : VpnService() {
         _vpnStats.value = VpnSessionStats(status = VpnStatus.CONNECTING, autoMode = true,
             progressMessage = "Авто: проверяем сохранённые серверы")
         val settings = repository.settingsFlow.value
+        val custom = customByeDpi(settings)
+        if (custom?.isFailure == true) {
+            _vpnStats.value = VpnSessionStats(status = VpnStatus.ERROR, autoMode = true,
+                errorMessage = "Своя стратегия ByeDPI: ${custom.exceptionOrNull()?.message}. Исправьте или очистите поле в настройках")
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            return
+        }
+        val pingOnly = ConnectCheckMode.normalize(settings.connectCheckMode) == ConnectCheckMode.PING
+        // "Только пинг" or the user's own strategy: no preset sweep, just servers by best ping.
+        if (pingOnly || custom != null) {
+            handleAutoQuickLocked(sessionId, settings, custom?.getOrNull(), verifyHttps = !pingOnly)
+            return
+        }
         val tried = mutableSetOf<String>()
         var attempts = 0
         var lastReport = TunnelHealthReport()
@@ -356,7 +384,8 @@ class VlessVpnService : VpnService() {
         stopForeground(STOP_FOREGROUND_REMOVE)
     }
 
-    private suspend fun handleConnectLocked(configId: String, sessionId: Long, autoMode: Boolean = false, profile: RouteProfile = RouteProfile.COMPATIBLE, requirePreferredServices: Boolean = autoMode, byeDpiPreset: ByeDpiPreset = ByeDpiPreset.COMBINED) {
+    private suspend fun handleConnectLocked(configId: String, sessionId: Long, autoMode: Boolean = false, profile: RouteProfile = RouteProfile.COMPATIBLE, requirePreferredServices: Boolean = autoMode, byeDpiPreset: ByeDpiPreset = ByeDpiPreset.COMBINED,
+                                     verifyHttps: Boolean = true, customByeDpi: List<String>? = null) {
         if (sessionId != sessionSequence.get()) return
 
         // 0. DEFENSIVE: Verify VPN permission BEFORE any heavy work (prevents crash on Connect)
@@ -391,7 +420,13 @@ class VlessVpnService : VpnService() {
         val base = repository.settingsFlow.value
         NetworkDiagnosticLog.record(NetworkDiagnosticEvent(phase = DiagnosticPhase.ROUTE_START, profile = profile,
             preset = if (profile == RouteProfile.BYEDPI) byeDpiPreset else null))
-        val routeLabel = if (profile == RouteProfile.BYEDPI) byeDpiPreset.label else profile.label
+        // The user's own strategy applies only to TLS-family servers which ByeDPI can carry.
+        val custom = customByeDpi?.takeIf { RouteProfile.BYEDPI in AdaptiveRoutePolicy.profiles(config) }
+        val routeLabel = when {
+            custom != null -> AutoRouteAttempt.CUSTOM_LABEL
+            profile == RouteProfile.BYEDPI -> byeDpiPreset.label
+            else -> profile.label
+        }
         val settingsSnapshot: AppSettings = if (autoMode) AdaptiveRoutePolicy.safeSettings(base, profile) else base
 
         _vpnStats.value = VpnSessionStats(status = VpnStatus.CONNECTING, activeConfig = config,
@@ -422,9 +457,12 @@ class VlessVpnService : VpnService() {
             // 4. Launch via Sing-Box Engine (Full unified support for VLESS Reality, VMess, Trojan, ShadowTLS, uTLS)
             val localProbe = LocalProbeProxy.allocate()
             probeProxy = localProbe
-            val antiDpiPort = if (autoMode && profile == RouteProfile.BYEDPI) {
-                val runner = ByeDpiRunner(this@VlessVpnService); byeDpi = runner; runner.start(byeDpiPreset)
-            } else null
+            val antiDpiPort = when {
+                custom != null -> ByeDpiRunner(this@VlessVpnService).also { byeDpi = it }.startCustom(custom)
+                autoMode && profile == RouteProfile.BYEDPI ->
+                    ByeDpiRunner(this@VlessVpnService).also { byeDpi = it }.start(byeDpiPreset, base.byeDpiMaskDomain)
+                else -> null
+            }
             val singBoxJson = SingBoxManager.generateConfig(
                 context = this@VlessVpnService,
                 config = config,
@@ -509,6 +547,21 @@ class VlessVpnService : VpnService() {
             check(vpnInterface != null) { "Ядро не создало Android VPN-туннель" }
             TunnelHealthChecker.activate(localProbe, if (autoMode) profile else null,
                 if (autoMode && profile == RouteProfile.BYEDPI) byeDpiPreset else null)
+            if (!verifyHttps) {
+                // "Только пинг": the tunnel is up; HTTPS is measured afterwards for display only.
+                val startTime = System.currentTimeMillis()
+                NetworkDiagnosticLog.record(NetworkDiagnosticEvent(phase = DiagnosticPhase.PARTIAL,
+                    profile = profile, preset = if (profile == RouteProfile.BYEDPI) byeDpiPreset else null))
+                repository.setActive(config.id)
+                _vpnStats.value = VpnSessionStats(status = VpnStatus.CONNECTED, activeConfig = config,
+                    connectedSinceTimestamp = startTime, autoMode = autoMode,
+                    progressMessage = "Подключено по пингу; HTTPS проверяется в фоне",
+                    profileLabel = if (autoMode || custom != null) routeLabel else "Параметры сервера")
+                safeStartForeground(1, createNotification(config, "Подключено по пингу • ${routeLabel}"))
+                startStatsUpdater(startTime)
+                startDisplayHealthCheck(sessionId, localProbe, config, if (autoMode && custom == null) profile else null, byeDpiPreset)
+                return
+            }
             _vpnStats.value = _vpnStats.value.copy(progressMessage = "Проверяем HTTPS через выбранный сервер")
             safeStartForeground(1, createNotification(config, "Проверка реального маршрута…"))
             val report = TunnelHealthChecker.check(localProbe)
@@ -529,11 +582,11 @@ class VlessVpnService : VpnService() {
             val startTime = System.currentTimeMillis()
             repository.recordTunnelHealth(config.id, healthy = true, latency = report.latencyMs)
             repository.setActive(config.id)
-            if (autoMode && report.usable) routeMemory.remember(config, profile, byeDpiPreset)
+            if (autoMode && custom == null && report.usable) routeMemory.remember(config, profile, byeDpiPreset)
             NetworkProfileManager.markProfileWorking(netProfile)
             _vpnStats.value = VpnSessionStats(status = VpnStatus.CONNECTED, activeConfig = config,
                 connectedSinceTimestamp = startTime, autoMode = autoMode, health = report,
-                profileLabel = if (autoMode) routeLabel else "Параметры сервера")
+                profileLabel = if (autoMode || custom != null) routeLabel else "Параметры сервера")
             safeStartForeground(1, createNotification(config, if (report.preferredServices) "Маршрут проверен • ${report.latencyMs} мс" else "HTTPS работает; не все сервисы доступны"))
             startStatsUpdater(startTime)
             if (autoMode) startAutoHealthMonitor(sessionId)
@@ -641,6 +694,81 @@ class VlessVpnService : VpnService() {
         } catch (e: Exception) {
             Log.w("VlessVpnService", "CommandClient listener note: ${e.message}")
         }
+    }
+
+    private fun customByeDpi(settings: AppSettings): Result<List<String>>? =
+        settings.byeDpiCustomArgs.takeIf { it.isNotBlank() }?.let { ByeDpiArgs.parse(it, settings.byeDpiMaskDomain) }
+
+    /** One HTTPS check after a ping-only connect: updates the status card, never tears the tunnel down. */
+    private fun startDisplayHealthCheck(sessionId: Long, proxy: LocalProbeProxy, config: VlessConfig,
+                                        rememberProfile: RouteProfile?, preset: ByeDpiPreset) {
+        healthJob?.cancel()
+        healthJob = serviceScope.launch {
+            val report = runCatching { TunnelHealthChecker.check(proxy) }.getOrNull() ?: return@launch
+            if (sessionId != sessionSequence.get() || probeProxy !== proxy || _vpnStats.value.status != VpnStatus.CONNECTED) return@launch
+            _vpnStats.value = _vpnStats.value.copy(health = report, progressMessage = when {
+                report.usable -> "Подключено по пингу; HTTPS работает"
+                report.internet -> "Подключено по пингу; HTTPS есть, YouTube/Telegram не ответили"
+                else -> "Подключено по пингу, но HTTPS не прошёл. Если сайты не открываются — выберите другой сервер или включите полную проверку"
+            })
+            repository.recordTunnelHealth(config.id, healthy = report.internet, latency = report.latencyMs)
+            if (rememberProfile != null && report.usable) routeMemory.remember(config, rememberProfile, preset)
+            safeStartForeground(1, createNotification(config, when {
+                report.usable -> "Подключено • HTTPS ${report.latencyMs} мс"
+                report.internet -> "Подключено • не все сервисы доступны"
+                else -> "Подключено по пингу • HTTPS не прошёл"
+            }))
+        }
+    }
+
+    /** Ping-ranked servers, one route each (own ByeDPI line / remembered / server parameters). */
+    private suspend fun handleAutoQuickLocked(sessionId: Long, settings: AppSettings, custom: List<String>?, verifyHttps: Boolean) {
+        var attempts = 0
+        val tried = mutableSetOf<String>()
+        suspend fun tryPool(pool: List<VlessConfig>): Boolean {
+            val supported = AutoConnectPolicy.rank(pool, settings.autopilotAllowedOnlyFavorites)
+            val remembered = supported.mapNotNull { c -> routeMemory.get(c)?.let { AutoConnectPolicy.identity(c) to it } }.toMap()
+            _vpnStats.value = _vpnStats.value.copy(progressMessage = "Авто: пингуем серверы")
+            val measured = AutoTcpPreflight.measure(AutoSearchPolicy.candidates(supported, remembered, settings.autopilotAllowedOnlyFavorites))
+            measured.forEach { (c, ms) -> repository.recordAutoTcpHint(c.id, ms) }
+            for (attempt in AutoPingPolicy.plan(measured, remembered, custom != null)) {
+                currentCoroutineContext().ensureActive()
+                if (sessionId != sessionSequence.get()) return false
+                if (!tried.add(attempt.key)) continue
+                attempts++
+                _vpnStats.value = VpnSessionStats(status = VpnStatus.CONNECTING, autoMode = true, activeConfig = attempt.config,
+                    progressMessage = "Авто: лучший пинг ${attempt.tcpMs} мс · ${attempt.label}")
+                handleConnectLocked(attempt.config.id, sessionId, autoMode = true, profile = attempt.profile,
+                    requirePreferredServices = false, byeDpiPreset = attempt.byeDpiPreset ?: ByeDpiPreset.COMBINED,
+                    verifyHttps = verifyHttps, customByeDpi = if (attempt.custom) custom else null)
+                currentCoroutineContext().ensureActive()
+                if (sessionId != sessionSequence.get()) return false
+                if (_vpnStats.value.status == VpnStatus.CONNECTED) return true
+            }
+            return false
+        }
+        try {
+            withTimeout(AutoSearchPolicy.DEADLINE_MS) {
+                if (tryPool(repository.getAllConfigs())) return@withTimeout
+                if (sessionId != sessionSequence.get() || settings.autopilotAllowedOnlyFavorites) return@withTimeout
+                _vpnStats.value = VpnSessionStats(status = VpnStatus.CONNECTING, autoMode = true, progressMessage = "Обновляем публичные конфигурации")
+                val sources = (repository.subscriptionSources().take(2) + PublicConfigFetcher.DEFAULT_PUBLIC_SOURCES.take(4)).distinct().take(4)
+                val fresh = PublicConfigFetcher.fetchCandidates(sources, maxSources = 4) { message ->
+                    if (sessionId == sessionSequence.get()) _vpnStats.value = _vpnStats.value.copy(progressMessage = message)
+                }
+                repository.mergeCandidates(fresh)
+                tryPool(AutoSearchPolicy.importedRows(repository.getAllConfigs(), fresh))
+            }
+        } catch (_: TimeoutCancellationException) { }
+        currentCoroutineContext().ensureActive()
+        if (sessionId != sessionSequence.get() || _vpnStats.value.status == VpnStatus.CONNECTED) return
+        val last = _vpnStats.value
+        cleanupResources()
+        val skipped = AutoConnectPolicy.skippedSummary(repository.getAllConfigs())
+        _vpnStats.value = VpnSessionStats(status = VpnStatus.ERROR, autoMode = true, health = last.health,
+            errorMessage = (if (attempts == 0) "Ни один сервер не ответил на пинг" else "Попыток: $attempts. " + (last.errorMessage ?: "Туннель не запустился")) +
+                (skipped?.let { ". $it" } ?: ""))
+        stopForeground(STOP_FOREGROUND_REMOVE)
     }
 
     private fun startAutoHealthMonitor(sessionId: Long) {
