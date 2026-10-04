@@ -32,29 +32,26 @@ python3 - <<'CHECK'
 from pathlib import Path
 import re, os
 text = Path("native-results.txt").read_text()
-passed = os.environ["INSTRUMENT_EXIT"] == "0" and "OK (62 tests)" in text and not re.search(r"FAILURES!!!|INSTRUMENTATION_FAILED|Process crashed|INSTRUMENTATION_STATUS_CODE: -[1-4]", text)
+passed = os.environ["INSTRUMENT_EXIT"] == "0" and "OK (63 tests)" in text and not re.search(r"FAILURES!!!|INSTRUMENTATION_FAILED|Process crashed|INSTRUMENTATION_STATUS_CODE: -[1-4]", text)
 if not passed:
     summary = text[text.rfind("Time:"):] if "Time:" in text else text[-3500:]
     summary = "\n".join(line for line in summary.splitlines() if not line.lstrip().startswith(("at ", "... ")))
     summary = summary[:3500].replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
     print("::error title=Native Android fixture assertions::" + summary)
-    # Logs need a login; encode which group failed in the job duration as well
-    # (checkout + 20 min + code * 110 s). bit0: mask loopback, bit1: new full-TUN tests, bit2: anything else.
+    # Logs need a login; encode the failure class in the job duration as well:
+    # checkout + 14 min + code * 75 s, code = mask marker (0-5) + 6 if any other test failed.
     import time
-    code, cls, name = 0, "", ""
+    other = False; cls = ""
     for line in text.splitlines():
         if line.startswith("INSTRUMENTATION_STATUS: class="): cls = line.split("=", 1)[1].strip()
-        elif line.startswith("INSTRUMENTATION_STATUS: test="): name = line.split("=", 1)[1].strip()
-        elif re.match(r"INSTRUMENTATION_STATUS_CODE: -[1-4]", line):
-            if cls.endswith("ByeDpiMaskLoopbackTest"): code |= 1
-            elif cls.endswith("NativeFullTunFixtureTest") and name in ("maskAutoFakeTunDnsHttpsAndRestart", "customStrategyTunDnsHttpsAndRestart"): code |= 2
-            else: code |= 4
-    if code == 0: code = 4
+        elif re.match(r"INSTRUMENTATION_STATUS_CODE: -[1-4]", line) and not cls.endswith("ByeDpiMaskLoopbackTest"): other = True
+    mask = next((i for i, m in enumerate(["HARNESS", "MD5SIG_UNSUPPORTED", "SPLICE_FAILED", "FAKE_LEAKED", "OTHER_MASK"], 1) if m in text), 0)
+    code = mask + (6 if other or mask == 0 else 0)
     print("Failure group code:", code)
     try:
-        target = os.stat(".git/HEAD").st_mtime + 1200 + code * 110
+        target = os.stat(".git/HEAD").st_mtime + 840 + code * 75
         time.sleep(max(0, min(target - time.time(), 1500)))
     except OSError: pass
     raise SystemExit(1)
-print("Confirmed: 62 instrumented fixture checks, no skipped/failed tests")
+print("Confirmed: 63 instrumented fixture checks, no skipped/failed tests")
 CHECK
