@@ -46,10 +46,22 @@ def run(opts, mask):
     finally:
         child.terminate(); child.wait(); srv.close()
 
-cases = [('MASK_FAKE', ['--disorder', '1', '--fake', '-1', '--ttl', '8', '--fake-sni', 'ya.ru'], 'ya.ru'),
-         ('MASK_FAKE_RAND', ['--fake', '-1', '--ttl', '8', '--fake-sni', 'vk.com', '--fake-tls-mod', 'rand'], 'vk.com'),
-         ('CUSTOM_LINE', ['--disorder', '1', '--fake', '-1', '--ttl', '8', '--fake-sni', 'gosuslugi.ru', '--fake-tls-mod', 'r'], 'gosuslugi.ru')]
+def short_hello():
+    # Minimal 128-byte ClientHello (Go/Conscrypt-like sizes): the built-in fake template cannot shrink to it.
+    import os, struct
+    sni = b'fixture.test'
+    exts = struct.pack('>HHHBH', 0, len(sni) + 5, len(sni) + 3, 0, len(sni)) + sni + bytes.fromhex('002b0003020304000a00040002001d000d000400020403')
+    body = b'\x03\x03' + os.urandom(32) + b'\x20' + os.urandom(32) + b'\x00\x02\x13\x01\x01\x00' + struct.pack('>H', len(exts)) + exts
+    hs = b'\x01' + len(body).to_bytes(3, 'big') + body
+    return b'\x16\x03\x01' + struct.pack('>H', len(hs)) + hs
+
+cases = [('MASK_FAKE', ['--disorder', '1', '--fake', '-1', '--ttl', '8', '--fake-sni', 'ya.ru', '--fake-tls-mod', 'orig'], 'ya.ru'),
+         ('MASK_FAKE_RAND', ['--fake', '-1', '--ttl', '8', '--fake-sni', 'vk.com', '--fake-tls-mod', 'rand,orig'], 'vk.com'),
+         ('CUSTOM_LINE', ['--disorder', '1', '--fake', '-1', '--ttl', '8', '--fake-sni', 'gosuslugi.ru', '--fake-tls-mod', 'o'], 'gosuslugi.ru')]
+openssl_hello = hello
 for label, opts, mask in cases:
-    results = [run(opts, mask) for _ in range(4)]
-    print(label, 'outcomes:', results)
+    for name, generator in (('openssl', openssl_hello), ('short', short_hello)):
+        hello = generator
+        results = [run(opts, mask) for _ in range(4)]
+        print(label, name, 'outcomes:', results)
 print('Fake SNI check: every leaked fake carried the masking domain')

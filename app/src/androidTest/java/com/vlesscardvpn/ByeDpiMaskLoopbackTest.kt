@@ -34,7 +34,7 @@ class ByeDpiMaskLoopbackTest {
     @Test fun maskFakeCarriesYandexSni() = exercise(ByeDpiPreset.MASK_FAKE.arguments(1080, "ya.ru").drop(8), mask = "ya.ru")
     @Test fun maskFakeRandCarriesChosenSni() = exercise(ByeDpiPreset.MASK_FAKE_RAND.arguments(1080, "vk.com").drop(8), mask = "vk.com")
     @Test fun customMaskLineCarriesChosenSni() =
-        exercise(ByeDpiArgs.parse("-d1 -f-1 -t8 -n {sni} -Qr", "gosuslugi.ru").getOrThrow(), mask = "gosuslugi.ru")
+        exercise(ByeDpiArgs.parse("-d1 -f-1 -t8 -n {sni} -Qo", "gosuslugi.ru").getOrThrow(), mask = "gosuslugi.ru")
 
     private fun clientHello(): ByteArray {
         val engine = SSLContext.getInstance("TLS").apply { init(null, null, null) }.createSSLEngine("vpn.test.local", 443)
