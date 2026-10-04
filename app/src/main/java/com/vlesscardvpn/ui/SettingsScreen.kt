@@ -146,6 +146,8 @@ fun SettingsScreen(
                 }
             }
 
+            ByeDpiSettingsPanel(repo, settings)
+
             // Group 2: Ядро туннелирования
             GroupCard(title = "Ядро туннеля и протоколы") {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {

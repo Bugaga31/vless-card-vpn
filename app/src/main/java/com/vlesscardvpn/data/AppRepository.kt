@@ -205,7 +205,10 @@ class AppRepository(private val context: Context) {
         enableSniRotation = prefs.getBoolean("enableSniRotation", true),
         enableFragmentation = prefs.getBoolean("enableFragmentation", true),
         fragmentPackets = prefs.getString("fragmentPackets", "tlshello") ?: "tlshello",
-        fragmentInterval = prefs.getString("fragmentInterval", "5-15ms") ?: "5-15ms"
+        fragmentInterval = prefs.getString("fragmentInterval", "5-15ms") ?: "5-15ms",
+        connectCheckMode = com.vlesscardvpn.domain.ConnectCheckMode.normalize(prefs.getString("connectCheckMode", null)),
+        byeDpiCustomArgs = prefs.getString("byeDpiCustomArgs", "") ?: "",
+        byeDpiMaskDomain = com.vlesscardvpn.domain.ByeDpiArgs.maskDomain(prefs.getString("byeDpiMaskDomain", null))
     )
 
     private fun saveSettingsToPrefs(settings: AppSettings) {
@@ -240,6 +243,9 @@ class AppRepository(private val context: Context) {
             putBoolean("enableFragmentation", settings.enableFragmentation)
             putString("fragmentPackets", settings.fragmentPackets)
             putString("fragmentInterval", settings.fragmentInterval)
+            putString("connectCheckMode", com.vlesscardvpn.domain.ConnectCheckMode.normalize(settings.connectCheckMode))
+            putString("byeDpiCustomArgs", settings.byeDpiCustomArgs.take(com.vlesscardvpn.domain.ByeDpiArgs.MAX_LENGTH))
+            putString("byeDpiMaskDomain", com.vlesscardvpn.domain.ByeDpiArgs.maskDomain(settings.byeDpiMaskDomain))
             apply()
         }
     }

@@ -70,6 +70,12 @@ data class AppSettings(
     val enableTcpFastOpen: Boolean = true,
     val enableMux: Boolean = false,
     val enableNoisePadding: Boolean = true,
+    /** "ping" (default): connect after TCP ping, HTTPS only displayed; "https": reject routes without HTTPS. */
+    val connectCheckMode: String = ConnectCheckMode.PING,
+    /** User-entered ByeByeDPI-style strategy, e.g. "-d1 -f-1 -t8 -S -n {sni}". Blank = built-in presets. */
+    val byeDpiCustomArgs: String = "",
+    /** Fake-SNI masking domain substituted for {sni} (e.g. ya.ru). */
+    val byeDpiMaskDomain: String = ByeDpiArgs.DEFAULT_MASK,
     val bypassApps: List<String> = listOf(
         "com.sberbankmobile",
         "ru.tinkoff.mobile",

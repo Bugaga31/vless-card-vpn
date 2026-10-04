@@ -20,10 +20,17 @@ enum class ByeDpiPreset(val label: String, val extraArgs: List<String>) {
     // Upstream disoob (-q1): disordered first part plus OOB byte.
     DISOOB("ByeDPI · OOB + обратный порядок", listOf("--disoob", "1")),
     // ByeByeDPI multi-position disorder/split around the SNI ("-d1 -s1+s -d3+s -s6+s -d9+s -s12+s").
-    MULTI_DISORDER("ByeDPI · многократный порядок", listOf("--disorder", "1", "--split", "1+s", "--disorder", "3+s", "--split", "6+s", "--disorder", "9+s", "--split", "12+s"));
-    fun arguments(port: Int): List<String> {
-        require(port in 1024..65535)
-        return listOf("--ip", "127.0.0.1", "--port", port.toString(), "--max-conn", "128", "--timeout", "4") + extraArgs
+    MULTI_DISORDER("ByeDPI · многократный порядок", listOf("--disorder", "1", "--split", "1+s", "--disorder", "3+s", "--split", "6+s", "--disorder", "9+s", "--split", "12+s")),
+    // Masking (ByeByeDPI/zapret "fake SNI"): a fake ClientHello for a whitelisted domain ({sni}, default ya.ru)
+    // goes first; low TTL plus a TCP MD5 option make the real server drop it, DPI sees the Yandex SNI.
+    MASK_FAKE("ByeDPI · маскировка фейк-SNI", listOf("--disorder", "1", "--fake", "-1", "--ttl", "8", "--md5sig", "--fake-sni", ByeDpiArgs.SNI_PLACEHOLDER)),
+    MASK_SPLIT_FAKE("ByeDPI · маскировка + случайный TLS", listOf("--split", "1+s", "--fake", "-1", "--ttl", "8", "--md5sig", "--fake-sni", ByeDpiArgs.SNI_PLACEHOLDER, "--fake-tls-mod", "rand")),
+    // Without MD5 (some kernels lack TCP_MD5SIG): masking only after a DPI reset/timeout of plain disorder.
+    MASK_AUTO_FAKE("ByeDPI · авто: порядок → маскировка", listOf("--disorder", "1", "--auto=torst", "--fake", "-1", "--ttl", "8", "--fake-sni", ByeDpiArgs.SNI_PLACEHOLDER, "--fake-tls-mod", "rand"));
+    val masked: Boolean get() = ByeDpiArgs.SNI_PLACEHOLDER in extraArgs
+    fun arguments(port: Int, mask: String = ByeDpiArgs.DEFAULT_MASK): List<String> {
+        val domain = ByeDpiArgs.maskDomain(mask)
+        return ByeDpiArgs.loopbackPrefix(port) + extraArgs.map { it.replace(ByeDpiArgs.SNI_PLACEHOLDER, domain) }
     }
     companion object {
         fun remembered(value: String?): ByeDpiPreset? =

@@ -56,7 +56,8 @@ fun HomeDashboard(stats: VpnSessionStats, selected: VlessConfig? = null, configC
     val error = stats.status == VpnStatus.ERROR
     var showNetworkDiagnostics by remember { mutableStateOf(false) }
     val headline = when { busy && preparing -> "Разрешение VPN"; busy && stats.autoMode -> "Подбираем маршрут"; busy -> "Подключаемся"; stopping -> "Отключаемся"; limited -> "Частичный доступ"; working -> "Подключено"; storageIssue != null -> "Подключение недоступно"
-        error && !stats.autoMode -> "Не удалось подключиться"; error -> "Маршрут не найден"; connected -> "Проверяем связь"; else -> "Не подключено" }
+        error && !stats.autoMode -> "Не удалось подключиться"; error -> "Маршрут не найден"
+        connected && stats.health.checkedAt > 0 -> "Подключено · HTTPS не прошёл"; connected -> "Подключено по пингу"; else -> "Не подключено" }
     val description = when {
         busy -> stats.progressMessage.ifBlank { "Проверяем сервер и передачу данных." }
         stopping -> "Завершаем сеанс и освобождаем ресурсы."
@@ -64,6 +65,7 @@ fun HomeDashboard(stats: VpnSessionStats, selected: VlessConfig? = null, configC
         working -> stats.profileLabel.ifBlank { "Связь через выбранный сервер подтверждена." }
         storageIssue != null -> "Сначала восстановите доступ к сохранённым данным."
         error -> stats.errorMessage ?: "Авто не нашло рабочий сервер. Можно повторить поиск или добавить подписку."
+        connected -> stats.progressMessage.ifBlank { "Туннель запущен; HTTPS проверяется." }
         else -> if (selected != null) "Подключите выбранный сервер или запустите Авто." else "Добавьте подписку или запустите поиск Авто."
     }
     val stateColor = when { limited -> c.primary; working -> c.tertiary; error -> c.error; busy -> c.primary; else -> c.onSurfaceVariant }
