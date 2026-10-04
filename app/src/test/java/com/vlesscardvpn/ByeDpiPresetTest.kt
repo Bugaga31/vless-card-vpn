@@ -66,7 +66,7 @@ class ByeDpiPresetTest {
         assertTrue(fake.indexOf("--auto=torst") in 1 until fake.indexOf("--fake"))
         assertEquals("8", fake[fake.indexOf("--ttl") + 1])
         assertTrue(ByeDpiPreset.entries.all { "--md5sig" !in it.extraArgs && "--fake-sni" !in it.extraArgs })
-        assertEquals(8, ByeDpiPreset.entries.size)
+        assertEquals(12, ByeDpiPreset.entries.size)
     }
     @Test fun newStrategiesRestoreFromMemoryAndStayLoopbackOnly() {
         val c = node(1)
@@ -75,6 +75,30 @@ class ByeDpiPresetTest {
             assertEquals(preset, p.first().byeDpiPreset)
             val args = preset.arguments(12400)
             assertEquals("127.0.0.1", args[args.indexOf("--ip") + 1])
+        }
+    }
+    @Test fun byeByeDpiOobAndMultiDisorderStrategiesUsePinnedSyntax() {
+        assertEquals(listOf("--oob", "1"), ByeDpiPreset.OOB.extraArgs)
+        assertEquals(listOf("--disoob", "1"), ByeDpiPreset.DISOOB.extraArgs)
+        val oobAuto = ByeDpiPreset.OOB_THEN_DISORDER.extraArgs
+        // Fallback disorder is only used after a DPI reset/timeout on the first group.
+        assertTrue(oobAuto.indexOf("--auto=torst") in 1 until oobAuto.indexOf("--disorder"))
+        val multi = ByeDpiPreset.MULTI_DISORDER.extraArgs
+        assertEquals(3, multi.count { it == "--disorder" }); assertEquals(3, multi.count { it == "--split" })
+        // No option takes a shell metacharacter, a file path, or a replaced hostname.
+        assertTrue(ByeDpiPreset.entries.all { p -> p.extraArgs.none { it.contains('/') || it.contains(';') || it.contains('|') } })
+        assertTrue(ByeDpiPreset.entries.all { "--fake-data" !in it.extraArgs && "--hosts" !in it.extraArgs && "--udp-fake" !in it.extraArgs })
+    }
+    @Test fun everyStrategyHasUniqueLabelAndArguments() {
+        assertEquals(ByeDpiPreset.entries.size, ByeDpiPreset.entries.map { it.label }.toSet().size)
+        assertEquals(ByeDpiPreset.entries.size, ByeDpiPreset.entries.map { it.extraArgs }.toSet().size)
+    }
+    @Test fun oobStrategiesRestoreFromMemory() {
+        val c = node(1)
+        for (preset in listOf(ByeDpiPreset.OOB, ByeDpiPreset.OOB_THEN_DISORDER, ByeDpiPreset.DISOOB, ByeDpiPreset.MULTI_DISORDER)) {
+            val p = AutoSearchPolicy.plan(listOf(c to 1), mapOf(AutoConnectPolicy.identity(c) to "BYEDPI#${preset.name}"))
+            assertEquals(preset, p.first().byeDpiPreset)
+            assertEquals(ByeDpiPreset.entries.size + 2, p.size)
         }
     }
 }
