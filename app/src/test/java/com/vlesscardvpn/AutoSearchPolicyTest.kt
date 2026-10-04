@@ -12,7 +12,7 @@ class AutoSearchPolicyTest {
         uuid = "00000000-0000-4000-8000-000000000001", security = "tls", flow = "", sni = "example.org")
     @Test fun failedTcpIsNotDiscardedAndGetsAlternativeFirst() {
         val p = AutoSearchPolicy.plan(listOf(node(1) to -1))
-        assertEquals(7, p.size); assertEquals(RouteProfile.BYEDPI, p.first().profile)
+        assertEquals(ByeDpiPreset.entries.size + 2, p.size); assertEquals(RouteProfile.BYEDPI, p.first().profile)
     }
     @Test fun firstRoundTestsDifferentNodesBeforeAnotherProfile() {
         val p = AutoSearchPolicy.plan((1..12).map { node(it) to it })
@@ -31,10 +31,10 @@ class AutoSearchPolicyTest {
     @Test fun triedProfileDoesNotExcludeOtherProfilesOfSameNode() {
         val initial = AutoSearchPolicy.plan(listOf(node(1) to 12))
         val retry = AutoSearchPolicy.plan(listOf(initial.first().config to 12), tried = setOf(initial.first().key))
-        assertEquals(6, retry.size); assertFalse(retry.any { it.profile == RouteProfile.COMPATIBLE })
+        assertEquals(ByeDpiPreset.entries.size + 1, retry.size); assertFalse(retry.any { it.profile == RouteProfile.COMPATIBLE })
     }
     @Test fun repeatedConfigDoesNotConsumeExtraAttempts() {
-        val c = node(1); assertEquals(7, AutoSearchPolicy.plan(listOf(c to 1, c to -1)).size)
+        val c = node(1); assertEquals(ByeDpiPreset.entries.size + 2, AutoSearchPolicy.plan(listOf(c to 1, c to -1)).size)
     }
     @Test fun unsupportedPlaintextCannotEnterPlan() {
         assertTrue(AutoSearchPolicy.plan(listOf(node(1).copy(security = "none") to 1)).isEmpty())
@@ -68,7 +68,7 @@ class AutoSearchPolicyTest {
         val all = (1..13).map { node(it) to it }
         val tried = all.take(12).flatMap { AutoSearchPolicy.plan(listOf(it)) }.map { it.key }.toSet()
         val next = AutoSearchPolicy.plan(all, tried = tried)
-        assertEquals(7, next.size)
+        assertEquals(ByeDpiPreset.entries.size + 2, next.size)
         assertTrue(next.all { it.config.address == "n13.example.org" })
     }
     @Test fun telegramOnlyHttpsCanBeRetainedWithoutClaimingYoutubeWorks() {
