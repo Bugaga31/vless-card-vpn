@@ -15,9 +15,9 @@ The strict gate requires the exact test count, successful instrumentation, no sk
 
 ## Current gate (read from HEAD, not from the table above)
 
-The numbers in the table are from the historical source commit. The gate that CI enforces today is defined in `tools/run-native-android-check.sh`: it requires `OK (50 tests)`, instrumentation exit code 0 and no failure markers. Always take the expected count from that script on the SHA being checked; never lower it to make CI green.
+The numbers in the table are from the historical source commit. The gate that CI enforces today is defined in `tools/run-native-android-check.sh`: it requires `OK (57 tests)` (1.0.54: +7 ByeDPI strategy full-TUN cases), instrumentation exit code 0 and no failure markers. Always take the expected count from that script on the SHA being checked; never lower it to make CI green.
 
-On API 33 the current matrix runs three times; on API 26 once. On commit c0875356 API 33 x3 passed and API 26 failed, consistent with issue #7.
+On API 33 the current matrix runs three times; on API 26 once. On commit c0875356 API 33 x3 passed and API 26 failed, consistent with issue #7. On 2026-10-04 API 33 attempts are intermittently red even on unchanged baseline code (1/3 green on the main-equivalent revert); the job log annotation is required to classify these.
 
 ## API 26 diagnostic path
 

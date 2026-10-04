@@ -12,7 +12,15 @@ enum class ByeDpiPreset(val label: String, val extraArgs: List<String>) {
     // Upstream recommendation for stacks that retransmit from the loss point: split before disorder.
     SPLIT_DISORDER("ByeDPI · разбиение + обратный порядок", listOf("--split", "1+s", "--disorder", "3+s")),
     // Native in-process fallback group: start with disorder; only after a reset/timeout from DPI retry with a low-TTL fake.
-    DISORDER_THEN_FAKE("ByeDPI · авто: порядок → фейк", listOf("--disorder", "1", "--auto=torst", "--fake", "-1", "--ttl", "8"));
+    DISORDER_THEN_FAKE("ByeDPI · авто: порядок → фейк", listOf("--disorder", "1", "--auto=torst", "--fake", "-1", "--ttl", "8")),
+    // ByeByeDPI strategy list: out-of-band urgent byte that DPI counts but the server's TCP stack drops (-o1).
+    OOB("ByeDPI · OOB-байт", listOf("--oob", "1")),
+    // ByeByeDPI "-o1 -At,r,s -d1": OOB first; only after a DPI reset/timeout fall back to disorder.
+    OOB_THEN_DISORDER("ByeDPI · авто: OOB → порядок", listOf("--oob", "1", "--auto=torst", "--disorder", "1")),
+    // Upstream disoob (-q1): disordered first part plus OOB byte.
+    DISOOB("ByeDPI · OOB + обратный порядок", listOf("--disoob", "1")),
+    // ByeByeDPI multi-position disorder/split around the SNI ("-d1 -s1+s -d3+s -s6+s -d9+s -s12+s").
+    MULTI_DISORDER("ByeDPI · многократный порядок", listOf("--disorder", "1", "--split", "1+s", "--disorder", "3+s", "--split", "6+s", "--disorder", "9+s", "--split", "12+s"));
     fun arguments(port: Int): List<String> {
         require(port in 1024..65535)
         return listOf("--ip", "127.0.0.1", "--port", port.toString(), "--max-conn", "128", "--timeout", "4") + extraArgs
