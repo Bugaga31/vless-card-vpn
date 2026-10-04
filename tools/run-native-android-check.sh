@@ -39,5 +39,5 @@ if not passed:
     summary = summary[:3500].replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
     print("::error title=Native Android fixture assertions::" + summary)
     raise SystemExit(1)
-print("Confirmed: 50 instrumented fixture checks, no skipped/failed tests")
+print("Confirmed: 53 instrumented fixture checks, no skipped/failed tests")
 CHECK
