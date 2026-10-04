@@ -58,7 +58,7 @@ class RouteDiagnosticsContextTest {
             try {
                 NetworkDiagnosticLog.ring = DiagnosticRing(file)
                 TunnelHealthChecker.activate(proxy, RouteProfile.BYEDPI, ByeDpiPreset.TLS_RECORD_ONLY)
-                assertFalse(TunnelHealthChecker.check(proxy, 1500).internet)
+                assertFalse(TunnelHealthChecker.check(proxy, 1500, retries = 0).internet)
                 val rows = NetworkDiagnosticLog.ring!!.read()
                 assertEquals(3, rows.size)
                 for (line in rows) {

@@ -81,12 +81,7 @@ object XrayConfigImporter {
         }
     }
 
-    private fun normalizeTransport(network: String): String = when (network.lowercase()) {
-        "ws", "websocket" -> "ws"
-        "grpc", "gun" -> "grpc"
-        "h2", "http", "http2" -> "h2"
-        else -> network.lowercase() // Never silently convert an unsupported transport to TCP.
-    }
+    private fun normalizeTransport(network: String): String = com.vlesscardvpn.domain.ConfigTransport.normalize(network)
 
     private fun transportHost(settings: JSONObject): String = if (normalizeTransport(settings.optString("network", "tcp")) == "h2")
         settings.optJSONObject("httpSettings")?.optJSONArray("host")?.optString(0, "") ?: ""

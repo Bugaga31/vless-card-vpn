@@ -340,7 +340,7 @@ class VlessVpnService : VpnService() {
             _vpnStats.value = VpnSessionStats(status = VpnStatus.CONNECTING, autoMode = true,
                 progressMessage = "Возвращаем HTTPS-маршрут; доступность сервисов ограничена")
             try {
-                withTimeout(10_000L) {
+                withTimeout(AutoSearchPolicy.FALLBACK_MS) {
                     handleConnectLocked(attempt.config.id, sessionId, autoMode = true,
                         profile = attempt.profile, requirePreferredServices = false, byeDpiPreset = attempt.byeDpiPreset ?: ByeDpiPreset.COMBINED)
                 }
@@ -349,8 +349,10 @@ class VlessVpnService : VpnService() {
             if (sessionId != sessionSequence.get() || _vpnStats.value.status == VpnStatus.CONNECTED) return
         }
         cleanupResources()
+        val skipped = AutoConnectPolicy.skippedSummary(repository.getAllConfigs())
         _vpnStats.value = VpnSessionStats(status = VpnStatus.ERROR, autoMode = true, health = lastReport,
-            errorMessage = "Проверено маршрутов: $attempts. HTTPS-маршрут не подтверждён. Пинг порта не означает рабочий VPN. Добавьте надёжную подписку или повторите поиск")
+            errorMessage = "Проверено маршрутов: $attempts. HTTPS-маршрут не подтверждён. Пинг порта не означает рабочий VPN. Добавьте надёжную подписку или повторите поиск" +
+                (skipped?.let { ". $it" } ?: ""))
         stopForeground(STOP_FOREGROUND_REMOVE)
     }
 
@@ -509,10 +511,10 @@ class VlessVpnService : VpnService() {
                 if (autoMode && profile == RouteProfile.BYEDPI) byeDpiPreset else null)
             _vpnStats.value = _vpnStats.value.copy(progressMessage = "Проверяем HTTPS через выбранный сервер")
             safeStartForeground(1, createNotification(config, "Проверка реального маршрута…"))
-            val report = TunnelHealthChecker.check(localProbe, timeoutMs = 4000)
+            val report = TunnelHealthChecker.check(localProbe)
             currentCoroutineContext().ensureActive()
             if (sessionId != sessionSequence.get()) { cleanupResources(); return }
-            if (!report.internet || requirePreferredServices && !report.preferredServices) {
+            if (!report.internet || requirePreferredServices && !report.usable) {
                 cleanupResources()
                 repository.recordTunnelHealth(config.id, healthy = false, latency = -1)
                 _vpnStats.value = VpnSessionStats(status = VpnStatus.ERROR, activeConfig = config,
@@ -527,7 +529,7 @@ class VlessVpnService : VpnService() {
             val startTime = System.currentTimeMillis()
             repository.recordTunnelHealth(config.id, healthy = true, latency = report.latencyMs)
             repository.setActive(config.id)
-            if (autoMode && report.preferredServices) routeMemory.remember(config, profile, byeDpiPreset)
+            if (autoMode && report.usable) routeMemory.remember(config, profile, byeDpiPreset)
             NetworkProfileManager.markProfileWorking(netProfile)
             _vpnStats.value = VpnSessionStats(status = VpnStatus.CONNECTED, activeConfig = config,
                 connectedSinceTimestamp = startTime, autoMode = autoMode, health = report,

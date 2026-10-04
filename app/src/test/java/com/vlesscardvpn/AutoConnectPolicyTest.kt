@@ -42,4 +42,13 @@ class AutoConnectPolicyTest {
         assertTrue(r.internet); assertFalse(r.preferredServices)
         assertFalse(TunnelHealthReport(listOf(TunnelProbe("Cloudflare", 100, 302)), 1).internet)
     }
+    @Test fun rawIsTcpAndHttpUpgradeIsSupportedButXhttpIsReported() {
+        assertTrue(AutoConnectPolicy.supports(node().copy(transport = "raw")))
+        assertEquals("tcp", ConfigTransport.normalize("RAW")); assertEquals("tcp", ConfigTransport.normalize(null))
+        assertTrue(AutoConnectPolicy.supports(node().copy(transport = "httpupgrade")))
+        assertEquals("xhttp", ConfigTransport.normalize("xhttp")); assertFalse(ConfigTransport.isSupported("splithttp"))
+        val summary = AutoConnectPolicy.skippedSummary(listOf(node(), node().copy(address = "b.example.org", transport = "xhttp")))
+        assertNotNull(summary); assertTrue(summary!!.contains("XHTTP")); assertTrue(summary.contains("1 из 2"))
+        assertNull(AutoConnectPolicy.skippedSummary(listOf(node())))
+    }
 }

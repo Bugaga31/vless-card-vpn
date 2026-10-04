@@ -10,7 +10,10 @@ object AutoSearchPolicy {
     const val MAX_CANDIDATES = 24
     const val MAX_NODES_PER_POOL = 12
     const val SAVED_ATTEMPTS = 6
-    const val DEADLINE_MS = 60_000L
+    // An attempt may need a core start plus two 6 s HTTPS rounds; 60 s allowed only ~4 real attempts.
+    const val DEADLINE_MS = 90_000L
+    /** Re-opening the best partial route needs a core start plus one retried check (10 s was too short). */
+    const val FALLBACK_MS = 25_000L
     private fun hasRememberedProfile(config: VlessConfig, remembered: Map<String, String>): Boolean {
         val value = remembered[AutoConnectPolicy.identity(config)] ?: return false
         val profile = RouteProfile.entries.firstOrNull { it.name == value.substringBefore('#') } ?: return false
@@ -74,7 +77,7 @@ object AutoSearchPolicy {
             .distinctBy(AutoConnectPolicy::identity)
     }
     fun betterPartial(candidate: TunnelHealthReport, current: TunnelHealthReport?): Boolean {
-        if (!candidate.internet || candidate.preferredServices) return false
+        if (!candidate.internet || candidate.usable) return false
         if (current == null) return true
         val score = { r: TunnelHealthReport -> (if (r.youtube) 1 else 0) + (if (r.telegram) 1 else 0) }
         return score(candidate) > score(current) || score(candidate) == score(current) &&
