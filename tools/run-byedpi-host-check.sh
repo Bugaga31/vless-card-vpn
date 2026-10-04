@@ -8,3 +8,4 @@ cc -D_DEFAULT_SOURCE -std=c99 -O2 -fPIE -pie -fstack-protector-strong \
   "$root"/native/byedpi/{packets,main,conev,proxy,desync,mpool,extend}.c \
   -o "$work/byedpi"
 python3 "$root/tools/test-sni-records-live.py" --byedpi "$work/byedpi"
+python3 "$root/tools/test-fake-sni-live.py" --byedpi "$work/byedpi"

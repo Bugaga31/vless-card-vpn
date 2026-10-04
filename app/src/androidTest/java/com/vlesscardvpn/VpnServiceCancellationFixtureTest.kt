@@ -63,7 +63,9 @@ class VpnServiceCancellationFixtureTest {
         try {
             repo.updateSettings { it.copy(autoSelect = false, autopilotAllowedOnlyFavorites = true,
                 autoReconnectOnNetworkChange = false, enableRuDirect = false, enableAdBlock = false,
-                evasionStrategy = "stable_tls", enableFragmentation = false, enableSniRotation = false) }
+                evasionStrategy = "stable_tls", enableFragmentation = false, enableSniRotation = false,
+                // This fixture covers cancellation while the HTTPS gate is pending (not the ping-only mode).
+                connectCheckMode = com.vlesscardvpn.domain.ConnectCheckMode.HTTPS, byeDpiCustomArgs = "") }
             assertTrue("Fixture must not select any other saved favorites", repo.getAllConfigs().none { it.isFavorite })
             Blackhole().use { endpoint ->
                 val node = VlessConfig(id = id, name = "Controlled cancellation fixture", address = "127.0.0.1",

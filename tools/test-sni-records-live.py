@@ -42,7 +42,10 @@ with tempfile.TemporaryDirectory(prefix='tls-record-live-') as d:
            ('OOB_THEN_DISORDER',['--oob','1','--auto=torst','--disorder','1'],1,'fixture.test'),
            ('DISOOB',['--disoob','1'],1,'fixture.test'),
            ('MULTI_DISORDER',['--disorder','1','--split','1+s','--disorder','3+s','--split','6+s','--disorder','9+s','--split','12+s'],1,'fixture.test'),
-           ('OOB_WRONG_HOST',['--oob','1'],1,'wrong.test')]
+           ('OOB_WRONG_HOST',['--oob','1'],1,'wrong.test'),
+           # Masking only after a DPI reset/timeout: the fake must not break a clean path.
+           ('MASK_AUTO_FAKE',['--disorder','1','--auto=torst','--fake','-1','--ttl','8','--fake-sni','ya.ru','--fake-tls-mod','rand'],1,'fixture.test'),
+           ('CUSTOM_LINE',['--oob','1','--auto','t,r,s','--disorder','1','--fake','-1','--fake-sni','ya.ru','--fake-tls-mod','r'],1,'fixture.test')]
     try:
         for label,options,expected,hostname in cases:
             port=spare_port()

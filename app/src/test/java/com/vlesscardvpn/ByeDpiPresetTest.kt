@@ -26,7 +26,9 @@ class ByeDpiPresetTest {
     }
     @Test fun firstVariantsAreSpreadAcrossNodesWithinTheBudget() {
         val plan = AutoSearchPolicy.plan((1..12).map { node(it) to it })
-        assertEquals(ByeDpiPreset.entries.toSet(), plan.drop(12).take(12).map { it.byeDpiPreset }.toSet())
+        val firstVariants = plan.drop(12).take(12).map { it.byeDpiPreset }
+        assertEquals(12, firstVariants.toSet().size)
+        assertTrue(firstVariants.all { it in ByeDpiPreset.entries })
         assertEquals(36, plan.size)
     }
     @Test fun allVariantsExistForSingleNodeWithoutReplacingItsCredentials() {
@@ -46,7 +48,8 @@ class ByeDpiPresetTest {
     @Test fun newSniOffsetsUsePinnedNativeSyntaxAndDoNotReplaceDomains() {
         assertEquals(listOf("--split", "0+sm", "--tlsrec", "0+sm"), ByeDpiPreset.SNI_MIDDLE.extraArgs)
         assertEquals(listOf("--split", "1+s", "--split", "-1+se", "--tlsrec", "1+s", "--tlsrec", "-1+se"), ByeDpiPreset.SNI_EDGES.extraArgs)
-        assertTrue(ByeDpiPreset.entries.all { "--fake-sni" !in it.extraArgs && "--tlsminor" !in it.extraArgs })
+        assertTrue(ByeDpiPreset.entries.filterNot { it.masked }.all { "--fake-sni" !in it.extraArgs })
+        assertTrue(ByeDpiPreset.entries.all { "--tlsminor" !in it.extraArgs })
     }
     @Test fun newPresetsRestoreFromMemoryAndAllFiveAreReachableForOneNode() {
         val c = node(1)
@@ -65,8 +68,10 @@ class ByeDpiPresetTest {
         // Fake is only a fallback group after a DPI reset/timeout, never the first action.
         assertTrue(fake.indexOf("--auto=torst") in 1 until fake.indexOf("--fake"))
         assertEquals("8", fake[fake.indexOf("--ttl") + 1])
-        assertTrue(ByeDpiPreset.entries.all { "--md5sig" !in it.extraArgs && "--fake-sni" !in it.extraArgs })
-        assertEquals(12, ByeDpiPreset.entries.size)
+        assertTrue(ByeDpiPreset.entries.filterNot { it.masked }.all { "--fake-sni" !in it.extraArgs })
+        // TCP_MD5SIG is unavailable on Android emulator kernels: no preset may depend on it.
+        assertTrue(ByeDpiPreset.entries.all { "--md5sig" !in it.extraArgs })
+        assertEquals(15, ByeDpiPreset.entries.size)
     }
     @Test fun newStrategiesRestoreFromMemoryAndStayLoopbackOnly() {
         val c = node(1)
@@ -99,6 +104,31 @@ class ByeDpiPresetTest {
             val p = AutoSearchPolicy.plan(listOf(c to 1), mapOf(AutoConnectPolicy.identity(c) to "BYEDPI#${preset.name}"))
             assertEquals(preset, p.first().byeDpiPreset)
             assertEquals(ByeDpiPreset.entries.size + 2, p.size)
+        }
+    }
+    @Test fun maskingPresetsSubstituteTheChosenDomainAndKeepLoopback() {
+        val masked = ByeDpiPreset.entries.filter { it.masked }
+        assertEquals(listOf(ByeDpiPreset.MASK_FAKE, ByeDpiPreset.MASK_SPLIT_FAKE, ByeDpiPreset.MASK_AUTO_FAKE), masked)
+        for (preset in masked) {
+            val args = preset.arguments(12400, "vk.com")
+            assertEquals("vk.com", args[args.indexOf("--fake-sni") + 1])
+            assertFalse(args.any { "{sni}" in it })
+            assertEquals("127.0.0.1", args[args.indexOf("--ip") + 1])
+            assertEquals("ya.ru", preset.arguments(12400, "bad host;rm").let { it[it.indexOf("--fake-sni") + 1] })
+            assertEquals("8", args[args.indexOf("--ttl") + 1])
+        }
+        // Without MD5 the fake is only a fallback after a DPI reset/timeout.
+        val auto = ByeDpiPreset.MASK_AUTO_FAKE.extraArgs
+        assertTrue(auto.indexOf("--auto=torst") in 1 until auto.indexOf("--fake"))
+        assertFalse("--md5sig" in auto)
+        assertFalse("--md5sig" in ByeDpiPreset.MASK_FAKE.extraArgs)
+        assertEquals("ya.ru", ByeDpiPreset.MASK_FAKE.arguments(12400).let { it[it.indexOf("--fake-sni") + 1] })
+    }
+    @Test fun maskingPresetsRestoreFromMemory() {
+        val c = node(1)
+        for (preset in listOf(ByeDpiPreset.MASK_FAKE, ByeDpiPreset.MASK_SPLIT_FAKE, ByeDpiPreset.MASK_AUTO_FAKE)) {
+            val p = AutoSearchPolicy.plan(listOf(c to 1), mapOf(AutoConnectPolicy.identity(c) to "BYEDPI#${preset.name}"))
+            assertEquals(preset, p.first().byeDpiPreset)
         }
     }
 }

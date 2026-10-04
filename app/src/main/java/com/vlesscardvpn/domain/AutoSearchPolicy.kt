@@ -1,10 +1,13 @@
 package com.vlesscardvpn.domain
 
 /** Bounded breadth-first search. TCP is a hint, never admission or success evidence. */
-data class AutoRouteAttempt(val config: VlessConfig, val profile: RouteProfile, val tcpMs: Int, val byeDpiPreset: ByeDpiPreset? = null) {
+data class AutoRouteAttempt(val config: VlessConfig, val profile: RouteProfile, val tcpMs: Int, val byeDpiPreset: ByeDpiPreset? = null,
+                            /** The user's own ByeDPI command line from settings instead of a built-in preset. */
+                            val custom: Boolean = false) {
     val key: String get() = AutoConnectPolicy.identity(config) + ":" + profile.name +
-        if (profile == RouteProfile.BYEDPI) "#${(byeDpiPreset ?: ByeDpiPreset.COMBINED).name}" else ""
-    val label: String get() = if (profile == RouteProfile.BYEDPI) (byeDpiPreset ?: ByeDpiPreset.COMBINED).label else profile.label
+        if (profile == RouteProfile.BYEDPI) (if (custom) "#CUSTOM" else "#${(byeDpiPreset ?: ByeDpiPreset.COMBINED).name}") else ""
+    val label: String get() = if (profile == RouteProfile.BYEDPI) (if (custom) CUSTOM_LABEL else (byeDpiPreset ?: ByeDpiPreset.COMBINED).label) else profile.label
+    companion object { const val CUSTOM_LABEL = "ByeDPI · своя стратегия" }
 }
 object AutoSearchPolicy {
     const val MAX_CANDIDATES = 24
