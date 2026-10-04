@@ -126,8 +126,8 @@ private fun ServiceAuditPanel() {
     Text("Telegram и YouTube", style = MaterialTheme.typography.titleLarge)
     Text("По три HTTPS-запроса к каждому сервису, с отдельной медианой отклика. Это не ICMP-пинг и не замер скорости видео.", color = colors.onSurfaceVariant)
     Text(if (vpn.status == VpnStatus.CONNECTED)
-        "VPN подключён. Запросы используют текущую маршрутизацию Android; исключения VPN могут влиять на путь."
-        else "VPN не подключён: результат относится к текущей сети, не к выбранному VPN-серверу.",
+        "VPN подключён. Эти HTTPS-проверки принудительно проходят через выбранный сервер."
+        else "VPN не подключён: сквозная проверка через сервер пока недоступна.",
         style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant)
     Text("Telegram: telegram.org (веб-сайт, не MTProto). YouTube: youtube.com/generate_204 (не воспроизведение видео). Сервисы видят адрес исходящего соединения.",
         style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant)

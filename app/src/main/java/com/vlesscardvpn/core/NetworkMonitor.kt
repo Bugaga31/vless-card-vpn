@@ -3,7 +3,6 @@ package com.vlesscardvpn.core
 import android.content.Context
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
-import android.os.Build
 import android.telephony.TelephonyManager
 
 object NetworkMonitor {
@@ -29,11 +28,9 @@ object NetworkMonitor {
             try {
                 val tm = context.getSystemService(Context.TELEPHONY_SERVICE) as TelephonyManager
                 operatorName = tm.networkOperatorName ?: "Unknown"
-                networkType = when (tm.networkType) {
-                    TelephonyManager.NETWORK_TYPE_LTE -> "LTE"
-                    TelephonyManager.NETWORK_TYPE_NR -> "5G"
-                    else -> "Mobile"
-                }
+                // Radio generation requires READ_PHONE_STATE on modern Android.
+                // Do not request sensitive phone permissions for a decorative network label.
+                networkType = "Mobile"
             } catch (_: SecurityException) {
                 // Permission not granted
             } catch (_: Exception) {

@@ -8,18 +8,23 @@ import java.nio.charset.StandardCharsets
 object UniversalConfigParser {
 
     fun parseAny(raw: String): List<VlessConfig> {
-        val trimmed = raw.trim()
+        require(raw.length <= 2 * 1024 * 1024) { "Конфигурация больше 2 МиБ" }
+        val trimmed = raw.removePrefix("\uFEFF").trim()
         val results = mutableListOf<VlessConfig>()
 
         // Check if raw is base64 encoded subscription
         val decodedText = tryDecodeBase64(trimmed) ?: trimmed
 
-        decodedText.lines().forEach { line ->
+        // Import Xray outbound profiles only; routing/inbounds are not executed or applied.
+        if (decodedText.trimStart().startsWith("{"))
+            return XrayConfigImporter.importFromJson(decodedText).configs.take(JsonImportLimits.MAX_OUTBOUNDS)
+
+        decodedText.lineSequence().take(10000).forEach { line ->
             val l = line.trim()
             if (l.isNotBlank()) {
                 val parsed = parseSingleUri(l)
                 if (parsed != null) {
-                    results.add(parsed)
+                    if (results.size < 1000) results.add(parsed)
                 }
             }
         }
@@ -39,25 +44,28 @@ object UniversalConfigParser {
 
     fun decodeBase64Safe(text: String): ByteArray? {
         val clean = text.replace("\r", "").replace("\n", "").replace(" ", "").trim()
-        if (clean.isBlank()) return null
-        return try {
-            // JVM Standard Base64
-            java.util.Base64.getDecoder().decode(clean)
-        } catch (_: Exception) {
+        if (clean.isBlank() || !clean.matches(Regex("[A-Za-z0-9+/_-]+={0,2}")) ||
+            clean.trimEnd('=').length % 4 == 1 || clean.endsWith('=') && clean.length % 4 != 0) return null
+        val urlSafe = clean.contains('-') || clean.contains('_')
+        if (urlSafe && (clean.contains('+') || clean.contains('/'))) return null
+        // java.util.Base64 was added in Android 8/API 26. The app also supports API 24/25.
+        // Use the platform decoder first; reflection keeps JVM unit tests independent of Android stubs.
+        for (flags in listOf(if (urlSafe) 8 else 0)) { // DEFAULT, URL_SAFE
             try {
-                // URL-safe Base64
-                java.util.Base64.getUrlDecoder().decode(clean)
-            } catch (_: Exception) {
-                try {
-                    // Android Base64 fallback if available
-                    val clazz = Class.forName("android.util.Base64")
-                    val method = clazz.getMethod("decode", String::class.java, Int::class.javaPrimitiveType)
-                    method.invoke(null, clean, 0) as? ByteArray
-                } catch (_: Exception) {
-                    null
-                }
-            }
+                val clazz = Class.forName("android.util.Base64")
+                val bytes = clazz.getMethod("decode", String::class.java, Int::class.javaPrimitiveType)
+                    .invoke(null, clean, flags) as? ByteArray
+                if (bytes != null) return bytes
+            } catch (_: Exception) {}
         }
+        for (factory in listOf(if (urlSafe) "getUrlDecoder" else "getDecoder")) {
+            try {
+                val clazz = Class.forName("java.util.Base64")
+                val decoder = clazz.getMethod(factory).invoke(null)
+                return decoder.javaClass.getMethod("decode", String::class.java).invoke(decoder, clean) as? ByteArray
+            } catch (_: Exception) {}
+        }
+        return null
     }
 
     private fun tryDecodeBase64(text: String): String? {
@@ -127,6 +135,7 @@ object UniversalConfigParser {
                 }
             }
 
+            if (queryMap["encryption"]?.let { it != "none" } == true) return null
             val transportType = queryMap["type"] ?: "tcp"
             VlessConfig(
                 name = remark,

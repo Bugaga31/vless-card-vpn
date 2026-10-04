@@ -36,25 +36,25 @@ fun InstrumentSplashScreen() {
                 modifier = Modifier
                     .size(16.dp)
                     .clip(CircleShape)
-                    .background(SignalOrange)
+                    .background(MaterialTheme.colorScheme.primary)
             )
 
             Spacer(modifier = Modifier.height(InstrumentDimens.space16))
 
             Text(
-                text = "VLESS CARD",
+                text = "VLESS Card",
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.onBackground,
-                letterSpacing = 2.sp
+                letterSpacing = 0.sp
             )
 
             Spacer(modifier = Modifier.height(InstrumentDimens.space4))
 
             Text(
-                text = "Инициализация ядра связи...",
+                text = "Готовим интерфейс",
                 style = MaterialTheme.typography.bodySmall,
-                fontFamily = FontFamily.Monospace,
+
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }

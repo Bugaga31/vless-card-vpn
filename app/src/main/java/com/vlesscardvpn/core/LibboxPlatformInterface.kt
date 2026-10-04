@@ -8,10 +8,12 @@ import android.net.NetworkCapabilities
 import android.net.VpnService
 import android.os.Build
 import android.os.ParcelFileDescriptor
+import android.system.OsConstants
 import android.util.Log
 import io.nekohasekai.libbox.*
 import java.net.Inet4Address
 import java.net.Inet6Address
+import java.net.InetSocketAddress
 import java.net.NetworkInterface as JavaNetInterface
 import java.util.Collections
 
@@ -62,7 +64,14 @@ class LibboxPlatformInterface(
                 }
 
                 override fun onLost(network: Network) {
-                    activeMonitorListener?.updateDefaultInterface("", -1, false, false)
+                    // Loss of an old Wi-Fi network must not clear a replacement cellular route.
+                    val replacement = connectivityManager.activeNetwork
+                    if (replacement != null && replacement != network) reportNetworkUpdate(replacement)
+                    else activeMonitorListener?.updateDefaultInterface("", -1, false, false)
+                }
+
+                override fun onCapabilitiesChanged(network: Network, capabilities: NetworkCapabilities) {
+                    if (network == connectivityManager.activeNetwork) reportNetworkUpdate(network)
                 }
             }
 
@@ -110,17 +119,6 @@ class LibboxPlatformInterface(
 
             val ifaceName = lp.interfaceName ?: ""
             var ifaceIndex = -1
-            var hasV4 = false
-            var hasV6 = false
-
-            for (linkAddr in lp.linkAddresses) {
-                val addr = linkAddr.address
-                if (addr is Inet4Address && !addr.isLoopbackAddress && !addr.isLinkLocalAddress) {
-                    hasV4 = true
-                } else if (addr is Inet6Address && !addr.isLoopbackAddress && !addr.isLinkLocalAddress) {
-                    hasV6 = true
-                }
-            }
 
             if (ifaceName.isNotBlank()) {
                 try {
@@ -131,7 +129,10 @@ class LibboxPlatformInterface(
                 } catch (_: Exception) {}
             }
 
-            listener.updateDefaultInterface(ifaceName, ifaceIndex, hasV4, hasV6)
+            // libbox 1.11+ takes isExpensive/isConstrained, NOT hasIPv4/hasIPv6.
+            // Address families are already reported through getInterfaces().
+            val isExpensive = !caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED)
+            listener.updateDefaultInterface(ifaceName, ifaceIndex, isExpensive, false)
         } catch (e: Exception) {
             Log.e("LibboxPlatform", "Error reporting network update", e)
         }
@@ -143,8 +144,32 @@ class LibboxPlatformInterface(
         srcPort: Int,
         destIp: String?,
         destPort: Int
-    ): ConnectionOwner? {
-        return null
+    ): ConnectionOwner {
+        // gomobile forwards null as (nil, nil). libbox then dereferences it in Go,
+        // which can terminate the process outside Kotlin's exception handlers.
+        val owner = NativeCallbackValues.unknownConnectionOwner()
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q ||
+            (ipProtocol != 6 && ipProtocol != 17) ||
+            srcIp.isNullOrBlank() || destIp.isNullOrBlank() ||
+            srcPort !in 1..65535 || destPort !in 1..65535) return owner
+
+        try {
+            val uid = connectivityManager.getConnectionOwnerUid(
+                ipProtocol,
+                InetSocketAddress(srcIp, srcPort),
+                InetSocketAddress(destIp, destPort)
+            )
+            // Android returns INVALID_UID (-1) if the flow is already gone.
+            if (uid >= 0) {
+                owner.userId = uid
+                owner.androidPackageName = vpnService.packageManager
+                    .getPackagesForUid(uid)?.firstOrNull().orEmpty()
+            }
+        } catch (_: Exception) {
+            // A race with VPN revocation or an unavailable owner is not fatal.
+            // Keep an explicit unknown UID; do not fabricate root/system UID 0.
+        }
+        return owner
     }
 
     override fun getInterfaces(): NetworkInterfaceIterator {
@@ -154,16 +179,26 @@ class LibboxPlatformInterface(
             for (iface in interfaces) {
                 if (iface.isUp) {
                     val addrsList = mutableListOf<String>()
-                    for (addr in Collections.list(iface.inetAddresses)) {
-                        if (!addr.isLoopbackAddress) {
-                            addrsList.add(addr.hostAddress ?: "")
-                        }
+                    // libbox uses netip.MustParsePrefix, NOT ParseAddr. A bare IP
+                    // or IPv6 zone identifier causes a Go panic outside Kotlin catches.
+                    for (linkAddress in iface.interfaceAddresses) {
+                        val address = linkAddress.address ?: continue
+                        if (address.isLoopbackAddress) continue
+                        InterfacePrefixFormatter.format(address, linkAddress.networkPrefixLength.toInt())
+                            ?.let(addrsList::add)
                     }
 
                     val ni = NetworkInterface().apply {
                         name = iface.name
                         index = iface.index
-                        mtu = try { iface.mtu } catch (_: Exception) { 1500 }
+                        mtu = try { iface.mtu.takeIf { it > 0 } ?: 1500 } catch (_: Exception) { 1500 }
+                        flags = OsConstants.IFF_UP or OsConstants.IFF_RUNNING
+                        if (iface.isLoopback) flags = flags or OsConstants.IFF_LOOPBACK
+                        if (iface.isPointToPoint) flags = flags or OsConstants.IFF_POINTOPOINT
+                        if (iface.supportsMulticast()) flags = flags or OsConstants.IFF_MULTICAST
+                        if (iface.interfaceAddresses.any { it.broadcast != null }) {
+                            flags = flags or OsConstants.IFF_BROADCAST
+                        }
                         addresses = object : StringIterator {
                             private var aIdx = 0
                             override fun hasNext(): Boolean = aIdx < addrsList.size
@@ -220,26 +255,18 @@ class LibboxPlatformInterface(
                     addRoute("0.0.0.0", 0)
                 }
 
-                // Configure IPv6: support if configured in TunOptions, otherwise exclude/do not route
+                // Route IPv6 through the same core; never silently skip a configured family.
                 val inet6Iterator = options.inet6Address
+                var hasV6 = false
                 while (inet6Iterator != null && inet6Iterator.hasNext()) {
-                    val p6 = inet6Iterator.next()
-                    try {
-                        addAddress(p6.address(), p6.prefix())
-                    } catch (e: Exception) {
-                        Log.w("LibboxPlatform", "IPv6 address add skipped: ${e.message}")
-                    }
+                    val p6 = inet6Iterator.next(); addAddress(p6.address(), p6.prefix()); hasV6 = true
                 }
-
                 val route6Iterator = options.inet6RouteAddress
+                var hasV6Routes = false
                 while (route6Iterator != null && route6Iterator.hasNext()) {
-                    val r6 = route6Iterator.next()
-                    try {
-                        addRoute(r6.address(), r6.prefix())
-                    } catch (e: Exception) {
-                        Log.w("LibboxPlatform", "IPv6 route add skipped: ${e.message}")
-                    }
+                    val r6 = route6Iterator.next(); addRoute(r6.address(), r6.prefix()); hasV6Routes = true
                 }
+                if (hasV6 && !hasV6Routes) addRoute("::", 0)
 
                 // DNS
                 val dnsBox = options.dnsServerAddress
@@ -258,9 +285,7 @@ class LibboxPlatformInterface(
                 }
 
                 // Per-app split tunneling: exclude user-selected apps (banks, gov, etc.)
-                // at the VpnService level. This actually works, unlike a sing-box
-                // package_name route rule, which stays a no-op while findConnectionOwner
-                // returns null.
+                // at the VpnService level, independent of connection-owner lookup.
                 for (pkg in bypassApps) {
                     if (pkg.isBlank() || pkg == vpnService.packageName) continue
                     try {
@@ -294,13 +319,7 @@ class LibboxPlatformInterface(
         // Foreground notification handled by VlessVpnService
     }
 
-    override fun systemCertificates(): StringIterator {
-        return object : StringIterator {
-            override fun hasNext(): Boolean = false
-            override fun len(): Int = 0
-            override fun next(): String = ""
-        }
-    }
+    override fun systemCertificates(): StringIterator = AndroidTrustAnchors.iterator()
 
     override fun underNetworkExtension(): Boolean = false
 

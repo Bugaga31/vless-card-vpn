@@ -1,0 +1,151 @@
+[
+  {
+    "measurement": "2wZez5kt0ER1OdKNJ00021F3y",
+    "createdAt": "2026-10-02T09:46:36.507Z",
+    "path": "/generate_204",
+    "country": "RU",
+    "city": "Moscow",
+    "network": "Timeweb",
+    "asn": 9123,
+    "tags": [
+      "datacenter-network",
+      "u-Lanakod"
+    ],
+    "status": "finished",
+    "httpCode": 204,
+    "tlsAuthorized": true,
+    "totalMs": 72
+  },
+  {
+    "measurement": "2wZez5kt0ER1OdKNJ00021F3y",
+    "createdAt": "2026-10-02T09:46:36.507Z",
+    "path": "/generate_204",
+    "country": "RU",
+    "city": "Moscow",
+    "network": "Yandex.Cloud",
+    "asn": 200350,
+    "tags": [
+      "datacenter-network"
+    ],
+    "status": "failed",
+    "httpCode": null,
+    "tlsAuthorized": null,
+    "totalMs": null
+  },
+  {
+    "measurement": "2wZez5kt0ER1OdKNJ00021F3y",
+    "createdAt": "2026-10-02T09:46:36.507Z",
+    "path": "/generate_204",
+    "country": "RU",
+    "city": "Saint Petersburg",
+    "network": "Selectel",
+    "asn": 49505,
+    "tags": [
+      "datacenter-network"
+    ],
+    "status": "finished",
+    "httpCode": 204,
+    "tlsAuthorized": true,
+    "totalMs": 18
+  },
+  {
+    "measurement": "2Fuv7SD4MwLCOOa2X00021F42",
+    "createdAt": "2026-10-02T09:50:03.265Z",
+    "path": "/generate_204",
+    "country": "RU",
+    "city": "Moscow",
+    "network": "Timeweb",
+    "asn": 9123,
+    "tags": [
+      "eyeball-network",
+      "u-hugmouse"
+    ],
+    "status": "finished",
+    "httpCode": 204,
+    "tlsAuthorized": true,
+    "totalMs": 59
+  },
+  {
+    "measurement": "2Fuv7SD4MwLCOOa2X00021F42",
+    "createdAt": "2026-10-02T09:50:03.265Z",
+    "path": "/generate_204",
+    "country": "RU",
+    "city": "Tomsk",
+    "network": "Limited Company Information and Consulting Agency",
+    "asn": 31357,
+    "tags": [
+      "eyeball-network",
+      "u-zGato"
+    ],
+    "status": "failed",
+    "httpCode": null,
+    "tlsAuthorized": null,
+    "totalMs": 15000
+  },
+  {
+    "measurement": "2Fuv7SD4MwLCOOa2X00021F42",
+    "createdAt": "2026-10-02T09:50:03.265Z",
+    "path": "/generate_204",
+    "country": "RU",
+    "city": "Novosibirsk",
+    "network": "MTS",
+    "asn": 8359,
+    "tags": [
+      "eyeball-network",
+      "u-finenumbers"
+    ],
+    "status": "failed",
+    "httpCode": null,
+    "tlsAuthorized": null,
+    "totalMs": null
+  },
+  {
+    "measurement": "2a58iJ7u773Oy4RST00021F44",
+    "createdAt": "2026-10-02T09:52:04.507Z",
+    "path": "/",
+    "country": "RU",
+    "city": "Moscow",
+    "network": "Timeweb",
+    "asn": 9123,
+    "tags": [
+      "eyeball-network",
+      "u-hugmouse"
+    ],
+    "status": "finished",
+    "httpCode": 200,
+    "tlsAuthorized": true,
+    "totalMs": 101
+  },
+  {
+    "measurement": "2a58iJ7u773Oy4RST00021F44",
+    "createdAt": "2026-10-02T09:52:04.507Z",
+    "path": "/",
+    "country": "RU",
+    "city": "Moscow",
+    "network": "Yandex.Cloud",
+    "asn": 200350,
+    "tags": [
+      "datacenter-network"
+    ],
+    "status": "failed",
+    "httpCode": null,
+    "tlsAuthorized": null,
+    "totalMs": null
+  },
+  {
+    "measurement": "2a58iJ7u773Oy4RST00021F44",
+    "createdAt": "2026-10-02T09:52:04.507Z",
+    "path": "/",
+    "country": "RU",
+    "city": "Saint Petersburg",
+    "network": "Selectel",
+    "asn": 49505,
+    "tags": [
+      "datacenter-network"
+    ],
+    "status": "finished",
+    "httpCode": 200,
+    "tlsAuthorized": true,
+    "totalMs": 61
+  }
+]

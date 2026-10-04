@@ -25,6 +25,25 @@ object EvasionStrategies {
          * Каскад «на всё случаи»: пробует стратегии по очереди.
          * Параметры фрагментации берутся с первой стадии каскада.
          */
+        TLS_FRAGMENT(
+            id = "tls_fragment", displayName = "TLS-фрагментация",
+            tagLine = "Совместимый SNI и фрагментация ядра",
+            description = "Включает поддерживаемый libbox флаг TLS fragment. Не является ByeDPI или zapret; SNI и ключи сервера сохраняются.",
+            recommendedFragmentPackets = "tlshello", recommendedFragmentInterval = "10-20ms",
+            uTlsFingerprint = "chrome", origin = "libbox TLS fragment"
+        ),
+        STABLE_TLS(
+            id = "stable_tls",
+            displayName = "Стабильный TLS",
+            tagLine = "Параметры сервера без случайной подмены",
+            description = "Сохраняет SNI и отпечаток из подписки. Без экспериментальной " +
+                "фрагментации и ротации доменов. Проверка сертификата остаётся включённой; " +
+                "профиль не гарантирует обход блокировок.",
+            recommendedFragmentPackets = "none",
+            recommendedFragmentInterval = "0ms",
+            uTlsFingerprint = "chrome",
+            origin = "Server-compatible TLS"
+        ),
         AUTO_CASCADE(
             id = "auto_cascade",
             displayName = "🤖 Автокаскад (кнопка «Подключить»)",

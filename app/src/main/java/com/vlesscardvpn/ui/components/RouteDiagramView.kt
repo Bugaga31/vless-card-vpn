@@ -79,10 +79,10 @@ fun RouteDiagramView(
                     style = MaterialTheme.typography.bodySmall,
                     fontWeight = FontWeight.SemiBold,
                     color = when {
-                        isConnected -> SemanticGreen
-                        isConnecting -> SignalOrange
-                        isError -> SemanticRed
-                        else -> GraphiteTertiary
+                        isConnected -> MaterialTheme.colorScheme.tertiary
+                        isConnecting -> MaterialTheme.colorScheme.primary
+                        isError -> MaterialTheme.colorScheme.error
+                        else -> MaterialTheme.colorScheme.onSurfaceVariant
                     }
                 )
             }
@@ -100,7 +100,7 @@ fun RouteDiagramView(
                     label = "Устройство",
                     subtext = networkTypeName,
                     isActive = true,
-                    statusColor = SemanticGreen,
+                    statusColor = MaterialTheme.colorScheme.tertiary,
                     modifier = Modifier.weight(1f)
                 )
 
@@ -123,10 +123,10 @@ fun RouteDiagramView(
                     },
                     isActive = isConnected,
                     statusColor = when {
-                        isConnected -> SemanticGreen
-                        isConnecting -> SignalOrange
-                        isError -> SemanticRed
-                        else -> SemanticNeutral
+                        isConnected -> MaterialTheme.colorScheme.tertiary
+                        isConnecting -> MaterialTheme.colorScheme.primary
+                        isError -> MaterialTheme.colorScheme.error
+                        else -> MaterialTheme.colorScheme.onSurfaceVariant
                     },
                     modifier = Modifier.weight(1f)
                 )
@@ -147,11 +147,11 @@ fun RouteDiagramView(
                     } else "Не выбран",
                     isActive = isConnected,
                     statusColor = when {
-                        isConnected -> SemanticGreen
-                        activeConfig != null && activeConfig.pingMs in 1..200 -> SemanticGreen
-                        activeConfig != null && activeConfig.pingMs > 200 -> SemanticAmber
-                        isError -> SemanticRed
-                        else -> SemanticNeutral
+                        isConnected -> MaterialTheme.colorScheme.tertiary
+                        activeConfig != null && activeConfig.pingMs in 1..200 -> MaterialTheme.colorScheme.tertiary
+                        activeConfig != null && activeConfig.pingMs > 200 -> MaterialTheme.colorScheme.secondary
+                        isError -> MaterialTheme.colorScheme.error
+                        else -> MaterialTheme.colorScheme.onSurfaceVariant
                     },
                     modifier = Modifier.weight(1f)
                 )
@@ -177,13 +177,13 @@ private fun RouteNode(
             modifier = Modifier
                 .size(40.dp)
                 .clip(CircleShape)
-                .background(if (isActive) statusColor.copy(alpha = 0.12f) else MineralSurfaceSubtle),
+                .background(if (isActive) statusColor.copy(alpha = 0.12f) else MaterialTheme.colorScheme.surfaceVariant),
             contentAlignment = Alignment.Center
         ) {
             Icon(
                 imageVector = icon,
                 contentDescription = label,
-                tint = if (isActive) statusColor else GraphiteTertiary,
+                tint = if (isActive) statusColor else MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.size(20.dp)
             )
         }
@@ -219,9 +219,9 @@ private fun RouteConnector(
             .height(2.dp)
             .background(
                 when {
-                    isActive -> SemanticGreen
-                    isWarning -> SignalOrange
-                    else -> MineralBorder
+                    isActive -> MaterialTheme.colorScheme.tertiary
+                    isWarning -> MaterialTheme.colorScheme.primary
+                    else -> MaterialTheme.colorScheme.outlineVariant
                 }
             )
     )

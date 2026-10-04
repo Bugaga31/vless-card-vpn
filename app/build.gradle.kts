@@ -1,4 +1,7 @@
+import java.util.Properties
+
 plugins {
+    id("app.cash.paparazzi")
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("com.google.devtools.ksp")
@@ -11,14 +14,20 @@ android {
     namespace = "com.vlesscardvpn"
     compileSdk = 34
     defaultConfig {
-        applicationId = "com.vlesscardvpn"
+        // Install the diagnostic build alongside the release without deleting user data.
+        val stabilityPreview = providers.gradleProperty("stabilityPreview").orNull == "true"
+        val autoPreview = providers.gradleProperty("autoPreview").orNull == "true"
+        val labPreview = providers.gradleProperty("labPreview").orNull == "true"
+        val betaPreview = providers.gradleProperty("betaPreview").orNull == "true"
+        applicationId = when { betaPreview -> "com.vlesscardvpn.beta2"; labPreview -> "com.vlesscardvpn.lab"; autoPreview -> "com.vlesscardvpn.auto"; stabilityPreview -> "com.vlesscardvpn.preview"; else -> "com.vlesscardvpn" }
+        manifestPlaceholders["vpnAppLabel"] = when { betaPreview -> "VLESS Card · Beta"; labPreview -> "VLESS Card · Lab"; autoPreview -> "VLESS Card VPN · Auto"; stabilityPreview -> "VLESS Card VPN · Test"; else -> "@string/app_name" }
         minSdk = 24
         targetSdk = 34
         versionCode = releaseNumber
         versionName = "1.0.$releaseNumber"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables { useSupportLibrary = true }
-        ndk { abiFilters.addAll(listOf("arm64-v8a", "armeabi-v7a", "x86_64", "x86")) }
+        ndk { abiFilters.addAll(if (autoPreview || labPreview || betaPreview) listOf("arm64-v8a", "armeabi-v7a") else listOf("arm64-v8a", "armeabi-v7a", "x86_64", "x86")) }
     }
     testOptions { unitTests.isReturnDefaultValues = true }
     buildTypes {
@@ -34,7 +43,11 @@ android {
     kotlinOptions { jvmTarget = "1.8" }
     buildFeatures { compose = true }
     composeOptions { kotlinCompilerExtensionVersion = "1.5.14" }
-    packaging { resources { excludes += "/META-INF/{AL2.0,LGPL2.1}" } }
+    packaging {
+        resources { excludes += "/META-INF/{AL2.0,LGPL2.1}" }
+        jniLibs { useLegacyPackaging = true; keepDebugSymbols += "**/libbyedpi.so" }
+    }
+    sourceSets["main"].jniLibs.srcDir(layout.buildDirectory.dir("generated/byedpi"))
 }
 
 dependencies {
@@ -56,6 +69,9 @@ dependencies {
     implementation("androidx.room:room-runtime:2.6.1")
     ksp("androidx.room:room-compiler:2.6.1")
     implementation("androidx.room:room-ktx:2.6.1")
+    testImplementation("io.mockk:mockk:1.13.12")
+    testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
+    testImplementation("com.squareup.okhttp3:okhttp-tls:4.12.0")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20240303")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.7.3")
@@ -70,4 +86,47 @@ dependencies {
 // The existing publisher invokes assembleDebug. Fail that command if unit tests fail.
 tasks.matching { it.name == "assembleDebug" }.configureEach {
     dependsOn("testDebugUnitTest")
+}
+
+// Reproducible source build; install NDK 27.2.12479018 before building.
+val buildByeDpi by tasks.registering(Exec::class) {
+    val sdk = System.getenv("ANDROID_HOME") ?: Properties().apply {
+        rootProject.file("local.properties").inputStream().use { load(it) }
+    }.getProperty("sdk.dir")
+    inputs.dir(rootProject.file("native/byedpi"))
+    inputs.file(rootProject.file("native/build-byedpi.sh"))
+    inputs.file(rootProject.file("native/launcher.c"))
+    inputs.property("armOnly", providers.gradleProperty("autoPreview").orNull == "true" || providers.gradleProperty("labPreview").orNull == "true")
+    outputs.dir(layout.buildDirectory.dir("generated/byedpi"))
+    commandLine("bash", rootProject.file("native/build-byedpi.sh").absolutePath,
+        "$sdk/ndk/27.2.12479018", layout.buildDirectory.dir("generated/byedpi").get().asFile.absolutePath,
+        if (providers.gradleProperty("autoPreview").orNull == "true" || providers.gradleProperty("labPreview").orNull == "true") "arm" else "all")
+}
+tasks.named("preBuild").configure { dependsOn(buildByeDpi) }
+
+// Export future schemas for migration review and testing.
+ksp { arg("room.schemaLocation", "$projectDir/schemas") }
+
+// Public CI diagnostics expose test identifiers/counts only, never exception messages,
+// URLs, credentials, captured console output or complete test artifacts.
+tasks.withType<org.gradle.api.tasks.testing.Test>().configureEach {
+    if (System.getenv("GITHUB_ACTIONS") == "true") {
+        addTestListener(object : org.gradle.api.tasks.testing.TestListener {
+            override fun beforeSuite(suite: org.gradle.api.tasks.testing.TestDescriptor) {}
+            override fun beforeTest(test: org.gradle.api.tasks.testing.TestDescriptor) {}
+            override fun afterTest(test: org.gradle.api.tasks.testing.TestDescriptor, result: org.gradle.api.tasks.testing.TestResult) {
+                if (result.resultType == org.gradle.api.tasks.testing.TestResult.ResultType.FAILURE) {
+                    val label = "${test.className}.${test.name}".replace(Regex("[^A-Za-z0-9_.$ -]"), "_").take(240)
+                    println("::error title=JVM regression assertion::$label")
+                }
+            }
+            override fun afterSuite(suite: org.gradle.api.tasks.testing.TestDescriptor, result: org.gradle.api.tasks.testing.TestResult) {
+                if (suite.parent == null) {
+                    val totals = "tests=${result.testCount},failed=${result.failedTestCount},skipped=${result.skippedTestCount}"
+                    println("JVM regression totals: $totals")
+                    if (result.failedTestCount > 0) println("::error title=JVM regression summary::$totals")
+                }
+            }
+        })
+    }
 }
