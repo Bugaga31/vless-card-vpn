@@ -33,3 +33,10 @@ test -n "$PID" || exit 1
 adb shell dumpsys activity activities | grep -E "mResumedActivity|topResumedActivity" | head -2
 adb shell dumpsys activity activities | grep -qE "(mResumedActivity|topResumedActivity).*$PKG" || exit 1
 echo "LAUNCH OK"
+echo "== upgrade over published Beta 1.0.52 (same key, data kept)"
+adb uninstall $PKG >/dev/null 2>&1
+if curl -fsL -o prev.apk https://github.com/Bugaga31/vless-card-vpn/releases/download/beta-v1.0.52/VLESS-Card-Beta-1.0.52.apk; then
+  adb install prev.apk 2>&1 | tail -1 | grep -q Success || exit 1
+  U=$(adb install -r "$APK" 2>&1 | tail -1); echo "$U"; echo "$U" | grep -q Success || exit 1
+fi
+echo "ALL INSTALL CHECKS OK"

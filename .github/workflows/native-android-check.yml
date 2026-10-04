@@ -15,7 +15,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        api: [26, 33]
+        include:
+          - { api: 33, attempt: 1 }
+          - { api: 33, attempt: 2 }
+          - { api: 33, attempt: 3 }
+          - { api: 26, attempt: 1 }
     steps:
       - uses: actions/checkout@v4
         with:
@@ -59,7 +63,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: native-android-api-${{ matrix.api }}
+          name: native-android-api-${{ matrix.api }}-run-${{ matrix.attempt }}
           path: |
             native-results.txt
             fixture.log
