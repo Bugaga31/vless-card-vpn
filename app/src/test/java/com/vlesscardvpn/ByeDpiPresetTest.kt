@@ -68,7 +68,9 @@ class ByeDpiPresetTest {
         // Fake is only a fallback group after a DPI reset/timeout, never the first action.
         assertTrue(fake.indexOf("--auto=torst") in 1 until fake.indexOf("--fake"))
         assertEquals("8", fake[fake.indexOf("--ttl") + 1])
-        assertTrue(ByeDpiPreset.entries.filterNot { it.masked }.all { "--md5sig" !in it.extraArgs && "--fake-sni" !in it.extraArgs })
+        assertTrue(ByeDpiPreset.entries.filterNot { it.masked }.all { "--fake-sni" !in it.extraArgs })
+        // TCP_MD5SIG is unavailable on Android emulator kernels: no preset may depend on it.
+        assertTrue(ByeDpiPreset.entries.all { "--md5sig" !in it.extraArgs })
         assertEquals(15, ByeDpiPreset.entries.size)
     }
     @Test fun newStrategiesRestoreFromMemoryAndStayLoopbackOnly() {
@@ -119,7 +121,7 @@ class ByeDpiPresetTest {
         val auto = ByeDpiPreset.MASK_AUTO_FAKE.extraArgs
         assertTrue(auto.indexOf("--auto=torst") in 1 until auto.indexOf("--fake"))
         assertFalse("--md5sig" in auto)
-        assertTrue("--md5sig" in ByeDpiPreset.MASK_FAKE.extraArgs)
+        assertFalse("--md5sig" in ByeDpiPreset.MASK_FAKE.extraArgs)
         assertEquals("ya.ru", ByeDpiPreset.MASK_FAKE.arguments(12400).let { it[it.indexOf("--fake-sni") + 1] })
     }
     @Test fun maskingPresetsRestoreFromMemory() {

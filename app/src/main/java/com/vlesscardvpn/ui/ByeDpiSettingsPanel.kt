@@ -37,7 +37,7 @@ fun ByeDpiSettingsPanel(repo: AppRepository, settings: AppSettings) {
 
             HorizontalDivider(color = MaterialTheme.colorScheme.outline, thickness = 1.dp)
             Text("Своя стратегия ByeDPI", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
-            Text("Как в ByeByeDPI: например «-d1 -f-1 -t8 -S -n {sni}». {sni} заменяется доменом маскировки. Пусто — встроенные стратегии. Применяется к ручному подключению и «Авто».",
+            Text("Как в ByeByeDPI: например «-d1 -f-1 -t8 -n {sni}». {sni} заменяется доменом маскировки. Пусто — встроенные стратегии. Применяется к ручному подключению и «Авто».",
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             OutlinedTextField(value = custom, onValueChange = { v ->
                     custom = v.take(ByeDpiArgs.MAX_LENGTH); repo.updateSettings { it.copy(byeDpiCustomArgs = custom) }
@@ -46,7 +46,8 @@ fun ByeDpiSettingsPanel(repo: AppRepository, settings: AppSettings) {
                 placeholder = { Text("-o1 -At,r,s -d1") })
             if (custom.isNotBlank()) {
                 val parsed = remember(custom, mask) { ByeDpiArgs.parse(custom, mask) }
-                Text(parsed.fold({ "✓ Будет запущено: " + it.joinToString(" ") }, { "✗ " + it.message }),
+                Text(parsed.fold({ "✓ Будет запущено: " + it.joinToString(" ") +
+                        ByeDpiArgs.warnings(it).joinToString("") { w -> "\n⚠ $w" } }, { "✗ " + it.message }),
                     style = MaterialTheme.typography.bodySmall,
                     color = if (parsed.isSuccess) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error)
             }
@@ -61,7 +62,7 @@ fun ByeDpiSettingsPanel(repo: AppRepository, settings: AppSettings) {
 
             HorizontalDivider(color = MaterialTheme.colorScheme.outline, thickness = 1.dp)
             Text("Маскировка (фейк-SNI)", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
-            Text("Фейковый ClientHello с этим доменом видит DPI; сервер его отбрасывает. Используется стратегиями «маскировка» и {sni}.",
+            Text("Фейковый ClientHello с этим доменом видит DPI; до сервера он не доходит (TTL 8). Используется стратегиями «маскировка» и {sni}.",
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 ByeDpiArgs.MASK_DOMAINS.forEach { domain ->

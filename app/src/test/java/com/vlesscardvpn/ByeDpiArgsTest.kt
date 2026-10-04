@@ -37,7 +37,11 @@ class ByeDpiArgsTest {
         assertEquals("ya.ru", AppSettings().byeDpiMaskDomain)
     }
     @Test fun examplesParseAndLoopbackStaysAppControlled() {
-        for (e in ByeDpiArgs.EXAMPLES) assertTrue(e, ByeDpiArgs.parse(e, "gosuslugi.ru").isSuccess)
+        for (e in ByeDpiArgs.EXAMPLES) {
+            val args = ByeDpiArgs.parse(e, "gosuslugi.ru").getOrThrow()
+            assertTrue(e, ByeDpiArgs.warnings(args).isEmpty())
+        }
+        assertEquals(1, ByeDpiArgs.warnings(ok("-d1 -f-1 -t8 -S -n {sni}")).size)
         val prefix = ByeDpiArgs.loopbackPrefix(12400)
         assertEquals("127.0.0.1", prefix[prefix.indexOf("--ip") + 1])
         assertEquals("12400", prefix[prefix.indexOf("--port") + 1])
