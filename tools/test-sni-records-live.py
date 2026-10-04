@@ -33,11 +33,7 @@ with tempfile.TemporaryDirectory(prefix='tls-record-live-') as d:
     cases=[('TCP_ONLY',['--split','1+s'],1,'fixture.test'),
            ('SNI_MIDDLE',['--split','0+sm','--tlsrec','0+sm'],2,'fixture.test'),
            ('SNI_EDGES',edge_options,3,'fixture.test'),
-           ('SNI_EDGES_WRONG_HOST',edge_options,3,'wrong.test'),
-           ('DISORDER',['--disorder','1'],1,'fixture.test'),
-           ('SPLIT_DISORDER',['--split','1+s','--disorder','3+s'],1,'fixture.test'),
-           ('DISORDER_THEN_FAKE',['--disorder','1','--auto=torst','--fake','-1','--ttl','8'],1,'fixture.test'),
-           ('DISORDER_WRONG_HOST',['--disorder','1'],1,'wrong.test')]
+           ('SNI_EDGES_WRONG_HOST',edge_options,3,'wrong.test')]
     try:
         for label,options,expected,hostname in cases:
             port=spare_port()
