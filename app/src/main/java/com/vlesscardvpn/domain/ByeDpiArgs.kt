@@ -14,7 +14,7 @@ object ByeDpiArgs {
     /** Ready ByeByeDPI-style strategies the user can insert into the editor and edit. */
     val EXAMPLES = listOf(
         "-d1 -f-1 -t8 -n {sni}",
-        "-s1+s -f-1 -t8 -n {sni} -Qr",
+        "-f-1 -t8 -n {sni} -Qr",
         "-o1 -At,r,s -d1",
         "-d1 -s1+s -d3+s -s6+s -d9+s -s12+s",
         "-q1 -r1+s",
