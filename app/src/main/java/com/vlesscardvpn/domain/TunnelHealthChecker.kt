@@ -19,6 +19,8 @@ data class TunnelHealthReport(val probes: List<TunnelProbe> = emptyList(), val c
     val youtube: Boolean get() = probes.any { it.label == "YouTube · HTTPS" && it.passed }
     val telegram: Boolean get() = probes.any { it.label == "Telegram · веб" && it.passed }
     val preferredServices: Boolean get() = internet && youtube && telegram
+    /** Auto accepts a route once real HTTPS works and at least one of YouTube/Telegram answers through it. */
+    val usable: Boolean get() = internet && (youtube || telegram)
     val latencyMs: Int get() = probes.filter { it.passed }.minOfOrNull { it.latencyMs } ?: -1
 }
 
@@ -34,7 +36,10 @@ object TunnelHealthChecker {
         if (old.proxy === proxy) session.compareAndSet(old, null)
     }
 
-    suspend fun check(proxy: LocalProbeProxy? = activeProxy, timeoutMs: Int = 4000): TunnelHealthReport {
+    /** The first request through a fresh tunnel pays for the outer TCP/TLS/REALITY handshake and, for ByeDPI
+     *  disorder, a retransmission; one 4 s attempt rejected working routes on slow mobile networks. */
+    const val DEFAULT_TIMEOUT_MS = 6000
+    suspend fun check(proxy: LocalProbeProxy? = activeProxy, timeoutMs: Int = DEFAULT_TIMEOUT_MS, retries: Int = 1): TunnelHealthReport {
         if (proxy == null) return TunnelHealthReport()
         val route = session.get()?.takeIf { it.proxy === proxy }
         return coroutineScope {
@@ -43,7 +48,11 @@ object TunnelHealthChecker {
                 Triple(ServiceTarget.YOUTUBE.label, ServiceTarget.YOUTUBE.url, ServiceTarget.YOUTUBE.expectedCode),
                 Triple(ServiceTarget.TELEGRAM.label, ServiceTarget.TELEGRAM.url, ServiceTarget.TELEGRAM.expectedCode)
             ).map { (label, url, expected) -> async {
-                val result = probe(proxy, url, expected, timeoutMs)
+                var result = probe(proxy, url, expected, timeoutMs)
+                var left = retries.coerceIn(0, 2)
+                // Retry only transport failures; a definitive wrong HTTP status is never retried into a pass.
+                while (left-- > 0 && result.failure != DiagnosticFailure.NONE && result.failure != DiagnosticFailure.HTTP)
+                    result = probe(proxy, url, expected, timeoutMs)
                 NetworkDiagnosticLog.record(NetworkDiagnosticEvent(phase = DiagnosticPhase.HTTPS_CHECK,
                     target = when (label) { "Cloudflare" -> DiagnosticTarget.INTERNET; ServiceTarget.YOUTUBE.label -> DiagnosticTarget.YOUTUBE; else -> DiagnosticTarget.TELEGRAM },
                     profile = route?.profile, preset = route?.preset, stage = result.stage,

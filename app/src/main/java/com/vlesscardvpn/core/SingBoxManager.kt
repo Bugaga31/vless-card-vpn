@@ -338,7 +338,7 @@ object SingBoxManager {
     }
 
     /** Same declared transport across VLESS, VMess and Trojan; no silent TCP fallback. */
-    private fun createTransport(config: VlessConfig, effectiveSni: String): JSONObject? = when (config.transport.lowercase()) {
+    private fun createTransport(config: VlessConfig, effectiveSni: String): JSONObject? = when (com.vlesscardvpn.domain.ConfigTransport.normalize(config.transport)) {
         "tcp" -> null
         "ws", "websocket" -> JSONObject().apply {
             put("type", "ws"); put("path", config.wsPath.ifBlank { "/" })
@@ -348,7 +348,11 @@ object SingBoxManager {
         "grpc", "gun" -> JSONObject().apply {
             put("type", "grpc"); put("service_name", config.serviceName)
         }
-        "h2", "http2" -> JSONObject().apply {
+        "httpupgrade" -> JSONObject().apply {
+            put("type", "httpupgrade"); put("path", config.wsPath.ifBlank { "/" })
+            if (config.wsHost.isNotBlank()) put("host", config.wsHost.trim())
+        }
+        "h2" -> JSONObject().apply {
             put("type", "http"); put("host", JSONArray(listOf(config.wsHost.ifBlank { effectiveSni })))
             put("path", config.wsPath.ifBlank { "/" })
         }

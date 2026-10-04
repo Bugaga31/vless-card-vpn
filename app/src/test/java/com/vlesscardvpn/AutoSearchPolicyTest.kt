@@ -4,7 +4,7 @@ import org.junit.Assert.*
 import org.junit.Test
 class AutoSearchPolicyTest {
     @Test fun quickSearchBudgetIsBounded() {
-        assertEquals(60000L, AutoSearchPolicy.DEADLINE_MS)
+        assertEquals(90000L, AutoSearchPolicy.DEADLINE_MS)
         assertEquals(6, AutoSearchPolicy.SAVED_ATTEMPTS)
         assertEquals(24, AutoSearchPolicy.MAX_CANDIDATES)
     }
@@ -52,8 +52,9 @@ class AutoSearchPolicyTest {
         assertTrue(AutoSearchPolicy.betterPartial(report(), null))
         assertFalse(AutoSearchPolicy.betterPartial(report(true, true), null))
     }
-    @Test fun moreConfirmedServicesRankAboveFasterGenericHttps() {
-        assertTrue(AutoSearchPolicy.betterPartial(report(youtube = true, latency = 900), report(latency = 10)))
+    @Test fun routeWithOneConfirmedServiceIsAcceptedNotKeptAsPartial() {
+        assertTrue(report(youtube = true, latency = 900).usable); assertFalse(report(latency = 10).usable)
+        assertFalse(AutoSearchPolicy.betterPartial(report(youtube = true, latency = 900), report(latency = 10)))
         assertFalse(AutoSearchPolicy.betterPartial(report(latency = 10), report(youtube = true, latency = 900)))
     }
     @Test fun equalServiceCoverageUsesProvenLatency() {
@@ -74,7 +75,8 @@ class AutoSearchPolicyTest {
     @Test fun telegramOnlyHttpsCanBeRetainedWithoutClaimingYoutubeWorks() {
         val r = TunnelHealthReport(listOf(TunnelProbe("Telegram · веб", 90, 200, 200)))
         assertTrue(r.internet); assertFalse(r.youtube); assertFalse(r.preferredServices)
-        assertTrue(AutoSearchPolicy.betterPartial(r, null))
+        // Telegram through the tunnel is enough for Auto to stop searching; it is not claimed as YouTube.
+        assertTrue(r.usable); assertFalse(AutoSearchPolicy.betterPartial(r, null))
     }
 
     @Test fun repeatedlyFailedNodesDoNotAlwaysDisplaceUntestedNodes() {

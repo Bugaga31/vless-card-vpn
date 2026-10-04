@@ -136,7 +136,7 @@ object UniversalConfigParser {
             }
 
             if (queryMap["encryption"]?.let { it != "none" } == true) return null
-            val transportType = queryMap["type"] ?: "tcp"
+            val transportType = com.vlesscardvpn.domain.ConfigTransport.normalize(queryMap["type"])
             VlessConfig(
                 name = remark,
                 address = address,
@@ -207,9 +207,14 @@ object UniversalConfigParser {
                 protocolType = "trojan",
                 security = "tls",
                 sni = queryMap["sni"] ?: queryMap["peer"] ?: address,
-                fingerprint = "chrome",
+                fingerprint = queryMap["fp"]?.ifBlank { null } ?: "chrome",
                 remark = remark,
-                isFree = true
+                isFree = true,
+                // Trojan links from panels routinely use ws/grpc; ignoring type= produced a TCP outbound that never worked.
+                transport = com.vlesscardvpn.domain.ConfigTransport.normalize(queryMap["type"]),
+                wsHost = queryMap["host"] ?: "",
+                wsPath = queryMap["path"] ?: "/",
+                serviceName = queryMap["serviceName"] ?: ""
             )
         } catch (e: Exception) {
             null
@@ -227,9 +232,9 @@ object UniversalConfigParser {
             val port = json.optInt("port", 443)
             val uuid = json.optString("id", "")
             val ps = json.optString("ps", "VMess Node")
-            val sni = json.optString("sni", json.optString("host", "yandex.ru"))
+            val sni = json.optString("sni", "").ifBlank { json.optString("host", "") }.ifBlank { address }
             val tls = json.optString("tls", "")
-            val net = json.optString("net", "tcp")
+            val net = com.vlesscardvpn.domain.ConfigTransport.normalize(json.optString("net", "tcp"))
             val wsPath = json.optString("path", "/")
             val wsHost = json.optString("host", "")
 
@@ -239,13 +244,15 @@ object UniversalConfigParser {
                 port = port,
                 uuid = uuid,
                 protocolType = "vmess",
-                security = if (tls.isNotBlank()) "tls" else "none",
+                security = if (tls.equals("tls", true)) "tls" else "none", // "tls":"none" is plaintext, not TLS
                 sni = sni,
                 remark = ps,
                 isFree = true,
                 transport = net,
                 wsHost = wsHost,
-                wsPath = wsPath
+                wsPath = wsPath,
+                serviceName = if (net == "grpc") json.optString("path", "") else "",
+                fingerprint = json.optString("fp", "").ifBlank { "chrome" }
             )
         } catch (e: Exception) {
             null
