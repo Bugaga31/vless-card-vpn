@@ -15,7 +15,7 @@ object AutoConnectPolicy {
     }
     fun supports(c: VlessConfig): Boolean {
         if (c.address.isBlank() || c.address.any { it.isWhitespace() || it == '/' || it == '@' } || c.port !in 1..65535 || c.uuid.isBlank()) return false
-        if (c.transport.lowercase() !in setOf("tcp", "ws", "websocket", "grpc", "gun", "h2", "http2")) return false
+        if (!ConfigTransport.isSupported(c.transport)) return false
         val protocol = c.protocolType.lowercase()
         if (protocol !in setOf("vless", "vmess", "trojan", "ss", "shadowsocks")) return false
         if (protocol == "ss" || protocol == "shadowsocks") {
@@ -33,8 +33,23 @@ object AutoConnectPolicy {
             if (UniversalConfigParser.decodeBase64Safe(c.publicKey)?.size != 32) return false
             if (c.shortId.length > 16 || c.shortId.length % 2 != 0 || !c.shortId.all { it in "0123456789abcdefABCDEF" }) return false
         }
-        if (c.flow.isNotBlank() && protocol == "vless" && (c.flow != "xtls-rprx-vision" || c.transport != "tcp")) return false
+        if (c.flow.isNotBlank() && protocol == "vless" && (c.flow != "xtls-rprx-vision" || ConfigTransport.normalize(c.transport) != "tcp")) return false
         return true
+    }
+    /** Why Auto cannot try a saved node; shown to the user instead of a silent "nothing found". */
+    fun skipReason(c: VlessConfig): String? = when {
+        supports(c) -> null
+        !ConfigTransport.isSupported(c.transport) -> "транспорт ${ConfigTransport.normalize(c.transport).uppercase()} не поддерживается ядром"
+        c.protocolType.lowercase() in setOf("vless", "vmess") && c.security.lowercase() !in setOf("tls", "reality") -> "без TLS/REALITY"
+        c.security.equals("reality", true) -> "неполные параметры REALITY"
+        else -> "неполные параметры"
+    }
+    fun skippedSummary(configs: List<VlessConfig>): String? {
+        val reasons = configs.distinctBy(::identity).mapNotNull(::skipReason)
+        if (reasons.isEmpty()) return null
+        val top = reasons.groupingBy { it }.eachCount().entries.sortedByDescending { it.value }.take(3)
+            .joinToString("; ") { "${it.key} — ${it.value}" }
+        return "Пропущено ${reasons.size} из ${configs.distinctBy(::identity).size} сохранённых: $top"
     }
     fun rank(configs: List<VlessConfig>, favoritesOnly: Boolean = false): List<VlessConfig> = configs
         .filter { supports(it) && (!favoritesOnly || it.isFavorite) }.distinctBy(::identity)
