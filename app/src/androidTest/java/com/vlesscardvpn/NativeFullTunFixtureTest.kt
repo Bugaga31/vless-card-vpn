@@ -59,6 +59,10 @@ class NativeFullTunFixtureTest {
     @Test fun disorderTunDnsHttpsAndRestart() = exercise(RouteProfile.BYEDPI, ByeDpiPreset.DISORDER)
     @Test fun splitDisorderTunDnsHttpsAndRestart() = exercise(RouteProfile.BYEDPI, ByeDpiPreset.SPLIT_DISORDER)
     @Test fun disorderThenFakeTunDnsHttpsAndRestart() = exercise(RouteProfile.BYEDPI, ByeDpiPreset.DISORDER_THEN_FAKE)
+    @Test fun oobTunDnsHttpsAndRestart() = exercise(RouteProfile.BYEDPI, ByeDpiPreset.OOB)
+    @Test fun oobThenDisorderTunDnsHttpsAndRestart() = exercise(RouteProfile.BYEDPI, ByeDpiPreset.OOB_THEN_DISORDER)
+    @Test fun disoobTunDnsHttpsAndRestart() = exercise(RouteProfile.BYEDPI, ByeDpiPreset.DISOOB)
+    @Test fun multiDisorderTunDnsHttpsAndRestart() = exercise(RouteProfile.BYEDPI, ByeDpiPreset.MULTI_DISORDER)
 
     private fun exercise(profile: RouteProfile, preset: ByeDpiPreset = ByeDpiPreset.COMBINED, stack: String? = null) = runBlocking {
         val args = InstrumentationRegistry.getArguments()
