@@ -47,7 +47,7 @@ def run(opts, mask):
         child.terminate(); child.wait(); srv.close()
 
 cases = [('MASK_FAKE', ['--disorder', '1', '--fake', '-1', '--ttl', '8', '--fake-sni', 'ya.ru'], 'ya.ru'),
-         ('MASK_SPLIT_FAKE', ['--split', '1+s', '--fake', '-1', '--ttl', '8', '--fake-sni', 'vk.com', '--fake-tls-mod', 'rand'], 'vk.com'),
+         ('MASK_FAKE_RAND', ['--fake', '-1', '--ttl', '8', '--fake-sni', 'vk.com', '--fake-tls-mod', 'rand'], 'vk.com'),
          ('CUSTOM_LINE', ['--disorder', '1', '--fake', '-1', '--ttl', '8', '--fake-sni', 'gosuslugi.ru', '--fake-tls-mod', 'r'], 'gosuslugi.ru')]
 for label, opts, mask in cases:
     results = [run(opts, mask) for _ in range(4)]

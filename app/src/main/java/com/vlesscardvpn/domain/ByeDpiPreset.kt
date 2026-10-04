@@ -25,7 +25,9 @@ enum class ByeDpiPreset(val label: String, val extraArgs: List<String>) {
     // goes first with TTL 8, so it expires before a distant server while the DPI sees the Yandex SNI.
     // No --md5sig: CI showed TCP_MD5SIG is unavailable on the Android emulator kernel (and many GKI phones).
     MASK_FAKE("ByeDPI · маскировка фейк-SNI", listOf("--disorder", "1", "--fake", "-1", "--ttl", "8", "--fake-sni", ByeDpiArgs.SNI_PLACEHOLDER)),
-    MASK_SPLIT_FAKE("ByeDPI · маскировка + случайный TLS", listOf("--split", "1+s", "--fake", "-1", "--ttl", "8", "--fake-sni", ByeDpiArgs.SNI_PLACEHOLDER, "--fake-tls-mod", "rand")),
+    // Whole fake first (ByeByeDPI "-f-1 -t8 -n ya.ru -Qr"): the fake chunk is cut from the template's start,
+    // so after a split it may miss the SNI on short ClientHellos (seen in CI); keep it unsplit.
+    MASK_FAKE_RAND("ByeDPI · маскировка + случайный TLS", listOf("--fake", "-1", "--ttl", "8", "--fake-sni", ByeDpiArgs.SNI_PLACEHOLDER, "--fake-tls-mod", "rand")),
     // Masking only after a DPI reset/timeout of plain disorder: never costs a working route.
     MASK_AUTO_FAKE("ByeDPI · авто: порядок → маскировка", listOf("--disorder", "1", "--auto=torst", "--fake", "-1", "--ttl", "8", "--fake-sni", ByeDpiArgs.SNI_PLACEHOLDER, "--fake-tls-mod", "rand"));
     val masked: Boolean get() = ByeDpiArgs.SNI_PLACEHOLDER in extraArgs

@@ -108,7 +108,7 @@ class ByeDpiPresetTest {
     }
     @Test fun maskingPresetsSubstituteTheChosenDomainAndKeepLoopback() {
         val masked = ByeDpiPreset.entries.filter { it.masked }
-        assertEquals(listOf(ByeDpiPreset.MASK_FAKE, ByeDpiPreset.MASK_SPLIT_FAKE, ByeDpiPreset.MASK_AUTO_FAKE), masked)
+        assertEquals(listOf(ByeDpiPreset.MASK_FAKE, ByeDpiPreset.MASK_FAKE_RAND, ByeDpiPreset.MASK_AUTO_FAKE), masked)
         for (preset in masked) {
             val args = preset.arguments(12400, "vk.com")
             assertEquals("vk.com", args[args.indexOf("--fake-sni") + 1])
@@ -126,7 +126,7 @@ class ByeDpiPresetTest {
     }
     @Test fun maskingPresetsRestoreFromMemory() {
         val c = node(1)
-        for (preset in listOf(ByeDpiPreset.MASK_FAKE, ByeDpiPreset.MASK_SPLIT_FAKE, ByeDpiPreset.MASK_AUTO_FAKE)) {
+        for (preset in listOf(ByeDpiPreset.MASK_FAKE, ByeDpiPreset.MASK_FAKE_RAND, ByeDpiPreset.MASK_AUTO_FAKE)) {
             val p = AutoSearchPolicy.plan(listOf(c to 1), mapOf(AutoConnectPolicy.identity(c) to "BYEDPI#${preset.name}"))
             assertEquals(preset, p.first().byeDpiPreset)
         }
