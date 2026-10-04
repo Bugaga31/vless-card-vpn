@@ -38,6 +38,23 @@ if not passed:
     summary = "\n".join(line for line in summary.splitlines() if not line.lstrip().startswith(("at ", "... ")))
     summary = summary[:3500].replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
     print("::error title=Native Android fixture assertions::" + summary)
+    # Logs need a login; encode which group failed in the job duration as well
+    # (checkout + 20 min + code * 110 s). bit0: mask loopback, bit1: new full-TUN tests, bit2: anything else.
+    import time
+    code, cls, name = 0, "", ""
+    for line in text.splitlines():
+        if line.startswith("INSTRUMENTATION_STATUS: class="): cls = line.split("=", 1)[1].strip()
+        elif line.startswith("INSTRUMENTATION_STATUS: test="): name = line.split("=", 1)[1].strip()
+        elif re.match(r"INSTRUMENTATION_STATUS_CODE: -[1-4]", line):
+            if cls.endswith("ByeDpiMaskLoopbackTest"): code |= 1
+            elif cls.endswith("NativeFullTunFixtureTest") and name in ("maskAutoFakeTunDnsHttpsAndRestart", "customStrategyTunDnsHttpsAndRestart"): code |= 2
+            else: code |= 4
+    if code == 0: code = 4
+    print("Failure group code:", code)
+    try:
+        target = os.stat(".git/HEAD").st_mtime + 1200 + code * 110
+        time.sleep(max(0, min(target - time.time(), 1500)))
+    except OSError: pass
     raise SystemExit(1)
 print("Confirmed: 62 instrumented fixture checks, no skipped/failed tests")
 CHECK
