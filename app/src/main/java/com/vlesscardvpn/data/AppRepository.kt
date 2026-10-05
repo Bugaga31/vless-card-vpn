@@ -208,7 +208,8 @@ class AppRepository(private val context: Context) {
         fragmentInterval = prefs.getString("fragmentInterval", "5-15ms") ?: "5-15ms",
         connectCheckMode = com.vlesscardvpn.domain.ConnectCheckMode.normalize(prefs.getString("connectCheckMode", null)),
         byeDpiCustomArgs = prefs.getString("byeDpiCustomArgs", "") ?: "",
-        byeDpiMaskDomain = com.vlesscardvpn.domain.ByeDpiArgs.maskDomain(prefs.getString("byeDpiMaskDomain", null))
+        byeDpiMaskDomain = com.vlesscardvpn.domain.ByeDpiArgs.maskDomain(prefs.getString("byeDpiMaskDomain", null)),
+        directFallback = prefs.getBoolean("directFallback", true)
     )
 
     private fun saveSettingsToPrefs(settings: AppSettings) {
@@ -246,6 +247,7 @@ class AppRepository(private val context: Context) {
             putString("connectCheckMode", com.vlesscardvpn.domain.ConnectCheckMode.normalize(settings.connectCheckMode))
             putString("byeDpiCustomArgs", settings.byeDpiCustomArgs.take(com.vlesscardvpn.domain.ByeDpiArgs.MAX_LENGTH))
             putString("byeDpiMaskDomain", com.vlesscardvpn.domain.ByeDpiArgs.maskDomain(settings.byeDpiMaskDomain))
+            putBoolean("directFallback", settings.directFallback)
             apply()
         }
     }

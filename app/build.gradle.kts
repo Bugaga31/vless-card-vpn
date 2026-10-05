@@ -45,7 +45,7 @@ android {
     composeOptions { kotlinCompilerExtensionVersion = "1.5.14" }
     packaging {
         resources { excludes += "/META-INF/{AL2.0,LGPL2.1}" }
-        jniLibs { useLegacyPackaging = true; keepDebugSymbols += "**/libbyedpi.so" }
+        jniLibs { useLegacyPackaging = true; keepDebugSymbols += "**/libbyedpi.so"; keepDebugSymbols += "**/libtpws.so" }
     }
     sourceSets["main"].jniLibs.srcDir(layout.buildDirectory.dir("generated/byedpi"))
 }
@@ -94,6 +94,7 @@ val buildByeDpi by tasks.registering(Exec::class) {
         rootProject.file("local.properties").inputStream().use { load(it) }
     }.getProperty("sdk.dir")
     inputs.dir(rootProject.file("native/byedpi"))
+    inputs.dir(rootProject.file("native/tpws"))
     inputs.file(rootProject.file("native/build-byedpi.sh"))
     inputs.file(rootProject.file("native/launcher.c"))
     inputs.property("armOnly", providers.gradleProperty("autoPreview").orNull == "true" || providers.gradleProperty("labPreview").orNull == "true")

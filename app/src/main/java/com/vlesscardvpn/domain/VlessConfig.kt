@@ -76,6 +76,8 @@ data class AppSettings(
     val byeDpiCustomArgs: String = "",
     /** Fake-SNI masking domain substituted for {sni} (e.g. ya.ru). */
     val byeDpiMaskDomain: String = ByeDpiArgs.DEFAULT_MASK,
+    /** When no server passes, Auto tries "без сервера" (local ByeDPI/zapret like ByeByeDPI). */
+    val directFallback: Boolean = true,
     val bypassApps: List<String> = listOf(
         "com.sberbankmobile",
         "ru.tinkoff.mobile",

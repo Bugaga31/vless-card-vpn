@@ -1,11 +1,11 @@
 package com.vlesscardvpn.domain
 
-/** "Только пинг": TCP reachability picks the server; HTTPS is checked only for display, never to reject. */
+/** "Только пинг": manual connect starts after TCP ping (HTTPS shown afterwards); Auto still verifies HTTPS. */
 object ConnectCheckMode {
     const val PING = "ping"
     const val HTTPS = "https"
     fun normalize(value: String?): String = if (value == HTTPS) HTTPS else PING
-    fun label(value: String?): String = if (normalize(value) == HTTPS) "Полная проверка HTTPS" else "Только пинг"
+    fun label(value: String?): String = if (normalize(value) == HTTPS) "Полная проверка HTTPS" else "Быстрая"
 }
 
 object AutoPingPolicy {

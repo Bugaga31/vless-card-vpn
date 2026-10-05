@@ -22,6 +22,10 @@ data class TunnelHealthReport(val probes: List<TunnelProbe> = emptyList(), val c
     /** Auto accepts a route once real HTTPS works and at least one of YouTube/Telegram answers through it. */
     val usable: Boolean get() = internet && (youtube || telegram)
     val latencyMs: Int get() = probes.filter { it.passed }.minOfOrNull { it.latencyMs } ?: -1
+    /** "Без сервера": DPI throttling lets tiny responses through, so a real page body must download. */
+    val youtubeBulk: Boolean get() = probes.any { it.label == TunnelHealthChecker.YOUTUBE_BULK_LABEL && it.passed }
+    /** Ranking for the best partial "без сервера" route when no strategy fully passes. */
+    val directScore: Int get() = (if (youtubeBulk) 4 else 0) + (if (youtube) 2 else 0) + (if (internet) 1 else 0)
 }
 
 object TunnelHealthChecker {
@@ -39,6 +43,23 @@ object TunnelHealthChecker {
     /** The first request through a fresh tunnel pays for the outer TCP/TLS/REALITY handshake and, for ByeDPI
      *  disorder, a retransmission; one 4 s attempt rejected working routes on slow mobile networks. */
     const val DEFAULT_TIMEOUT_MS = 6000
+    const val YOUTUBE_BULK_LABEL = "YouTube · загрузка"
+    const val YOUTUBE_BULK_URL = "https://www.youtube.com/"
+    const val YOUTUBE_BULK_BYTES = 48 * 1024
+
+    /** Standard probes plus a YouTube page download (≥48 KB) that throttled connections cannot finish. */
+    suspend fun directCheck(proxy: LocalProbeProxy? = activeProxy, timeoutMs: Int = DEFAULT_TIMEOUT_MS): TunnelHealthReport {
+        if (proxy == null) return TunnelHealthReport()
+        return coroutineScope {
+            val base = async { check(proxy, timeoutMs, retries = 0) }
+            val bulk = async {
+                val r = probe(proxy, YOUTUBE_BULK_URL, 200, timeoutMs + 3000, minBodyBytes = YOUTUBE_BULK_BYTES)
+                TunnelProbe(YOUTUBE_BULK_LABEL, r.latencyMs ?: -1, r.httpCode ?: -1, 200, r.failure, r.stage)
+            }
+            val b = base.await()
+            TunnelHealthReport(b.probes + bulk.await(), System.currentTimeMillis())
+        }
+    }
     suspend fun check(proxy: LocalProbeProxy? = activeProxy, timeoutMs: Int = DEFAULT_TIMEOUT_MS, retries: Int = 1): TunnelHealthReport {
         if (proxy == null) return TunnelHealthReport()
         val route = session.get()?.takeIf { it.proxy === proxy }
@@ -64,7 +85,8 @@ object TunnelHealthChecker {
 
     internal suspend fun probe(
         proxy: LocalProbeProxy?, url: String, expectedCode: Int, timeoutMs: Int,
-        tlsFactory: SSLSocketFactory = SSLSocketFactory.getDefault() as SSLSocketFactory
+        tlsFactory: SSLSocketFactory = SSLSocketFactory.getDefault() as SSLSocketFactory,
+        minBodyBytes: Int = 0
     ): ServiceProbe {
         if (proxy == null) return ServiceProbe(error = "Нет активного проверяемого маршрута", failure = DiagnosticFailure.NO_ROUTE, stage = DiagnosticFailure.NO_ROUTE)
         val uri = URI(url)
@@ -106,6 +128,14 @@ object TunnelHealthChecker {
                                     check(terminated) { "HTTP status line exceeds limit" }
                                     val match = Regex("^HTTP/1\\.[01] ([0-9]{3})(?: .*|)$").matchEntire(status.toString())
                                     val code = match?.groupValues?.get(1)?.toInt() ?: error("Invalid HTTP status")
+                                    if (minBodyBytes > 0 && code == expectedCode) {
+                                        // Bounded read of headers + body; the bytes are discarded immediately.
+                                        val buf = ByteArray(8192); var total = 0
+                                        while (total < minBodyBytes) {
+                                            val n = input.read(buf); if (n < 0) break; total += n
+                                        }
+                                        check(total >= minBodyBytes) { "Short body" }
+                                    }
                                     ServiceProbe(elapsed(), code, if (code == expectedCode) null else "Неожиданный HTTP $code",
                                         if (code == expectedCode) DiagnosticFailure.NONE else DiagnosticFailure.HTTP, stage.get())
                                 }

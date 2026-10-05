@@ -46,6 +46,9 @@ import com.vlesscardvpn.domain.ConnectCheckMode
 import com.vlesscardvpn.domain.LocalProbeProxy
 import com.vlesscardvpn.domain.TunnelHealthChecker
 import com.vlesscardvpn.domain.TunnelHealthReport
+import com.vlesscardvpn.domain.DirectStrategies
+import com.vlesscardvpn.domain.DirectStrategy
+import com.vlesscardvpn.domain.DpiEngine
 import com.vlesscardvpn.data.PublicConfigFetcher
 import io.nekohasekai.libbox.*
 import kotlinx.coroutines.*
@@ -77,7 +80,9 @@ data class VpnSessionStats(
     val progressMessage: String = "",
     val autoMode: Boolean = false,
     val health: TunnelHealthReport = TunnelHealthReport(),
-    val profileLabel: String = "Параметры сервера"
+    val profileLabel: String = "Параметры сервера",
+    /** "Без сервера" (как ByeByeDPI): local ByeDPI/tpws only, no VPN server. */
+    val direct: Boolean = false
 )
 
 class VlessVpnService : VpnService() {
@@ -86,6 +91,7 @@ class VlessVpnService : VpnService() {
         const val ACTION_CONNECT = "com.vlesscardvpn.CONNECT"
         const val ACTION_AUTO = "com.vlesscardvpn.AUTO"
         const val ACTION_DISCONNECT = "com.vlesscardvpn.DISCONNECT"
+        const val ACTION_DIRECT = "com.vlesscardvpn.DIRECT"
         const val EXTRA_CONFIG_ID = "config_id"
 
         private val _vpnStats = MutableStateFlow(VpnSessionStats())
@@ -127,6 +133,20 @@ class VlessVpnService : VpnService() {
             } catch (_: Exception) {
                 _vpnStats.value = VpnSessionStats(status = VpnStatus.ERROR,
                     errorMessage = "Не удалось запустить автоматический подбор")
+            }
+        }
+
+        /** "Без сервера": local ByeDPI/zapret desync for all apps, like ByeByeDPI's VPN mode. */
+        fun startDirect(context: Context) {
+            _vpnStats.value = VpnSessionStats(status = VpnStatus.CONNECTING, autoMode = true, direct = true,
+                progressMessage = "Без сервера: подбираем стратегию обхода")
+            val intent = Intent(context, VlessVpnService::class.java).apply { action = ACTION_DIRECT }
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) context.startForegroundService(intent)
+                else context.startService(intent)
+            } catch (_: Exception) {
+                _vpnStats.value = VpnSessionStats(status = VpnStatus.ERROR, direct = true,
+                    errorMessage = "Не удалось запустить режим без сервера")
             }
         }
 
@@ -236,7 +256,7 @@ class VlessVpnService : VpnService() {
         }
 
         when (intent.action) {
-            ACTION_CONNECT, ACTION_AUTO -> {
+            ACTION_CONNECT, ACTION_AUTO, ACTION_DIRECT -> {
                 val configId = intent.getStringExtra(EXTRA_CONFIG_ID) ?: ""
                 if (intent.action == ACTION_AUTO && !intent.getBooleanExtra("auto_recovery", false)) autoRecoveryAttempts = 0
                 val sessionId = sessionSequence.incrementAndGet()
@@ -250,7 +270,10 @@ class VlessVpnService : VpnService() {
 
                 connectionJob?.cancel()
                 connectionJob = serviceScope.launch {
-                    if (intent.action == ACTION_AUTO) {
+                    if (intent.action == ACTION_DIRECT) {
+                        operationMutex.withLock { handleDirectLocked(sessionId, fromAuto = false) }
+                        if (_vpnStats.value.status == VpnStatus.ERROR) stopSelf()
+                    } else if (intent.action == ACTION_AUTO) {
                         operationMutex.withLock { handleAutoConnectLocked(sessionId) }
                         if (_vpnStats.value.status == VpnStatus.ERROR) stopSelf()
                     } else handleConnect(configId, sessionId)
@@ -306,7 +329,8 @@ class VlessVpnService : VpnService() {
         val pingOnly = ConnectCheckMode.normalize(settings.connectCheckMode) == ConnectCheckMode.PING
         // "Только пинг" or the user's own strategy: no preset sweep, just servers by best ping.
         if (pingOnly || custom != null) {
-            handleAutoQuickLocked(sessionId, settings, custom?.getOrNull(), verifyHttps = !pingOnly)
+            // Auto never accepts an unverified route: "Только пинг" only shortens the list (best ping, one route each).
+            handleAutoQuickLocked(sessionId, settings, custom?.getOrNull(), verifyHttps = true)
             return
         }
         val tried = mutableSetOf<String>()
@@ -374,6 +398,12 @@ class VlessVpnService : VpnService() {
                 }
             } catch (_: TimeoutCancellationException) { }
             currentCoroutineContext().ensureActive()
+            if (sessionId != sessionSequence.get() || _vpnStats.value.status == VpnStatus.CONNECTED) return
+        }
+        if (settings.directFallback && sessionId == sessionSequence.get()) {
+            _vpnStats.value = VpnSessionStats(status = VpnStatus.CONNECTING, autoMode = true, direct = true,
+                progressMessage = "Серверы не прошли проверку ($attempts). Пробуем без сервера, как ByeByeDPI")
+            handleDirectLocked(sessionId, fromAuto = true)
             if (sessionId != sessionSequence.get() || _vpnStats.value.status == VpnStatus.CONNECTED) return
         }
         cleanupResources()
@@ -696,6 +726,121 @@ class VlessVpnService : VpnService() {
         }
     }
 
+    private val directPrefs by lazy { getSharedPreferences("direct_mode", Context.MODE_PRIVATE) }
+
+    /**
+     * "Без сервера": one sing-box TUN pointed at a fixed loopback port; ByeDPI/tpws strategies are swapped behind
+     * that port and each is accepted only when a real YouTube page downloads through it (throttling lets the tiny
+     * generate_204 through). Bounded by [DirectStrategies.DEADLINE_MS].
+     */
+    private suspend fun handleDirectLocked(sessionId: Long, fromAuto: Boolean) {
+        if (sessionId != sessionSequence.get()) return
+        if (prepareVpnPermission() != null) {
+            cleanupResources()
+            _vpnStats.value = VpnSessionStats(status = VpnStatus.ERROR, direct = true,
+                errorMessage = "Нет разрешения VPN. Предоставьте разрешение в системных настройках.")
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            return
+        }
+        val settings = repository.settingsFlow.value
+        val custom = customByeDpi(settings)?.getOrNull()
+        cleanupResources()
+        val plan = DirectStrategies.plan(custom, directPrefs.getString("last", null),
+            ByeDpiRunner.available(this, DpiEngine.TPWS))
+        val runner = ByeDpiRunner(this).also { byeDpi = it }
+        var best: Pair<DirectStrategy, TunnelHealthReport>? = null
+        var tried = 0
+        var accepted: Pair<DirectStrategy, TunnelHealthReport>? = null
+        var port = -1
+        var running: DirectStrategy? = null
+        try {
+            val localProbe = LocalProbeProxy.allocate()
+            probeProxy = localProbe
+            port = java.net.ServerSocket(0, 1, java.net.InetAddress.getByName("127.0.0.1")).use { it.localPort }
+            initLibboxEnvironment()
+            val json = SingBoxManager.generateDirectConfig(this, settings, port, localProbe)
+            SingBoxManager.validateGeneratedConfig(json).getOrThrow()
+            Libbox.checkConfig(json)
+            val adapter = LibboxPlatformInterface(this, settings.bypassApps) { pfd -> vpnInterface = pfd }
+            platformAdapter = adapter
+            val handler = object : CommandServerHandler {
+                override fun getSystemProxyStatus(): SystemProxyStatus = NativeCallbackValues.disabledSystemProxy()
+                override fun serviceReload() {}
+                override fun serviceStop() {
+                    serviceScope.launch { operationMutex.withLock {
+                        if (sessionId == sessionSequence.get() && _vpnStats.value.status == VpnStatus.CONNECTED) {
+                            cleanupResources()
+                            _vpnStats.value = VpnSessionStats(status = VpnStatus.ERROR, direct = true, errorMessage = "Ядро туннеля было остановлено системой")
+                            stopForeground(STOP_FOREGROUND_REMOVE)
+                        }
+                    } }
+                }
+                override fun setSystemProxyEnabled(p0: Boolean) {}
+                override fun writeDebugMessage(msg: String?) { Log.d("SingBoxCore", VlessApplication.sanitizeLog(msg)) }
+            }
+            val server = CommandServer(handler, adapter)
+            commandServer = server
+            server.start()
+            server.startOrReloadService(json, OverrideOptions())
+            startCommandClientListener()
+            check(vpnInterface != null) { "Ядро не создало Android VPN-туннель" }
+            TunnelHealthChecker.activate(localProbe)
+            withTimeout(DirectStrategies.DEADLINE_MS) {
+                for (strategy in plan) {
+                    currentCoroutineContext().ensureActive()
+                    if (sessionId != sessionSequence.get()) return@withTimeout
+                    tried++
+                    _vpnStats.value = VpnSessionStats(status = VpnStatus.CONNECTING, autoMode = true, direct = true,
+                        progressMessage = "Без сервера $tried/${plan.size}: ${strategy.label}")
+                    safeStartForeground(1, createNotification(null, "Без сервера: проверка $tried/${plan.size}"))
+                    val started = runCatching { runner.startDirect(strategy, port, settings.byeDpiMaskDomain) }
+                    val failure = started.exceptionOrNull()
+                    if (failure is CancellationException) throw failure
+                    if (failure != null) { running = null; continue }
+                    running = strategy
+                    val report = TunnelHealthChecker.directCheck(localProbe, DirectStrategies.CHECK_TIMEOUT_MS)
+                    if (report.youtubeBulk) { accepted = strategy to report; return@withTimeout }
+                    if (report.directScore > (best?.second?.directScore ?: 0)) best = strategy to report
+                }
+            }
+        } catch (e: CancellationException) {
+            if (e !is TimeoutCancellationException) { cleanupResources(); throw e }
+        } catch (t: Throwable) {
+            Log.e("VlessVpnService", "direct mode failed", t)
+            cleanupResources()
+            _vpnStats.value = VpnSessionStats(status = VpnStatus.ERROR, autoMode = fromAuto, direct = true,
+                errorMessage = "Режим без сервера не запустился: ${sanitizeError(t.message ?: t.javaClass.simpleName)}")
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            return
+        }
+        if (sessionId != sessionSequence.get()) { cleanupResources(); return }
+        val chosen = accepted ?: best?.takeIf { it.second.youtube || it.second.internet }
+        val (strategy, report) = chosen ?: run {
+            cleanupResources()
+            _vpnStats.value = VpnSessionStats(status = VpnStatus.ERROR, autoMode = fromAuto, direct = true,
+                errorMessage = "Без сервера: проверено стратегий $tried, ни одна не пропустила YouTube. Возможно, сайт заблокирован по IP — нужен рабочий сервер")
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            return
+        }
+        if (running != strategy) {
+            // The sweep left another strategy running: restart the best partial one behind the same port.
+            if (runCatching { runner.startDirect(strategy, port, settings.byeDpiMaskDomain) }.isFailure) {
+                cleanupResources()
+                _vpnStats.value = VpnSessionStats(status = VpnStatus.ERROR, autoMode = fromAuto, direct = true,
+                    errorMessage = "Без сервера: не удалось перезапустить ${strategy.label}")
+                stopForeground(STOP_FOREGROUND_REMOVE)
+                return
+            }
+        }
+        if (accepted != null) directPrefs.edit().putString("last", strategy.id).apply()
+        val startTime = System.currentTimeMillis()
+        _vpnStats.value = VpnSessionStats(status = VpnStatus.CONNECTED, autoMode = fromAuto, direct = true, health = report,
+            connectedSinceTimestamp = startTime, profileLabel = "Без сервера · ${strategy.label}",
+            progressMessage = if (accepted != null) "YouTube загружается через локальный обход" else "Частично: YouTube не прошёл полную проверку")
+        safeStartForeground(1, createNotification(null, "Без сервера • ${strategy.label}"))
+        startStatsUpdater(startTime)
+    }
+
     private fun customByeDpi(settings: AppSettings): Result<List<String>>? =
         settings.byeDpiCustomArgs.takeIf { it.isNotBlank() }?.let { ByeDpiArgs.parse(it, settings.byeDpiMaskDomain) }
 
@@ -709,7 +854,7 @@ class VlessVpnService : VpnService() {
             _vpnStats.value = _vpnStats.value.copy(health = report, progressMessage = when {
                 report.usable -> "Подключено по пингу; HTTPS работает"
                 report.internet -> "Подключено по пингу; HTTPS есть, YouTube/Telegram не ответили"
-                else -> "Подключено по пингу, но HTTPS не прошёл. Если сайты не открываются — выберите другой сервер или включите полную проверку"
+                else -> "Подключено по пингу, но HTTPS не прошёл: сервер не работает. Нажмите «Авто» или «Без сервера»"
             })
             repository.recordTunnelHealth(config.id, healthy = report.internet, latency = report.latencyMs)
             if (rememberProfile != null && report.usable) routeMemory.remember(config, rememberProfile, preset)
@@ -763,6 +908,12 @@ class VlessVpnService : VpnService() {
         currentCoroutineContext().ensureActive()
         if (sessionId != sessionSequence.get() || _vpnStats.value.status == VpnStatus.CONNECTED) return
         val last = _vpnStats.value
+        if (settings.directFallback && sessionId == sessionSequence.get()) {
+            _vpnStats.value = VpnSessionStats(status = VpnStatus.CONNECTING, autoMode = true, direct = true,
+                progressMessage = "Серверы не прошли проверку. Пробуем без сервера, как ByeByeDPI")
+            handleDirectLocked(sessionId, fromAuto = true)
+            if (sessionId != sessionSequence.get() || _vpnStats.value.status == VpnStatus.CONNECTED) return
+        }
         cleanupResources()
         val skipped = AutoConnectPolicy.skippedSummary(repository.getAllConfigs())
         _vpnStats.value = VpnSessionStats(status = VpnStatus.ERROR, autoMode = true, health = last.health,

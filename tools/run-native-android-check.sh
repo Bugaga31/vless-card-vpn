@@ -21,7 +21,7 @@ adb install -r -t vpn-test-probe/build/outputs/apk/debug/vpn-test-probe-debug.ap
 adb shell appops set com.vlesscardvpn.preview ACTIVATE_VPN allow
 set +e
 adb shell am instrument -w -r -e fixture_ca_path /data/local/tmp/vless-fixture-ca.pem -e fixture_reality_key_path /data/local/tmp/vless-fixture-reality-public.txt -e fixture_full_tun 1 \
-  -e class com.vlesscardvpn.AutoTcpPreflightAndroidTest,com.vlesscardvpn.NativeConfigValidationTest,com.vlesscardvpn.NativeCallbackContractTest,com.vlesscardvpn.NodeStorageMigrationTest,com.vlesscardvpn.NodeMetadataUpdateTest,com.vlesscardvpn.NativeOutboundFixtureTest,com.vlesscardvpn.NativeFullTunFixtureTest,com.vlesscardvpn.ByeDpiMaskLoopbackTest,com.vlesscardvpn.HomeScreenSmokeTest,com.vlesscardvpn.LauncherStartupTest,com.vlesscardvpn.VpnServiceCancellationFixtureTest \
+  -e class com.vlesscardvpn.AutoTcpPreflightAndroidTest,com.vlesscardvpn.NativeConfigValidationTest,com.vlesscardvpn.NativeCallbackContractTest,com.vlesscardvpn.NodeStorageMigrationTest,com.vlesscardvpn.NodeMetadataUpdateTest,com.vlesscardvpn.NativeOutboundFixtureTest,com.vlesscardvpn.NativeFullTunFixtureTest,com.vlesscardvpn.ByeDpiMaskLoopbackTest,com.vlesscardvpn.DirectEngineLoopbackTest,com.vlesscardvpn.HomeScreenSmokeTest,com.vlesscardvpn.LauncherStartupTest,com.vlesscardvpn.VpnServiceCancellationFixtureTest \
   com.vlesscardvpn.preview.test/androidx.test.runner.AndroidJUnitRunner | tee native-results.txt
 INSTRUMENT_EXIT=${PIPESTATUS[0]}
 set -e
@@ -32,26 +32,34 @@ python3 - <<'CHECK'
 from pathlib import Path
 import re, os
 text = Path("native-results.txt").read_text()
-passed = os.environ["INSTRUMENT_EXIT"] == "0" and "OK (63 tests)" in text and not re.search(r"FAILURES!!!|INSTRUMENTATION_FAILED|Process crashed|INSTRUMENTATION_STATUS_CODE: -[1-4]", text)
+passed = os.environ["INSTRUMENT_EXIT"] == "0" and "OK (71 tests)" in text and not re.search(r"FAILURES!!!|INSTRUMENTATION_FAILED|Process crashed|INSTRUMENTATION_STATUS_CODE: -[1-4]", text)
 if not passed:
     summary = text[text.rfind("Time:"):] if "Time:" in text else text[-3500:]
     summary = "\n".join(line for line in summary.splitlines() if not line.lstrip().startswith(("at ", "... ")))
     summary = summary[:3500].replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
     print("::error title=Native Android fixture assertions::" + summary)
-    # Logs need a login; encode the failure class in the job duration as well:
-    # checkout + 14 min + code * 75 s, code = mask marker (0-5) + 6 if any other test failed.
+    # Logs need a login; encode the first failing test in the job duration as well:
+    # checkout + 14 min + code * 14 s. code = 1-based index of "Class#method" in the sorted list of all
+    # @Test methods of app/src/androidTest (see the listing printed below); 0 = no failing test reported.
     import time
-    other = False; cls = ""
+    names = []
+    for f in sorted(Path("app/src/androidTest/java/com/vlesscardvpn").glob("*Test.kt")):
+        names += [f.stem + "#" + m for m in re.findall(r"@Test\s+fun\s+(\w+)", f.read_text())]
+    names.sort()
+    cls = test = ""; code = 0
     for line in text.splitlines():
         if line.startswith("INSTRUMENTATION_STATUS: class="): cls = line.split("=", 1)[1].strip()
-        elif re.match(r"INSTRUMENTATION_STATUS_CODE: -[1-4]", line) and not cls.endswith("ByeDpiMaskLoopbackTest"): other = True
-    mask = next((i for i, m in enumerate(["HARNESS", "MD5SIG_UNSUPPORTED", "SPLICE_FAILED", "FAKE_LEAKED", "OTHER_MASK"], 1) if m in text), 0)
-    code = mask + (6 if other or mask == 0 else 0)
-    print("Failure group code:", code)
+        elif line.startswith("INSTRUMENTATION_STATUS: test="): test = line.split("=", 1)[1].strip()
+        elif re.match(r"INSTRUMENTATION_STATUS_CODE: -[1-4]", line):
+            key = cls.rsplit(".", 1)[-1] + "#" + test
+            code = names.index(key) + 1 if key in names else 0
+            print("First failing test:", cls, test)
+            break
+    print("Failure code:", code, "of", len(names))
     try:
-        target = os.stat(".git/HEAD").st_mtime + 840 + code * 75
-        time.sleep(max(0, min(target - time.time(), 1500)))
+        target = os.stat(".git/HEAD").st_mtime + 840 + code * 14
+        time.sleep(max(0, min(target - time.time(), 1900)))
     except OSError: pass
     raise SystemExit(1)
-print("Confirmed: 63 instrumented fixture checks, no skipped/failed tests")
+print("Confirmed: 71 instrumented fixture checks, no skipped/failed tests")
 CHECK
