@@ -35,7 +35,10 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
         Spacer(Modifier.height(16.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Mode.values().forEach { m ->
-                FilterChip(selected = mode == m, onClick = { Store.update { it.copy(settings = it.settings.copy(mode = m)) } },
+                FilterChip(selected = mode == m, onClick = {
+                    Store.update { it.copy(settings = it.settings.copy(mode = m)) }
+                    if (m != mode && status.state == Tunnel.State.CONNECTED) onConnect() // reconnect with the new mode
+                },
                     label = { Text(when (m) { Mode.SERVERS -> "Серверы"; Mode.BYEDPI -> "ByeDPI"; Mode.HYBRID -> "Гибрид" }) })
             }
         }

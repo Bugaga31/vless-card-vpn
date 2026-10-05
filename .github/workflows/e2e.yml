@@ -76,5 +76,7 @@ jobs:
           packages: platform-tools platforms;android-34 build-tools;34.0.0
           log-accepted-android-sdk-licenses: false
       - uses: gradle/actions/setup-gradle@v3
+      - name: Install pinned NDK
+        run: sdkmanager 'ndk;27.2.12479018'
       - name: Every server type × every mask through real Xray-core
         run: bash tools/masks-matrix-ci.sh
