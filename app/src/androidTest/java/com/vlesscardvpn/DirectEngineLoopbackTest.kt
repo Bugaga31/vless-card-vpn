@@ -37,6 +37,11 @@ class DirectEngineLoopbackTest {
         assertTrue("DIRECT_RELAY " + failed.joinToString("; ").take(1500), failed.isEmpty())
     }
     @Test fun vcardStealthRelaysIntact() = exercise(DirectStrategies.VCARD_STEALTH)
+    /** Own masking family incl. the masked cascade (its fakes only fire after a DPI failure, never here). */
+    @Test fun vcardOwnFamilyRelaysIntact() {
+        val failed = DirectStrategies.OWN.mapNotNull { s -> runCatching { exercise(s) }.exceptionOrNull()?.let { "${s.id}: ${it.message}" } }
+        assertTrue("VCARD_RELAY " + failed.joinToString("; ").take(1500), failed.isEmpty())
+    }
     @Test fun tpwsRestartOnSamePort() = runBlocking {
         val runner = ByeDpiRunner(context)
         val port = ServerSocket(0, 1, InetAddress.getByName("127.0.0.1")).use { it.localPort }
