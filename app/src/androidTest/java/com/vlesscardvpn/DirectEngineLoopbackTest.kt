@@ -53,6 +53,9 @@ class DirectEngineLoopbackTest {
         } finally { runner.close() }
     }
 
+    /** Minimal ServerHello-shaped reply: ssl_err detection (--auto=ssl_err) expects a TLS handshake back, not text. */
+    private val SERVER_HELLO = byteArrayOf(0x16, 3, 3, 0, 4, 2, 0, 0, 0)
+
     private fun clientHello(): ByteArray {
         val engine = SSLContext.getInstance("TLS").apply { init(null, null, null) }.createSSLEngine("www.youtube.com", 443)
         engine.useClientMode = true
@@ -92,7 +95,7 @@ class DirectEngineLoopbackTest {
                             val r = input.read(chunk); if (r < 0) break
                             buf.write(chunk, 0, r); payload = recordPayload(buf.toByteArray())
                         }
-                        s.getOutputStream().apply { write("PONG".toByteArray()); flush() }
+                        s.getOutputStream().apply { write(SERVER_HELLO); flush() }
                         payload
                     }
                 }
@@ -107,8 +110,8 @@ class DirectEngineLoopbackTest {
                     o.write(hello); o.flush()
                     val got = received.get(12, TimeUnit.SECONDS)
                     check(got != null && got.contentEquals(expected)) { "handshake altered: ${got?.size}/${expected.size}" }
-                    val pong = ByteArray(4).also { b -> i.readFully(b) }
-                    check(String(pong) == "PONG") { "no reply" }
+                    val reply2 = ByteArray(SERVER_HELLO.size).also { b -> i.readFully(b) }
+                    check(reply2.contentEquals(SERVER_HELLO)) { "no reply" }
                 }
             }
         } finally { runner.close(); pool.shutdownNow() }
