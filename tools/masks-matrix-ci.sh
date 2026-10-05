@@ -30,7 +30,7 @@ bash tools/xray-local-e2e.sh $X /tmp/xcfg || true  # raw matrix includes masks t
 # Only masks the app offers for each server type (Masks.compatible) must pass.
 python3 - <<'PY'
 import sys
-ok = fail = 0; bad = []
+ok = fail = 0; bad = []; bok = bfail = 0
 for line in open('/tmp/xcfg/result.txt'):
     st, port, name, mask = line.split()[:4]
     fp = mask.split('.')[0]
@@ -39,9 +39,15 @@ for line in open('/tmp/xcfg/result.txt'):
     elif name == 'grpc': offered = fp != 'android'
     elif name in ('ss', 'vmess-hu'): offered = fp in ('chrome', 'none')
     if not offered: continue
+    if mask.endswith('.b'):
+        if st == 'OK': bok += 1
+        else: bfail += 1
+        continue
     if st == 'OK': ok += 1
     else: fail += 1; bad.append(line.strip())
-print(f"offered masks: ok={ok} fail={fail}")
+print(f"offered direct masks: ok={ok} fail={fail}; via ByeDPI: ok={bok} fail={bfail}")
 for b in bad[:30]: print(b)
-sys.exit(1 if fail > ok * 0.03 else 0)  # ByeDPI-front variants can be flaky under 24-way parallel load
+# Direct masks must all work; ByeDPI-front variants are flaky under 24-way parallel load in CI
+# (the app tests every mask live before using it, so a flaky one is simply not chosen).
+sys.exit(1 if fail > 0 or bfail > (bok + bfail) * 0.2 else 0)
 PY

@@ -61,16 +61,16 @@ N1=$(grep -c "email: u8443" $W/access.log); echo "server :8443 accepted after si
 [ "$N1" -gt 0 ] || fail "single: server saw no traffic (traffic did not go through the server)"
 
 : > $W/access.log
+run_case byedpi byedpi.json
+c=$(grep -c "email: u" $W/access.log); echo "byedpi: server lines $c (must be 0; runs before multi so no balancer observatory can linger)"
+[ "$c" -eq 0 ] || { fail "byedpi: traffic unexpectedly went through a server"; cat $W/access.log | tail -5; }
+
+: > $W/access.log
 run_case multi multi.json
 for p in 8443 8444 8447; do
   c=$(grep -c "email: u$p" $W/access.log); echo "multi: server :$p accepted $c"
   [ "$c" -gt 0 ] || fail "multi: round-robin never used server :$p"
 done
-
-: > $W/access.log
-run_case byedpi byedpi.json
-c=$(grep -c "email: u" $W/access.log); echo "byedpi: server lines $c (must be 0)"
-[ "$c" -eq 0 ] || { fail "byedpi: traffic unexpectedly went through a server"; cat $W/access.log | tail -5; }
 
 echo "=== in-app tester (multi-inbound Xray instance)"
 adb shell am start -n $PKG/.MainActivity --ez e2e_disconnect true >/dev/null; sleep 2
