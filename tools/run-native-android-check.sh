@@ -39,23 +39,25 @@ if not passed:
     summary = summary[:3500].replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
     print("::error title=Native Android fixture assertions::" + summary)
     # Logs need a login; encode the first failing test in the job duration as well:
-    # checkout + 14 min + code * 60 s. code = class index (1-12, alphabetical), 0 = no failing test
-    # reported (count/crash), 13/14/15 = NativeFullTun mask/custom ByeDPI / "без сервера" tests.
+    # checkout + 14 min + code * 14 s. code = 1-based index of "Class#method" in the sorted list of all
+    # @Test methods of app/src/androidTest (see the listing printed below); 0 = no failing test reported.
     import time
-    classes = sorted(p.stem for p in Path("app/src/androidTest/java/com/vlesscardvpn").glob("*Test.kt"))
+    names = []
+    for f in sorted(Path("app/src/androidTest/java/com/vlesscardvpn").glob("*Test.kt")):
+        names += [f.stem + "#" + m for m in re.findall(r"@Test\s+fun\s+(\w+)", f.read_text())]
+    names.sort()
     cls = test = ""; code = 0
     for line in text.splitlines():
         if line.startswith("INSTRUMENTATION_STATUS: class="): cls = line.split("=", 1)[1].strip()
         elif line.startswith("INSTRUMENTATION_STATUS: test="): test = line.split("=", 1)[1].strip()
         elif re.match(r"INSTRUMENTATION_STATUS_CODE: -[1-4]", line):
-            short = cls.rsplit(".", 1)[-1]
-            code = 13 if test.startswith("maskAutoFake") else 14 if test.startswith("customStrategy") else \
-                15 if test.startswith("direct") else (classes.index(short) + 1 if short in classes else 0)
+            key = cls.rsplit(".", 1)[-1] + "#" + test
+            code = names.index(key) + 1 if key in names else 0
             print("First failing test:", cls, test)
             break
-    print("Failure group code:", code)
+    print("Failure code:", code, "of", len(names))
     try:
-        target = os.stat(".git/HEAD").st_mtime + 840 + code * 60
+        target = os.stat(".git/HEAD").st_mtime + 840 + code * 14
         time.sleep(max(0, min(target - time.time(), 1900)))
     except OSError: pass
     raise SystemExit(1)
