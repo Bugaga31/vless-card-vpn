@@ -31,9 +31,17 @@ fun ByeDpiSettingsPanel(repo: AppRepository, settings: AppSettings) {
                 }
             }
             Text(if (mode == ConnectCheckMode.PING)
-                    "Быстро: «Авто» берёт сервер с лучшим пингом и сразу подключает. HTTPS проверяется в фоне только для информации — пинг не гарантирует, что сайты откроются."
-                else "Медленнее: маршрут без работающего HTTPS отклоняется, «Авто» перебирает стратегии ByeDPI.",
+                    "Быстро: «Авто» берёт до 5 серверов с лучшим пингом и принимает только тот, через который реально открылся HTTPS. Ручное подключение — сразу, HTTPS проверяется в фоне."
+                else "Медленнее: каждый маршрут без HTTPS отклоняется, «Авто» перебирает стратегии ByeDPI на каждом сервере.",
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Без сервера, если серверы не работают", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+                    Text("Как ByeByeDPI: трафик идёт напрямую через встроенные ByeDPI и zapret (tpws), стратегии перебираются, пока не загрузится YouTube. Помогает от замедления и DPI, но не от блокировки по IP.",
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                Switch(checked = settings.directFallback, onCheckedChange = { v -> repo.updateSettings { it.copy(directFallback = v) } })
+            }
 
             HorizontalDivider(color = MaterialTheme.colorScheme.outline, thickness = 1.dp)
             Text("Своя стратегия ByeDPI", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)

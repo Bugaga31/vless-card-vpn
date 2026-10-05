@@ -83,6 +83,7 @@ fun VlessCardVpnApp(
 
     var showSplash by remember { mutableStateOf(true) }
     var pendingAuto by remember { mutableStateOf(false) }
+    var pendingDirect by remember { mutableStateOf(false) }
     var pendingConfig by remember { mutableStateOf<VlessConfig?>(null) }
     var preparingConnection by remember { mutableStateOf(false) }
     var preparationJob by remember { mutableStateOf<Job?>(null) }
@@ -102,13 +103,15 @@ fun VlessCardVpnApp(
         contract = ActivityResultContracts.StartActivityForResult()
     ) { result ->
         if (result.resultCode == Activity.RESULT_OK) {
-            if (pendingAuto) VlessVpnService.startAuto(context)
+            if (pendingDirect) VlessVpnService.startDirect(context)
+            else if (pendingAuto) VlessVpnService.startAuto(context)
             else pendingConfig?.let { cfg -> VlessVpnService.startVpn(context, cfg) }
         } else {
             Toast.makeText(context, "Разрешение VPN необходимо для подключения", Toast.LENGTH_SHORT).show()
         }
         pendingConfig = null
         pendingAuto = false
+        pendingDirect = false
     }
 
     val handleAutoConnect: () -> Unit = auto@{
@@ -120,6 +123,15 @@ fun VlessCardVpnApp(
             pendingAuto = true
             vpnPermissionLauncher.launch(permission)
         } else VlessVpnService.startAuto(context)
+    }
+    val handleDirectConnect: () -> Unit = direct@{
+        if (pendingAuto || pendingDirect || pendingConfig != null) return@direct
+        if (VlessVpnService.vpnStats.value.status == VpnStatus.CONNECTING) return@direct
+        val permission = VpnService.prepare(context)
+        if (permission != null) {
+            pendingDirect = true; pendingAuto = true
+            vpnPermissionLauncher.launch(permission)
+        } else VlessVpnService.startDirect(context)
     }
     val handleConnectToggle: (VlessConfig?) -> Unit = toggle@{ target ->
         if (pendingConfig != null || pendingAuto) return@toggle
@@ -176,7 +188,8 @@ fun VlessCardVpnApp(
                         onPanicTrigger = onPanicExit,
                         preparingConnection = pendingAuto || pendingConfig != null,
                         onNavigateToCrashReports = { navController.navigate("crash_reports") },
-                        onAutoConnect = handleAutoConnect
+                        onAutoConnect = handleAutoConnect,
+                        onDirectConnect = handleDirectConnect
                     )
                 }
                 composable("servers") {
