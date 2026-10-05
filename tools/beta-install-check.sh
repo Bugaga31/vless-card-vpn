@@ -28,10 +28,10 @@ adb exec-out screencap -p > screen.png
 adb logcat -d > logcat.txt
 PID=$(adb shell pidof $PKG | tr -d '\r')
 echo "pid: $PID"
-# The emulator runs ARM code through ndk_translation, which lacks the arm64 CNTVCT_EL0 timer read used by the
+# The emulator runs ARM code through ndk_translation, which lacks arm64 MRS system-register reads (CNTVCT_EL0, MIDR_EL1) used by the
 # Go runtime inside Xray-core (libgojni). Real ARM phones support it. Treat exactly that as "can't test here".
-if grep -q "ndk_translation: Undefined instruction 0xd53be0" logcat.txt && grep -E "Fatal signal 4 \(SIGILL\)" logcat.txt | grep -q "xray"; then
-  echo "LAUNCH SKIPPED: ARM translator cannot run Go/Xray (SIGILL on CNTVCT_EL0) - emulator limitation, not an app bug"
+if grep -q "ndk_translation: Undefined instruction 0xd53[0-9a-f]" logcat.txt && grep -E "Fatal signal 4 \(SIGILL\)" logcat.txt | grep -q "xray"; then
+  echo "LAUNCH SKIPPED: ARM translator cannot run Go/Xray (SIGILL on MRS CNTVCT_EL0/MIDR_EL1) - emulator limitation, not an app bug"
   grep -E "FATAL EXCEPTION" -A25 logcat.txt | grep -q "$PKG" && { grep -E "FATAL EXCEPTION" -A25 logcat.txt | head -40; exit 1; }
 else
 if grep -E "FATAL EXCEPTION|Fatal signal" -A20 logcat.txt | grep -q "$PKG"; then grep -E "FATAL EXCEPTION|Fatal signal" -A25 logcat.txt | head -60; exit 1; fi
