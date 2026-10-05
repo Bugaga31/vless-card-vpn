@@ -64,4 +64,21 @@ class DirectStrategyTest {
         assertTrue(TunnelHealthReport(listOf(ok, yt)).directScore > TunnelHealthReport(listOf(yt)).directScore)
         assertTrue(AppSettings().directFallback)
     }
+    @Test fun ownMaskingFamily() {
+        val ids = DirectStrategies.BUILT_IN.map { it.id }
+        assertEquals(ids.size, ids.toSet().size)
+        assertTrue(DirectStrategies.OWN.all { it.id in ids })
+        assertEquals("BYEDPI#VCARD_CASCADE", ids[1])
+        val c = DirectStrategies.VCARD_CASCADE.argv(20002, "max.ru")
+        // Pool: user's mask first, every entry a separate --fake-sni, no placeholder left.
+        val snis = c.indices.filter { c[it] == "--fake-sni" }.map { c[it + 1] }
+        assertEquals("max.ru", snis.first()); assertTrue("vk.com" in snis); assertEquals(snis.size, snis.toSet().size)
+        assertFalse(c.any { it.startsWith("{") })
+        assertTrue(DirectStrategies.VCARD_CASCADE.masked && DirectStrategies.VCARD_CASCADE.adaptive)
+        // Fakes only after two DPI failures.
+        assertTrue(c.lastIndexOf("--auto=torst,ssl_err") in c.indexOf("--auto=torst,ssl_err") + 1 until c.indexOf("--fake"))
+        assertFalse(DirectStrategies.VCARD_SHRED.adaptive || DirectStrategies.VCARD_SHRED.masked)
+        assertEquals(DpiEngine.TPWS, DirectStrategies.VCARD_TPWS.engine)
+        assertEquals(DirectStrategies.maskPool("ya.ru"), DirectStrategies.maskPool("ya.ru").distinct())
+    }
 }

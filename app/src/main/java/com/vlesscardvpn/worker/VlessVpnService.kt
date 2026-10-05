@@ -798,7 +798,9 @@ class VlessVpnService : VpnService() {
                     if (failure is CancellationException) throw failure
                     if (failure != null) { running = null; continue }
                     running = strategy
-                    val report = TunnelHealthChecker.directCheck(localProbe, DirectStrategies.CHECK_TIMEOUT_MS)
+                    var report = TunnelHealthChecker.directCheck(localProbe, DirectStrategies.CHECK_TIMEOUT_MS)
+                    // Adaptive (--auto) strategies spend the first connection detecting the DPI; they have learned now.
+                    if (!report.youtubeBulk && strategy.adaptive) report = TunnelHealthChecker.directCheck(localProbe, DirectStrategies.CHECK_TIMEOUT_MS)
                     if (report.youtubeBulk) { accepted = strategy to report; return@withTimeout }
                     if (report.directScore > (best?.second?.directScore ?: 0)) best = strategy to report
                 }

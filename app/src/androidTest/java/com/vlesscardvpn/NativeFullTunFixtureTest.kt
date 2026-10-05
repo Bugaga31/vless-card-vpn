@@ -71,6 +71,7 @@ class NativeFullTunFixtureTest {
     // "Без сервера": another app's traffic → TUN → sing-box → production ByeDPI/tpws argv → real TCP to the fixture HTTPS.
     @Test fun directOobThenDisorderTunDnsHttps() = exerciseDirect(DirectStrategies.BUILT_IN.first { it.id == "BYEDPI#OOB_THEN_DISORDER" })
     @Test fun directVcardStealthTunDnsHttps() = exerciseDirect(DirectStrategies.VCARD_STEALTH)
+    @Test fun directVcardCascadeTunDnsHttps() = exerciseDirect(DirectStrategies.VCARD_CASCADE)
     @Test fun directTpwsSplitDisorderTunDnsHttps() = exerciseDirect(DirectStrategies.BUILT_IN.first { it.id == "TPWS#SPLIT_DISORDER" })
     @Test fun directTpwsTlsRecTunDnsHttps() = exerciseDirect(DirectStrategies.BUILT_IN.first { it.id == "TPWS#TLSREC" })
 
