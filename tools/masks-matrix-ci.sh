@@ -26,7 +26,7 @@ L
 chmod +x gradlew
 XRAY_CONFIG_DUMP=/tmp/xcfg XRAY_LOCAL_LINKS=/tmp/links.txt ./gradlew --no-daemon -q :app:testDebugUnitTest --tests 'com.vlesscardvpn.ConfigTest'
 for f in /tmp/xcfg/*.json; do echo "$(basename $f): $($X run -test -c $f 2>&1 | tail -1)"; done
-bash tools/xray-local-e2e.sh $X /tmp/xcfg
+bash tools/xray-local-e2e.sh $X /tmp/xcfg || true  # raw matrix includes masks the app never offers
 # Only masks the app offers for each server type (Masks.compatible) must pass.
 python3 - <<'PY'
 import sys
