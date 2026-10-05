@@ -110,5 +110,13 @@ object Store {
         st.copy(servers = keep + list.filter { ids.add(it.id) })
     }
 
+    fun wipe(context: Context) = synchronized(lock) {
+        saveJob?.cancel()
+        _state.value = AppState()
+        runCatching { File(context.filesDir, "state.json").delete() }
+        runCatching { File(context.filesDir, "hev-socks5-tunnel.yaml").delete() }
+        runCatching { context.cacheDir.deleteRecursively() }
+    }
+
     fun remove(ids: Set<String>) = update { st -> st.copy(servers = st.servers.filterNot { it.id in ids }, states = st.states - ids) }
 }

@@ -7,17 +7,22 @@ import com.vlesscardvpn.model.Settings
 import org.json.JSONArray
 import org.json.JSONObject
 
+/** Local SOCKS listener of the running VPN (random port + login/password in stealth mode). */
+data class SocksAuth(val port: Int, val user: String = "", val pass: String = "") { val auth: Boolean get() = user.isNotEmpty() }
+
 /** Builds Xray-core JSON configs. Pure (no Android APIs) so it is covered by JVM tests and `xray run -test`. */
 object XrayConfigBuilder {
     const val BYEDPI_TAG = "byedpi"
     const val PROXY_PREFIX = "proxy-"
+    const val RU_DNS = "77.88.8.8"
+    val RU_DOMAINS = listOf("geosite:category-ru", "domain:ru", "domain:su", "domain:xn--p1ai")
     private val IPV4_LITERAL = Regex("^\\d{1,3}(\\.\\d{1,3}){3}$")
 
     private fun arr(vararg v: Any): JSONArray = JSONArray().apply { v.forEach { put(it) } }
     private fun csv(s: String) = s.split(',').map { it.trim() }.filter { it.isNotEmpty() }
 
     /** Proxy outbound for [s] with masking [mask] (per outbound, so many masks work at once). */
-    fun outbound(s: Server, tag: String, mask: Mask?): JSONObject {
+    fun outbound(s: Server, tag: String, mask: Mask?, mux: Boolean = false): JSONObject {
         val o = JSONObject().put("tag", tag)
         when (s.protocol) {
             "vless" -> o.put("protocol", "vless").put("settings", JSONObject().put("vnext", arr(JSONObject()
@@ -36,8 +41,13 @@ object XrayConfigBuilder {
             else -> throw IllegalArgumentException("unsupported protocol ${s.protocol}")
         }
         o.put("streamSettings", stream(s, mask))
+        if (mux && muxable(s)) o.put("mux", JSONObject().put("enabled", true).put("concurrency", 8)
+            .put("xudpConcurrency", 16).put("xudpProxyUDP443", "reject"))
         return o
     }
+
+    /** Mux is incompatible with XTLS Vision, XHTTP (has its own) and UDP transports. */
+    fun muxable(s: Server): Boolean = s.isTcpBased && s.flow.isEmpty() && s.network != "xhttp" && s.protocol != "hysteria2"
 
     private fun stream(s: Server, mask: Mask?): JSONObject {
         val st = JSONObject()
@@ -116,16 +126,19 @@ object XrayConfigBuilder {
      * Config for the running VPN: SOCKS inbound 127.0.0.1:[Settings.socksPort] (hev-socks5-tunnel feeds the TUN into it),
      * one outbound per selected server, balancer + observatory across them, DNS via DoH through the tunnel.
      */
-    fun vpnConfig(servers: List<Pair<Server, Mask?>>, settings: Settings, byeDpiPort: Int?): String {
+    fun vpnConfig(servers: List<Pair<Server, Mask?>>, settings: Settings, byeDpiPort: Int?, socks: SocksAuth = SocksAuth(settings.socksPort)): String {
         require(settings.mode == Mode.BYEDPI || servers.isNotEmpty()) { "Не выбран ни один сервер" }
         require(settings.mode == Mode.SERVERS || byeDpiPort != null) { "ByeDPI не запущен" }
         val c = base()
-        c.put("inbounds", arr(JSONObject().put("tag", "socks").put("listen", "127.0.0.1").put("port", settings.socksPort)
-            .put("protocol", "socks").put("settings", JSONObject().put("auth", "noauth").put("udp", true))
+        val inSettings = JSONObject().put("udp", true).put("ip", "127.0.0.1")
+        if (socks.auth) inSettings.put("auth", "password").put("accounts", arr(JSONObject().put("user", socks.user).put("pass", socks.pass)))
+        else inSettings.put("auth", "noauth")
+        c.put("inbounds", arr(JSONObject().put("tag", "socks").put("listen", "127.0.0.1").put("port", socks.port)
+            .put("protocol", "socks").put("settings", inSettings)
             .put("sniffing", JSONObject().put("enabled", true).put("destOverride", arr("http", "tls", "quic")).put("routeOnly", true))))
         val outs = JSONArray()
         val useServers = settings.mode != Mode.BYEDPI
-        if (useServers) servers.forEachIndexed { i, (s, m) -> outs.put(outbound(s, "$PROXY_PREFIX$i", m)) }
+        if (useServers) servers.forEachIndexed { i, (s, m) -> outs.put(outbound(s, "$PROXY_PREFIX$i", m, settings.mux)) }
         outs.put(JSONObject().put("tag", "direct").put("protocol", "freedom").put("settings", JSONObject().put("domainStrategy", "UseIPv4")))
         outs.put(JSONObject().put("tag", "block").put("protocol", "blackhole"))
         outs.put(JSONObject().put("tag", "dns-out").put("protocol", "dns"))
@@ -138,20 +151,30 @@ object XrayConfigBuilder {
             many -> rule.put("balancerTag", "balancer")
             else -> rule.put("outboundTag", "${PROXY_PREFIX}0")
         }
-        val dnsServers = JSONArray().put(settings.dnsUrl)
+        val dnsServers = JSONArray()
+        val ruDns = settings.ruDns && settings.ruDirect && useServers
+        if (ruDns) dnsServers.put(JSONObject().put("address", RU_DNS).put("port", 53)
+            .put("domains", JSONArray(RU_DOMAINS)).put("skipFallback", true))
+        dnsServers.put(settings.dnsUrl)
         if (settings.dnsUrl != "https://8.8.8.8/dns-query") dnsServers.put("https://8.8.8.8/dns-query")
         c.put("dns", JSONObject().put("servers", dnsServers).put("queryStrategy", "UseIPv4").put("tag", "dns-module"))
 
         val rules = JSONArray()
         rules.put(JSONObject().put("inboundTag", arr("socks")).put("port", "53").put("outboundTag", "dns-out"))
+        if (ruDns) rules.put(JSONObject().put("inboundTag", arr("dns-module")).put("ip", arr(RU_DNS)).put("outboundTag", "direct"))
         rules.put(toMain(JSONObject().put("inboundTag", arr("dns-module"))))
         rules.put(JSONObject().put("ip", arr("geoip:private")).put("outboundTag", "direct"))
         rules.put(JSONObject().put("ip", arr("::/0")).put("outboundTag", "block"))
+        // WebRTC/STUN would reveal the real address to websites; QUIC can't be desynced, so TCP+TLS is forced.
+        if (settings.blockStun) rules.put(JSONObject().put("network", "udp").put("port", "3478,5349,19302-19309").put("outboundTag", "block"))
+        if (settings.blockQuic || !useServers) rules.put(JSONObject().put("network", "udp").put("port", "443").put("outboundTag", "block"))
+        else if (settings.mode == Mode.HYBRID && settings.hybridDomains.isNotEmpty())
+            rules.put(JSONObject().put("network", "udp").put("port", "443").put("domain", JSONArray(settings.hybridDomains)).put("outboundTag", "block"))
         if (settings.blockAds) rules.put(JSONObject().put("domain", arr("geosite:category-ads-all")).put("outboundTag", "block"))
         if (settings.mode == Mode.HYBRID && settings.hybridDomains.isNotEmpty())
             rules.put(JSONObject().put("domain", JSONArray(settings.hybridDomains)).put("outboundTag", BYEDPI_TAG))
         if (settings.ruDirect && useServers) {
-            rules.put(JSONObject().put("domain", arr("geosite:category-ru", "domain:ru", "domain:su", "domain:xn--p1ai")).put("outboundTag", "direct"))
+            rules.put(JSONObject().put("domain", JSONArray(RU_DOMAINS)).put("outboundTag", "direct"))
             rules.put(JSONObject().put("ip", arr("geoip:ru")).put("outboundTag", "direct"))
         }
         rules.put(toMain(JSONObject().put("network", "tcp,udp")))

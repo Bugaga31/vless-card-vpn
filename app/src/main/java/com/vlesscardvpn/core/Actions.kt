@@ -11,7 +11,12 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import libv2ray.Libv2ray
 import okhttp3.OkHttpClient
@@ -52,8 +57,9 @@ object Actions {
     private fun fetch(url: String): String? {
         val clients = buildList {
             add(http)
-            if (Tunnel.status.value.state == Tunnel.State.CONNECTED)
-                add(http.newBuilder().proxy(Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", Store.state.value.settings.socksPort))).build())
+            val socks = Tunnel.socks
+            if (socks != null && Tunnel.status.value.state == Tunnel.State.CONNECTED)
+                add(http.newBuilder().proxy(Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", socks.port))).build())
         }
         for (c in clients) for (u in Settings.mirrors(url)) {
             val body = runCatching {
@@ -64,7 +70,9 @@ object Actions {
         return null
     }
 
-    fun refreshSubscriptions(then: (() -> Unit)? = null) = launch("Обновление подписок") {
+    fun refreshSubscriptions(then: (() -> Unit)? = null) = launch("Обновление подписок") { doRefresh(then) }
+
+    private suspend fun doRefresh(then: (() -> Unit)? = null): String {
         val subs = Store.state.value.settings.subscriptions
         var ok = 0; var total = 0
         subs.forEachIndexed { i, url ->
@@ -77,7 +85,7 @@ object Actions {
         }
         step(subs.size, subs.size)
         then?.invoke()
-        if (ok == 0) "Подписки не загрузились (нет сети или всё заблокировано)" else "Загружено серверов: $total из $ok подписок"
+        return if (ok == 0) "Подписки не загрузились (нет сети или всё заблокировано)" else "Загружено серверов: $total из $ok подписок"
     }
 
     fun importText(text: String): Int {
@@ -101,14 +109,15 @@ object Actions {
         }
     }
 
-    private suspend fun byeDpiPortForTests(need: Boolean): Pair<ByeDpi?, Int?> {
+    private suspend fun byeDpiPortForTests(need: Boolean): Pair<DpiProxy?, Int?> {
         if (!need) return null to null
         val running = Tunnel.byeDpiPort
         if (running != null) return null to running
-        val b = ByeDpi(app)
-        if (!b.available) return null to null
         val st = Store.state.value.settings
-        return runCatching { b to b.start(st.byeDpiArgs, st.byeDpiSni) }.getOrElse { b.close(); null to null }
+        val strategy = DpiStrategies.resolve(st, Net.key(app))
+        val b = DpiProxy(app)
+        if (!b.available(strategy.engine)) return null to null
+        return runCatching { b to b.start(strategy, st.byeDpiSni, allowLocal = com.vlesscardvpn.BuildConfig.DEBUG) }.getOrElse { b.close(); null to null }
     }
 
     /** TCP ping of all servers, then real test of the [realLimit] fastest. */
@@ -180,24 +189,137 @@ object Actions {
     }
 
     /** Selects the [n] fastest working servers (deselects others). */
-    fun selectBest(n: Int = 5): Int {
+    fun selectBest(n: Int = 5, among: Collection<Server>? = null): Int {
         var c = 0
+        val ids = among?.map { it.id }?.toHashSet()
         Store.update { st ->
-            val best = st.servers.filter { st.state(it).works }.sortedBy { st.state(it).realMs }.take(n).map { it.id }.toSet()
+            val best = st.servers.filter { (ids == null || it.id in ids) && st.state(it).works }.sortedBy { st.state(it).realMs }.take(n).map { it.id }.toSet()
             c = best.size
             st.copy(states = st.servers.associate { s -> s.id to st.state(s).copy(selected = s.id in best) } )
         }
         return c
     }
 
-    /** ByeDPI-only check: is the internet reachable through the built-in ByeDPI with the current strategy? */
-    fun testByeDpi() = launch("Проверка ByeDPI") {
-        val (own, port) = byeDpiPortForTests(true)
-        if (port == null) return@launch "ByeDPI не запустился — проверьте стратегию"
+    /** Current strategy only: does the YouTube page load through it? */
+    fun testByeDpi() = launch("Проверка обхода DPI") {
+        val st = Store.state.value.settings
+        val strategy = DpiStrategies.resolve(st, Net.key(app))
+        val b = DpiProxy(app)
         try {
-            val p = withContext(Dispatchers.IO) { Tester.probeSocks(port, Store.state.value.settings.testUrl) }
-            if (p.realMs > 0) "ByeDPI: ответ ${p.realMs} мс, 256 КБ: ${yn(p.bigOk)}, YouTube: ${yn(p.ytOk)}" else "ByeDPI: нет ответа (${p.error})"
-        } finally { own?.close() }
+            val port = b.start(strategy, st.byeDpiSni, allowLocal = com.vlesscardvpn.BuildConfig.DEBUG)
+            val p = withContext(Dispatchers.IO) { Tester.probeDpi(port) }
+            if (p.ok) "${strategy.label}: YouTube открылся за ${p.ms} мс" else "${strategy.label}: не работает (${p.error})"
+        } finally { b.close() }
+    }
+
+    // ---------- DPI strategy search (как в ByeByeDPI «тест стратегий») ----------
+    data class DpiResult(val ok: Boolean, val ms: Int, val error: String)
+    /** Strategy id → result of the last search (this session). */
+    val dpiResults = MutableStateFlow<Map<String, DpiResult>>(emptyMap())
+
+    /**
+     * Tries every strategy (custom line, the remembered one, 20 built-ins incl. zapret and own ones) through its
+     * own local proxy, 4 at a time; a strategy works if the real YouTube page downloads. The best one in plan order
+     * (gentlest first) is remembered for the current network and used automatically.
+     */
+    fun findDpi() = launch("Подбор обхода DPI") {
+        val st = Store.state.value.settings
+        val network = Net.key(app)
+        val probe = DpiProxy(app)
+        val plan = DpiStrategies.plan(st, network, probe.available(DpiEngine.TPWS)).filter { probe.available(it.engine) }
+        if (plan.isEmpty()) return@launch "Обход DPI недоступен на этом устройстве (нужен Android 8+)"
+        dpiResults.value = emptyMap()
+        val done = AtomicInteger()
+        step(0, plan.size)
+        coroutineScope {
+            val sem = Semaphore(4)
+            plan.map { s ->
+                async(Dispatchers.IO) {
+                    sem.withPermit {
+                        val px = DpiProxy(app)
+                        val r = try {
+                            val port = px.start(s, st.byeDpiSni, allowLocal = com.vlesscardvpn.BuildConfig.DEBUG)
+                            Tester.probeDpi(port, attempts = if (s.adaptive) 3 else 2)
+                        } catch (e: Throwable) { Tester.DpiProbe(false, 0, 0, e.message ?: "не запустился") } finally { px.close() }
+                        dpiResults.value = dpiResults.value + (s.id to DpiResult(r.ok, r.ms, r.error))
+                        step(done.incrementAndGet(), plan.size)
+                    }
+                }
+            }.awaitAll()
+        }
+        val res = dpiResults.value
+        val working = plan.filter { res[it.id]?.ok == true }
+        val best = working.firstOrNull()
+        val zapretOk = working.count { it.engine == DpiEngine.TPWS }
+        val ownOk = working.count { it.own }
+        if (best != null) Store.update { a ->
+            a.copy(settings = a.settings.copy(dpiRemembered = a.settings.dpiRemembered + (network to best.id) + (Settings.ANY_NETWORK to best.id)))
+        }
+        if (best == null) "Сеть «$network»: ни одна из ${plan.size} стратегий не открыла YouTube. Нужен сервер (режим «Серверы»)."
+        else "Сеть «$network»: работают ${working.size} из ${plan.size} (zapret: $zapretOk, своих VLESS Card: $ownOk). Выбрана: ${best.label}"
+    }
+
+    // ---------- network diagnosis (DPI / white lists) ----------
+    data class NetReport(val verdict: String = "", val details: String = "", val kind: Kind = Kind.NONE)
+    enum class Kind { NONE, OPEN, DPI, WHITELIST, OFFLINE, PARTIAL }
+    val netReport = MutableStateFlow(NetReport())
+
+    /**
+     * Direct checks (the app is outside the VPN): Russian sites vs foreign ones vs the real YouTube page.
+     * Only Russian sites open → the operator is in "white list" mode; foreign open but YouTube cut → DPI throttling.
+     */
+    fun diagnoseNetwork() = launch("Проверка сети") {
+        val client = http.newBuilder().connectTimeout(6, TimeUnit.SECONDS).readTimeout(6, TimeUnit.SECONDS).callTimeout(9, TimeUnit.SECONDS).build()
+        fun reach(url: String): Boolean = runCatching {
+            client.newCall(Request.Builder().url(url).header("User-Agent", Tester.UA).build()).execute().use { it.code in 100..499 }
+        }.getOrDefault(false)
+        fun bigYoutube(): Boolean = runCatching {
+            client.newCall(Request.Builder().url(Tester.DPI_URL).header("User-Agent", Tester.UA).build()).execute().use { r ->
+                val src = r.body!!.byteStream(); val buf = ByteArray(16384); var t = 0
+                while (t < Tester.DPI_BYTES) { val n = src.read(buf); if (n < 0) break; t += n }
+                t >= Tester.DPI_BYTES
+            }
+        }.getOrDefault(false)
+        val ru = listOf("https://ya.ru/", "https://www.gosuslugi.ru/", "https://vk.com/")
+        val foreign = listOf("https://www.gstatic.com/generate_204", "https://www.cloudflare.com/cdn-cgi/trace", "https://github.com/", "https://telegram.org/")
+        step(0, ru.size + foreign.size + 1)
+        val (ruOk, fOk, yt) = coroutineScope {
+            val a = ru.map { async(Dispatchers.IO) { reach(it) } }
+            val b = foreign.map { async(Dispatchers.IO) { reach(it) } }
+            val c = async(Dispatchers.IO) { bigYoutube() }
+            Triple(a.awaitAll().count { it }, b.awaitAll().count { it }, c.await())
+        }
+        step(ru.size + foreign.size + 1, ru.size + foreign.size + 1)
+        val net = Net.key(app)
+        val details = "Сеть «$net» · российские сайты: $ruOk/${ru.size} · зарубежные: $fOk/${foreign.size} · YouTube: ${if (yt) "открылся" else "не грузится"}"
+        val r = when {
+            ruOk == 0 && fOk == 0 -> NetReport("Нет интернета", details, Kind.OFFLINE)
+            fOk == 0 -> NetReport("Белые списки: открываются только российские сайты. Нужны серверы из подписки «White-Lists» — они на разрешённых адресах.", details, Kind.WHITELIST)
+            !yt -> NetReport("YouTube режут (DPI). Поможет обход DPI без сервера или любой рабочий сервер.", details, Kind.DPI)
+            fOk < foreign.size -> NetReport("Часть зарубежных сайтов заблокирована — нужен сервер.", details, Kind.PARTIAL)
+            else -> NetReport("Сеть без заметных ограничений.", details, Kind.OPEN)
+        }
+        netReport.value = r
+        "${r.verdict} ($details)"
+    }
+
+    /** White-list mode: keep only servers from white-list subscriptions selected and test them. */
+    fun whitelistServers() = launch("Серверы для белых списков") {
+        val loaded = doRefresh()
+        val wl = Store.state.value.servers.filter { it.source.contains("White", ignoreCase = true) }
+        if (wl.isEmpty()) return@launch "$loaded. Серверов для белых списков нет."
+        Store.update { st -> st.copy(states = st.servers.associate { s -> s.id to st.state(s).copy(selected = false) }) }
+        val working = realTest(wl.take(150), "Серверы для белых списков")
+        val n = selectBest(5, wl)
+        "Белые списки: работают $working из ${minOf(wl.size, 150)}. Выбрано лучших: $n — жмите «Подключить»."
+    }
+
+    /** Panic button: stop everything and erase servers, settings and test results. */
+    fun wipe() {
+        cancel()
+        Store.wipe(app)
+        dpiResults.value = emptyMap(); netReport.value = NetReport()
+        progress.value = Progress(message = "Все данные стёрты")
     }
 
     fun yn(b: Boolean?) = when (b) { true -> "да"; false -> "нет"; null -> "—" }

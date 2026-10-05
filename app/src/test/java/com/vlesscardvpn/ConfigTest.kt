@@ -79,6 +79,58 @@ class ConfigTest {
         dump("test", XrayConfigBuilder.testConfig(variants, variants.indices.map { 20000 + it }, 1080))
     }
 
+    @Test fun stealthSocksMuxDnsAndLeaks() {
+        val servers = links.mapNotNull { LinkParser.parse(it) }
+        val st = Settings(mux = true, blockStun = true, ruDirect = true, ruDns = true, mode = Mode.HYBRID)
+        val auth = com.vlesscardvpn.xray.SocksAuth(34567, "u1", "p1")
+        val c = JSONObject(XrayConfigBuilder.vpnConfig(servers.map { it to null }, st, 1080, auth))
+        val inb = c.getJSONArray("inbounds").getJSONObject(0)
+        assertEquals(34567, inb.getInt("port"))
+        val ins = inb.getJSONObject("settings")
+        assertEquals("password", ins.getString("auth"))
+        assertEquals("u1", ins.getJSONArray("accounts").getJSONObject(0).getString("user"))
+        val outs = c.getJSONArray("outbounds")
+        val byTag = (0 until outs.length()).map { outs.getJSONObject(it) }
+        // Vision (reality) and XHTTP must not get mux; WS/gRPC/Trojan do.
+        assertFalse(byTag[0].has("mux")); assertTrue(byTag[1].has("mux")); assertFalse(byTag[2].has("mux"))
+        val dns = c.getJSONObject("dns").getJSONArray("servers")
+        assertEquals("77.88.8.8", dns.getJSONObject(0).getString("address"))
+        val rules = c.getJSONObject("routing").getJSONArray("rules").toString()
+        assertTrue(rules.contains("3478,5349,19302-19309"))
+        assertTrue(rules.contains("\"port\":\"443\""))
+        dump("vpn-stealth", c.toString())
+        dump("vpn-byedpi-auth", XrayConfigBuilder.vpnConfig(emptyList(), Settings(mode = Mode.BYEDPI), 1080, auth))
+    }
+
+    @Test fun dpiStrategies() {
+        val all = com.vlesscardvpn.core.DpiStrategies.BUILT_IN
+        assertEquals(21, all.size)
+        assertEquals(all.size, all.map { it.id }.toSet().size)
+        assertEquals(5, all.count { it.own })
+        all.forEach { s ->
+            val argv = s.argv(23456, "vk.com")
+            assertFalse(s.id, argv.any { "{sni}" in it || "{mask_pool}" in it })
+            if (s.engine == com.vlesscardvpn.core.DpiEngine.TPWS) assertTrue(argv.contains("--bind-addr=127.0.0.1"))
+            else assertEquals(listOf("--ip", "127.0.0.1", "--port", "23456"), argv.take(4))
+        }
+        val cascade = com.vlesscardvpn.core.DpiStrategies.CASCADE.argv(23456, "vk.com")
+        assertTrue(cascade.windowed(2).contains(listOf("--fake-sni", "vk.com")))
+        assertTrue(cascade.windowed(2).contains(listOf("--fake-sni", "gosuslugi.ru")))
+        val net = "Моб.: Beeline"
+        val s0 = Settings()
+        assertEquals(com.vlesscardvpn.core.DpiStrategies.CUSTOM_ID, com.vlesscardvpn.core.DpiStrategies.resolve(s0, net).id)
+        val s1 = s0.copy(dpiRemembered = mapOf(net to "TPWS#SPLIT_DISORDER", "*" to "BYEDPI#DISORDER"))
+        assertEquals("TPWS#SPLIT_DISORDER", com.vlesscardvpn.core.DpiStrategies.resolve(s1, net).id)
+        assertEquals("BYEDPI#DISORDER", com.vlesscardvpn.core.DpiStrategies.resolve(s1, "Wi-Fi").id)
+        assertEquals("BYEDPI#VCARD_SHRED", com.vlesscardvpn.core.DpiStrategies.resolve(s1.copy(dpiStrategy = "BYEDPI#VCARD_SHRED"), net).id)
+        val plan = com.vlesscardvpn.core.DpiStrategies.plan(s1, net, tpwsAvailable = false)
+        assertTrue(plan.none { it.engine == com.vlesscardvpn.core.DpiEngine.TPWS })
+        assertEquals(com.vlesscardvpn.core.DpiStrategies.CUSTOM_ID, plan.first().id)
+        val rt = Settings.fromJson(s1.copy(apps = listOf("ru.sberbankmobile"), stealthSocks = false, disguise = "calc").toJson())
+        assertEquals(s1.dpiRemembered, rt.dpiRemembered); assertEquals(listOf("ru.sberbankmobile"), rt.apps)
+        assertFalse(rt.stealthSocks); assertEquals("calc", rt.disguise)
+    }
+
     @Test fun fragmentMaskGoesToFinalmask() {
         val s = LinkParser.parse(reality)!!
         val o = XrayConfigBuilder.outbound(s, "p", Masks.byId("safari.p3.b"))

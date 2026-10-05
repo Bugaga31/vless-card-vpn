@@ -24,13 +24,38 @@ data class Settings(
     val testUrl: String = "https://www.gstatic.com/generate_204",
     val dnsUrl: String = "https://1.1.1.1/dns-query",
     val subscriptions: List<String> = DEFAULT_SUBSCRIPTIONS,
+    /** DPI strategy id: [DPI_AUTO] (found for this network), "custom" (byeDpiArgs) or a built-in id. */
+    val dpiStrategy: String = DPI_AUTO,
+    /** Network name → strategy id that passed the search on that network. */
+    val dpiRemembered: Map<String, String> = emptyMap(),
+    // ---- privacy / hiding
+    /** Random local SOCKS port + random login/password on every connect (apps can't find the proxy by scanning 10808). */
+    val stealthSocks: Boolean = true,
+    val blockStun: Boolean = false,
+    val blockQuic: Boolean = false,
+    val mux: Boolean = false,
+    /** Russian domains resolved by Yandex DNS directly (with RU direct): RU sites see a normal Russian user. */
+    val ruDns: Boolean = true,
+    /** Package names: excluded from VPN, or (if [onlyApps]) the only ones that use it. */
+    val apps: List<String> = emptyList(),
+    val onlyApps: Boolean = false,
+    val quietNotification: Boolean = false,
+    val disguise: String = "",
 ) {
     fun toJson(): JSONObject = JSONObject().put("mode", mode.name).put("balance", balance.name).put("socksPort", socksPort)
         .put("ruDirect", ruDirect).put("blockAds", blockAds).put("byeDpiArgs", byeDpiArgs).put("byeDpiSni", byeDpiSni)
         .put("hybridDomains", JSONArray(hybridDomains)).put("testUrl", testUrl).put("dnsUrl", dnsUrl)
         .put("subscriptions", JSONArray(subscriptions))
+        .put("dpiStrategy", dpiStrategy).put("dpiRemembered", JSONObject(dpiRemembered as Map<*, *>))
+        .put("stealthSocks", stealthSocks).put("blockStun", blockStun).put("blockQuic", blockQuic).put("mux", mux)
+        .put("ruDns", ruDns).put("apps", JSONArray(apps)).put("onlyApps", onlyApps)
+        .put("quietNotification", quietNotification).put("disguise", disguise)
 
     companion object {
+        const val DPI_AUTO = "auto"
+        const val ANY_NETWORK = "*"
+        val DNS_PRESETS = listOf("Cloudflare" to "https://1.1.1.1/dns-query", "Google" to "https://8.8.8.8/dns-query",
+            "Quad9" to "https://9.9.9.9/dns-query", "AdGuard (без рекламы)" to "https://94.140.14.14/dns-query")
         const val DEFAULT_BYEDPI = "-o1 -At,r,s -d1 -At,r,s -f-1 -t8 -n {sni} -Qo"
         private const val IG = "igareck/vpn-configs-for-russia/main"
         val DEFAULT_SUBSCRIPTIONS = listOf(
@@ -58,6 +83,12 @@ data class Settings(
                 byeDpiArgs = o.optString("byeDpiArgs", d.byeDpiArgs), byeDpiSni = o.optString("byeDpiSni", d.byeDpiSni),
                 hybridDomains = list("hybridDomains", d.hybridDomains), testUrl = o.optString("testUrl", d.testUrl),
                 dnsUrl = o.optString("dnsUrl", d.dnsUrl), subscriptions = list("subscriptions", d.subscriptions),
+                dpiStrategy = o.optString("dpiStrategy", d.dpiStrategy),
+                dpiRemembered = o.optJSONObject("dpiRemembered")?.let { m -> m.keys().asSequence().associateWith { m.getString(it) } } ?: emptyMap(),
+                stealthSocks = o.optBoolean("stealthSocks", d.stealthSocks), blockStun = o.optBoolean("blockStun", d.blockStun),
+                blockQuic = o.optBoolean("blockQuic", d.blockQuic), mux = o.optBoolean("mux", d.mux), ruDns = o.optBoolean("ruDns", d.ruDns),
+                apps = list("apps", d.apps), onlyApps = o.optBoolean("onlyApps", d.onlyApps),
+                quietNotification = o.optBoolean("quietNotification", d.quietNotification), disguise = o.optString("disguise", d.disguise),
             )
         }
     }

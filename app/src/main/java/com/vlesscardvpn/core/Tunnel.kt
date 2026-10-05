@@ -15,4 +15,7 @@ object Tunnel {
     )
     val status = MutableStateFlow(Status())
     @Volatile var byeDpiPort: Int? = null
+    /** Running VPN's local SOCKS listener (random port + login in stealth mode); null when disconnected. */
+    @Volatile var socks: com.vlesscardvpn.xray.SocksAuth? = null
+    @Volatile var dpiLabel: String = ""
 }

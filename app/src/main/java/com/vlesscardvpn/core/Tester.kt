@@ -14,7 +14,9 @@ import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import java.net.Authenticator
 import java.net.InetAddress
+import java.net.PasswordAuthentication
 import java.net.InetSocketAddress
 import java.net.Proxy
 import java.net.ServerSocket
@@ -125,6 +127,40 @@ object Tester {
                 } finally { core.stop() }
             }
         }
+    }
+
+    /** SOCKS5 login for the stealth listener (java.net SOCKS client asks the default Authenticator). */
+    fun installAuthenticator() = Authenticator.setDefault(object : Authenticator() {
+        override fun getPasswordAuthentication(): PasswordAuthentication? {
+            val a = Tunnel.socks ?: return null
+            if (!a.auth || requestingPort != a.port) return null
+            return PasswordAuthentication(a.user, a.pass.toCharArray())
+        }
+    })
+
+    data class DpiProbe(val ok: Boolean, val ms: Int, val bytes: Int, val error: String = "")
+    const val DPI_URL = "https://www.youtube.com/"
+    const val DPI_BYTES = 48_000
+
+    /** DPI strategy check: the real YouTube page (≥48 KB) must download through the local DPI proxy — a tiny 204 passes even when throttled. */
+    fun probeDpi(port: Int, attempts: Int = 2): DpiProbe {
+        val client = base.newBuilder().proxy(Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", port)))
+            .readTimeout(6, TimeUnit.SECONDS).callTimeout(10, TimeUnit.SECONDS).build()
+        var last = DpiProbe(false, 0, 0, "нет ответа")
+        repeat(attempts) {
+            val t0 = System.nanoTime()
+            last = runCatching {
+                client.newCall(Request.Builder().url(DPI_URL).header("User-Agent", UA).build()).execute().use { r ->
+                    val src = r.body!!.byteStream(); val buf = ByteArray(16384); var total = 0
+                    while (total < DPI_BYTES) { val n = src.read(buf); if (n < 0) break; total += n }
+                    val ms = ((System.nanoTime() - t0) / 1_000_000).toInt().coerceAtLeast(1)
+                    DpiProbe(total >= DPI_BYTES, ms, total, if (total >= DPI_BYTES) "" else "оборвалось на ${total / 1024} КБ")
+                }
+            }.getOrElse { DpiProbe(false, 0, 0, it.message ?: it.javaClass.simpleName) }
+            if (last.ok) { client.connectionPool.evictAll(); return last }
+        }
+        client.connectionPool.evictAll()
+        return last
     }
 
     const val UA = "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0 Mobile Safari/537.36"
