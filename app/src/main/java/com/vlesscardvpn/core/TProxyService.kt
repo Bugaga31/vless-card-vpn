@@ -13,7 +13,7 @@ class TProxyService {
 
         init { System.loadLibrary("hev-socks5-tunnel") }
 
-        fun config(socksPort: Int, mtu: Int, ipv4: String, ipv6: String?): String = buildString {
+        fun config(socksPort: Int, mtu: Int, ipv4: String, ipv6: String?, user: String = "", pass: String = ""): String = buildString {
             appendLine("tunnel:")
             appendLine("  mtu: $mtu")
             appendLine("  ipv4: $ipv4")
@@ -22,15 +22,16 @@ class TProxyService {
             appendLine("  port: $socksPort")
             appendLine("  address: 127.0.0.1")
             appendLine("  udp: 'udp'")
+            if (user.isNotEmpty()) { appendLine("  username: '$user'"); appendLine("  password: '$pass'") }
             appendLine("misc:")
             appendLine("  tcp-read-write-timeout: 300000")
             appendLine("  udp-read-write-timeout: 60000")
             appendLine("  log-level: warn")
         }
 
-        fun start(dir: File, tun: ParcelFileDescriptor, socksPort: Int, mtu: Int, ipv4: String, ipv6: String?) {
+        fun start(dir: File, tun: ParcelFileDescriptor, socksPort: Int, mtu: Int, ipv4: String, ipv6: String?, user: String = "", pass: String = "") {
             val f = File(dir, "hev-socks5-tunnel.yaml")
-            f.writeText(config(socksPort, mtu, ipv4, ipv6))
+            f.writeText(config(socksPort, mtu, ipv4, ipv6, user, pass))
             TProxyStartService(f.absolutePath, tun.fd)
         }
 

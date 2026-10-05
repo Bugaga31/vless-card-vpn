@@ -12,6 +12,8 @@ sed -e "s#@PRIV@#$PRIV#g" -e "s#@U@#$U#g" tools/e2e/matrix-server.json > /tmp/sr
 $X run -c /tmp/srv/server.json > /tmp/srv/server.log 2>&1 &
 gcc -D_DEFAULT_SOURCE -std=c99 -O2 native/byedpi/{packets,main,conev,proxy,desync,mpool,extend}.c -o /tmp/byedpi
 /tmp/byedpi --ip 127.0.0.1 --port 1080 --oob 1 --auto t,r,s --disorder 1 > /tmp/bd.log 2>&1 &
+(command -v apt-get >/dev/null && sudo apt-get install -y -qq libcap-dev zlib1g-dev >/dev/null) || true
+gcc -std=gnu99 -D_GNU_SOURCE -O2 -Inative/tpws native/tpws/*.c -lz -o /tmp/tpws || echo "host tpws build failed"
 SS=$(printf 'chacha20-ietf-poly1305:sspass' | base64 -w0)
 VM=$(printf '{"v":"2","ps":"vmess-hu","add":"127.0.0.1","port":"8449","id":"%s","scy":"auto","net":"httpupgrade","path":"/hu","tls":""}' $U | base64 -w0)
 cat > /tmp/links.txt <<L
@@ -25,12 +27,19 @@ vmess://$VM
 L
 chmod +x gradlew
 XRAY_CONFIG_DUMP=/tmp/xcfg XRAY_LOCAL_LINKS=/tmp/links.txt ./gradlew --no-daemon -q :app:testDebugUnitTest --tests 'com.vlesscardvpn.ConfigTest'
+# One engine per fixed strategy (the app's own argv: VLESS Card, zapret, ByeDPI); servers are on loopback.
+while read -r eng args; do
+  if [ "$eng" = TPWS ]; then VCVPN_TPWS_ALLOW_LOCAL=1 /tmp/tpws $args > /dev/null 2>&1 & else /tmp/byedpi $args > /dev/null 2>&1 & fi
+done < /tmp/xcfg/dpi-engines.txt
+sleep 1
 for f in /tmp/xcfg/*.json; do echo "$(basename $f): $($X run -test -c $f 2>&1 | tail -1)"; done
 bash tools/xray-local-e2e.sh $X /tmp/xcfg || true  # raw matrix includes masks the app never offers
 # Only masks the app offers for each server type (Masks.compatible) must pass.
 python3 - <<'PY'
 import sys
 ok = fail = 0; bad = []; bok = bfail = 0
+from collections import defaultdict
+per = defaultdict(lambda: [0, 0])
 for line in open('/tmp/xcfg/result.txt'):
     st, port, name, mask = line.split()[:4]
     fp = mask.split('.')[0]
@@ -39,6 +48,10 @@ for line in open('/tmp/xcfg/result.txt'):
     elif name == 'grpc': offered = fp != 'android'
     elif name in ('ss', 'vmess-hu'): offered = fp in ('chrome', 'none')
     if not offered: continue
+    if '.d:' in mask:
+        sid = mask.split('.d:')[1]
+        per[sid][0 if st == 'OK' else 1] += 1
+        continue
     if mask.endswith('.b'):
         if st == 'OK': bok += 1
         else: bfail += 1
@@ -47,6 +60,14 @@ for line in open('/tmp/xcfg/result.txt'):
     else: fail += 1; bad.append(line.strip())
 print(f"offered direct masks: ok={ok} fail={fail}; via ByeDPI: ok={bok} fail={bfail}")
 for b in bad[:30]: print(b)
+print("fixed strategies in front of servers (ok/fail):")
+for sid, (o, f) in sorted(per.items()): print(f"  {sid}: {o}/{f}")
+# On loopback a low-TTL fake reaches the server (0 hops) and breaks it — real servers are far away, so fake-only
+# strategies are reported but not judged.
+fake_only = {'BYEDPI#MASK_FAKE', 'BYEDPI#MASK_FAKE_RAND'}
+dpi_ok = sum(o for s, (o, f) in per.items() if s not in fake_only); dpi_all = sum(o + f for s, (o, f) in per.items() if s not in fake_only)
+print(f"fixed strategies (without fake-only): ok={dpi_ok}/{dpi_all}")
+if dpi_all and dpi_ok < dpi_all * 0.8: print("too many fixed-strategy failures"); sys.exit(1)
 # Direct masks must all work; ByeDPI-front variants are flaky under 24-way parallel load in CI
 # (the app tests every mask live before using it, so a flaky one is simply not chosen).
 sys.exit(1 if fail > 0 or bfail > (bok + bfail) * 0.2 else 0)

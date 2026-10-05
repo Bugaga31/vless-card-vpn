@@ -14,7 +14,9 @@ import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import java.net.Authenticator
 import java.net.InetAddress
+import java.net.PasswordAuthentication
 import java.net.InetSocketAddress
 import java.net.Proxy
 import java.net.ServerSocket
@@ -95,21 +97,21 @@ object Tester {
 
     /** Tests [variants] (server + mask) in parallel through one temporary Xray instance. */
     suspend fun real(
-        variants: List<Pair<Server, Mask?>>, testUrl: String, byeDpiPort: Int?, youtube: Boolean = true,
+        variants: List<Pair<Server, Mask?>>, testUrl: String, byeDpiPort: Int?, dpiPorts: Map<String, Int> = emptyMap(), youtube: Boolean = true,
         batch: Int = 32, parallel: Int = 12, onEach: (Int, Probe) -> Unit,
     ) = mutex.withLock {
         withContext(Dispatchers.IO) {
             variants.chunked(batch).forEachIndexed { chunkNo, chunk ->
                 val ports = freePorts(chunk.size)
                 val core = XrayCore.Instance("test")
-                val started = runCatching { core.start(XrayConfigBuilder.testConfig(chunk, ports, byeDpiPort)) }
+                val started = runCatching { core.start(XrayConfigBuilder.testConfig(chunk, ports, byeDpiPort, dpiPorts)) }
                 if (started.isFailure || !core.running) {
                     // A broken link must not hide the others: fall back to one instance per variant.
                     core.stop()
                     chunk.forEachIndexed { i, v ->
                         val one = XrayCore.Instance("test1")
                         val p = freePorts(1)
-                        val ok = runCatching { one.start(XrayConfigBuilder.testConfig(listOf(v), p, byeDpiPort)) }.isSuccess && one.running
+                        val ok = runCatching { one.start(XrayConfigBuilder.testConfig(listOf(v), p, byeDpiPort, dpiPorts)) }.isSuccess && one.running
                         onEach(chunkNo * batch + i, if (ok) probeSocks(p[0], testUrl, youtube = youtube) else Probe(0, null, null, "конфиг не принят ядром"))
                         one.stop()
                     }
@@ -125,6 +127,40 @@ object Tester {
                 } finally { core.stop() }
             }
         }
+    }
+
+    /** SOCKS5 login for the stealth listener (java.net SOCKS client asks the default Authenticator). */
+    fun installAuthenticator() = Authenticator.setDefault(object : Authenticator() {
+        override fun getPasswordAuthentication(): PasswordAuthentication? {
+            val a = Tunnel.socks ?: return null
+            if (!a.auth || requestingPort != a.port) return null
+            return PasswordAuthentication(a.user, a.pass.toCharArray())
+        }
+    })
+
+    data class DpiProbe(val ok: Boolean, val ms: Int, val bytes: Int, val error: String = "")
+    const val DPI_URL = "https://www.youtube.com/"
+    const val DPI_BYTES = 48_000
+
+    /** DPI strategy check: the real YouTube page (≥48 KB) must download through the local DPI proxy — a tiny 204 passes even when throttled. */
+    fun probeDpi(port: Int, attempts: Int = 2): DpiProbe {
+        val client = base.newBuilder().proxy(Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", port)))
+            .readTimeout(6, TimeUnit.SECONDS).callTimeout(10, TimeUnit.SECONDS).build()
+        var last = DpiProbe(false, 0, 0, "нет ответа")
+        repeat(attempts) {
+            val t0 = System.nanoTime()
+            last = runCatching {
+                client.newCall(Request.Builder().url(DPI_URL).header("User-Agent", UA).build()).execute().use { r ->
+                    val src = r.body!!.byteStream(); val buf = ByteArray(16384); var total = 0
+                    while (total < DPI_BYTES) { val n = src.read(buf); if (n < 0) break; total += n }
+                    val ms = ((System.nanoTime() - t0) / 1_000_000).toInt().coerceAtLeast(1)
+                    DpiProbe(total >= DPI_BYTES, ms, total, if (total >= DPI_BYTES) "" else "оборвалось на ${total / 1024} КБ")
+                }
+            }.getOrElse { DpiProbe(false, 0, 0, it.message ?: it.javaClass.simpleName) }
+            if (last.ok) { client.connectionPool.evictAll(); return last }
+        }
+        client.connectionPool.evictAll()
+        return last
     }
 
     const val UA = "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0 Mobile Safari/537.36"

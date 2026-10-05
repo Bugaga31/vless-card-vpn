@@ -10,6 +10,7 @@ class VlessApplication : Application() {
         super.onCreate()
         Store.init(this)
         Actions.init(this)
+        com.vlesscardvpn.core.Tester.installAuthenticator()
         Thread({ runCatching { XrayCore.init(this) } }, "xray-init").start()
     }
 }

@@ -31,7 +31,8 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
     val mode = app.settings.mode
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
         Text("VLESS Card", fontSize = 26.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onBackground)
-        Text("${BuildConfig.VERSION_NAME} · Xray · SOCKS 127.0.0.1:${app.settings.socksPort}", fontSize = 12.sp, color = Color.Gray)
+        Text("${BuildConfig.VERSION_NAME} · Xray · " + if (app.settings.stealthSocks) "прокси скрыт (случайный порт + пароль)" else "SOCKS 127.0.0.1:${app.settings.socksPort}",
+            fontSize = 12.sp, color = Color.Gray)
         Spacer(Modifier.height(16.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Mode.values().forEach { m ->
@@ -44,8 +45,8 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
         }
         Text(when (mode) {
             Mode.SERVERS -> "Весь трафик через выбранные серверы (запросы распределяются между ними)"
-            Mode.BYEDPI -> "Без сервера: обход замедления встроенным ByeDPI (YouTube, Discord и т.п.)"
-            Mode.HYBRID -> "YouTube/Discord/Telegram — через ByeDPI, остальное — через серверы"
+            Mode.BYEDPI -> "Без сервера: обход DPI встроенными ByeDPI/zapret (YouTube, Discord и т.п.). Не помогает от блокировки по IP"
+            Mode.HYBRID -> "YouTube/Discord/Telegram — через обход DPI, остальное — через серверы"
         }, fontSize = 13.sp, color = Color.Gray, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 6.dp))
         Spacer(Modifier.height(28.dp))
 
@@ -77,6 +78,31 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
                         sel.isEmpty() -> "Всего ${app.servers.size}. Нажмите «Проверить» на вкладке «Серверы»."
                         else -> sel.take(3).joinToString { it.name } + if (sel.size > 3) " и ещё ${sel.size - 3}" else ""
                     }, fontSize = 13.sp, color = Color.Gray)
+                }
+            }
+        }
+        if (mode != Mode.SERVERS) {
+            Spacer(Modifier.height(10.dp))
+            OutlinedButton(onClick = { Actions.findDpi() }, enabled = !progress.running, modifier = Modifier.fillMaxWidth()) { Text("Подобрать обход DPI для этой сети") }
+        }
+        Spacer(Modifier.height(12.dp))
+        val report by Actions.netReport.collectAsState()
+        Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+            Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("Что с сетью?", fontWeight = FontWeight.SemiBold)
+                if (report.verdict.isEmpty()) Text("Проверю, режут ли YouTube (DPI) и не включены ли белые списки", fontSize = 13.sp, color = Color.Gray)
+                else {
+                    Text(report.verdict, fontSize = 14.sp, color = when (report.kind) { Actions.Kind.OPEN -> Good; Actions.Kind.OFFLINE -> Bad; else -> Warn })
+                    Text(report.details, fontSize = 12.sp, color = Color.Gray)
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(onClick = { Actions.diagnoseNetwork() }, enabled = !progress.running) { Text("Проверить сеть") }
+                    when (report.kind) {
+                        Actions.Kind.WHITELIST -> Button(onClick = { Store.update { it.copy(settings = it.settings.copy(mode = Mode.SERVERS)) }; Actions.whitelistServers() },
+                            enabled = !progress.running) { Text("Серверы для белых списков") }
+                        Actions.Kind.DPI -> Button(onClick = { Actions.findDpi() }, enabled = !progress.running) { Text("Подобрать обход") }
+                        else -> {}
+                    }
                 }
             }
         }

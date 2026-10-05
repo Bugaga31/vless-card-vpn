@@ -54,7 +54,17 @@ class ConfigTest {
     }
 
     @Test fun maskCatalog() {
-        assertTrue(Masks.ALL.size >= 150)
+        assertEquals(315, Masks.ALL.size)
+        assertEquals(147, Masks.ALL.count { it.viaByeDpi && it.dpi != Masks.CURRENT_DPI })
+        val r = LinkParser.parse(reality)!!
+        val ws = LinkParser.parse(links[1])!!
+        val m = listOf(r to Masks.byId("chrome.d:BYEDPI#VCARD_CASCADE"), ws to Masks.byId("firefox.d:TPWS#VCARD_SHRED"), ws to Masks.byId("edge.h2.b"))
+        val c = XrayConfigBuilder.vpnConfig(m, Settings(), 1080, dpiPorts = mapOf("BYEDPI#VCARD_CASCADE" to 1101))
+        assertTrue(c.contains("\"dialerProxy\": \"dpi-BYEDPI_VCARD_CASCADE\""))
+        assertTrue(c.contains("\"tag\": \"dpi-BYEDPI_VCARD_CASCADE\""))
+        // zapret engine not running → that mask falls back to the current strategy
+        assertEquals(2, Regex("\"dialerProxy\": \"byedpi\"").findAll(c).count())
+        dump("vpn-fixed-dpi", c)
         assertEquals(Masks.ALL.size, Masks.ALL.map { it.id }.toSet().size)
         assertEquals(Masks.ALL.size, Masks.searchOrder(true).size)
         assertTrue(Masks.searchOrder(false).none { it.viaByeDpi })
@@ -79,6 +89,58 @@ class ConfigTest {
         dump("test", XrayConfigBuilder.testConfig(variants, variants.indices.map { 20000 + it }, 1080))
     }
 
+    @Test fun stealthSocksMuxDnsAndLeaks() {
+        val servers = links.mapNotNull { LinkParser.parse(it) }
+        val st = Settings(mux = true, blockStun = true, ruDirect = true, ruDns = true, mode = Mode.HYBRID)
+        val auth = com.vlesscardvpn.xray.SocksAuth(34567, "u1", "p1")
+        val c = JSONObject(XrayConfigBuilder.vpnConfig(servers.map { it to null }, st, 1080, auth))
+        val inb = c.getJSONArray("inbounds").getJSONObject(0)
+        assertEquals(34567, inb.getInt("port"))
+        val ins = inb.getJSONObject("settings")
+        assertEquals("password", ins.getString("auth"))
+        assertEquals("u1", ins.getJSONArray("accounts").getJSONObject(0).getString("user"))
+        val outs = c.getJSONArray("outbounds")
+        val byTag = (0 until outs.length()).map { outs.getJSONObject(it) }
+        // Vision (reality) and XHTTP must not get mux; WS/gRPC/Trojan do.
+        assertFalse(byTag[0].has("mux")); assertTrue(byTag[1].has("mux")); assertFalse(byTag[2].has("mux"))
+        val dns = c.getJSONObject("dns").getJSONArray("servers")
+        assertEquals("77.88.8.8", dns.getJSONObject(0).getString("address"))
+        val rules = c.getJSONObject("routing").getJSONArray("rules").toString()
+        assertTrue(rules.contains("3478,5349,19302-19309"))
+        assertTrue(rules.contains("\"port\":\"443\""))
+        dump("vpn-stealth", c.toString())
+        dump("vpn-byedpi-auth", XrayConfigBuilder.vpnConfig(emptyList(), Settings(mode = Mode.BYEDPI), 1080, auth))
+    }
+
+    @Test fun dpiStrategies() {
+        val all = com.vlesscardvpn.core.DpiStrategies.BUILT_IN
+        assertEquals(21, all.size)
+        assertEquals(all.size, all.map { it.id }.toSet().size)
+        assertEquals(5, all.count { it.own })
+        all.forEach { s ->
+            val argv = s.argv(23456, "vk.com")
+            assertFalse(s.id, argv.any { "{sni}" in it || "{mask_pool}" in it })
+            if (s.engine == com.vlesscardvpn.core.DpiEngine.TPWS) assertTrue(argv.contains("--bind-addr=127.0.0.1"))
+            else assertEquals(listOf("--ip", "127.0.0.1", "--port", "23456"), argv.take(4))
+        }
+        val cascade = com.vlesscardvpn.core.DpiStrategies.CASCADE.argv(23456, "vk.com")
+        assertTrue(cascade.windowed(2).contains(listOf("--fake-sni", "vk.com")))
+        assertTrue(cascade.windowed(2).contains(listOf("--fake-sni", "gosuslugi.ru")))
+        val net = "Моб.: Beeline"
+        val s0 = Settings()
+        assertEquals(com.vlesscardvpn.core.DpiStrategies.CUSTOM_ID, com.vlesscardvpn.core.DpiStrategies.resolve(s0, net).id)
+        val s1 = s0.copy(dpiRemembered = mapOf(net to "TPWS#SPLIT_DISORDER", "*" to "BYEDPI#DISORDER"))
+        assertEquals("TPWS#SPLIT_DISORDER", com.vlesscardvpn.core.DpiStrategies.resolve(s1, net).id)
+        assertEquals("BYEDPI#DISORDER", com.vlesscardvpn.core.DpiStrategies.resolve(s1, "Wi-Fi").id)
+        assertEquals("BYEDPI#VCARD_SHRED", com.vlesscardvpn.core.DpiStrategies.resolve(s1.copy(dpiStrategy = "BYEDPI#VCARD_SHRED"), net).id)
+        val plan = com.vlesscardvpn.core.DpiStrategies.plan(s1, net, tpwsAvailable = false)
+        assertTrue(plan.none { it.engine == com.vlesscardvpn.core.DpiEngine.TPWS })
+        assertEquals(com.vlesscardvpn.core.DpiStrategies.CUSTOM_ID, plan.first().id)
+        val rt = Settings.fromJson(s1.copy(apps = listOf("ru.sberbankmobile"), stealthSocks = false, disguise = "calc").toJson())
+        assertEquals(s1.dpiRemembered, rt.dpiRemembered); assertEquals(listOf("ru.sberbankmobile"), rt.apps)
+        assertFalse(rt.stealthSocks); assertEquals("calc", rt.disguise)
+    }
+
     @Test fun fragmentMaskGoesToFinalmask() {
         val s = LinkParser.parse(reality)!!
         val o = XrayConfigBuilder.outbound(s, "p", Masks.byId("safari.p3.b"))
@@ -95,7 +157,12 @@ class ConfigTest {
         val f = System.getenv("XRAY_LOCAL_LINKS") ?: return
         val servers = File(f).readLines().mapNotNull { LinkParser.parse(it) }
         val variants = servers.flatMap { s -> (listOf<com.vlesscardvpn.xray.Mask?>(null) + Masks.ALL).map { s to it } }
-        dump("local-matrix", XrayConfigBuilder.testConfig(variants, variants.indices.map { 30000 + it }, 1080))
+        // Fixed DPI strategies in front of the server: one host engine per strategy on 1100+i (tools/masks-matrix-ci.sh starts them).
+        val dpiPorts = com.vlesscardvpn.core.DpiStrategies.BUILT_IN.mapIndexed { i, st -> st.id to 1100 + i }.toMap()
+        File(System.getenv("XRAY_CONFIG_DUMP"), "dpi-engines.txt").writeText(com.vlesscardvpn.core.DpiStrategies.BUILT_IN.mapIndexed { i, st ->
+            "${st.engine.name} " + st.argv(1100 + i, "ya.ru").joinToString(" ")
+        }.joinToString("\n"))
+        dump("local-matrix", XrayConfigBuilder.testConfig(variants, variants.indices.map { 30000 + it }, 1080, dpiPorts))
         File(System.getenv("XRAY_CONFIG_DUMP"), "local-matrix.txt").writeText(variants.mapIndexed { i, (s, m) -> "${30000 + i} ${s.name} ${m?.id ?: "none"}" }.joinToString("\n"))
     }
 

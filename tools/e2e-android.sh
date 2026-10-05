@@ -53,6 +53,9 @@ run_case() { # $1 name, $2 state
   echo "app: $C"
   echo "$C" | grep -q "check ok=true" || fail "$1: in-app check through 127.0.0.1:10808 failed"
   R=$(probe $1); okprobe "$R" || fail "$1: probe app traffic through VPN failed"
+  S=$(adb logcat -d -s E2E:I | grep "socks port=" | tail -1); echo "app: $S"
+  echo "$S" | grep -q "auth=true" || fail "$1: local SOCKS is not password-protected (stealth)"
+  adb shell cat /proc/net/tcp /proc/net/tcp6 | awk '$4=="0A"{print $2}' | grep -qi ":2A38$" && fail "$1: something listens on 10808 (proxy must be hidden)"
 }
 
 : > $W/access.log
@@ -71,6 +74,28 @@ for p in 8443 8444 8447; do
   c=$(grep -c "email: u$p" $W/access.log); echo "multi: server :$p accepted $c"
   [ "$c" -gt 0 ] || fail "multi: round-robin never used server :$p"
 done
+
+: > $W/access.log
+run_case tpws tpws.json
+adb logcat -d -s E2E:I | grep "socks port=" | tail -1 | grep -q "dpi=zapret" || fail "tpws: zapret strategy was not used"
+
+: > $W/access.log
+run_case ownmask ownmask.json
+adb logcat -d -s E2E:I | grep "socks port=" | tail -1 | grep -q "VCARD_CASCADE" || fail "ownmask: own cascade engine not started"
+for p in 8443 8444; do
+  c=$(grep -c "email: u$p" $W/access.log); echo "ownmask: server :$p accepted $c"
+  [ "$c" -gt 0 ] || fail "ownmask: server :$p not reached through own masking"
+done
+
+echo "=== DPI strategy search (all engines start and carry HTTPS)"
+adb shell am start -n $PKG/.MainActivity --ez e2e_disconnect true >/dev/null; sleep 2
+adb logcat -c
+adb shell am start -n $PKG/.MainActivity --ez e2e_dpi true >/dev/null
+D=$(waitlog "action\[Подбор обхода DPI\]" 240) || fail "dpi search: no result"
+echo "dpi: $D"
+N=$(echo "$D" | sed -n 's/.*работают \([0-9]*\) из \([0-9]*\).*/\1/p')
+[ "${N:-0}" -ge 15 ] || fail "dpi search: expected at least 15 working strategies (no DPI on the emulator)"
+echo "$D" | grep -q "zapret: [1-9]" || fail "dpi search: no zapret strategy worked"
 
 echo "=== in-app tester (multi-inbound Xray instance)"
 adb shell am start -n $PKG/.MainActivity --ez e2e_disconnect true >/dev/null; sleep 2
