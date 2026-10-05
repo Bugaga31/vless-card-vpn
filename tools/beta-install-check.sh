@@ -28,11 +28,18 @@ adb exec-out screencap -p > screen.png
 adb logcat -d > logcat.txt
 PID=$(adb shell pidof $PKG | tr -d '\r')
 echo "pid: $PID"
+# The emulator runs ARM code through ndk_translation, which lacks the arm64 CNTVCT_EL0 timer read used by the
+# Go runtime inside Xray-core (libgojni). Real ARM phones support it. Treat exactly that as "can't test here".
+if grep -q "ndk_translation: Undefined instruction 0xd53be0" logcat.txt && grep -E "Fatal signal 4 \(SIGILL\)" logcat.txt | grep -q "xray"; then
+  echo "LAUNCH SKIPPED: ARM translator cannot run Go/Xray (SIGILL on CNTVCT_EL0) - emulator limitation, not an app bug"
+  grep -E "FATAL EXCEPTION" -A25 logcat.txt | grep -q "$PKG" && { grep -E "FATAL EXCEPTION" -A25 logcat.txt | head -40; exit 1; }
+else
 if grep -E "FATAL EXCEPTION|Fatal signal" -A20 logcat.txt | grep -q "$PKG"; then grep -E "FATAL EXCEPTION|Fatal signal" -A25 logcat.txt | head -60; exit 1; fi
 test -n "$PID" || exit 1
 adb shell dumpsys activity activities | grep -E "mResumedActivity|topResumedActivity" | head -2
 adb shell dumpsys activity activities | grep -qE "(mResumedActivity|topResumedActivity).*$PKG" || exit 1
 echo "LAUNCH OK"
+fi
 echo "== upgrade over published Beta 1.0.52 (same key, data kept)"
 adb uninstall $PKG >/dev/null 2>&1
 if curl -fsL -o prev.apk https://github.com/Bugaga31/vless-card-vpn/releases/download/beta-v1.0.52/VLESS-Card-Beta-1.0.52.apk; then
