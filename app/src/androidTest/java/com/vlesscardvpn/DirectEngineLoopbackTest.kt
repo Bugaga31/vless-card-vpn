@@ -37,6 +37,11 @@ class DirectEngineLoopbackTest {
         assertTrue("DIRECT_RELAY " + failed.joinToString("; ").take(1500), failed.isEmpty())
     }
     @Test fun vcardStealthRelaysIntact() = exercise(DirectStrategies.VCARD_STEALTH)
+    /** Own masking family incl. the masked cascade (its fakes only fire after a DPI failure, never here). */
+    @Test fun vcardOwnFamilyRelaysIntact() {
+        val failed = DirectStrategies.OWN.mapNotNull { s -> runCatching { exercise(s) }.exceptionOrNull()?.let { "${s.id}: ${it.message}" } }
+        assertTrue("VCARD_RELAY " + failed.joinToString("; ").take(1500), failed.isEmpty())
+    }
     @Test fun tpwsRestartOnSamePort() = runBlocking {
         val runner = ByeDpiRunner(context)
         val port = ServerSocket(0, 1, InetAddress.getByName("127.0.0.1")).use { it.localPort }
@@ -47,6 +52,9 @@ class DirectEngineLoopbackTest {
             assertEquals(port, runner.startDirect(DirectStrategies.BUILT_IN.first(), port))
         } finally { runner.close() }
     }
+
+    /** Minimal ServerHello-shaped reply: ssl_err detection (--auto=ssl_err) expects a TLS handshake back, not text. */
+    private val SERVER_HELLO = byteArrayOf(0x16, 3, 3, 0, 4, 2, 0, 0, 0)
 
     private fun clientHello(): ByteArray {
         val engine = SSLContext.getInstance("TLS").apply { init(null, null, null) }.createSSLEngine("www.youtube.com", 443)
@@ -87,7 +95,7 @@ class DirectEngineLoopbackTest {
                             val r = input.read(chunk); if (r < 0) break
                             buf.write(chunk, 0, r); payload = recordPayload(buf.toByteArray())
                         }
-                        s.getOutputStream().apply { write("PONG".toByteArray()); flush() }
+                        s.getOutputStream().apply { write(SERVER_HELLO); flush() }
                         payload
                     }
                 }
@@ -102,8 +110,8 @@ class DirectEngineLoopbackTest {
                     o.write(hello); o.flush()
                     val got = received.get(12, TimeUnit.SECONDS)
                     check(got != null && got.contentEquals(expected)) { "handshake altered: ${got?.size}/${expected.size}" }
-                    val pong = ByteArray(4).also { b -> i.readFully(b) }
-                    check(String(pong) == "PONG") { "no reply" }
+                    val reply2 = ByteArray(SERVER_HELLO.size).also { b -> i.readFully(b) }
+                    check(reply2.contentEquals(SERVER_HELLO)) { "no reply" }
                 }
             }
         } finally { runner.close(); pool.shutdownNow() }
