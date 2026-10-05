@@ -54,7 +54,17 @@ class ConfigTest {
     }
 
     @Test fun maskCatalog() {
-        assertTrue(Masks.ALL.size >= 150)
+        assertEquals(315, Masks.ALL.size)
+        assertEquals(147, Masks.ALL.count { it.viaByeDpi && it.dpi != Masks.CURRENT_DPI })
+        val r = LinkParser.parse(reality)!!
+        val ws = LinkParser.parse(links[1])!!
+        val m = listOf(r to Masks.byId("chrome.d:BYEDPI#VCARD_CASCADE"), ws to Masks.byId("firefox.d:TPWS#VCARD_SHRED"), ws to Masks.byId("edge.h2.b"))
+        val c = XrayConfigBuilder.vpnConfig(m, Settings(), 1080, dpiPorts = mapOf("BYEDPI#VCARD_CASCADE" to 1101))
+        assertTrue(c.contains("\"dialerProxy\": \"dpi-BYEDPI_VCARD_CASCADE\""))
+        assertTrue(c.contains("\"tag\": \"dpi-BYEDPI_VCARD_CASCADE\""))
+        // zapret engine not running → that mask falls back to the current strategy
+        assertEquals(2, Regex("\"dialerProxy\": \"byedpi\"").findAll(c).count())
+        dump("vpn-fixed-dpi", c)
         assertEquals(Masks.ALL.size, Masks.ALL.map { it.id }.toSet().size)
         assertEquals(Masks.ALL.size, Masks.searchOrder(true).size)
         assertTrue(Masks.searchOrder(false).none { it.viaByeDpi })
@@ -147,7 +157,12 @@ class ConfigTest {
         val f = System.getenv("XRAY_LOCAL_LINKS") ?: return
         val servers = File(f).readLines().mapNotNull { LinkParser.parse(it) }
         val variants = servers.flatMap { s -> (listOf<com.vlesscardvpn.xray.Mask?>(null) + Masks.ALL).map { s to it } }
-        dump("local-matrix", XrayConfigBuilder.testConfig(variants, variants.indices.map { 30000 + it }, 1080))
+        // Fixed DPI strategies in front of the server: one host engine per strategy on 1100+i (tools/masks-matrix-ci.sh starts them).
+        val dpiPorts = com.vlesscardvpn.core.DpiStrategies.BUILT_IN.mapIndexed { i, st -> st.id to 1100 + i }.toMap()
+        File(System.getenv("XRAY_CONFIG_DUMP"), "dpi-engines.txt").writeText(com.vlesscardvpn.core.DpiStrategies.BUILT_IN.mapIndexed { i, st ->
+            "${st.engine.name} " + st.argv(1100 + i, "ya.ru").joinToString(" ")
+        }.joinToString("\n"))
+        dump("local-matrix", XrayConfigBuilder.testConfig(variants, variants.indices.map { 30000 + it }, 1080, dpiPorts))
         File(System.getenv("XRAY_CONFIG_DUMP"), "local-matrix.txt").writeText(variants.mapIndexed { i, (s, m) -> "${30000 + i} ${s.name} ${m?.id ?: "none"}" }.joinToString("\n"))
     }
 

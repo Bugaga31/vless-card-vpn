@@ -109,15 +109,14 @@ object Actions {
         }
     }
 
-    private suspend fun byeDpiPortForTests(need: Boolean): Pair<DpiProxy?, Int?> {
-        if (!need) return null to null
-        val running = Tunnel.byeDpiPort
-        if (running != null) return null to running
+    /** Engines needed to test these masks: reuses the VPN's current one when connected. */
+    private suspend fun dpiForTests(masks: Collection<Mask?>): Pair<DpiSet, Int?> {
         val st = Store.state.value.settings
-        val strategy = DpiStrategies.resolve(st, Net.key(app))
-        val b = DpiProxy(app)
-        if (!b.available(strategy.engine)) return null to null
-        return runCatching { b to b.start(strategy, st.byeDpiSni, allowLocal = com.vlesscardvpn.BuildConfig.DEBUG) }.getOrElse { b.close(); null to null }
+        val running = Tunnel.byeDpiPort
+        val needCur = running == null && masks.any { it?.dpi == Masks.CURRENT_DPI }
+        val set = DpiSet(app)
+        runCatching { set.start(st, Net.key(app), needCur, Masks.strategies(masks) - Masks.CURRENT_DPI, com.vlesscardvpn.BuildConfig.DEBUG) }
+        return set to (running ?: set.currentPort)
     }
 
     /** TCP ping of all servers, then real test of the [realLimit] fastest. */
@@ -144,10 +143,10 @@ object Actions {
         val pinned = pinCertificates(servers)
         val st = Store.state.value
         val variants = pinned.map { it to (Masks.byId(st.state(it).maskId)) }
-        val (own, port) = byeDpiPortForTests(variants.any { it.second?.viaByeDpi == true })
+        val (own, port) = dpiForTests(variants.map { it.second })
         val done = AtomicInteger(); val ok = AtomicInteger()
         try {
-            Tester.real(variants, st.settings.testUrl, port) { i, p ->
+            Tester.real(variants, st.settings.testUrl, port, own.ports) { i, p ->
                 val s = variants[i].first
                 if (p.works) ok.incrementAndGet()
                 Store.setState(s.id) {
@@ -161,19 +160,25 @@ object Actions {
     }
 
     /** For each server, tries masks in [Masks.searchOrder] and keeps the fastest working one. */
-    fun findMasks(servers: List<Server>, perServer: Int = 32) = launch("Подбор маскировки") {
+    fun findMasks(servers: List<Server>, perServer: Int = 48) = launch("Подбор маскировки") {
         if (servers.isEmpty()) return@launch "Выберите серверы"
         val pinned = pinCertificates(servers)
-        val (own, port) = byeDpiPortForTests(true)
-        val variants: List<Pair<Server, Mask?>> = pinned.flatMap { s -> Masks.searchOrder(port != null, s).take(perServer).map { s to it } }
+        val probe = DpiProxy(app)
+        val dpiOk = probe.available(DpiEngine.BYEDPI)
+        val tpwsOk = probe.available(DpiEngine.TPWS)
+        val order = { s: Server -> Masks.searchOrder(dpiOk, s).filter { tpwsOk || !it.dpi.startsWith("TPWS#") }.take(perServer) }
+        val variants: List<Pair<Server, Mask?>> = pinned.flatMap { s -> order(s).map { s to it } }
+        val (own, port) = dpiForTests(variants.map { it.second })
         val best = HashMap<String, Pair<Mask, Probe>>()
+        val good = HashMap<String, MutableList<Pair<Mask, Int>>>()
         val done = AtomicInteger()
         try {
-            Tester.real(variants, Store.state.value.settings.testUrl, port, youtube = false, batch = 48, parallel = 8) { i, p ->
+            Tester.real(variants, Store.state.value.settings.testUrl, port, own.ports, youtube = false, batch = 48, parallel = 8) { i, p ->
                 val (s, m) = variants[i]
                 synchronized(best) {
                     val cur = best[s.id]
                     if (p.works && m != null && (cur == null || p.realMs < cur.second.realMs)) best[s.id] = m to p
+                    if (p.works && m != null) good.getOrPut(s.id) { mutableListOf() } += m to p.realMs
                 }
                 step(done.incrementAndGet(), variants.size)
             }
@@ -182,7 +187,8 @@ object Actions {
             val b = best[s.id]
             Store.setState(s.id) {
                 if (b == null) it.copy(realMs = 0, checkedAt = System.currentTimeMillis())
-                else it.copy(maskId = b.first.id, realMs = b.second.realMs, bigOk = b.second.bigOk, checkedAt = System.currentTimeMillis())
+                else it.copy(maskId = b.first.id, realMs = b.second.realMs, bigOk = b.second.bigOk, checkedAt = System.currentTimeMillis(),
+                    goodMasks = good[s.id].orEmpty().sortedBy { g -> g.second }.map { g -> g.first.id }.filter { g -> g != b.first.id }.take(6))
             }
         }
         "Маскировка найдена для ${best.size} из ${pinned.size} серверов (перебрано ${variants.size} вариантов)"

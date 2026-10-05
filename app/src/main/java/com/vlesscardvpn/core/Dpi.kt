@@ -169,3 +169,33 @@ class DpiProxy(private val context: Context) : AutoCloseable {
         }
     }
 }
+
+/**
+ * The current strategy (for ByeDPI/Hybrid modes and ".b" masks) plus one engine per fixed strategy used by
+ * server masks ("Chrome + VLESS Card · каскад" etc.). Engines that fail to start are skipped: their masks
+ * fall back to the current strategy (see XrayConfigBuilder.resolveMask).
+ */
+class DpiSet(private val context: Context) : AutoCloseable {
+    private val procs = mutableListOf<DpiProxy>()
+    var current: DpiStrategy? = null; private set
+    var currentPort: Int? = null; private set
+    val ports = LinkedHashMap<String, Int>()
+
+    suspend fun start(s: Settings, network: String, needCurrent: Boolean, fixed: Set<String>, allowLocal: Boolean): DpiSet {
+        if (needCurrent) {
+            val cur = DpiStrategies.resolve(s, network)
+            val p = DpiProxy(context); procs += p
+            currentPort = p.start(cur, s.byeDpiSni, allowLocal); current = cur
+        }
+        for (id in fixed) {
+            if (id == current?.id) { currentPort?.let { ports[id] = it }; continue }
+            val st = DpiStrategies.byId(id, s) ?: continue
+            val p = DpiProxy(context)
+            if (!p.available(st.engine)) continue
+            runCatching { ports[id] = p.start(st, s.byeDpiSni, allowLocal); procs += p }
+        }
+        return this
+    }
+
+    override fun close() { procs.forEach { it.close() }; procs.clear(); ports.clear(); currentPort = null; current = null }
+}

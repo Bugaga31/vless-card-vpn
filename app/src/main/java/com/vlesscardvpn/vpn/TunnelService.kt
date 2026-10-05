@@ -16,7 +16,7 @@ import android.os.ParcelFileDescriptor
 import android.util.Log
 import com.vlesscardvpn.MainActivity
 import com.vlesscardvpn.core.Actions
-import com.vlesscardvpn.core.DpiProxy
+import com.vlesscardvpn.core.DpiSet
 import com.vlesscardvpn.core.DpiStrategies
 import com.vlesscardvpn.core.Net
 import com.vlesscardvpn.BuildConfig
@@ -69,7 +69,7 @@ class TunnelService : VpnService() {
     private val lock = Mutex()
     private var tun: ParcelFileDescriptor? = null
     private var core: XrayCore.Instance? = null
-    private var byeDpi: DpiProxy? = null
+    private var dpi: DpiSet? = null
     private var checkJob: Job? = null
     private var netCallback: ConnectivityManager.NetworkCallback? = null
 
@@ -107,25 +107,27 @@ class TunnelService : VpnService() {
             if (settings.mode != Mode.BYEDPI && selected.isEmpty())
                 error("Нет выбранных серверов. Откройте «Серверы», нажмите «Проверить» и отметьте рабочие.")
             selected = Actions.pinCertificates(selected)
-            val withMasks = selected.map { it to Masks.byId(st.state(it).maskId) }
-            val needByeDpi = settings.mode != Mode.SERVERS || withMasks.any { it.second?.viaByeDpi == true }
-            var bdPort: Int? = null
-            var dpiLabel = ""
-            if (needByeDpi) {
-                val strategy = DpiStrategies.resolve(settings, Net.key(this))
-                val b = DpiProxy(this); byeDpi = b
-                bdPort = b.start(strategy, settings.byeDpiSni, allowLocal = BuildConfig.DEBUG)
-                Tunnel.byeDpiPort = bdPort
-                dpiLabel = strategy.label
+            val rotate = settings.rotateMasks
+            val withMasks = selected.map { srv ->
+                val ss = st.state(srv)
+                val id = if (rotate && ss.goodMasks.isNotEmpty()) (ss.goodMasks + ss.maskId).filter { it.isNotEmpty() }.random() else ss.maskId
+                srv to Masks.byId(id)
             }
+            val needCurrent = settings.mode != Mode.SERVERS || withMasks.any { it.second?.dpi == Masks.CURRENT_DPI }
+            val fixed = if (settings.mode == Mode.BYEDPI) emptySet() else Masks.strategies(withMasks.map { it.second }) - Masks.CURRENT_DPI
+            val set = DpiSet(this); dpi = set
+            set.start(settings, Net.key(this), needCurrent, fixed, allowLocal = BuildConfig.DEBUG)
+            val bdPort = set.currentPort
+            Tunnel.byeDpiPort = bdPort
+            val dpiLabel = set.current?.label.orEmpty()
             Tunnel.dpiLabel = dpiLabel
             val socks = if (settings.stealthSocks) SocksAuth(randomPort(), randomToken(), randomToken()) else SocksAuth(settings.socksPort)
-            val config = XrayConfigBuilder.vpnConfig(withMasks, settings, bdPort, socks)
+            val config = XrayConfigBuilder.vpnConfig(withMasks, settings, bdPort, socks, set.ports)
             val c = XrayCore.Instance("vpn"); core = c
             c.start(config)
             check(c.running) { "Xray не запустился: ${c.lastStatus}" }
             Tunnel.socks = socks
-            Log.i("E2E", "socks port=${socks.port} auth=${socks.auth} dpi=${dpiLabel.ifEmpty { "-" }}")
+            Log.i("E2E", "socks port=${socks.port} auth=${socks.auth} dpi=${dpiLabel.ifEmpty { "-" }} fixed=${set.ports.keys}")
 
             val b = Builder().setSession("VLESS Card").setMtu(MTU)
                 .addAddress(IPV4, 30).addRoute("0.0.0.0", 0)
@@ -187,8 +189,8 @@ class TunnelService : VpnService() {
                 if (!changed) return
                 // Another network (Wi-Fi ↔ mobile): its own DPI strategy may be remembered — restart with it.
                 val st = Store.state.value.settings
-                val dpi = byeDpi?.strategy
-                if (dpi != null && DpiStrategies.resolve(st, Net.key(this@TunnelService)).id != dpi.id) {
+                val cur = dpi?.current
+                if (cur != null && DpiStrategies.resolve(st, Net.key(this@TunnelService)).id != cur.id) {
                     scope.launch { delay(1500); lock.withLock { connect() } }
                 } else verifySoon(3000)
             }
@@ -202,7 +204,7 @@ class TunnelService : VpnService() {
         netCallback = null
         TProxyService.stop()
         core?.stop(); core = null
-        byeDpi?.close(); byeDpi = null; Tunnel.byeDpiPort = null; Tunnel.socks = null
+        dpi?.close(); dpi = null; Tunnel.byeDpiPort = null; Tunnel.socks = null
         runCatching { tun?.close() }; tun = null
         if (error != null) {
             Tunnel.status.value = if (error.isEmpty()) Tunnel.Status() else Tunnel.Status(Tunnel.State.ERROR, error)

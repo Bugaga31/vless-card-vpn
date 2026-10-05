@@ -6,7 +6,8 @@ package com.vlesscardvpn.xray
  *  - uTLS fingerprint of the ClientHello (JA3/JA4 looks like a real browser);
  *  - Xray finalmask "fragment": the first TLS record / first packets are split into small TCP segments with
  *    delays so the DPI cannot read SNI from one packet;
- *  - "ByeDPI front": the TCP connection to the server goes through the built-in ByeDPI (desync, fake packets).
+ *  - DPI front: the TCP connection to the server goes through a local desync engine — the current strategy
+ *    (".b") or a fixed one ("fp.d:<id>"): own VLESS Card cascade / SNI shredder / fake SNI ya.ru, zapret, ByeDPI.
  */
 data class Mask(
     val id: String,
@@ -16,10 +17,14 @@ data class Mask(
     val length: String = "",
     val delay: String = "",
     val maxSplit: String = "",
-    val viaByeDpi: Boolean = false,
-)
+    /** "" = direct, [Masks.CURRENT_DPI] = the strategy chosen for this network, else a DpiStrategies id. */
+    val dpi: String = "",
+) {
+    val viaByeDpi: Boolean get() = dpi.isNotEmpty()
+}
 
 object Masks {
+    const val CURRENT_DPI = "cur"
     val FINGERPRINTS = listOf("chrome", "firefox", "safari", "edge", "ios", "android", "qq")
     private val FP_TITLES = mapOf("chrome" to "Chrome", "firefox" to "Firefox", "safari" to "Safari", "edge" to "Edge",
         "ios" to "iPhone", "android" to "Android", "qq" to "QQ")
@@ -31,6 +36,7 @@ object Masks {
 
     fun compatible(m: Mask, s: com.vlesscardvpn.model.Server): Boolean = when {
         m.viaByeDpi && !s.isTcpBased -> false
+        m.viaByeDpi && m.dpi != CURRENT_DPI && m.packets.isNotEmpty() -> false
         m.packets.isNotEmpty() && !s.isTcpBased -> false
         s.security == "reality" -> m.fingerprint in REALITY_FPS
         s.network == "grpc" && s.security == "tls" -> m.fingerprint != "android"
@@ -55,13 +61,18 @@ object Masks {
         listOf("p5", "дробление 1-2 пакетов, долгая пауза", "1-2", "20-60", "30-60", "4"),
     )
 
-    /** All combinations: 7 fingerprints × 12 fragment modes × (direct | via ByeDPI) = 168 masks. */
+    /**
+     * 7 fingerprints × 12 fragment modes × (direct | via the current DPI strategy) = 168,
+     * plus 7 fingerprints × 21 fixed strategies (5 own VLESS Card, 7 zapret, 9 ByeDPI) = 147. Total 315.
+     */
     val ALL: List<Mask> = buildList {
         for (via in listOf(false, true)) for (f in FRAGMENTS) for (fp in FINGERPRINTS) {
             val id = "${fp}.${f[0]}" + if (via) ".b" else ""
-            val title = FP_TITLES.getValue(fp) + ", " + f[1] + if (via) " + ByeDPI" else ""
-            add(Mask(id, title, fp, f[2], f[3], f[4], f[5], via))
+            val title = FP_TITLES.getValue(fp) + ", " + f[1] + if (via) " + обход DPI" else ""
+            add(Mask(id, title, fp, f[2], f[3], f[4], f[5], if (via) CURRENT_DPI else ""))
         }
+        for (st in com.vlesscardvpn.core.DpiStrategies.BUILT_IN) for (fp in FINGERPRINTS)
+            add(Mask("$fp.d:${st.id}", FP_TITLES.getValue(fp) + " + " + st.label, fp, dpi = st.id))
     }
     private val byId = ALL.associateBy { it.id }
     val DEFAULT: Mask = byId.getValue("chrome.n")
@@ -72,10 +83,17 @@ object Masks {
      * Order in which "Подобрать маскировку" tries masks: most likely to pass Russian TSPU first, then the rest.
      * Covers every fragment mode and every fingerprint early instead of exhausting one dimension.
      */
+    /** Fixed DPI strategy ids used by these masks (each needs its own local engine). */
+    fun strategies(masks: Collection<Mask?>): Set<String> = masks.mapNotNull { it?.dpi }.filter { it.isNotEmpty() }.toSet()
+
     fun searchOrder(byeDpiAvailable: Boolean, server: com.vlesscardvpn.model.Server? = null): List<Mask> {
         val first = listOf("chrome.n", "chrome.h4", "chrome.p2", "firefox.h2", "safari.p3", "edge.h5", "chrome.h1", "ios.p1",
             "android.h3", "firefox.h4", "chrome.n.b", "chrome.h4.b", "firefox.p4", "chrome.p5", "chrome.h6", "qq.h2",
-            "safari.n", "firefox.n", "edge.p2", "ios.h4", "android.p3", "safari.h1", "chrome.p1.b", "firefox.h3.b")
+            "safari.n", "firefox.n", "edge.p2", "ios.h4", "android.p3", "safari.h1", "chrome.p1.b", "firefox.h3.b",
+            // own VLESS Card masking and zapret in front of the server connection
+            "chrome.d:BYEDPI#VCARD_CASCADE", "firefox.d:TPWS#VCARD_SHRED", "chrome.d:BYEDPI#VCARD_SHRED", "safari.d:BYEDPI#VCARD_STEALTH",
+            "chrome.d:BYEDPI#VCARD_RECVER", "chrome.d:TPWS#SPLIT_DISORDER", "firefox.d:TPWS#TLSREC", "chrome.d:BYEDPI#OOB_THEN_DISORDER",
+            "safari.d:TPWS#HOST_DISORDER", "chrome.d:BYEDPI#MULTI_DISORDER", "chrome.d:TPWS#TLSREC_OOB", "firefox.d:BYEDPI#MASK_AUTO_FAKE")
         val ordered = (first.mapNotNull { byId[it] } + ALL).distinct()
         return ordered.filter { (byeDpiAvailable || !it.viaByeDpi) && (server == null || compatible(it, server)) }
     }

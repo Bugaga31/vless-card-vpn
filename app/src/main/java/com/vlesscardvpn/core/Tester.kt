@@ -97,21 +97,21 @@ object Tester {
 
     /** Tests [variants] (server + mask) in parallel through one temporary Xray instance. */
     suspend fun real(
-        variants: List<Pair<Server, Mask?>>, testUrl: String, byeDpiPort: Int?, youtube: Boolean = true,
+        variants: List<Pair<Server, Mask?>>, testUrl: String, byeDpiPort: Int?, dpiPorts: Map<String, Int> = emptyMap(), youtube: Boolean = true,
         batch: Int = 32, parallel: Int = 12, onEach: (Int, Probe) -> Unit,
     ) = mutex.withLock {
         withContext(Dispatchers.IO) {
             variants.chunked(batch).forEachIndexed { chunkNo, chunk ->
                 val ports = freePorts(chunk.size)
                 val core = XrayCore.Instance("test")
-                val started = runCatching { core.start(XrayConfigBuilder.testConfig(chunk, ports, byeDpiPort)) }
+                val started = runCatching { core.start(XrayConfigBuilder.testConfig(chunk, ports, byeDpiPort, dpiPorts)) }
                 if (started.isFailure || !core.running) {
                     // A broken link must not hide the others: fall back to one instance per variant.
                     core.stop()
                     chunk.forEachIndexed { i, v ->
                         val one = XrayCore.Instance("test1")
                         val p = freePorts(1)
-                        val ok = runCatching { one.start(XrayConfigBuilder.testConfig(listOf(v), p, byeDpiPort)) }.isSuccess && one.running
+                        val ok = runCatching { one.start(XrayConfigBuilder.testConfig(listOf(v), p, byeDpiPort, dpiPorts)) }.isSuccess && one.running
                         onEach(chunkNo * batch + i, if (ok) probeSocks(p[0], testUrl, youtube = youtube) else Probe(0, null, null, "конфиг не принят ядром"))
                         one.stop()
                     }

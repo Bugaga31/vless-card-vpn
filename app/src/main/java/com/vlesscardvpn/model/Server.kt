@@ -80,17 +80,21 @@ data class ServerState(
     val checkedAt: Long = 0,
     val okCount: Int = 0,
     val failCount: Int = 0,
+    /** Other masks that passed the last search, fastest first (used by "менять маскировку"). */
+    val goodMasks: List<String> = emptyList(),
 ) {
     val works: Boolean get() = realMs > 0 && bigOk != false
     fun toJson(): JSONObject = JSONObject().apply {
         if (selected) put("sel", true); put("tcp", tcpMs); put("real", realMs); bigOk?.let { put("big", it) }; ytOk?.let { put("yt", it) }
         if (maskId.isNotEmpty()) put("mask", maskId); put("at", checkedAt); put("ok", okCount); put("fail", failCount)
+        if (goodMasks.isNotEmpty()) put("good", org.json.JSONArray(goodMasks))
     }
     companion object {
         fun fromJson(o: JSONObject) = ServerState(
             selected = o.optBoolean("sel"), tcpMs = o.optInt("tcp", -1), realMs = o.optInt("real", -1),
             bigOk = if (o.has("big")) o.optBoolean("big") else null, ytOk = if (o.has("yt")) o.optBoolean("yt") else null,
             maskId = o.optString("mask"), checkedAt = o.optLong("at"), okCount = o.optInt("ok"), failCount = o.optInt("fail"),
+            goodMasks = o.optJSONArray("good")?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: emptyList(),
         )
     }
 }

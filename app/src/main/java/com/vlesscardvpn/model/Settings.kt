@@ -34,6 +34,8 @@ data class Settings(
     val blockStun: Boolean = false,
     val blockQuic: Boolean = false,
     val mux: Boolean = false,
+    /** Each connect picks a random mask among the ones that passed the last search for that server. */
+    val rotateMasks: Boolean = false,
     /** Russian domains resolved by Yandex DNS directly (with RU direct): RU sites see a normal Russian user. */
     val ruDns: Boolean = true,
     /** Package names: excluded from VPN, or (if [onlyApps]) the only ones that use it. */
@@ -47,7 +49,7 @@ data class Settings(
         .put("hybridDomains", JSONArray(hybridDomains)).put("testUrl", testUrl).put("dnsUrl", dnsUrl)
         .put("subscriptions", JSONArray(subscriptions))
         .put("dpiStrategy", dpiStrategy).put("dpiRemembered", JSONObject(dpiRemembered as Map<*, *>))
-        .put("stealthSocks", stealthSocks).put("blockStun", blockStun).put("blockQuic", blockQuic).put("mux", mux)
+        .put("stealthSocks", stealthSocks).put("blockStun", blockStun).put("blockQuic", blockQuic).put("mux", mux).put("rotateMasks", rotateMasks)
         .put("ruDns", ruDns).put("apps", JSONArray(apps)).put("onlyApps", onlyApps)
         .put("quietNotification", quietNotification).put("disguise", disguise)
 
@@ -86,7 +88,7 @@ data class Settings(
                 dpiStrategy = o.optString("dpiStrategy", d.dpiStrategy),
                 dpiRemembered = o.optJSONObject("dpiRemembered")?.let { m -> m.keys().asSequence().associateWith { m.getString(it) } } ?: emptyMap(),
                 stealthSocks = o.optBoolean("stealthSocks", d.stealthSocks), blockStun = o.optBoolean("blockStun", d.blockStun),
-                blockQuic = o.optBoolean("blockQuic", d.blockQuic), mux = o.optBoolean("mux", d.mux), ruDns = o.optBoolean("ruDns", d.ruDns),
+                blockQuic = o.optBoolean("blockQuic", d.blockQuic), mux = o.optBoolean("mux", d.mux), rotateMasks = o.optBoolean("rotateMasks", d.rotateMasks), ruDns = o.optBoolean("ruDns", d.ruDns),
                 apps = list("apps", d.apps), onlyApps = o.optBoolean("onlyApps", d.onlyApps),
                 quietNotification = o.optBoolean("quietNotification", d.quietNotification), disguise = o.optString("disguise", d.disguise),
             )

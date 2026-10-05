@@ -112,13 +112,30 @@ object XrayConfigBuilder {
             fm.put("udp", arr(JSONObject().put("type", "salamander").put("settings", JSONObject().put("password", s.obfsPassword))))
         if (fm.length() > 0) st.put("finalmask", fm)
         val sock = JSONObject().put("tcpKeepAliveInterval", 15)
-        if (mask?.viaByeDpi == true && s.isTcpBased) sock.put("dialerProxy", BYEDPI_TAG)
+        if (mask?.viaByeDpi == true && s.isTcpBased) sock.put("dialerProxy", dpiTag(mask.dpi))
         st.put("sockopt", sock)
         return st
     }
 
-    fun byeDpiOutbound(port: Int): JSONObject = JSONObject().put("tag", BYEDPI_TAG).put("protocol", "socks")
+    fun byeDpiOutbound(port: Int, tag: String = BYEDPI_TAG): JSONObject = JSONObject().put("tag", tag).put("protocol", "socks")
         .put("settings", JSONObject().put("servers", arr(JSONObject().put("address", "127.0.0.1").put("port", port))))
+
+    /** Outbound tag of a local DPI engine: the current strategy is "byedpi", fixed ones "dpi-<id>". */
+    fun dpiTag(dpi: String): String = if (dpi.isEmpty() || dpi == Masks.CURRENT_DPI) BYEDPI_TAG else "dpi-" + dpi.replace(Regex("[^A-Za-z0-9_]"), "_")
+
+    /** Masks whose engine is not running fall back to the current one, or to direct. */
+    private fun resolveMask(m: Mask?, cur: Int?, ports: Map<String, Int>): Mask? = when {
+        m == null || !m.viaByeDpi -> m
+        m.dpi == Masks.CURRENT_DPI -> if (cur != null) m else m.copy(dpi = "")
+        ports.containsKey(m.dpi) -> m
+        cur != null -> m.copy(dpi = Masks.CURRENT_DPI)
+        else -> m.copy(dpi = "")
+    }
+
+    private fun dpiOutbounds(outs: JSONArray, cur: Int?, ports: Map<String, Int>) {
+        if (cur != null) outs.put(byeDpiOutbound(cur))
+        ports.forEach { (id, p) -> outs.put(byeDpiOutbound(p, dpiTag(id))) }
+    }
 
     private fun base(): JSONObject = JSONObject().put("log", JSONObject().put("loglevel", "warning"))
 
@@ -126,7 +143,8 @@ object XrayConfigBuilder {
      * Config for the running VPN: SOCKS inbound 127.0.0.1:[Settings.socksPort] (hev-socks5-tunnel feeds the TUN into it),
      * one outbound per selected server, balancer + observatory across them, DNS via DoH through the tunnel.
      */
-    fun vpnConfig(servers: List<Pair<Server, Mask?>>, settings: Settings, byeDpiPort: Int?, socks: SocksAuth = SocksAuth(settings.socksPort)): String {
+    fun vpnConfig(servers: List<Pair<Server, Mask?>>, settings: Settings, byeDpiPort: Int?, socks: SocksAuth = SocksAuth(settings.socksPort),
+                  dpiPorts: Map<String, Int> = emptyMap()): String {
         require(settings.mode == Mode.BYEDPI || servers.isNotEmpty()) { "Не выбран ни один сервер" }
         require(settings.mode == Mode.SERVERS || byeDpiPort != null) { "ByeDPI не запущен" }
         val c = base()
@@ -138,11 +156,11 @@ object XrayConfigBuilder {
             .put("sniffing", JSONObject().put("enabled", true).put("destOverride", arr("http", "tls", "quic")).put("routeOnly", true))))
         val outs = JSONArray()
         val useServers = settings.mode != Mode.BYEDPI
-        if (useServers) servers.forEachIndexed { i, (s, m) -> outs.put(outbound(s, "$PROXY_PREFIX$i", m, settings.mux)) }
+        if (useServers) servers.forEachIndexed { i, (s, m) -> outs.put(outbound(s, "$PROXY_PREFIX$i", resolveMask(m, byeDpiPort, dpiPorts), settings.mux)) }
         outs.put(JSONObject().put("tag", "direct").put("protocol", "freedom").put("settings", JSONObject().put("domainStrategy", "UseIPv4")))
         outs.put(JSONObject().put("tag", "block").put("protocol", "blackhole"))
         outs.put(JSONObject().put("tag", "dns-out").put("protocol", "dns"))
-        if (byeDpiPort != null) outs.put(byeDpiOutbound(byeDpiPort))
+        dpiOutbounds(outs, byeDpiPort, if (useServers) dpiPorts else emptyMap())
         c.put("outbounds", outs)
 
         val many = useServers && servers.size > 1
@@ -201,17 +219,17 @@ object XrayConfigBuilder {
      * Test config: one SOCKS inbound per (server, mask) variant on consecutive loopback ports, each routed to its own
      * outbound. Lets the app test many servers/masks in parallel through one Xray instance.
      */
-    fun testConfig(variants: List<Pair<Server, Mask?>>, ports: List<Int>, byeDpiPort: Int?): String {
+    fun testConfig(variants: List<Pair<Server, Mask?>>, ports: List<Int>, byeDpiPort: Int?, dpiPorts: Map<String, Int> = emptyMap()): String {
         require(ports.size == variants.size)
         val c = base()
         val ins = JSONArray(); val outs = JSONArray(); val rules = JSONArray()
         variants.forEachIndexed { i, (s, m) ->
             ins.put(JSONObject().put("tag", "t$i").put("listen", "127.0.0.1").put("port", ports[i]).put("protocol", "socks")
                 .put("settings", JSONObject().put("auth", "noauth").put("udp", false)))
-            outs.put(outbound(s, "v$i", if (m?.viaByeDpi == true && byeDpiPort == null) m.copy(viaByeDpi = false) else m))
+            outs.put(outbound(s, "v$i", resolveMask(m, byeDpiPort, dpiPorts)))
             rules.put(JSONObject().put("inboundTag", arr("t$i")).put("outboundTag", "v$i"))
         }
-        if (byeDpiPort != null) outs.put(byeDpiOutbound(byeDpiPort))
+        dpiOutbounds(outs, byeDpiPort, dpiPorts)
         outs.put(JSONObject().put("tag", "block").put("protocol", "blackhole"))
         c.put("inbounds", ins).put("outbounds", outs).put("routing", JSONObject().put("rules", rules))
         c.put("policy", JSONObject().put("levels", JSONObject().put("0", JSONObject().put("handshake", 8).put("connIdle", 30))))

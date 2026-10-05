@@ -39,6 +39,7 @@ class MainActivity : ComponentActivity() {
         if (i.getBooleanExtra("e2e_connect", false)) connect()
         if (i.getBooleanExtra("e2e_disconnect", false)) TunnelService.stop(this)
         if (i.getBooleanExtra("e2e_test", false)) com.vlesscardvpn.core.Actions.testAll()
+        if (i.getBooleanExtra("e2e_dpi", false)) com.vlesscardvpn.core.Actions.findDpi()
         if (i.getBooleanExtra("e2e_masks", false)) com.vlesscardvpn.core.Actions.findMasks(com.vlesscardvpn.core.Store.state.value.servers)
     }
 }
