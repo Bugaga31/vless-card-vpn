@@ -1,0 +1,1 @@
+heiher/hev-socks5-tunnel @ 197f64297b6b18eb034f4f47fb09606e9f97f847 (MIT), submodules: src/core@162dd996299fc2d2bff2dd63728f8a2cd71ed31a third-part/hev-task-system@e20b98914332613a5ed9da46ab5f1e894f3d3ef5 third-part/lwip@4b3ee51ca092ad32d7ce0e9d525a69ba696540a6 third-part/yaml@efa36117a8646d26d12b58e05bac472d7854a70d 

@@ -1,5 +1,5 @@
 package com.vlesscardvpn
-import com.vlesscardvpn.domain.*
+import com.vlesscardvpn.core.ByeDpiArgs
 import org.junit.Assert.*
 import org.junit.Test
 class ByeDpiArgsTest {
@@ -34,7 +34,7 @@ class ByeDpiArgsTest {
         assertEquals("ya.ru", ByeDpiArgs.maskDomain("localhost"))
         assertEquals("www.?#*.ru", ByeDpiArgs.maskDomain("www.?#*.ru"))
         assertTrue(ByeDpiArgs.MASK_DOMAINS.all { ByeDpiArgs.maskDomain(it) == it })
-        assertEquals("ya.ru", AppSettings().byeDpiMaskDomain)
+        assertTrue(ByeDpiArgs.parse(com.vlesscardvpn.model.Settings.DEFAULT_BYEDPI, "ya.ru").isSuccess)
     }
     @Test fun examplesParseAndLoopbackStaysAppControlled() {
         for (e in ByeDpiArgs.EXAMPLES) {
