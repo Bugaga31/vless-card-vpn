@@ -1,0 +1,203 @@
+package com.vlesscardvpn.xray
+
+import com.vlesscardvpn.model.Balance
+import com.vlesscardvpn.model.Mode
+import com.vlesscardvpn.model.Server
+import com.vlesscardvpn.model.Settings
+import org.json.JSONArray
+import org.json.JSONObject
+
+/** Builds Xray-core JSON configs. Pure (no Android APIs) so it is covered by JVM tests and `xray run -test`. */
+object XrayConfigBuilder {
+    const val BYEDPI_TAG = "byedpi"
+    const val PROXY_PREFIX = "proxy-"
+    private val IPV4_LITERAL = Regex("^\\d{1,3}(\\.\\d{1,3}){3}$")
+
+    private fun arr(vararg v: Any): JSONArray = JSONArray().apply { v.forEach { put(it) } }
+    private fun csv(s: String) = s.split(',').map { it.trim() }.filter { it.isNotEmpty() }
+
+    /** Proxy outbound for [s] with masking [mask] (per outbound, so many masks work at once). */
+    fun outbound(s: Server, tag: String, mask: Mask?): JSONObject {
+        val o = JSONObject().put("tag", tag)
+        when (s.protocol) {
+            "vless" -> o.put("protocol", "vless").put("settings", JSONObject().put("vnext", arr(JSONObject()
+                .put("address", s.address).put("port", s.port).put("users", arr(JSONObject().put("id", s.secret)
+                    .put("encryption", s.encryption.ifEmpty { "none" }).put("level", 0).apply { if (s.flow.isNotEmpty()) put("flow", s.flow) })))))
+            "vmess" -> o.put("protocol", "vmess").put("settings", JSONObject().put("vnext", arr(JSONObject()
+                .put("address", s.address).put("port", s.port).put("users", arr(JSONObject().put("id", s.secret)
+                    .put("security", s.method.ifEmpty { "auto" }).put("level", 0))))))
+            "trojan" -> o.put("protocol", "trojan").put("settings", JSONObject().put("servers", arr(JSONObject()
+                .put("address", s.address).put("port", s.port).put("password", s.secret).put("level", 0))))
+            "shadowsocks" -> o.put("protocol", "shadowsocks").put("settings", JSONObject().put("servers", arr(JSONObject()
+                .put("address", s.address).put("port", s.port).put("password", s.secret)
+                .put("method", if (s.method == "plain") "none" else s.method).put("level", 0))))
+            "hysteria2" -> o.put("protocol", "hysteria").put("settings", JSONObject().put("version", 2)
+                .put("address", s.address).put("port", s.port))
+            else -> throw IllegalArgumentException("unsupported protocol ${s.protocol}")
+        }
+        o.put("streamSettings", stream(s, mask))
+        return o
+    }
+
+    private fun stream(s: Server, mask: Mask?): JSONObject {
+        val st = JSONObject()
+        val net = when (s.protocol) { "shadowsocks" -> "tcp"; "hysteria2" -> "hysteria"; else -> s.network }
+        st.put("network", net)
+        var hostSni = ""
+        when (net) {
+            "tcp" -> if (s.headerType == "http") {
+                val hosts = csv(s.host)
+                st.put("tcpSettings", JSONObject().put("header", JSONObject().put("type", "http").put("request", JSONObject()
+                    .put("version", "1.1").put("method", "GET").put("path", JSONArray(csv(s.path).ifEmpty { listOf("/") }))
+                    .put("headers", JSONObject().put("Host", JSONArray(hosts)).put("Connection", arr("keep-alive"))))))
+                hostSni = hosts.firstOrNull().orEmpty()
+            }
+            "ws" -> { st.put("wsSettings", JSONObject().put("path", s.path.ifEmpty { "/" }).apply { if (s.host.isNotEmpty()) put("host", s.host) }); hostSni = s.host }
+            "httpupgrade" -> { st.put("httpupgradeSettings", JSONObject().put("path", s.path.ifEmpty { "/" }).apply { if (s.host.isNotEmpty()) put("host", s.host) }); hostSni = s.host }
+            "xhttp" -> {
+                val x = JSONObject().put("path", s.path.ifEmpty { "/" }).put("mode", s.mode.ifEmpty { "auto" })
+                if (s.host.isNotEmpty()) x.put("host", s.host)
+                if (s.extra.isNotEmpty()) runCatching { x.put("extra", JSONObject(s.extra)) }
+                st.put("xhttpSettings", x); hostSni = s.host
+            }
+            "grpc" -> { st.put("grpcSettings", JSONObject().put("serviceName", s.serviceName).put("multiMode", s.mode == "multi")
+                .put("idle_timeout", 60).put("health_check_timeout", 20).apply { if (s.host.isNotEmpty()) put("authority", s.host) }); hostSni = s.host }
+            "h2" -> { st.put("httpSettings", JSONObject().put("path", s.path.ifEmpty { "/" }).put("host", JSONArray(csv(s.host)))); hostSni = csv(s.host).firstOrNull().orEmpty() }
+            "kcp" -> st.put("kcpSettings", JSONObject().put("header", JSONObject().put("type", s.headerType.ifEmpty { "none" })).apply { if (s.path.isNotEmpty()) put("seed", s.path) })
+            "hysteria" -> st.put("hysteriaSettings", JSONObject().put("version", 2).put("auth", s.secret))
+        }
+        val security = if (s.protocol == "hysteria2") "tls" else s.security
+        val fp = when {
+            mask != null && mask.fingerprint.isNotEmpty() && s.protocol != "hysteria2" -> mask.fingerprint
+            s.fp.isNotEmpty() -> s.fp
+            else -> "chrome"
+        }
+        if (security == "tls" || security == "reality") {
+            val sni = s.sni.ifEmpty { hostSni.takeIf { it.isNotEmpty() } ?: s.address.takeIf { !IPV4_LITERAL.matches(it) && ':' !in it }.orEmpty() }
+            val t = JSONObject()
+            if (sni.isNotEmpty()) t.put("serverName", sni)
+            if (s.protocol != "hysteria2") t.put("fingerprint", fp)
+            if (security == "tls") {
+                val alpn = csv(s.alpn).ifEmpty { if (s.protocol == "hysteria2") listOf("h3") else emptyList() }
+                if (alpn.isNotEmpty()) t.put("alpn", JSONArray(alpn))
+                // Xray 26 removed allowInsecure: self-signed servers are pinned by certificate SHA-256 instead.
+                if (s.pcs.isNotEmpty()) t.put("pinnedPeerCertSha256", s.pcs)
+                if (s.vcn.isNotEmpty()) t.put("verifyPeerCertByName", s.vcn)
+                if (s.ech.isNotEmpty()) t.put("echConfigList", s.ech)
+                st.put("security", "tls").put("tlsSettings", t)
+            } else {
+                t.put("publicKey", s.pbk).put("shortId", s.sid)
+                if (s.spx.isNotEmpty()) t.put("spiderX", s.spx)
+                if (s.pqv.isNotEmpty()) t.put("mldsa65Verify", s.pqv)
+                st.put("security", "reality").put("realitySettings", t)
+            }
+        }
+        val fm = JSONObject()
+        if (mask != null && mask.packets.isNotEmpty() && s.isTcpBased) {
+            val f = JSONObject().put("packets", mask.packets).put("length", mask.length).put("delay", mask.delay)
+            if (mask.maxSplit.isNotEmpty() && mask.maxSplit != "0") f.put("maxSplit", mask.maxSplit)
+            fm.put("tcp", arr(JSONObject().put("type", "fragment").put("settings", f)))
+        }
+        if (s.protocol == "hysteria2" && s.obfsPassword.isNotEmpty())
+            fm.put("udp", arr(JSONObject().put("type", "salamander").put("settings", JSONObject().put("password", s.obfsPassword))))
+        if (fm.length() > 0) st.put("finalmask", fm)
+        val sock = JSONObject().put("tcpKeepAliveInterval", 15)
+        if (mask?.viaByeDpi == true && s.isTcpBased) sock.put("dialerProxy", BYEDPI_TAG)
+        st.put("sockopt", sock)
+        return st
+    }
+
+    fun byeDpiOutbound(port: Int): JSONObject = JSONObject().put("tag", BYEDPI_TAG).put("protocol", "socks")
+        .put("settings", JSONObject().put("servers", arr(JSONObject().put("address", "127.0.0.1").put("port", port))))
+
+    private fun base(): JSONObject = JSONObject().put("log", JSONObject().put("loglevel", "warning"))
+
+    /**
+     * Config for the running VPN: SOCKS inbound 127.0.0.1:[Settings.socksPort] (hev-socks5-tunnel feeds the TUN into it),
+     * one outbound per selected server, balancer + observatory across them, DNS via DoH through the tunnel.
+     */
+    fun vpnConfig(servers: List<Pair<Server, Mask?>>, settings: Settings, byeDpiPort: Int?): String {
+        require(settings.mode == Mode.BYEDPI || servers.isNotEmpty()) { "Не выбран ни один сервер" }
+        require(settings.mode == Mode.SERVERS || byeDpiPort != null) { "ByeDPI не запущен" }
+        val c = base()
+        c.put("inbounds", arr(JSONObject().put("tag", "socks").put("listen", "127.0.0.1").put("port", settings.socksPort)
+            .put("protocol", "socks").put("settings", JSONObject().put("auth", "noauth").put("udp", true))
+            .put("sniffing", JSONObject().put("enabled", true).put("destOverride", arr("http", "tls", "quic")).put("routeOnly", true))))
+        val outs = JSONArray()
+        val useServers = settings.mode != Mode.BYEDPI
+        if (useServers) servers.forEachIndexed { i, (s, m) -> outs.put(outbound(s, "$PROXY_PREFIX$i", m)) }
+        outs.put(JSONObject().put("tag", "direct").put("protocol", "freedom").put("settings", JSONObject().put("domainStrategy", "UseIPv4")))
+        outs.put(JSONObject().put("tag", "block").put("protocol", "blackhole"))
+        outs.put(JSONObject().put("tag", "dns-out").put("protocol", "dns"))
+        if (byeDpiPort != null) outs.put(byeDpiOutbound(byeDpiPort))
+        c.put("outbounds", outs)
+
+        val many = useServers && servers.size > 1
+        fun toMain(rule: JSONObject): JSONObject = when {
+            !useServers -> rule.put("outboundTag", BYEDPI_TAG)
+            many -> rule.put("balancerTag", "balancer")
+            else -> rule.put("outboundTag", "${PROXY_PREFIX}0")
+        }
+        val dnsServers = JSONArray().put(settings.dnsUrl)
+        if (settings.dnsUrl != "https://8.8.8.8/dns-query") dnsServers.put("https://8.8.8.8/dns-query")
+        c.put("dns", JSONObject().put("servers", dnsServers).put("queryStrategy", "UseIPv4").put("tag", "dns-module"))
+
+        val rules = JSONArray()
+        rules.put(JSONObject().put("inboundTag", arr("socks")).put("port", "53").put("outboundTag", "dns-out"))
+        rules.put(toMain(JSONObject().put("inboundTag", arr("dns-module"))))
+        rules.put(JSONObject().put("ip", arr("geoip:private")).put("outboundTag", "direct"))
+        rules.put(JSONObject().put("ip", arr("::/0")).put("outboundTag", "block"))
+        if (settings.blockAds) rules.put(JSONObject().put("domain", arr("geosite:category-ads-all")).put("outboundTag", "block"))
+        if (settings.mode == Mode.HYBRID && settings.hybridDomains.isNotEmpty())
+            rules.put(JSONObject().put("domain", JSONArray(settings.hybridDomains)).put("outboundTag", BYEDPI_TAG))
+        if (settings.ruDirect && useServers) {
+            rules.put(JSONObject().put("domain", arr("geosite:category-ru", "domain:ru", "domain:su", "domain:xn--p1ai")).put("outboundTag", "direct"))
+            rules.put(JSONObject().put("ip", arr("geoip:ru")).put("outboundTag", "direct"))
+        }
+        rules.put(toMain(JSONObject().put("network", "tcp,udp")))
+        val routing = JSONObject().put("domainStrategy", "AsIs").put("rules", rules)
+        if (many) {
+            routing.put("balancers", arr(JSONObject().put("tag", "balancer").put("selector", arr(PROXY_PREFIX))
+                .put("strategy", JSONObject().put("type", settings.balance.xray)).put("fallbackTag", "${PROXY_PREFIX}0")))
+            val probe = settings.testUrl
+            if (settings.balance == Balance.LEAST_LOAD) {
+                c.put("burstObservatory", JSONObject().put("subjectSelector", arr(PROXY_PREFIX)).put("pingConfig", JSONObject()
+                    .put("destination", probe).put("interval", "1m").put("connectivity", "").put("timeout", "10s").put("sampling", 3)))
+            } else {
+                c.put("observatory", JSONObject().put("subjectSelector", arr(PROXY_PREFIX)).put("probeUrl", probe)
+                    .put("probeInterval", "1m").put("enableConcurrency", true))
+            }
+        }
+        c.put("routing", routing)
+        c.put("policy", JSONObject().put("levels", JSONObject().put("0", JSONObject().put("handshake", 6).put("connIdle", 300)
+            .put("uplinkOnly", 2).put("downlinkOnly", 5))))
+        return c.toString(2)
+    }
+
+    /**
+     * Test config: one SOCKS inbound per (server, mask) variant on consecutive loopback ports, each routed to its own
+     * outbound. Lets the app test many servers/masks in parallel through one Xray instance.
+     */
+    fun testConfig(variants: List<Pair<Server, Mask?>>, ports: List<Int>, byeDpiPort: Int?): String {
+        require(ports.size == variants.size)
+        val c = base()
+        val ins = JSONArray(); val outs = JSONArray(); val rules = JSONArray()
+        variants.forEachIndexed { i, (s, m) ->
+            ins.put(JSONObject().put("tag", "t$i").put("listen", "127.0.0.1").put("port", ports[i]).put("protocol", "socks")
+                .put("settings", JSONObject().put("auth", "noauth").put("udp", false)))
+            outs.put(outbound(s, "v$i", if (m?.viaByeDpi == true && byeDpiPort == null) m.copy(viaByeDpi = false) else m))
+            rules.put(JSONObject().put("inboundTag", arr("t$i")).put("outboundTag", "v$i"))
+        }
+        if (byeDpiPort != null) outs.put(byeDpiOutbound(byeDpiPort))
+        outs.put(JSONObject().put("tag", "block").put("protocol", "blackhole"))
+        c.put("inbounds", ins).put("outbounds", outs).put("routing", JSONObject().put("rules", rules))
+        c.put("policy", JSONObject().put("levels", JSONObject().put("0", JSONObject().put("handshake", 8).put("connIdle", 30))))
+        return c.toString()
+    }
+
+    /** ByeDPI-only test config: one SOCKS inbound routed to the ByeDPI outbound. */
+    fun byeDpiTestConfig(port: Int, byeDpiPort: Int): String = base()
+        .put("inbounds", arr(JSONObject().put("tag", "t0").put("listen", "127.0.0.1").put("port", port).put("protocol", "socks")
+            .put("settings", JSONObject().put("auth", "noauth"))))
+        .put("outbounds", arr(byeDpiOutbound(byeDpiPort))).toString()
+}

@@ -4,334 +4,169 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.widget.Toast
-import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.background
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.vlesscardvpn.data.AppRepository
-import com.vlesscardvpn.domain.VlessConfig
-import com.vlesscardvpn.ui.components.ServerCard
-import com.vlesscardvpn.ui.theme.*
-import com.vlesscardvpn.util.UniversalConfigParser
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.CancellationException
+import com.vlesscardvpn.core.Actions
+import com.vlesscardvpn.core.Store
+import com.vlesscardvpn.model.LinkParser
+import com.vlesscardvpn.model.Server
+import com.vlesscardvpn.model.ServerState
+import com.vlesscardvpn.xray.Masks
 
-enum class ServerSortMode(val label: String) {
-    LATENCY("По задержке"),
-    FAVORITES("Избранные"),
-    PROTOCOL("Протокол"),
-    NAME("По имени")
+private enum class Filter(val title: String) { ALL("Все"), WORKING("Рабочие"), SELECTED("Выбранные") }
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+fun ServersScreen() {
+    val ctx = LocalContext.current
+    val app by Store.state.collectAsState()
+    val progress by Actions.progress.collectAsState()
+    var filter by remember { mutableStateOf(Filter.ALL) }
+    var addOpen by remember { mutableStateOf(false) }
+    var menuFor by remember { mutableStateOf<Server?>(null) }
+
+    val list = remember(app, filter) {
+        val rank = { s: Server -> val st = app.state(s)
+            when { st.selected -> 0; st.works -> 1; st.tcpMs > 0 && st.realMs < 0 -> 2; st.realMs < 0 && st.tcpMs < 0 -> 3; else -> 4 } }
+        app.servers.filter { when (filter) { Filter.ALL -> true; Filter.WORKING -> app.state(it).works; Filter.SELECTED -> app.state(it).selected } }
+            .sortedWith(compareBy<Server>(rank).thenBy { app.state(it).realMs.let { ms -> if (ms > 0) ms else Int.MAX_VALUE } }
+                .thenBy { app.state(it).tcpMs.let { ms -> if (ms > 0) ms else Int.MAX_VALUE } })
+    }
+
+    Column(Modifier.fillMaxSize().padding(horizontal = 12.dp)) {
+        Spacer(Modifier.height(10.dp))
+        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(onClick = { addOpen = true }) { Text("Добавить") }
+            OutlinedButton(onClick = { Actions.refreshSubscriptions() }, enabled = !progress.running) { Text("Подписки") }
+            OutlinedButton(onClick = { Actions.testAll(onlySelected = filter == Filter.SELECTED) }, enabled = !progress.running) { Text("Проверить") }
+            OutlinedButton(onClick = {
+                val target = app.selected.ifEmpty { app.servers.filter { app.state(it).tcpMs > 0 }.sortedBy { app.state(it).tcpMs }.take(10) }
+                Actions.findMasks(target)
+            }, enabled = !progress.running) { Text("Подобрать маскировку") }
+            OutlinedButton(onClick = {
+                val n = Actions.selectBest(5); Toast.makeText(ctx, if (n == 0) "Сначала нажмите «Проверить»" else "Выбрано: $n", Toast.LENGTH_SHORT).show()
+            }) { Text("5 лучших") }
+            OutlinedButton(onClick = {
+                val dead = app.servers.filter { val st = app.state(it); !st.selected && (st.tcpMs == 0 || st.realMs == 0) }.map { it.id }.toSet()
+                Store.remove(dead); Toast.makeText(ctx, "Удалено: ${dead.size}", Toast.LENGTH_SHORT).show()
+            }, enabled = !progress.running) { Text("Удалить нерабочие") }
+        }
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Filter.values().forEach { f -> FilterChip(selected = filter == f, onClick = { filter = f }, label = { Text(f.title) }) }
+            Spacer(Modifier.weight(1f))
+            Text("${list.size}", color = Color.Gray, fontSize = 12.sp)
+        }
+        if (progress.running || progress.message.isNotEmpty()) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.weight(1f)) { ProgressBlock(progress) }
+                if (progress.running) TextButton(onClick = { Actions.cancel() }) { Text("Стоп") }
+            }
+        }
+        if (app.servers.isEmpty()) {
+            Text("Список пуст. Нажмите «Подписки» — загрузятся бесплатные серверы для России (igareck, с зеркал), " +
+                "или «Добавить» и вставьте свои ссылки vless:// vmess:// trojan:// ss:// hysteria2://.", color = Color.Gray, modifier = Modifier.padding(top = 16.dp))
+        }
+        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(vertical = 6.dp)) {
+            items(list, key = { it.id }) { s ->
+                ServerRow(s, app.state(s), onToggle = { Store.setState(s.id) { st -> st.copy(selected = !st.selected) } }, onLong = { menuFor = s })
+            }
+        }
+    }
+
+    if (addOpen) AddDialog(onDismiss = { addOpen = false }, onAdd = { text ->
+        val n = Actions.importText(text); addOpen = false
+        Toast.makeText(ctx, if (n == 0) "Ссылки не найдены или уже есть" else "Добавлено: $n", Toast.LENGTH_SHORT).show()
+    })
+    menuFor?.let { s -> ServerMenu(s, app.state(s), onDismiss = { menuFor = null }) }
 }
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun ServersScreen(
-    repo: AppRepository,
-    onConnect: (VlessConfig) -> Unit,
-    onNavigateToFree: () -> Unit,
-    onBack: () -> Unit
-) {
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    val configs by repo.configsFlow.collectAsState(initial = emptyList())
-    var searchQuery by remember { mutableStateOf("") }
-    var sortMode by remember { mutableStateOf(ServerSortMode.LATENCY) }
-    var showImportDialog by remember { mutableStateOf(false) }
-    var importText by remember { mutableStateOf("") }
-    var importError by remember { mutableStateOf<String?>(null) }
-    var importing by remember { mutableStateOf(false) }
-    var isPingingAll by remember { mutableStateOf(false) }
-    var selectedPassportConfig by remember { mutableStateOf<VlessConfig?>(null) }
-
-    val activeConfig = configs.firstOrNull { it.isActive }
-    val vpnStats by com.vlesscardvpn.worker.VlessVpnService.vpnStats.collectAsState()
-
-    val sortedAndFilteredConfigs = remember(configs, searchQuery, sortMode) {
-        val filtered = configs.filter {
-            searchQuery.isBlank() ||
-            it.name.contains(searchQuery, ignoreCase = true) ||
-            it.address.contains(searchQuery, ignoreCase = true) ||
-            it.sni.contains(searchQuery, ignoreCase = true)
-        }
-        when (sortMode) {
-            ServerSortMode.LATENCY -> filtered.sortedWith(compareBy({ it.pingMs <= 0 }, { it.pingMs }))
-            ServerSortMode.FAVORITES -> filtered.sortedByDescending { it.isFavorite }
-            ServerSortMode.PROTOCOL -> filtered.sortedBy { it.protocolType }
-            ServerSortMode.NAME -> filtered.sortedBy { it.name }
-        }
-    }
-
-    Scaffold(
-        containerColor = MaterialTheme.colorScheme.background,
-        topBar = {
-            TopAppBar(
-                title = {
-                    Column {
-                        Text(
-                            text = "Серверы",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onBackground
-                        )
-                        Text(
-                            text = "${configs.size} в списке",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.Default.ArrowBack, contentDescription = "Назад", tint = MaterialTheme.colorScheme.onBackground)
-                    }
-                },
-                actions = {
-                    // Ping all button
-                    IconButton(
-                        onClick = {
-                            isPingingAll = true
-                            scope.launch {
-                                try { repo.testAllConfigs() } finally { isPingingAll = false }
-                            }
-                        }
-                    ) {
-                        if (isPingingAll) {
-                            CircularProgressIndicator(modifier = Modifier.size(18.dp), color = MaterialTheme.colorScheme.primary, strokeWidth = 2.dp)
-                        } else {
-                            Icon(Icons.Default.Speed, contentDescription = "Проверить все", tint = MaterialTheme.colorScheme.onBackground)
-                        }
-                    }
-
-                    // Free community nodes
-                    IconButton(onClick = onNavigateToFree) {
-                        Icon(Icons.Default.Public, contentDescription = "Публичные репозитории", tint = MaterialTheme.colorScheme.onBackground)
-                    }
-
-                    // Add server
-                    IconButton(onClick = { showImportDialog = true }) {
-                        Icon(Icons.Default.Add, contentDescription = "Добавить узел", tint = MaterialTheme.colorScheme.primary)
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface)
-            )
-        }
-    ) { padding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .padding(horizontal = InstrumentDimens.space16, vertical = InstrumentDimens.space8)
-        ) {
-            // Search Input
-            OutlinedTextField(
-                value = searchQuery,
-                onValueChange = { searchQuery = it },
-                placeholder = { Text("Найти сервер", fontSize = 16.sp) },
-                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
-                trailingIcon = {
-                    if (searchQuery.isNotBlank()) {
-                        IconButton(onClick = { searchQuery = "" }) {
-                            Icon(Icons.Default.Clear, contentDescription = "Очистить")
-                        }
-                    }
-                },
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true,
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = MaterialTheme.colorScheme.primary,
-                    unfocusedBorderColor = MaterialTheme.colorScheme.outline,
-                    focusedContainerColor = MaterialTheme.colorScheme.surface,
-                    unfocusedContainerColor = MaterialTheme.colorScheme.surface
-                ),
-                shape = RoundedCornerShape(InstrumentDimens.radiusMedium)
-            )
-
-            Spacer(modifier = Modifier.height(InstrumentDimens.space8))
-
-            // Sort Filter Chips
-            FlowRow(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                ServerSortMode.values().forEach { mode ->
-                    FilterChip(
-                        selected = sortMode == mode,
-                        onClick = { sortMode = mode },
-                        label = { Text(mode.label, style = MaterialTheme.typography.bodySmall) },
-                        colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
-                            selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
-                        )
-                    )
-                }
+private fun ServerRow(s: Server, st: ServerState, onToggle: () -> Unit, onLong: () -> Unit) {
+    Card(Modifier.fillMaxWidth().padding(vertical = 3.dp).combinedClickable(onClick = onToggle, onLongClick = onLong),
+        colors = CardDefaults.cardColors(containerColor = if (st.selected) Color(0xFF1C2A44) else MaterialTheme.colorScheme.surface)) {
+        Row(Modifier.padding(horizontal = 6.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+            Checkbox(checked = st.selected, onCheckedChange = { onToggle() })
+            Column(Modifier.weight(1f)) {
+                Text(s.name, maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.Medium, fontSize = 14.sp)
+                val mask = Masks.byId(st.maskId)?.title
+                Text(s.label + (mask?.let { " · $it" } ?: ""), maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 11.sp, color = Color.Gray)
             }
-
-            Spacer(modifier = Modifier.height(InstrumentDimens.space8))
-
-            // Server List
-            if (sortedAndFilteredConfigs.isEmpty()) {
-                Box(
-                    modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(
-                            text = if (searchQuery.isBlank()) "Список серверов пуст" else "Узлы не найдены",
-                            style = MaterialTheme.typography.bodyLarge,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Spacer(modifier = Modifier.height(InstrumentDimens.space8))
-                        Button(
-                            onClick = { showImportDialog = true },
-                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
-                        ) {
-                            Text("Добавить сервер")
-                        }
-                    }
-                }
-            } else {
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
-                    verticalArrangement = Arrangement.spacedBy(InstrumentDimens.space4)
-                ) {
-                    items(sortedAndFilteredConfigs, key = { it.id }) { config ->
-                        val isSelected = activeConfig?.id == config.id
-
-                        ServerCard(
-                            config = config,
-                            isConnected = vpnStats.status == com.vlesscardvpn.worker.VpnStatus.CONNECTED &&
-                                vpnStats.health.internet && vpnStats.activeConfig?.id == config.id,
-                            isSelected = isSelected,
-                            onSelect = {
-                                scope.launch {
-                                    repo.setActive(config.id)
-                                    Toast.makeText(context, "Выбран: ${config.name}", Toast.LENGTH_SHORT).show()
-                                }
-                            },
-                            onPing = {
-                                scope.launch {
-                                    val breakdown = com.vlesscardvpn.domain.PingTester.testDetailedLatency(config)
-                                    repo.recordPortCheck(config.id, breakdown)
-                                }
-                            },
-                            onDelete = {
-                                scope.launch { repo.deleteConfig(config.id) }
-                            },
-                            onToggleFavorite = {
-                                scope.launch { repo.toggleFavorite(config.id) }
-                            },
-                            onOpenPassport = {
-                                selectedPassportConfig = it
-                            }
-                        )
-                    }
-                }
+            Column(horizontalAlignment = Alignment.End) {
+                val real = st.realMs
+                Text(when { real > 0 -> "$real мс"; real == 0 -> "не работает"; st.tcpMs == 0 -> "недоступен"; st.tcpMs > 0 -> "TCP ${st.tcpMs} мс"; else -> "—" },
+                    color = when { real > 0 && st.bigOk != false -> Good; real > 0 -> Warn; real == 0 || st.tcpMs == 0 -> Bad; else -> Color.Gray }, fontSize = 13.sp)
+                if (real > 0) Text(buildString {
+                    append(when (st.bigOk) { true -> "256К ✓"; false -> "256К ✗ (обрыв)"; null -> "" })
+                    st.ytOk?.let { append(if (it) " · YT ✓" else " · YT ✗") }
+                }, fontSize = 11.sp, color = if (st.bigOk == false) Warn else Color.Gray)
             }
         }
     }
+}
 
-    // Server Passport Dialog
-    if (selectedPassportConfig != null) {
-        com.vlesscardvpn.ui.components.ServerPassportDialog(
-            config = selectedPassportConfig!!,
-            repo = repo,
-            onDismiss = { selectedPassportConfig = null }
-        )
-    }
-
-    // Import Dialog
-    if (showImportDialog) {
-        AlertDialog(
-            onDismissRequest = {
-                showImportDialog = false
-                importError = null
-            },
-            title = {
-                Text(
-                    text = "Добавить узел связи",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onBackground
-                )
-            },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(InstrumentDimens.space8)) {
-                    Text(
-                        text = "Поддерживаемые форматы: VLESS Reality (vless://), VMess (vmess://), Trojan (trojan://), Shadowsocks (ss://) Base64 или HTTPS-ссылка на подписку. Ссылки подписок сохраняются зашифрованными и обновляются каждые 6 часов.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-
-                    OutlinedTextField(
-                        value = importText,
-                        onValueChange = {
-                            importText = it
-                            importError = null
-                        },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(130.dp),
-                        placeholder = { Text("Вставьте ссылку или текст...", fontSize = 14.sp, fontFamily = FontFamily.Monospace) },
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = MaterialTheme.colorScheme.primary,
-                            unfocusedBorderColor = MaterialTheme.colorScheme.outline
-                        )
-                    )
-
-                    if (importError != null) {
-                        Text(
-                            text = importError ?: "",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.error
-                        )
-                    }
-                }
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        if (!importing) scope.launch {
-                            importing = true; importError = null
-                            try {
-                                val count = repo.importText(importText)
-                                Toast.makeText(context, "Импортировано: $count. Подписки обновляются автоматически", Toast.LENGTH_SHORT).show()
-                                showImportDialog = false; importText = ""
-                            } catch (cancel: CancellationException) { throw cancel }
-                            catch (_: Exception) { importError = "Импорт не выполнен: проверьте публичную HTTPS-ссылку, доступность источника и формат конфигураций" }
-                            finally { importing = false }
-                        }
-                    },
-                    enabled = !importing,
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
-                ) {
-                    Text(if (importing) "Загрузка…" else "Добавить")
-                }
-            },
-            dismissButton = {
+@Composable
+private fun AddDialog(onDismiss: () -> Unit, onAdd: (String) -> Unit) {
+    val ctx = LocalContext.current
+    var text by remember { mutableStateOf("") }
+    AlertDialog(onDismissRequest = onDismiss, title = { Text("Добавить серверы") },
+        text = {
+            Column {
+                OutlinedTextField(value = text, onValueChange = { text = it }, modifier = Modifier.fillMaxWidth().heightIn(min = 120.dp, max = 260.dp),
+                    placeholder = { Text("Ссылки vless:// vmess:// trojan:// ss:// hysteria2:// или текст подписки") })
                 TextButton(onClick = {
-                    showImportDialog = false
-                    importError = null
-                }) {
-                    Text("Отмена", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                    text = cm.primaryClip?.getItemAt(0)?.coerceToText(ctx)?.toString().orEmpty()
+                }) { Text("Вставить из буфера") }
+                Text("Ссылку на подписку (https://…) добавьте в Настройках → Подписки.", fontSize = 12.sp, color = Color.Gray)
+            }
+        },
+        confirmButton = { Button(onClick = { onAdd(text) }, enabled = text.isNotBlank()) { Text("Добавить") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Отмена") } })
+}
+
+@Composable
+private fun ServerMenu(s: Server, st: ServerState, onDismiss: () -> Unit) {
+    val ctx = LocalContext.current
+    var masks by remember { mutableStateOf(false) }
+    if (masks) {
+        val options = Masks.searchOrder(true, s)
+        AlertDialog(onDismissRequest = onDismiss, title = { Text("Маскировка: ${options.size} вариантов") },
+            text = {
+                LazyColumn(Modifier.heightIn(max = 420.dp)) {
+                    item { TextButton(onClick = { Store.setState(s.id) { it.copy(maskId = "") }; onDismiss() }) { Text("Без маскировки (как в ссылке)") } }
+                    items(options) { m -> TextButton(onClick = { Store.setState(s.id) { it.copy(maskId = m.id) }; onDismiss() }) {
+                        Text((if (m.id == st.maskId) "● " else "") + m.title, fontSize = 13.sp) } }
                 }
-            },
-            containerColor = MaterialTheme.colorScheme.surface
-        )
+            }, confirmButton = { TextButton(onClick = onDismiss) { Text("Закрыть") } })
+        return
     }
+    AlertDialog(onDismissRequest = onDismiss, title = { Text(s.name, maxLines = 2) },
+        text = {
+            Column {
+                Text("${s.label}\n${s.address}:${s.port}", fontSize = 13.sp, color = Color.Gray)
+                TextButton(onClick = { Actions.findMasks(listOf(s)); onDismiss() }) { Text("Подобрать маскировку (перебор до 32 вариантов)") }
+                TextButton(onClick = { masks = true }) { Text("Выбрать маскировку вручную") }
+                TextButton(onClick = {
+                    (ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("link", LinkParser.toLink(s)))
+                    Toast.makeText(ctx, "Ссылка скопирована", Toast.LENGTH_SHORT).show(); onDismiss()
+                }) { Text("Копировать ссылку") }
+                TextButton(onClick = { Store.remove(setOf(s.id)); onDismiss() }) { Text("Удалить", color = Bad) }
+            }
+        }, confirmButton = { TextButton(onClick = onDismiss) { Text("Закрыть") } })
 }
