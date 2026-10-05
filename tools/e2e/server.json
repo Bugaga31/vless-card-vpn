@@ -1,10 +1,1 @@
-{"log":{"loglevel":"warning","access":"/tmp/e2e/access.log"},
-"inbounds":[
-{"tag":"inbound-8443","port":8443,"protocol":"vless","settings":{"clients":[{"id":"@U@","flow":"xtls-rprx-vision"}],"decryption":"none"},
- "streamSettings":{"network":"tcp","security":"reality","realitySettings":{"dest":"www.microsoft.com:443","serverNames":["www.microsoft.com"],"privateKey":"@PRIV@","shortIds":["6ba85179e30d4fc2"]}}},
-{"tag":"inbound-8444","port":8444,"protocol":"vless","settings":{"clients":[{"id":"@U@"}],"decryption":"none"},
- "streamSettings":{"network":"ws","wsSettings":{"path":"/ws"},"security":"tls","tlsSettings":{"certificates":[{"certificateFile":"@W@/c.pem","keyFile":"@W@/k.pem"}]}}},
-{"tag":"inbound-8447","port":8447,"protocol":"vless","settings":{"clients":[{"id":"@U@"}],"decryption":"none"},
- "streamSettings":{"network":"xhttp","xhttpSettings":{"path":"/x","mode":"auto"},"security":"reality","realitySettings":{"dest":"www.microsoft.com:443","serverNames":["www.microsoft.com"],"privateKey":"@PRIV@","shortIds":["ab"]}}}
-],
-"outbounds":[{"protocol":"freedom"}]}
+{"log": {"loglevel": "warning", "access": "/tmp/e2e/access.log"}, "inbounds": [{"tag": "inbound-8443", "port": 8443, "protocol": "vless", "settings": {"clients": [{"id": "@U@", "flow": "xtls-rprx-vision", "email": "u8443"}], "decryption": "none"}, "streamSettings": {"network": "tcp", "security": "reality", "realitySettings": {"dest": "www.microsoft.com:443", "serverNames": ["www.microsoft.com"], "privateKey": "@PRIV@", "shortIds": ["6ba85179e30d4fc2"]}}}, {"tag": "inbound-8444", "port": 8444, "protocol": "vless", "settings": {"clients": [{"id": "@U@", "email": "u8444"}], "decryption": "none"}, "streamSettings": {"network": "ws", "wsSettings": {"path": "/ws"}, "security": "tls", "tlsSettings": {"certificates": [{"certificateFile": "@W@/c.pem", "keyFile": "@W@/k.pem"}]}}}, {"tag": "inbound-8447", "port": 8447, "protocol": "vless", "settings": {"clients": [{"id": "@U@", "email": "u8447"}], "decryption": "none"}, "streamSettings": {"network": "xhttp", "xhttpSettings": {"path": "/x", "mode": "auto"}, "security": "reality", "realitySettings": {"dest": "www.microsoft.com:443", "serverNames": ["www.microsoft.com"], "privateKey": "@PRIV@", "shortIds": ["ab"]}}}], "outbounds": [{"protocol": "freedom"}]}

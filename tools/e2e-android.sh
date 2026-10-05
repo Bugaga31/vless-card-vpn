@@ -43,11 +43,10 @@ import json,sys
 r=json.loads(sys.argv[1]); res=r.get("results",[])
 ok = r.get("vpn") and len(res)==4 and res[0]["code"]==204 and res[1]["code"]==200 and res[1]["bytes"]>=1048576 and res[2]["code"]==200 and res[3]["code"]==204
 print(("PASS " if ok else "BAD ")+json.dumps(r)); sys.exit(0 if ok else 1)' "$1"; }
-count() { grep -c "email: $1\|accepted.*$2" $W/access.log 2>/dev/null || echo 0; }
 
 run_case() { # $1 name, $2 state
   echo "=== case $1"
-  adb shell am start -n $PKG/.MainActivity --ez e2e_disconnect true >/dev/null; sleep 2
+  adb shell am start -n $PKG/.MainActivity --ez e2e_disconnect true >/dev/null; sleep 3; : > $W/access.log
   load $2; adb logcat -c
   adb shell am start -n $PKG/.MainActivity --ez e2e_connect true >/dev/null
   C=$(waitlog "check ok=|connect failed" 60) || { fail "$1: no connect result"; return; }
@@ -58,20 +57,20 @@ run_case() { # $1 name, $2 state
 
 : > $W/access.log
 run_case single single.json
-N1=$(grep -c "accepted" $W/access.log); echo "server accepted lines after single: $N1"
+N1=$(grep -c "email: u8443" $W/access.log); echo "server :8443 accepted after single: $N1"
 [ "$N1" -gt 0 ] || fail "single: server saw no traffic (traffic did not go through the server)"
 
 : > $W/access.log
 run_case multi multi.json
 for p in 8443 8444 8447; do
-  c=$(grep -c "inbound-$p" $W/access.log); echo "multi: server :$p accepted $c"
+  c=$(grep -c "email: u$p" $W/access.log); echo "multi: server :$p accepted $c"
   [ "$c" -gt 0 ] || fail "multi: round-robin never used server :$p"
 done
 
 : > $W/access.log
 run_case byedpi byedpi.json
-c=$(grep -c "accepted" $W/access.log); echo "byedpi: server lines $c (must be 0)"
-[ "$c" -eq 0 ] || fail "byedpi: traffic unexpectedly went through a server"
+c=$(grep -c "email: u" $W/access.log); echo "byedpi: server lines $c (must be 0)"
+[ "$c" -eq 0 ] || { fail "byedpi: traffic unexpectedly went through a server"; cat $W/access.log | tail -5; }
 
 echo "=== in-app tester (multi-inbound Xray instance)"
 adb shell am start -n $PKG/.MainActivity --ez e2e_disconnect true >/dev/null; sleep 2
