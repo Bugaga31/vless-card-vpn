@@ -6,18 +6,30 @@ import go.Seq
 import libv2ray.CoreCallbackHandler
 import libv2ray.CoreController
 import libv2ray.Libv2ray
-import java.util.concurrent.atomic.AtomicBoolean
 
 /** Thin wrapper over Xray-core (2dust/AndroidLibXrayLite). Geo files are read from APK assets by the core. */
 object XrayCore {
     private const val TAG = "XrayCore"
-    private val initialized = AtomicBoolean(false)
+    @Volatile private var initialized = false
 
+    @Synchronized
     fun init(context: Context) {
-        if (!initialized.compareAndSet(false, true)) return
+        if (initialized) return
         Seq.setContext(context.applicationContext)
         val dir = context.filesDir.resolve("xray").apply { mkdirs() }
+        // Xray 26 opens geoip.dat/geosite.dat by path (no asset fallback), so copy them out of the APK once per version.
+        val marker = dir.resolve(".assets-version")
+        val version = runCatching { context.packageManager.getPackageInfo(context.packageName, 0).lastUpdateTime.toString() }.getOrDefault("0")
+        if (marker.takeIf { it.isFile }?.readText() != version || listOf("geoip.dat", "geosite.dat").any { !dir.resolve(it).isFile }) {
+            for (name in listOf("geoip.dat", "geosite.dat")) {
+                val tmp = dir.resolve("$name.tmp")
+                context.assets.open(name).use { input -> tmp.outputStream().use { input.copyTo(it) } }
+                tmp.renameTo(dir.resolve(name))
+            }
+            marker.writeText(version)
+        }
         Libv2ray.initCoreEnv(dir.absolutePath, "")
+        initialized = true
     }
 
     fun version(): String = runCatching { Libv2ray.checkVersionX() }.getOrDefault("?")

@@ -38,7 +38,7 @@ object Actions {
         if (job?.isActive == true) return
         progress.value = Progress(title, running = true)
         job = scope.launch {
-            val msg = runCatching { block() }.getOrElse { it.message ?: "Ошибка" }
+            val msg = runCatching { withContext(Dispatchers.IO) { XrayCore.init(app) }; block() }.getOrElse { it.message ?: "Ошибка" }
             android.util.Log.i("E2E", "action[$title]: $msg")
             progress.value = progress.value.copy(running = false, message = msg)
         }

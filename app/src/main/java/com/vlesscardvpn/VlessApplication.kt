@@ -10,6 +10,6 @@ class VlessApplication : Application() {
         super.onCreate()
         Store.init(this)
         Actions.init(this)
-        runCatching { XrayCore.init(this) }
+        Thread({ runCatching { XrayCore.init(this) } }, "xray-init").start()
     }
 }
