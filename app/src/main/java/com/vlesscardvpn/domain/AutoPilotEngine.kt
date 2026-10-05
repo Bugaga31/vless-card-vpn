@@ -237,7 +237,8 @@ class AutoPilotEngine(
             stepHealthMap = _state.value.stepHealthMap + (PipelineStep.PROFILE to StepHealth.SUCCESS)
         )
 
-        if (vpnState.status != VpnStatus.CONNECTED) {
+        // "Без сервера" has no server to switch; the autopilot must not replace it.
+        if (vpnState.status != VpnStatus.CONNECTED || vpnState.direct) {
             // VPN is not currently connected
             _state.value = _state.value.copy(
                 currentStep = PipelineStep.TUNNEL,

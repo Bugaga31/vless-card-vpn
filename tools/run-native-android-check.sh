@@ -21,7 +21,7 @@ adb install -r -t vpn-test-probe/build/outputs/apk/debug/vpn-test-probe-debug.ap
 adb shell appops set com.vlesscardvpn.preview ACTIVATE_VPN allow
 set +e
 adb shell am instrument -w -r -e fixture_ca_path /data/local/tmp/vless-fixture-ca.pem -e fixture_reality_key_path /data/local/tmp/vless-fixture-reality-public.txt -e fixture_full_tun 1 \
-  -e class com.vlesscardvpn.AutoTcpPreflightAndroidTest,com.vlesscardvpn.NativeConfigValidationTest,com.vlesscardvpn.NativeCallbackContractTest,com.vlesscardvpn.NodeStorageMigrationTest,com.vlesscardvpn.NodeMetadataUpdateTest,com.vlesscardvpn.NativeOutboundFixtureTest,com.vlesscardvpn.NativeFullTunFixtureTest,com.vlesscardvpn.ByeDpiMaskLoopbackTest,com.vlesscardvpn.HomeScreenSmokeTest,com.vlesscardvpn.LauncherStartupTest,com.vlesscardvpn.VpnServiceCancellationFixtureTest \
+  -e class com.vlesscardvpn.AutoTcpPreflightAndroidTest,com.vlesscardvpn.NativeConfigValidationTest,com.vlesscardvpn.NativeCallbackContractTest,com.vlesscardvpn.NodeStorageMigrationTest,com.vlesscardvpn.NodeMetadataUpdateTest,com.vlesscardvpn.NativeOutboundFixtureTest,com.vlesscardvpn.NativeFullTunFixtureTest,com.vlesscardvpn.ByeDpiMaskLoopbackTest,com.vlesscardvpn.DirectEngineLoopbackTest,com.vlesscardvpn.HomeScreenSmokeTest,com.vlesscardvpn.LauncherStartupTest,com.vlesscardvpn.VpnServiceCancellationFixtureTest \
   com.vlesscardvpn.preview.test/androidx.test.runner.AndroidJUnitRunner | tee native-results.txt
 INSTRUMENT_EXIT=${PIPESTATUS[0]}
 set -e
@@ -32,25 +32,25 @@ python3 - <<'CHECK'
 from pathlib import Path
 import re, os
 text = Path("native-results.txt").read_text()
-passed = os.environ["INSTRUMENT_EXIT"] == "0" and "OK (63 tests)" in text and not re.search(r"FAILURES!!!|INSTRUMENTATION_FAILED|Process crashed|INSTRUMENTATION_STATUS_CODE: -[1-4]", text)
+passed = os.environ["INSTRUMENT_EXIT"] == "0" and "OK (71 tests)" in text and not re.search(r"FAILURES!!!|INSTRUMENTATION_FAILED|Process crashed|INSTRUMENTATION_STATUS_CODE: -[1-4]", text)
 if not passed:
     summary = text[text.rfind("Time:"):] if "Time:" in text else text[-3500:]
     summary = "\n".join(line for line in summary.splitlines() if not line.lstrip().startswith(("at ", "... ")))
     summary = summary[:3500].replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
     print("::error title=Native Android fixture assertions::" + summary)
     # Logs need a login; encode the first failing test in the job duration as well:
-    # checkout + 14 min + code * 60 s. code = class index (1-11, alphabetical), 12 = no failing test
-    # reported (count/crash), 13/14 = NativeFullTun mask/custom ByeDPI tests.
+    # checkout + 14 min + code * 60 s. code = class index (1-12, alphabetical), 0 = no failing test
+    # reported (count/crash), 13/14/15 = NativeFullTun mask/custom ByeDPI / "без сервера" tests.
     import time
     classes = sorted(p.stem for p in Path("app/src/androidTest/java/com/vlesscardvpn").glob("*Test.kt"))
-    cls = test = ""; code = 12
+    cls = test = ""; code = 0
     for line in text.splitlines():
         if line.startswith("INSTRUMENTATION_STATUS: class="): cls = line.split("=", 1)[1].strip()
         elif line.startswith("INSTRUMENTATION_STATUS: test="): test = line.split("=", 1)[1].strip()
         elif re.match(r"INSTRUMENTATION_STATUS_CODE: -[1-4]", line):
             short = cls.rsplit(".", 1)[-1]
             code = 13 if test.startswith("maskAutoFake") else 14 if test.startswith("customStrategy") else \
-                (classes.index(short) + 1 if short in classes else 12)
+                15 if test.startswith("direct") else (classes.index(short) + 1 if short in classes else 0)
             print("First failing test:", cls, test)
             break
     print("Failure group code:", code)
@@ -59,5 +59,5 @@ if not passed:
         time.sleep(max(0, min(target - time.time(), 1900)))
     except OSError: pass
     raise SystemExit(1)
-print("Confirmed: 63 instrumented fixture checks, no skipped/failed tests")
+print("Confirmed: 71 instrumented fixture checks, no skipped/failed tests")
 CHECK

@@ -31,14 +31,14 @@ fun HomeScreen(repo: AppRepository, autoPilotEngine: AutoPilotEngine, vpnStats: 
     onNavigateToAutopilot: () -> Unit, onNavigateToDiagnostic: () -> Unit,
     onNavigateToSettings: () -> Unit, onPanicTrigger: () -> Unit,
     preparingConnection: Boolean = false, onNavigateToCrashReports: () -> Unit = {},
-    onAutoConnect: () -> Unit = { onToggleConnect(null) }) {
+    onAutoConnect: () -> Unit = { onToggleConnect(null) }, onDirectConnect: () -> Unit = {}) {
     val configs by repo.configsFlow.collectAsState(initial = emptyList())
     val storageIssue by repo.storageIssueFlow.collectAsState()
     val selected = ConnectionSelection.current(configs, vpnStats.activeConfig,
         vpnStats.status in setOf(VpnStatus.CONNECTING, VpnStatus.CONNECTED, VpnStatus.STOPPING))
     HomeDashboard(vpnStats, selected, configs.size, preparingConnection,
         { onToggleConnect(selected) }, onAutoConnect, onNavigateToServers, onNavigateToSettings,
-        onNavigateToDiagnostic, onNavigateToCrashReports, storageIssue = storageIssue)
+        onNavigateToDiagnostic, onNavigateToCrashReports, storageIssue = storageIssue, onDirect = onDirectConnect)
 }
 
 /** Real Compose UI: presentation cannot start a tunnel or infer health from a TCP ping. */
@@ -46,11 +46,12 @@ fun HomeScreen(repo: AppRepository, autoPilotEngine: AutoPilotEngine, vpnStats: 
 fun HomeDashboard(stats: VpnSessionStats, selected: VlessConfig? = null, configCount: Int = 0,
     preparing: Boolean = false, onConnect: () -> Unit = {}, onAuto: () -> Unit = {},
     onServers: () -> Unit = {}, onSettings: () -> Unit = {}, onDiagnostics: () -> Unit = {},
-    onReports: () -> Unit = {}, scrollState: androidx.compose.foundation.ScrollState = rememberScrollState(), storageIssue: String? = null) {
+    onReports: () -> Unit = {}, scrollState: androidx.compose.foundation.ScrollState = rememberScrollState(), storageIssue: String? = null,
+    onDirect: () -> Unit = {}) {
     val c = MaterialTheme.colorScheme
     val connected = stats.status == VpnStatus.CONNECTED
     val working = connected && stats.health.internet
-    val limited = working && !stats.health.preferredServices
+    val limited = working && if (stats.direct) !stats.health.youtubeBulk else !stats.health.preferredServices
     val busy = stats.status == VpnStatus.CONNECTING || preparing
     val stopping = stats.status == VpnStatus.STOPPING
     val error = stats.status == VpnStatus.ERROR
@@ -61,6 +62,7 @@ fun HomeDashboard(stats: VpnSessionStats, selected: VlessConfig? = null, configC
     val description = when {
         busy -> stats.progressMessage.ifBlank { "Проверяем сервер и передачу данных." }
         stopping -> "Завершаем сеанс и освобождаем ресурсы."
+        limited && stats.direct -> "Без сервера: сайты открываются, но YouTube не прошёл проверку загрузки."
         limited -> "HTTPS работает. Не все сервисы прошли проверку."
         working -> stats.profileLabel.ifBlank { "Связь через выбранный сервер подтверждена." }
         storageIssue != null -> "Сначала восстановите доступ к сохранённым данным."
@@ -117,6 +119,9 @@ fun HomeDashboard(stats: VpnSessionStats, selected: VlessConfig? = null, configC
                                 Icon(Icons.Default.AutoAwesome, null, Modifier.size(20.dp))
                                 Spacer(Modifier.width(10.dp))
                                 Text("Авто", fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+                            }
+                            TextButton(onClick = onDirect, enabled = storageIssue == null, modifier = Modifier.heightIn(min = 48.dp)) {
+                                Text("Без сервера (как ByeByeDPI)", fontSize = 15.sp)
                             }
                         }
                     }

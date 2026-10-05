@@ -278,6 +278,71 @@ object SingBoxManager {
     }
 
     /**
+     * "Без сервера" (как ByeByeDPI): TCP from the TUN goes to the local ByeDPI/tpws SOCKS listener (tag "proxy",
+     * so probe-in checks exactly this path). QUIC is rejected so browsers/YouTube fall back to TCP+TLS which the
+     * desync can handle; other UDP and DNS go out directly (plain DNS to Yandex 77.88.8.8, reachable on RU ISPs).
+     */
+    fun generateDirectConfig(
+        context: Context?,
+        settings: AppSettings,
+        socksPort: Int,
+        probeProxy: LocalProbeProxy? = null,
+        platformSdk: Int? = null
+    ): String {
+        require(socksPort in 1024..65535)
+        val mtu = settings.mtuSize.coerceIn(1280, 1500)
+        val rules = JSONArray().apply {
+            if (probeProxy != null) put(JSONObject().apply { put("inbound", JSONArray(listOf("probe-in"))); put("outbound", "proxy") })
+            put(JSONObject().apply { put("action", "sniff") })
+            put(JSONObject().apply { put("protocol", "dns"); put("action", "hijack-dns") })
+            put(JSONObject().apply { put("network", "udp"); put("port", JSONArray(listOf(443, 80))); put("action", "reject") })
+            if (settings.enableAdBlock) put(JSONObject().apply { put("domain_suffix", JSONArray(AdBlockDns.adBlockRules)); put("action", "reject") })
+            put(JSONObject().apply { put("ip_is_private", true); put("outbound", "direct") })
+            put(JSONObject().apply { put("ip_cidr", JSONArray(privateIpCidrs)); put("outbound", "direct") })
+            if (settings.bypassApps.isNotEmpty()) put(JSONObject().apply { put("package_name", JSONArray(settings.bypassApps)); put("outbound", "direct") })
+            put(JSONObject().apply { put("network", "udp"); put("outbound", "direct") })
+        }
+        val dns = JSONObject().apply {
+            put("servers", JSONArray().apply {
+                put(JSONObject().apply { put("tag", "local-dns"); put("address", "77.88.8.8"); put("detour", "direct") })
+            })
+            put("rules", JSONArray())
+            put("final", "local-dns")
+            put("strategy", "prefer_ipv4")
+            put("independent_cache", true)
+            put("cache_capacity", 4096)
+        }
+        val inbounds = JSONArray().apply {
+            if (probeProxy != null) put(JSONObject().apply {
+                put("type", "mixed"); put("tag", "probe-in"); put("listen", "127.0.0.1"); put("listen_port", probeProxy.port)
+                put("users", JSONArray().put(JSONObject().apply { put("username", probeProxy.username); put("password", probeProxy.password) }))
+            })
+            put(JSONObject().apply {
+                put("type", "tun"); put("tag", "tun-in"); put("interface_name", "tun0")
+                put("address", JSONArray(listOf("172.19.0.1/30", "fdfe:dcba:9876::1/126")))
+                put("mtu", mtu); put("auto_route", true); put("strict_route", true)
+                put("stack", TunStackPolicy.forSdk(platformSdk ?: context?.let { Build.VERSION.SDK_INT }))
+            })
+        }
+        val outbounds = JSONArray().apply {
+            put(JSONObject().apply {
+                put("type", "socks"); put("tag", "proxy"); put("server", "127.0.0.1"); put("server_port", socksPort)
+                put("version", "5"); put("network", "tcp")
+            })
+            put(JSONObject().apply { put("type", "direct"); put("tag", "direct") })
+        }
+        return JSONObject().apply {
+            put("log", JSONObject().apply { put("level", "warn"); put("timestamp", true) })
+            put("dns", dns)
+            put("inbounds", inbounds)
+            put("outbounds", outbounds)
+            put("route", JSONObject().apply {
+                put("rules", rules); put("final", "proxy"); put("auto_detect_interface", true); put("default_domain_resolver", "local-dns")
+            })
+        }.toString(2)
+    }
+
+    /**
      * VLESS Outbound for sing-box with transport support (tcp, ws, grpc, h2).
      * Note: In sing-box schema, standard TCP transport is default and MUST NOT have `transport: { type: "tcp" }`.
      */

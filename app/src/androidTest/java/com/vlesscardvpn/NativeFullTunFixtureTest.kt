@@ -68,6 +68,76 @@ class NativeFullTunFixtureTest {
     @Test fun customStrategyTunDnsHttpsAndRestart() = exercise(RouteProfile.BYEDPI,
         custom = ByeDpiArgs.parse("-o1 -At,r,s -d1 -f-1 -n {sni} -Qr", "ya.ru").getOrThrow())
 
+    // "Без сервера": another app's traffic → TUN → sing-box → production ByeDPI/tpws argv → real TCP to the fixture HTTPS.
+    @Test fun directOobThenDisorderTunDnsHttps() = exerciseDirect(DirectStrategies.BUILT_IN.first { it.id == "BYEDPI#OOB_THEN_DISORDER" })
+    @Test fun directVcardStealthTunDnsHttps() = exerciseDirect(DirectStrategies.VCARD_STEALTH)
+    @Test fun directTpwsSplitDisorderTunDnsHttps() = exerciseDirect(DirectStrategies.BUILT_IN.first { it.id == "TPWS#SPLIT_DISORDER" })
+    @Test fun directTpwsTlsRecTunDnsHttps() = exerciseDirect(DirectStrategies.BUILT_IN.first { it.id == "TPWS#TLSREC" })
+
+    private fun exerciseDirect(strategy: DirectStrategy) = runBlocking {
+        val args = InstrumentationRegistry.getArguments()
+        val host = args.getString("fixture_host") ?: "10.0.2.2"
+        repeat(2) { cycle ->
+            val proxy = LocalProbeProxy.allocate()
+            val runner = ByeDpiRunner(context)
+            var server: CommandServer? = null
+            var descriptor: ParcelFileDescriptor? = null
+            var adapter: LibboxPlatformInterface? = null
+            val socksOut = AtomicInteger(); val tunTcp = AtomicInteger()
+            try {
+                val port = java.net.ServerSocket(0, 1, java.net.InetAddress.getByName("127.0.0.1")).use { it.localPort }
+                runner.startDirect(strategy, port)
+                val config = JSONObject(SingBoxManager.generateDirectConfig(null, AppSettings(), port, proxy, platformSdk = Build.VERSION.SDK_INT))
+                // Fixture-only: the fixture name resolves to 198.18.0.1, served by the host HTTPS at 10.0.2.2:18443.
+                config.getJSONObject("dns").getJSONArray("servers").getJSONObject(0).put("address", "udp://$host:15353")
+                val rules = config.getJSONObject("route").getJSONArray("rules")
+                val rebuilt = JSONArray().put(JSONObject().put("ip_cidr", JSONArray(listOf("198.18.0.1/32")))
+                    .put("action", "route").put("outbound", "proxy").put("override_address", host))
+                for (i in 0 until rules.length()) rebuilt.put(rules.getJSONObject(i))
+                config.getJSONObject("route").put("rules", rebuilt)
+                config.getJSONObject("log").put("level", "debug")
+                Libbox.checkConfig(config.toString())
+                adapter = LibboxPlatformInterface(registeredVpnService(context)) { descriptor = it }
+                val handler = object : CommandServerHandler {
+                    override fun getSystemProxyStatus(): SystemProxyStatus = NativeCallbackValues.disabledSystemProxy()
+                    override fun serviceReload() {}
+                    override fun serviceStop() {}
+                    override fun setSystemProxyEnabled(enabled: Boolean) {}
+                    override fun writeDebugMessage(message: String?) {
+                        val text = message.orEmpty()
+                        if (text.contains("inbound/tun[tun-in]") && text.contains("inbound connection")) tunTcp.incrementAndGet()
+                        if (text.contains("outbound/socks[proxy]") && text.contains("outbound connection")) socksOut.incrementAndGet()
+                    }
+                }
+                server = CommandServer(handler, adapter); server.start(); server.startOrReloadService(config.toString(), OverrideOptions())
+                assertNotNull("Native core must actually call VpnService.Builder.establish", descriptor)
+                val nonce = UUID.randomUUID().toString().replace("-", "")
+                shell("am force-stop com.vlesscardvpn.netprobe")
+                shell("am start -W -n com.vlesscardvpn.netprobe/.ProbeActivity --es nonce $nonce")
+                val deadline = android.os.SystemClock.elapsedRealtime() + 60000
+                var result: JSONObject? = null
+                while (android.os.SystemClock.elapsedRealtime() < deadline) {
+                    val parsed = runCatching { JSONObject(shell("run-as com.vlesscardvpn.netprobe cat files/result.json")) }.getOrNull()
+                    if (parsed?.optString("nonce") == nonce) { result = parsed; break }
+                    Thread.sleep(100)
+                }
+                val counts = "${strategy.id} cycle $cycle tunTcp=${tunTcp.get()},socksOut=${socksOut.get()}"
+                assertNotNull("DIRECT helper did not finish; $counts", result)
+                assertTrue("DIRECT helper must use the VPN; $counts", result!!.optBoolean("vpn"))
+                assertEquals("DIRECT DNS; $counts; ${result!!.optString("stage")}/${result!!.optString("failure")}", "198.18.0.1", result!!.optString("address"))
+                assertEquals("DIRECT HTTPS; $counts; ${result!!.optString("stage")}/${result!!.optString("failure")}", 204, result!!.optInt("code", -1))
+                assertEquals("DIRECT pinned HTTPS; $counts", 204, result!!.optJSONObject("pinned")?.optInt("code", -1))
+            } finally {
+                runCatching { server?.closeService() }
+                runCatching { server?.close() }
+                runCatching { adapter?.closeDefaultInterfaceMonitor(null) }
+                runCatching { descriptor?.close() }
+                runner.close()
+                shell("am force-stop com.vlesscardvpn.netprobe")
+            }
+        }
+    }
+
     private fun exercise(profile: RouteProfile, preset: ByeDpiPreset = ByeDpiPreset.COMBINED, stack: String? = null,
                          custom: List<String>? = null) = runBlocking {
         val args = InstrumentationRegistry.getArguments()
