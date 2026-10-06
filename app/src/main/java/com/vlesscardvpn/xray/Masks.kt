@@ -109,6 +109,27 @@ object Masks {
     /** Fixed DPI strategy ids used by these masks (each needs its own local engine). */
     fun strategies(masks: Collection<Mask?>): Set<String> = masks.mapNotNull { it?.dpi }.filter { it.isNotEmpty() }.toSet()
 
+    /** Families the user can switch on/off for the mask search (Settings.maskFamilies). */
+    val FAMILIES = listOf("plain" to "Без дробления", "frag" to "Дробление", "ladder" to "Лесенки (свои)", "viadpi" to "Через обход DPI",
+        "own" to "Свои VLESS Card", "zapret" to "zapret", "byedpi" to "ByeDPI", "noise" to "UDP-шум")
+
+    fun family(m: Mask): String = when {
+        m.noise.isNotEmpty() -> "noise"
+        m.dpi.startsWith("BYEDPI#VCARD") || m.dpi.startsWith("TPWS#VCARD") -> "own"
+        m.dpi.startsWith("TPWS#") -> "zapret"
+        m.dpi.isNotEmpty() && m.dpi != CURRENT_DPI -> "byedpi"
+        m.dpi == CURRENT_DPI -> "viadpi"
+        m.lengths.isNotEmpty() -> "ladder"
+        m.packets.isNotEmpty() -> "frag"
+        else -> "plain"
+    }
+
+    /** [searchOrder] limited to the families / fingerprints chosen in Settings (empty = all). Plain chrome stays as a baseline. */
+    fun searchOrder(byeDpiAvailable: Boolean, server: com.vlesscardvpn.model.Server?, families: Collection<String>, fps: Collection<String>): List<Mask> =
+        searchOrder(byeDpiAvailable, server).filter { m ->
+            m.id == DEFAULT.id || (families.isEmpty() || family(m) in families) && (fps.isEmpty() || m.fingerprint in fps || m.noise.isNotEmpty())
+        }
+
     fun searchOrder(byeDpiAvailable: Boolean, server: com.vlesscardvpn.model.Server? = null): List<Mask> {
         val first = listOf("chrome.n", "chrome.z1", "chrome.z2", "chrome.z3", "chrome.z4", "chrome.h4", "chrome.l1", "firefox.l2", "chrome.p2", "firefox.h2", "safari.p3", "edge.h5", "chrome.h1", "ios.p1", "safari.l3", "chrome.l2.b",
             "android.h3", "firefox.h4", "chrome.n.b", "chrome.h4.b", "firefox.p4", "chrome.p5", "chrome.h6", "qq.h2",

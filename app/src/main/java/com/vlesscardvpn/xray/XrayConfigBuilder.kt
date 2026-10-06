@@ -160,7 +160,7 @@ object XrayConfigBuilder {
      * one outbound per selected server, balancer + observatory across them, DNS via DoH through the tunnel.
      */
     fun vpnConfig(servers: List<Pair<Server, Mask?>>, settings0: Settings, byeDpiPort: Int?, socks: SocksAuth = SocksAuth(settings0.socksPort),
-                  dpiPorts: Map<String, Int> = emptyMap()): String {
+                  dpiPorts: Map<String, Int> = emptyMap(), listen: String = "127.0.0.1", httpPort: Int? = null): String {
         // Auto: servers when there are working ones, otherwise the DPI engine alone.
         val settings = if (settings0.mode == Mode.AUTO) settings0.copy(mode = if (servers.isEmpty()) Mode.BYEDPI else Mode.SERVERS) else settings0
         require(settings.mode == Mode.BYEDPI || servers.isNotEmpty()) { "Не выбран ни один сервер" }
@@ -169,9 +169,13 @@ object XrayConfigBuilder {
         val inSettings = JSONObject().put("udp", true).put("ip", "127.0.0.1")
         if (socks.auth) inSettings.put("auth", "password").put("accounts", arr(JSONObject().put("user", socks.user).put("pass", socks.pass)))
         else inSettings.put("auth", "noauth")
-        c.put("inbounds", arr(JSONObject().put("tag", "socks").put("listen", "127.0.0.1").put("port", socks.port)
-            .put("protocol", "socks").put("settings", inSettings)
-            .put("sniffing", JSONObject().put("enabled", true).put("destOverride", arr("http", "tls", "quic")).put("routeOnly", true))))
+        fun sniff() = JSONObject().put("enabled", true).put("destOverride", arr("http", "tls", "quic")).put("routeOnly", true)
+        val inbounds = arr(JSONObject().put("tag", "socks").put("listen", listen).put("port", socks.port)
+            .put("protocol", "socks").put("settings", inSettings).put("sniffing", sniff()))
+        // Proxy mode: an HTTP proxy next to SOCKS for apps/browsers that only know HTTP proxies.
+        if (httpPort != null) inbounds.put(JSONObject().put("tag", "http").put("listen", listen).put("port", httpPort)
+            .put("protocol", "http").put("settings", JSONObject()).put("sniffing", sniff()))
+        c.put("inbounds", inbounds)
         val outs = JSONArray()
         val useServers = settings.mode != Mode.BYEDPI
         if (useServers) servers.forEachIndexed { i, (s, m) -> outs.put(outbound(s, "$PROXY_PREFIX$i", resolveMask(m, byeDpiPort, dpiPorts), settings.mux)) }

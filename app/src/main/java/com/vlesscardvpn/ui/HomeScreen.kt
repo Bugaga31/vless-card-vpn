@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -50,6 +51,32 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
             Mode.HYBRID -> "YouTube/Discord/Telegram — через обход DPI, остальное — через серверы"
         }, fontSize = 13.sp, color = Color.Gray, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 6.dp))
         Spacer(Modifier.height(10.dp))
+        val st = app.settings
+        fun reconnect() { if (status.state == Tunnel.State.CONNECTED) onConnect() }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("Тип:", fontSize = 13.sp)
+            FilterChip(selected = !st.proxyOnly, onClick = { if (st.proxyOnly) { onDisconnect(); Store.update { it.copy(settings = it.settings.copy(proxyOnly = false)) } } }, label = { Text("VPN") })
+            FilterChip(selected = st.proxyOnly, onClick = { if (!st.proxyOnly) { onDisconnect(); Store.update { it.copy(settings = it.settings.copy(proxyOnly = true)) } } }, label = { Text("Прокси") })
+        }
+        if (st.proxyOnly) Text("Без VPN: SOCKS5 127.0.0.1:${st.socksPort}, HTTP :${st.httpPort}" + (if (st.lanShare) " — раздаётся в Wi-Fi" else "") + ". Telegram — кнопка в Настройках",
+            fontSize = 11.sp, color = Color.Gray, textAlign = TextAlign.Center)
+        else {
+            var appsDialog by remember { mutableStateOf(false) }
+            val n = st.apps.size
+            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                FilterChip(selected = !st.perApp || n == 0, onClick = { Store.update { it.copy(settings = it.settings.copy(perApp = false)) }; reconnect() }, label = { Text("Все приложения") })
+                FilterChip(selected = st.perApp && n > 0 && st.onlyApps, onClick = {
+                    if (n == 0) appsDialog = true else { Store.update { it.copy(settings = it.settings.copy(perApp = true, onlyApps = true)) }; reconnect() }
+                }, label = { Text(if (n > 0) "Только выбранные ($n)" else "Только выбранные") })
+                FilterChip(selected = st.perApp && n > 0 && !st.onlyApps, onClick = {
+                    if (n == 0) appsDialog = true else { Store.update { it.copy(settings = it.settings.copy(perApp = true, onlyApps = false)) }; reconnect() }
+                }, label = { Text("Все, кроме выбранных") })
+                TextButton(onClick = { appsDialog = true }) { Text("Выбрать…") }
+            }
+            if (appsDialog) AppsDialog(st, onDismiss = { appsDialog = false }) { apps, only ->
+                Store.update { it.copy(settings = it.settings.copy(apps = apps, onlyApps = only, perApp = true)) }; reconnect()
+            }
+        }
         // «Только YouTube и Telegram»: отмеченные сервисы идут через VPN, остальное — напрямую.
         val services = app.settings.services
         fun toggleService(id: String, v: Boolean) {

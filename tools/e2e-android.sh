@@ -104,6 +104,37 @@ adb logcat -d -s E2E:I | grep "socks port=" | tail -1 | grep -q "mode=SERVERS" |
 c=$(grep -c "email: u8443" $W/access.log); echo "auto: server :8443 accepted $c"
 [ "$c" -gt 0 ] || fail "auto: traffic did not go through the auto-picked server"
 
+echo "=== case proxy (no VPN: SOCKS5 10808 + HTTP 10809 for other apps)"
+adb shell am start -n $PKG/.MainActivity --ez e2e_disconnect true >/dev/null; sleep 3; : > $W/access.log
+load proxy.json; adb logcat -c
+adb shell am start -n $PKG/.MainActivity --ez e2e_connect true >/dev/null
+C=$(waitlog "check ok=|connect failed" 60) || fail "proxy: no connect result"
+echo "app: $C"; echo "$C" | grep -q "check ok=true" || fail "proxy: in-app check failed"
+adb logcat -d -s E2E:I | grep "socks port=" | tail -1 | grep -q "port=10808 auth=false.*proxy=true" || fail "proxy: not a plain SOCKS on 10808"
+adb shell ip addr | grep -q "tun0" && fail "proxy: a TUN interface exists (must be proxy only)"
+adb forward tcp:18081 tcp:10809 >/dev/null; adb forward tcp:18080 tcp:10808 >/dev/null
+H=$(curl -s -m 20 -o /dev/null -w '%{http_code}' -x http://127.0.0.1:18081 https://www.gstatic.com/generate_204); echo "proxy: HTTP proxy → $H"
+[ "$H" = "204" ] || fail "proxy: HTTP proxy 10809 does not work"
+S5=$(curl -s -m 20 -o /dev/null -w '%{http_code}' -x socks5h://127.0.0.1:18080 https://www.google.com/); echo "proxy: SOCKS5 → $S5"
+[ "$S5" = "200" ] || fail "proxy: SOCKS5 10808 does not work"
+adb forward --remove-all
+c=$(grep -c "email: u8443" $W/access.log); echo "proxy: server :8443 accepted $c"
+[ "$c" -gt 0 ] || fail "proxy: traffic did not go through the server"
+
+echo "=== case warp (register free WARP accounts, find endpoint + mask, connect)"
+adb shell am start -n $PKG/.MainActivity --ez e2e_disconnect true >/dev/null; sleep 3
+load warp.json; adb logcat -c
+adb shell am start -n $PKG/.MainActivity --ez e2e_warp true >/dev/null
+WR=$(waitlog "action\[WARP\]" 420) || fail "warp: no result"
+adb logcat -d -s E2E:I | grep "warp " ; echo "warp: $WR"
+if echo "$WR" | grep -q "WARP готов"; then
+  adb logcat -c
+  adb shell am start -n $PKG/.MainActivity --ez e2e_connect true >/dev/null
+  C=$(waitlog "check ok=|connect failed" 90) || fail "warp: no connect result"
+  echo "app: $C"; echo "$C" | grep -q "check ok=true" || fail "warp: in-app check through WARP failed"
+  R=$(probe warp); okprobe "$R" || fail "warp: probe app traffic through WARP failed"
+else fail "warp: no working WARP endpoint"; fi
+
 echo "=== DPI strategy search (all engines start and carry HTTPS)"
 adb shell am start -n $PKG/.MainActivity --ez e2e_disconnect true >/dev/null; sleep 2
 adb logcat -c

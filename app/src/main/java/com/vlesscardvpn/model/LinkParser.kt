@@ -197,8 +197,9 @@ object Base64 {
         val d = java.nio.charset.StandardCharsets.UTF_8.newDecoder()
         runCatching { d.decode(java.nio.ByteBuffer.wrap(b)).toString() }.getOrNull()
     }
-    fun encode(text: String): String {
-        val b = text.toByteArray(Charsets.UTF_8); val sb = StringBuilder(); var i = 0
+    fun encode(text: String): String = encode(text.toByteArray(Charsets.UTF_8))
+    fun encode(b: ByteArray): String {
+        val sb = StringBuilder(); var i = 0
         while (i < b.size) {
             val n = minOf(3, b.size - i); var v = 0
             for (k in 0 until 3) v = (v shl 8) or (if (k < n) b[i + k].toInt() and 0xFF else 0)

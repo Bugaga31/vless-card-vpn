@@ -13,7 +13,7 @@ class ToggleTileService : TileService() {
     override fun onClick() {
         val on = Tunnel.status.value.state.let { it == Tunnel.State.CONNECTED || it == Tunnel.State.CONNECTING }
         if (on) TunnelService.stop(this)
-        else if (VpnService.prepare(this) == null) TunnelService.start(this)
+        else if (com.vlesscardvpn.core.Store.state.value.settings.proxyOnly || VpnService.prepare(this) == null) TunnelService.start(this)
         else {
             val i = Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             if (android.os.Build.VERSION.SDK_INT >= 34)

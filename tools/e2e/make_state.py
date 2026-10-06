@@ -34,3 +34,6 @@ write(f"{out}/ownmask.json", [reality, ws], ["e2e-reality", "e2e-ws-tls"],
 write(f"{out}/xraydpi.json", [reality], [], {}, mode="BYEDPI", dpiStrategy="XRAY#LADDER")
 write(f"{out}/services.json", [reality], ["e2e-reality"], {}, services=["youtube", "telegram"])
 write(f"{out}/auto.json", [reality, dead], [], {}, mode="AUTO", autoUpdateSubs=False, lastSubRefresh=4102444800000)
+# 1.0.62: proxy mode (no TUN: SOCKS 10808 + HTTP 10809), built-in WARP (registers itself, finds endpoint + noise mask).
+write(f"{out}/proxy.json", [reality], ["e2e-reality"], {}, proxyOnly=True)
+write(f"{out}/warp.json", [], [], {}, autoUpdateSubs=False, lastSubRefresh=4102444800000)
