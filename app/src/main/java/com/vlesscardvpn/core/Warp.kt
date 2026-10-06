@@ -31,7 +31,8 @@ object Warp {
         "162.159.193.5:1002", "188.114.97.6:955", "162.159.195.9:7103", "188.114.98.11:3854",
     )
 
-    data class Account(val privateKey: String, val peerKey: String, val v4: String, val v6: String, val reserved: String, val id: String)
+    data class Account(val privateKey: String, val peerKey: String, val v4: String, val v6: String, val reserved: String, val id: String,
+                       val token: String = "", val plus: Boolean = false)
 
     // ---------------- X25519 (RFC 7748), enough for one key per registration
     private val P = BigInteger.ONE.shiftLeft(255).subtract(BigInteger.valueOf(19))
@@ -84,12 +85,8 @@ object Warp {
         val tos = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).apply { timeZone = TimeZone.getTimeZone("UTC") }.format(Date())
         val body = JSONObject().put("key", b64(publicKey(priv))).put("install_id", "").put("fcm_token", "").put("tos", tos)
             .put("type", "Android").put("locale", "en_US").toString()
-        val clients = buildList {
-            add(http)
-            Tunnel.socks?.let { s -> if (!s.auth) add(http.newBuilder().proxy(Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", s.port))).build()) }
-        }
         var err: Throwable? = null
-        for (c in clients) {
+        for (c in clients()) {
             val r = runCatching {
                 c.newCall(Request.Builder().url(API).header("User-Agent", "okhttp/3.12.1").header("CF-Client-Version", "a-6.30-3596")
                     .post(body.toRequestBody("application/json; charset=UTF-8".toMediaType())).build()).execute().use { r ->
@@ -103,19 +100,57 @@ object Warp {
         throw err ?: IllegalStateException("WARP: нет ответа")
     }
 
+    private fun clients(): List<OkHttpClient> = buildList {
+        add(http)
+        Tunnel.socks?.let { s -> if (!s.auth) add(http.newBuilder().proxy(Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", s.port))).build()) }
+    }
+
+    /**
+     * Binds a WARP+ key to the account (PUT /reg/{id}/account). Returns null on success, else the API's error
+     * (e.g. "Too many connected devices." — the key is used up, try another one).
+     */
+    fun applyLicense(a: Account, license: String): String? {
+        val body = JSONObject().put("license", license).toString()
+        var err = "нет ответа"
+        for (c in clients()) {
+            val r = runCatching {
+                c.newCall(Request.Builder().url("$API/${a.id}/account").header("Authorization", "Bearer ${a.token}")
+                    .header("User-Agent", "okhttp/3.12.1").header("CF-Client-Version", "a-6.30-3596")
+                    .put(body.toRequestBody("application/json; charset=UTF-8".toMediaType())).build()).execute().use { r ->
+                    val o = runCatching { JSONObject(r.body?.string().orEmpty()) }.getOrDefault(JSONObject())
+                    if (r.isSuccessful && o.optBoolean("warp_plus", false)) null
+                    else o.optJSONArray("errors")?.optJSONObject(0)?.optString("message") ?: "HTTP ${r.code}"
+                }
+            }
+            r.onSuccess { if (it == null) return null; err = it; if (!it.startsWith("HTTP")) return it }
+        }
+        return err
+    }
+
+    /** User keys first, then the built-in ones (shuffled); stops at the first key that binds. Returns the key used. */
+    fun upgrade(a: Account, own: List<String>, builtIn: Boolean, maxTries: Int = 12): Pair<String?, String> {
+        val order = own + if (builtIn) WarpKeys.BUILT_IN.shuffled().filter { it !in own } else emptyList()
+        var last = ""
+        for (k in order.take(maxTries + own.size)) {
+            val e = applyLicense(a, k) ?: return k to ""
+            last = e
+        }
+        return null to last
+    }
+
     fun parse(o: JSONObject, privateKey: String): Account {
         val cfg = o.getJSONObject("config")
         val peer = cfg.getJSONArray("peers").getJSONObject(0)
         val addr = cfg.getJSONObject("interface").getJSONObject("addresses")
         val clientId = cfg.optString("client_id")
         val reserved = runCatching { com.vlesscardvpn.model.Base64.decode(clientId)!!.take(3).joinToString(",") { (it.toInt() and 255).toString() } }.getOrDefault("")
-        return Account(privateKey, peer.getString("public_key"), addr.getString("v4"), addr.optString("v6"), reserved, o.optString("id"))
+        return Account(privateKey, peer.getString("public_key"), addr.getString("v4"), addr.optString("v6"), reserved, o.optString("id"), o.optString("token"))
     }
 
     /** One WireGuard server per endpoint for this account. */
     fun servers(a: Account, endpoints: List<String>): List<Server> = endpoints.map { ep ->
         val host = ep.substringBeforeLast(':'); val port = ep.substringAfterLast(':').toInt()
-        Server(name = "WARP $ep", protocol = "wireguard", address = host, port = port, secret = a.privateKey, pbk = a.peerKey,
+        Server(name = (if (a.plus) "WARP+ " else "WARP ") + ep, protocol = "wireguard", address = host, port = port, secret = a.privateKey, pbk = a.peerKey,
             localAddress = "${a.v4}/32", reserved = a.reserved, mtu = 1280, source = SOURCE)
     }
 }

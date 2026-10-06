@@ -60,4 +60,13 @@ class R62Test {
         assertTrue(ladders.drop(1).isNotEmpty() && ladders.drop(1).all { Masks.family(it) == "ladder" && it.fingerprint == "firefox" })
         assertEquals("noise", Masks.family(Masks.byId("chrome.z1")!!))
     }
+
+    @Test fun warpPlusKeys() {
+        val post = "🔐 Key: <code>h51Zl4W3-0gX3Cd82-9ngP82u6</code> (1923837100 GB)🔐 Key: <code>65jSa4G2-WO7A520P-X5mF349N</code>"
+        assertEquals(listOf("h51Zl4W3-0gX3Cd82-9ngP82u6", "65jSa4G2-WO7A520P-X5mF349N"), com.vlesscardvpn.core.WarpKeys.parse(post))
+        assertEquals(135, com.vlesscardvpn.core.WarpKeys.BUILT_IN.size)
+        assertTrue(com.vlesscardvpn.core.WarpKeys.BUILT_IN.all { com.vlesscardvpn.core.WarpKeys.parse(it) == listOf(it) })
+        val s = Settings.fromJson(Settings(warpKeys = "abc", warpBuiltinKeys = false).toJson())
+        assertTrue(s.warpKeys == "abc" && !s.warpBuiltinKeys)
+    }
 }

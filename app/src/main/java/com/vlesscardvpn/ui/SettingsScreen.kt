@@ -134,6 +134,15 @@ fun SettingsScreen() {
             runCatching { ctx.startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse("tg://socks?server=127.0.0.1&port=${s.socksPort}")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
         }, modifier = Modifier.fillMaxWidth()) { Text("Добавить прокси в Telegram") }
 
+        Section("WARP")
+        Hint("Серверы → «WARP» создаёт аккаунты и подбирает точки входа. Ключ WARP+ ускоряет WARP (вставьте один или целый пост с ключами).")
+        var wk by remember(s.warpKeys) { mutableStateOf(s.warpKeys) }
+        OutlinedTextField(wk, { v -> wk = v; set { it.copy(warpKeys = v) } }, label = { Text("Свой ключ WARP+ (xxxxxxxx-xxxxxxxx-xxxxxxxx)") },
+            modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp, max = 140.dp))
+        if (s.warpKeys.isNotBlank()) Hint("Найдено ключей: ${com.vlesscardvpn.core.WarpKeys.parse(s.warpKeys).size}")
+        Toggle("Встроенные ключи WARP+", "${com.vlesscardvpn.core.WarpKeys.BUILT_IN.size} публичных ключей: пробуются по очереди, если своего нет или он занят", s.warpBuiltinKeys) { v -> set { it.copy(warpBuiltinKeys = v) } }
+        OutlinedButton(onClick = { Actions.setupWarp() }, enabled = !progress.running, modifier = Modifier.fillMaxWidth()) { Text("Настроить WARP сейчас") }
+
         Section("Подбор маскировки: что перебирать")
         Hint("Ничего не отмечено — все виды. Меньше видов — быстрее подбор. Сервер перестаёт перебираться после 3 рабочих масок.")
         com.vlesscardvpn.xray.Masks.FAMILIES.forEach { (id, title) ->
