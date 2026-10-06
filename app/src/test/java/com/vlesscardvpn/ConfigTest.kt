@@ -177,6 +177,11 @@ class ConfigTest {
         val c = XrayConfigBuilder.vpnConfig(all.map { it to Masks.byId(if (!it.isTcpBased && it.protocol != "xray") "chrome.z2" else "chrome.n") }, Settings(), null)
         assertTrue(c.contains("\"noise\"")); assertTrue(c.contains("\"secretKey\""))
         dump("vpn-formats", c)
+        // the tester never runs two tunnels of one WireGuard key at once
+        val vs = (Masks.searchOrder(true, wg).map { wg to it } + Masks.searchOrder(true, sk).take(10).map { sk to it })
+        val ch = com.vlesscardvpn.core.Tester.chunks(vs, 32)
+        assertEquals(vs.indices.toList(), ch.flatten().sorted())
+        ch.forEach { c -> assertTrue(c.count { vs[it].first.protocol == "wireguard" } <= 1) }
     }
 
     @Test fun ladderNoiseServicesAuto() {
