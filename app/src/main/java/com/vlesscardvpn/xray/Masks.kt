@@ -24,6 +24,11 @@ data class Mask(
     val delays: String = "",
     /** UDP noise preset ([Masks.NOISES] id) for Hysteria2 / WireGuard / mKCP: junk datagrams before the handshake. */
     val noise: String = "",
+    /**
+     * WireGuard port hopping (Xray finalmask udphop): [Masks.HOP_LOCAL] = new local port every 10-20 s (a new flow for
+     * the DPI, the server roams), [Masks.HOP_WARP] = also a new WARP port every 10-20 s (Cloudflare listens on 54 ports).
+     */
+    val hop: String = "",
 ) {
     val viaByeDpi: Boolean get() = dpi.isNotEmpty()
 }
@@ -39,7 +44,13 @@ object Masks {
      */
     val REALITY_FPS = setOf("chrome", "firefox", "safari")
 
+    fun isWarp(s: com.vlesscardvpn.model.Server): Boolean = s.protocol == "wireguard" &&
+        (s.source == "warp" || s.pbk == "bmXOC+F1FxEMF9dyiK2H5/1SUtzH0JuVo51h2wPfgyo=")
+
     fun compatible(m: Mask, s: com.vlesscardvpn.model.Server): Boolean = when {
+        m.hop == HOP_WARP -> isWarp(s)
+        m.hop.isNotEmpty() -> s.protocol == "wireguard"
+        m.noise.isNotEmpty() && WG_NOISES.any { it[0] == m.noise } -> s.protocol == "wireguard"
         m.noise.isNotEmpty() -> !s.isTcpBased && s.protocol != "xray"
         s.protocol == "xray" -> m.id == DEFAULT.id // raw Xray JSON outbound: used as is
         m.viaByeDpi && !s.isTcpBased -> false
@@ -79,7 +90,19 @@ object Masks {
         listOf("z3", "шум под STUN (звонок)", """[{"type":"exp","packet":"<b 0001 0000 2112 a442><r 12>","delay":"3-8"},{"type":"exp","packet":"<b 0001 0000 2112 a442><r 12>","delay":"3-8"}]"""),
         listOf("z4", "много мелкого шума", """[{"rand":"1-16","delay":"1-3"},{"rand":"1-16","delay":"1-3"},{"rand":"1-16","delay":"1-3"},{"rand":"1-16","delay":"1-3"},{"rand":"1-16","delay":"1-3"},{"rand":"1-16","delay":"1-3"}]"""),
     )
-    private val NOISE_BY_ID = NOISES.associate { it[0] to it[2] }
+    /** WireGuard-only noise: AmneziaWG-style junk and look-alikes of protocols that the TSPU lets through. */
+    val WG_NOISES = listOf(
+        listOf("z5", "AmneziaWG: 4 мусорных пакета 40-70 байт", """[{"rand":"40-70","delay":"1-3"},{"rand":"40-70","delay":"1-3"},{"rand":"40-70","delay":"1-3"},{"rand":"40-70","delay":"1-3"}]"""),
+        listOf("z6", "шум под QUIC (HTTP/3 браузера)", """[{"type":"exp","packet":"<b c3 00000001 08><r 8><b 00 00 44 d0><r 1150>","delay":"2-5"},{"type":"exp","packet":"<b c3 00000001 08><r 8><b 00 00 44 d0><r 1150>","delay":"2-5"}]"""),
+        listOf("z7", "шум под DTLS (видеозвонок)", """[{"type":"exp","packet":"<b 16 fefd 0000 0000 0000 0000><r 2><b 01><r 3><b 0000><r 110>","delay":"3-6"},{"rand":"20-60","delay":"2-4"}]"""),
+        listOf("z8", "шум под голос RTP", """[{"type":"exp","packet":"<b 80 60><r 10><r 160>","delay":"20-20"},{"type":"exp","packet":"<b 80 60><r 10><r 160>","delay":"20-20"},{"type":"exp","packet":"<b 80 60><r 10><r 160>","delay":"20-20"}]"""),
+        listOf("z9", "AmneziaWG: 10 пакетов 50-1000 байт", """[{"rand":"50-1000","delay":"1-2"},{"rand":"50-1000","delay":"1-2"},{"rand":"50-1000","delay":"1-2"},{"rand":"50-1000","delay":"1-2"},{"rand":"50-1000","delay":"1-2"},{"rand":"50-1000","delay":"1-2"},{"rand":"50-1000","delay":"1-2"},{"rand":"50-1000","delay":"1-2"},{"rand":"50-1000","delay":"1-2"},{"rand":"50-1000","delay":"1-2"}]"""),
+    )
+    const val HOP_LOCAL = "hl"
+    const val HOP_WARP = "hw"
+    /** Ports Cloudflare WARP answers on (the same on every endpoint IP). */
+    const val WARP_PORTS = "500,854,859,864,878,880,890,891,894,903,908,928,934,939,942,943,945,946,955,968,987,988,1002,1010,1014,1018,1070,1074,1180,1387,1701,1843,2371,2408,2506,3138,3476,3581,3854,4177,4198,4233,4500,5279,5956,7103,7152,7156,7281,7559,8319,8742,8854,8886"
+    private val NOISE_BY_ID = (NOISES + WG_NOISES).associate { it[0] to it[2] }
     fun noiseItems(id: String): String? = NOISE_BY_ID[id]
 
     /**
@@ -93,6 +116,12 @@ object Masks {
             add(Mask(id, title, fp, f[2], f[3], f[4], f[5], if (via) CURRENT_DPI else "", f.getOrElse(6) { "" }, f.getOrElse(7) { "" }))
         }
         for (n in NOISES) add(Mask("chrome.${n[0]}", "UDP: " + n[1], "chrome", noise = n[0]))
+        // WireGuard / WARP: protocol look-alike noise × port hopping (stays ahead of per-flow blocking).
+        for (n in WG_NOISES) add(Mask("chrome.${n[0]}", "WireGuard: " + n[1], "chrome", noise = n[0]))
+        for (h in listOf(HOP_LOCAL to "смена порта каждые 10-20 с", HOP_WARP to "прыжки по 54 портам WARP")) {
+            add(Mask("chrome.${h.first}", "WireGuard: " + h.second, "chrome", hop = h.first))
+            for (n in listOf("z1", "z5", "z6", "z7", "z9")) add(Mask("chrome.$n.${h.first}", "WireGuard: " + ((NOISES + WG_NOISES).first { it[0] == n }[1]) + " + " + h.second, "chrome", noise = n, hop = h.first))
+        }
         // Xray-engine strategies duplicate the outbound's own fragment masks, so they are not offered in front of servers.
         for (st in com.vlesscardvpn.core.DpiStrategies.BUILT_IN.filter { it.engine != com.vlesscardvpn.core.DpiEngine.XRAY }) for (fp in FINGERPRINTS)
             add(Mask("$fp.d:${st.id}", FP_TITLES.getValue(fp) + " + " + st.label, fp, dpi = st.id))
@@ -114,7 +143,7 @@ object Masks {
         "own" to "Свои VLESS Card", "zapret" to "zapret", "byedpi" to "ByeDPI", "noise" to "UDP-шум")
 
     fun family(m: Mask): String = when {
-        m.noise.isNotEmpty() -> "noise"
+        m.noise.isNotEmpty() || m.hop.isNotEmpty() -> "noise"
         m.dpi.startsWith("BYEDPI#VCARD") || m.dpi.startsWith("TPWS#VCARD") -> "own"
         m.dpi.startsWith("TPWS#") -> "zapret"
         m.dpi.isNotEmpty() && m.dpi != CURRENT_DPI -> "byedpi"
@@ -131,7 +160,7 @@ object Masks {
         }
 
     fun searchOrder(byeDpiAvailable: Boolean, server: com.vlesscardvpn.model.Server? = null): List<Mask> {
-        val first = listOf("chrome.n", "chrome.z1", "chrome.z2", "chrome.z3", "chrome.z4", "chrome.h4", "chrome.l1", "firefox.l2", "chrome.p2", "firefox.h2", "safari.p3", "edge.h5", "chrome.h1", "ios.p1", "safari.l3", "chrome.l2.b",
+        val first = listOf("chrome.n", "chrome.z5", "chrome.z5.hw", "chrome.z6.hw", "chrome.z9", "chrome.z1.hl", "chrome.z7", "chrome.hw", "chrome.z1", "chrome.z2", "chrome.z3", "chrome.z4", "chrome.h4", "chrome.l1", "firefox.l2", "chrome.p2", "firefox.h2", "safari.p3", "edge.h5", "chrome.h1", "ios.p1", "safari.l3", "chrome.l2.b",
             "android.h3", "firefox.h4", "chrome.n.b", "chrome.h4.b", "firefox.p4", "chrome.p5", "chrome.h6", "qq.h2",
             "safari.n", "firefox.n", "edge.p2", "ios.h4", "android.p3", "safari.h1", "chrome.p1.b", "firefox.h3.b",
             // own VLESS Card masking and zapret in front of the server connection

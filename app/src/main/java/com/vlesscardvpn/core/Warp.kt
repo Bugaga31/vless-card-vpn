@@ -100,9 +100,16 @@ object Warp {
         throw err ?: IllegalStateException("WARP: нет ответа")
     }
 
+    /** Local SOCKS ports of DPI-bypass engines to retry through when api.cloudflareclient.com is blocked. */
+    @Volatile var extraSocks: List<Int> = emptyList()
+
+    private fun socks(port: Int) = http.newBuilder().proxy(Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", port))).build()
+
+    /** Direct, then through the running VPN (login via the app's Authenticator), then through DPI-bypass engines. */
     private fun clients(): List<OkHttpClient> = buildList {
         add(http)
-        Tunnel.socks?.let { s -> if (!s.auth) add(http.newBuilder().proxy(Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", s.port))).build()) }
+        Tunnel.socks?.let { add(socks(it.port)) }
+        extraSocks.forEach { add(socks(it)) }
     }
 
     /**

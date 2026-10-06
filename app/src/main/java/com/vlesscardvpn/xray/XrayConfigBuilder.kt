@@ -126,6 +126,13 @@ object XrayConfigBuilder {
             val u = fm.optJSONArray("udp") ?: JSONArray().also { fm.put("udp", it) }
             u.put(JSONObject().put("type", "noise").put("settings", JSONObject().put("noise", JSONArray(noise))))
         }
+        if (mask != null && mask.hop.isNotEmpty() && s.protocol == "wireguard") {
+            val u = fm.optJSONArray("udp") ?: JSONArray().also { fm.put("udp", it) }
+            val h = JSONObject().put("interval", "10-20")
+            if (mask.hop == Masks.HOP_WARP) h.put("mode", "intervalLocal,intervalRemote").put("remotePorts", Masks.WARP_PORTS)
+            else h.put("mode", "intervalLocal")
+            u.put(JSONObject().put("type", "udphop").put("settings", h))
+        }
         if (fm.length() > 0) st.put("finalmask", fm)
         val sock = JSONObject().put("tcpKeepAliveInterval", 15)
         if (mask?.viaByeDpi == true && s.isTcpBased) sock.put("dialerProxy", dpiTag(mask.dpi))

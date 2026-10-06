@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Host-side check: real Xray-core servers (REALITY/TLS/WS/gRPC/XHTTP/Trojan/SS/VMess) × every app mask, incl. ByeDPI front.
 set -euo pipefail
+# The matrix listens on 30000-34000: keep the kernel's ephemeral ports (32768+) out of the way, or one clash kills the client.
+sudo sysctl -qw net.ipv4.ip_local_port_range="40000 60999" || true
 curl -fsSL -o /tmp/xray.zip https://github.com/XTLS/Xray-core/releases/download/v26.9.30/Xray-linux-64.zip
 mkdir -p /tmp/xray /tmp/srv /tmp/xcfg && unzip -qo /tmp/xray.zip -d /tmp/xray
 X=/tmp/xray/xray
@@ -11,7 +13,8 @@ U=a00975c5-597e-4c22-a7a7-a84ce5e0691e
 sed -e "s#@PRIV@#$PRIV#g" -e "s#@U@#$U#g" tools/e2e/matrix-server.json > /tmp/srv/server.json
 $X run -c /tmp/srv/server.json > /tmp/srv/server.log 2>&1 &
 gcc -D_DEFAULT_SOURCE -std=c99 -O2 native/byedpi/{packets,main,conev,proxy,desync,mpool,extend}.c -o /tmp/byedpi
-/tmp/byedpi --ip 127.0.0.1 --port 1080 --oob 1 --auto t,r,s --disorder 1 > /tmp/bd.log 2>&1 &
+# the host build aborts now and then under 24-way load: keep it running
+(while true; do /tmp/byedpi --ip 127.0.0.1 --port 1080 --oob 1 --auto t,r,s --disorder 1 >> /tmp/bd.log 2>&1; echo restart >> /tmp/bd-restarts; sleep 0.2; done) &
 (command -v apt-get >/dev/null && sudo apt-get install -y -qq libcap-dev zlib1g-dev >/dev/null) || true
 gcc -std=gnu99 -D_GNU_SOURCE -O2 -Inative/tpws native/tpws/*.c -lz -o /tmp/tpws || echo "host tpws build failed"
 SS=$(printf 'chacha20-ietf-poly1305:sspass' | base64 -w0)
@@ -28,7 +31,7 @@ wireguard://iMKDJbeES0wVjl014e%2BVHdsv6vbOtdqgTCw4imW%2FhU4%3D@127.0.0.1:8450?pu
 socks5://mu:mp@127.0.0.1:8451#socks
 L
 chmod +x gradlew
-XRAY_CONFIG_DUMP=/tmp/xcfg XRAY_LOCAL_LINKS=/tmp/links.txt ./gradlew --no-daemon -q :app:testDebugUnitTest --tests 'com.vlesscardvpn.ConfigTest'
+XRAY_CONFIG_DUMP=/tmp/xcfg XRAY_LOCAL_LINKS=/tmp/links.txt ./gradlew --no-daemon -q :app:testDebugUnitTest --tests 'com.vlesscardvpn.ConfigTest' --tests 'com.vlesscardvpn.R62Test'
 # One engine per fixed strategy (the app's own argv: VLESS Card, zapret, ByeDPI); servers are on loopback.
 while read -r eng args; do
   if [ "$eng" = TPWS ]; then VCVPN_TPWS_ALLOW_LOCAL=1 /tmp/tpws $args > /dev/null 2>&1 &
@@ -45,7 +48,7 @@ while read -r eng args; do
 done < <(cat /tmp/xcfg/dpi-engines.txt; echo)
 echo "Xray no-server strategies: $XOK/$XALL carry HTTPS"
 [ "$XOK" -eq "$XALL" ] || { echo "xray strategies failed"; exit 1; }
-for f in /tmp/xcfg/*.json; do echo "$(basename $f): $($X run -test -c $f 2>&1 | tail -1)"; done
+for f in /tmp/xcfg/*.json; do case $f in */warp-*) continue;; esac; echo "$(basename $f): $($X run -test -c $f 2>&1 | tail -1)"; done
 bash tools/xray-local-e2e.sh $X /tmp/xcfg || true  # raw matrix includes masks the app never offers
 # Only masks the app offers for each server type (Masks.compatible) must pass.
 python3 - <<'PY'
@@ -57,7 +60,7 @@ rows = [l.split() for l in open('/tmp/xcfg/local-matrix.txt')]
 wok = wall = 0
 with open('/tmp/xcfg/wg-result.txt', 'w') as out:
     for port, name, mask in rows:
-        if name != 'wg' or not (mask in ('none', 'chrome.n') or ('.z' in mask and '.d:' not in mask)): continue
+        if name != 'wg' or '.hw' in mask or not (mask in ('none', 'chrome.n', 'chrome.hl') or (('.z' in mask or '.hl' in mask) and '.d:' not in mask)): continue
         tag = 'v%d' % (int(port) - 30000)
         ob = [o for o in cfg['outbounds'] if o['tag'] == tag][0]
         json.dump({"inbounds": [{"port": 24900, "listen": "127.0.0.1", "protocol": "socks", "settings": {"auth": "noauth"}}], "outbounds": [ob]}, open('/tmp/wg1.json', 'w'))
@@ -71,7 +74,7 @@ with open('/tmp/xcfg/wg-result.txt', 'w') as out:
 print(f"WireGuard (sequential, own instance): {wok}/{wall}")
 print(open('/tmp/xcfg/wg-result.txt').read())
 PY
-python3 - <<'PY'
+python3 - <<'PY' || MFAIL=1
 import sys
 ok = fail = 0; bad = []; bok = bfail = 0
 from collections import defaultdict
@@ -83,7 +86,7 @@ for line in open('/tmp/xcfg/result.txt'):
     if name in ('reality-vision', 'xhttp-reality'): offered = fp in ('chrome', 'firefox', 'safari', 'none')
     elif name == 'grpc': offered = fp != 'android'
     elif name in ('ss', 'vmess-hu', 'socks'): offered = fp in ('chrome', 'none')
-    elif name == 'wg': offered = mask == 'none' or mask == 'chrome.n' or (fp == 'chrome' and '.z' in mask and '.d:' not in mask)
+    elif name == 'wg': offered = mask == 'none' or mask == 'chrome.n' or (fp == 'chrome' and '.z' in mask and '.d:' not in mask and '.hw' not in mask)
     if '.z' in mask and '.d:' not in mask and name != 'wg': offered = False
     if name == 'wg': continue  # judged sequentially above
     if not offered: continue
@@ -113,3 +116,21 @@ wg = [l.split()[0] for l in open('/tmp/xcfg/wg-result.txt')]
 if wg.count('FAIL') > 0: print("WireGuard variants failed"); sys.exit(1)
 sys.exit(1 if fail > 0 or bfail > (bok + bfail) * 0.2 else 0)
 PY
+
+# Real Cloudflare WARP from the runner: every WireGuard/WARP mask the app offers (noise, QUIC/DTLS/RTP look-alikes, port hopping).
+K=$($X wg); WPRIV=$(echo "$K" | sed -n 's/PrivateKey: //p'); WPUB=$(echo "$K" | sed -n 's/.*PublicKey): //p')
+R=$(curl -s -m 20 -X POST https://api.cloudflareclient.com/v0a2158/reg -H 'User-Agent: okhttp/3.12.1' -H 'CF-Client-Version: a-6.30-3596' -H 'Content-Type: application/json' \
+  -d "{\"key\":\"$WPUB\",\"install_id\":\"\",\"fcm_token\":\"\",\"tos\":\"$(date -u +%Y-%m-%dT%H:%M:%S.000Z)\",\"type\":\"Android\",\"locale\":\"en_US\"}")
+WV4=$(echo "$R" | jq -r .config.interface.addresses.v4); WRES=$(echo "$R" | jq -r .config.client_id | base64 -d | od -An -tu1 | awk '{print $1","$2","$3}')
+WOK=0; WALL=0
+while read -r id; do
+  [ -n "$id" ] || continue
+  sed -e "s#@WPRIV@#$WPRIV#" -e "s#@WV4@#$WV4#" -e "s#\[11,22,33\]#[$WRES]#" /tmp/xcfg/warp-$id.json > /tmp/w1.json
+  $X run -c /tmp/w1.json > /tmp/w1.log 2>&1 & WP=$!; sleep 1.5
+  c=$(curl -s -m 15 -o /dev/null -w '%{http_code}' -x socks5h://127.0.0.1:24901 https://www.cloudflare.com/cdn-cgi/trace)
+  kill $WP 2>/dev/null; wait $WP 2>/dev/null; WALL=$((WALL+1))
+  if [ "$c" = 200 ]; then WOK=$((WOK+1)); echo "WARP OK $id"; else echo "WARP FAIL $id ($c) $(tail -1 /tmp/w1.log)"; fi
+done < /tmp/xcfg/warp-masks.txt
+echo "WARP masks: $WOK/$WALL carry HTTPS through real Cloudflare WARP; ByeDPI restarts: $(cat /tmp/bd-restarts 2>/dev/null | wc -l)"
+[ "$WOK" -ge $((WALL * 8 / 10)) ] || { echo "too many WARP masks fail"; exit 1; }
+exit ${MFAIL:-0}

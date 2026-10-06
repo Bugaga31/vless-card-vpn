@@ -107,7 +107,7 @@ object Tester {
     /** Tests [variants] (server + mask) in parallel through one temporary Xray instance. */
     suspend fun real(
         variants: List<Pair<Server, Mask?>>, testUrl: String, byeDpiPort: Int?, dpiPorts: Map<String, Int> = emptyMap(), youtube: Boolean = true,
-        batch: Int = 32, parallel: Int = 12, attempts: Int = 2,
+        batch: Int = 32, parallel: Int = 12, attempts: Int = 2, big: Boolean = true,
         /** Early stop: variants for which this returns true are not probed (reported as skipped). */
         skip: (Int) -> Boolean = { false },
         onEach: (Int, Probe) -> Unit,
@@ -127,7 +127,7 @@ object Tester {
                         val one = XrayCore.Instance("test1")
                         val p = freePorts(1)
                         val ok = runCatching { one.start(XrayConfigBuilder.testConfig(listOf(v), p, byeDpiPort, dpiPorts)) }.isSuccess && one.running
-                        onEach(idx[i], if (ok) probeSocks(p[0], testUrl, youtube = youtube, attempts = attempts) else Probe(0, null, null, "конфиг не принят ядром"))
+                        onEach(idx[i], if (ok) probeSocks(p[0], testUrl, big = big, youtube = youtube, attempts = attempts) else Probe(0, null, null, "конфиг не принят ядром"))
                         one.stop()
                     }
                     continue
@@ -136,7 +136,7 @@ object Tester {
                     coroutineScope {
                         val sem = Semaphore(parallel)
                         chunk.indices.map { i ->
-                            async { sem.withPermit { onEach(idx[i], if (skip(idx[i])) SKIPPED else probeSocks(ports[i], testUrl, youtube = youtube, attempts = attempts)) } }
+                            async { sem.withPermit { onEach(idx[i], if (skip(idx[i])) SKIPPED else probeSocks(ports[i], testUrl, big = big, youtube = youtube, attempts = attempts)) } }
                         }.awaitAll()
                     }
                 } finally { core.stop() }
