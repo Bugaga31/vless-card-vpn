@@ -176,7 +176,7 @@ object Actions {
     /** For each server, tries masks in [Masks.searchOrder] and keeps the fastest working one (remembered per network). */
     fun findMasks(servers: List<Server>, perServer: Int = 48) = launch("Подбор маскировки") { doFindMasks(servers, perServer) }
 
-    suspend fun doFindMasks(servers: List<Server>, perServer: Int = 48, enough: Int = 3): String {
+    suspend fun doFindMasks(servers: List<Server>, perServer: Int = 48, enough: Int = 3, group: (Server) -> String = { it.id }): String {
         if (servers.isEmpty()) return "Выберите серверы"
         val pinned = pinCertificates(servers)
         val probe = DpiProxy(app)
@@ -191,16 +191,17 @@ object Actions {
         val (own, port) = dpiForTests(variants.map { it.second })
         val best = HashMap<String, Pair<Mask, Probe>>()
         val good = HashMap<String, MutableList<Pair<Mask, Int>>>()
+        val found = HashMap<String, Int>()
         val done = AtomicInteger()
         progress.value = progress.value.copy(title = "Подбор маскировки")
         try {
             Tester.real(variants, cfg.testUrl, port, own.ports, youtube = false, batch = 64, parallel = 12, attempts = 1,
-                skip = { i -> synchronized(best) { (good[variants[i].first.id]?.size ?: 0) >= enough } }) { i, p ->
+                skip = { i -> synchronized(best) { (found[group(variants[i].first)] ?: 0) >= enough } }) { i, p ->
                 val (s, m) = variants[i]
                 synchronized(best) {
                     val cur = best[s.id]
                     if (p.works && m != null && (cur == null || p.realMs < cur.second.realMs)) best[s.id] = m to p
-                    if (p.works && m != null) good.getOrPut(s.id) { mutableListOf() } += m to p.realMs
+                    if (p.works && m != null) { good.getOrPut(s.id) { mutableListOf() } += m to p.realMs; found.merge(group(s), 1, Int::plus) }
                 }
                 step(done.incrementAndGet(), variants.size)
             }
@@ -258,14 +259,15 @@ object Actions {
         val per = Warp.ENDPOINTS.size / accs.size
         val list = accs.flatMapIndexed { i, a -> Warp.servers(a, Warp.ENDPOINTS.drop(i * per).take(minOf(per, 4))) }
         Store.replaceSource(Warp.SOURCE, list)
-        val res = doFindMasks(list, perServer = 6, enough = 1)
+        // one working endpoint per account is enough (only one tunnel per key can run at a time anyway)
+        val res = doFindMasks(list, perServer = 6, enough = 1, group = { it.secret })
         val st = Store.state.value
         val ok = list.filter { st.state(it).works }
         android.util.Log.i("E2E", "warp servers=${list.size} working=${ok.size} masks=${ok.map { st.state(it).maskId }}")
         // one endpoint per account: two tunnels with the same key at once would roam and stall
         if (ok.isNotEmpty()) selectBest(3, ok.sortedBy { st.state(it).realMs }.distinctBy { it.secret })
         return if (ok.isEmpty()) "WARP: аккаунтов ${accs.size}, но ни одна точка входа не ответила ($res). WireGuard в этой сети, похоже, режут."
-        else "WARP готов: работают ${ok.size} из ${list.size} точек входа, выбраны лучшие. Нажмите «Подключить»."
+        else "WARP готов: рабочих точек входа ${ok.size} (по одной на аккаунт, всего ${list.size}), выбраны. Нажмите «Подключить»."
     }
 
     // ---------- Auto mode ----------
