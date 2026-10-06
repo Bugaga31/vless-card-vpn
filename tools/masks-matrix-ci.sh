@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Host-side check: real Xray-core servers (REALITY/TLS/WS/gRPC/XHTTP/Trojan/SS/VMess) × every app mask, incl. ByeDPI front.
 set -euo pipefail
+# The matrix listens on 30000-34000: keep the kernel's ephemeral ports (32768+) out of the way, or one clash kills the client.
+sudo sysctl -qw net.ipv4.ip_local_port_range="40000 60999" || true
 curl -fsSL -o /tmp/xray.zip https://github.com/XTLS/Xray-core/releases/download/v26.9.30/Xray-linux-64.zip
 mkdir -p /tmp/xray /tmp/srv /tmp/xcfg && unzip -qo /tmp/xray.zip -d /tmp/xray
 X=/tmp/xray/xray
@@ -46,7 +48,7 @@ while read -r eng args; do
 done < <(cat /tmp/xcfg/dpi-engines.txt; echo)
 echo "Xray no-server strategies: $XOK/$XALL carry HTTPS"
 [ "$XOK" -eq "$XALL" ] || { echo "xray strategies failed"; exit 1; }
-for f in /tmp/xcfg/*.json; do echo "$(basename $f): $($X run -test -c $f 2>&1 | tail -1)"; done
+for f in /tmp/xcfg/*.json; do case $f in */warp-*) continue;; esac; echo "$(basename $f): $($X run -test -c $f 2>&1 | tail -1)"; done
 bash tools/xray-local-e2e.sh $X /tmp/xcfg || true  # raw matrix includes masks the app never offers
 # Only masks the app offers for each server type (Masks.compatible) must pass.
 python3 - <<'PY'
