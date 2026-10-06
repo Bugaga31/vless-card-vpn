@@ -54,7 +54,7 @@ class ConfigTest {
     }
 
     @Test fun maskCatalog() {
-        assertEquals(315, Masks.ALL.size)
+        assertEquals(361, Masks.ALL.size)
         assertEquals(147, Masks.ALL.count { it.viaByeDpi && it.dpi != Masks.CURRENT_DPI })
         val r = LinkParser.parse(reality)!!
         val ws = LinkParser.parse(links[1])!!
@@ -114,13 +114,14 @@ class ConfigTest {
 
     @Test fun dpiStrategies() {
         val all = com.vlesscardvpn.core.DpiStrategies.BUILT_IN
-        assertEquals(21, all.size)
+        assertEquals(26, all.size)
         assertEquals(all.size, all.map { it.id }.toSet().size)
-        assertEquals(5, all.count { it.own })
+        assertEquals(10, all.count { it.own })
         all.forEach { s ->
             val argv = s.argv(23456, "vk.com")
             assertFalse(s.id, argv.any { "{sni}" in it || "{mask_pool}" in it })
             if (s.engine == com.vlesscardvpn.core.DpiEngine.TPWS) assertTrue(argv.contains("--bind-addr=127.0.0.1"))
+            else if (s.engine == com.vlesscardvpn.core.DpiEngine.XRAY) dump("dpi-" + s.id.replace('#', '_'), com.vlesscardvpn.core.DpiStrategies.xrayConfig(s, 23456))
             else assertEquals(listOf("--ip", "127.0.0.1", "--port", "23456"), argv.take(4))
         }
         val cascade = com.vlesscardvpn.core.DpiStrategies.CASCADE.argv(23456, "vk.com")
@@ -152,15 +153,77 @@ class ConfigTest {
         assertFalse(plain.has("finalmask")); assertEquals("chrome", plain.getJSONObject("realitySettings").getString("fingerprint"))
     }
 
+    @Test fun moreConfigFormats() {
+        val wg = LinkParser.parse("wireguard://cHJpdmF0ZWtleXByaXZhdGVrZXlwcml2YXRla2V5cHJpdmE%3D@162.159.192.1:2408?publickey=bmZ1YmxpY2tleXB1YmxpY2tleXB1YmxpY2tleXB1Ymw%3D&address=172.16.0.2%2F32%2C2606%3A4700%3A110%3A8a36%3A%3A1%2F128&reserved=1%2C2%2C3&mtu=1280#WARP")!!
+        assertEquals("wireguard", wg.protocol); assertEquals(2408, wg.port); assertEquals("1,2,3", wg.reserved); assertFalse(wg.isTcpBased)
+        assertEquals(wg.copy(source = ""), LinkParser.parse(LinkParser.toLink(wg))?.copy(source = ""))
+        val conf = "[Interface]\nPrivateKey = cHJpdmF0ZWtleXByaXZhdGVrZXlwcml2YXRla2V5cHJpdmE=\nAddress = 172.16.0.2/32\nMTU = 1280\n\n[Peer]\nPublicKey = bmZ1YmxpY2tleXB1YmxpY2tleXB1YmxpY2tleXB1Ymw=\nAllowedIPs = 0.0.0.0/0\nEndpoint = engage.cloudflareclient.com:2408\n"
+        val wc = LinkParser.parseMany(conf).single()
+        assertEquals("engage.cloudflareclient.com", wc.address); assertEquals(1280, wc.mtu)
+        val sk = LinkParser.parse("socks://" + com.vlesscardvpn.model.Base64.encode("user:pa:ss") + "@5.5.5.5:1080#S")!!
+        assertEquals("user", sk.user); assertEquals("pa:ss", sk.secret)
+        assertEquals(sk.copy(source = ""), LinkParser.parse(LinkParser.toLink(sk))?.copy(source = ""))
+        assertEquals("u2", LinkParser.parse("socks5://u2:p2@6.6.6.6:1081")!!.user)
+        val json = """[{"remarks":"NL xhttp","outbounds":[{"tag":"proxy","protocol":"vless","settings":{"vnext":[{"address":"7.7.7.7","port":443,"users":[{"id":"uuid-j","encryption":"none"}]}]},
+            "streamSettings":{"network":"xhttp","security":"tls","tlsSettings":{"serverName":"x.example.com"},"xhttpSettings":{"path":"/j"},"sockopt":{"dialerProxy":"fragment"}}},
+            {"tag":"fragment","protocol":"freedom"},{"tag":"direct","protocol":"freedom"}]},{"remarks":"DE","outbounds":[{"protocol":"trojan","settings":{"servers":[{"address":"8.8.4.4","port":443,"password":"p"}]},"streamSettings":{"security":"tls"}}]}]"""
+        val js = LinkParser.parseMany(json, "sub")
+        assertEquals(2, js.size); assertEquals("NL xhttp", js[0].name); assertEquals("7.7.7.7", js[0].address)
+        assertFalse(js[0].extra.contains("dialerProxy"))
+        val all = listOf(wg, wc, sk) + js
+        all.forEach { sv -> Masks.searchOrder(true, sv).forEach { m -> assertTrue("${sv.name} ${m.id}", Masks.compatible(m, sv)) } }
+        assertEquals(listOf("chrome.n"), Masks.searchOrder(true, js[0]).map { it.id })
+        assertEquals(5, Masks.searchOrder(true, wg).size) // plain + 4 UDP noise masks
+        val c = XrayConfigBuilder.vpnConfig(all.map { it to Masks.byId(if (!it.isTcpBased && it.protocol != "xray") "chrome.z2" else "chrome.n") }, Settings(), null)
+        assertTrue(c.contains("\"noise\"")); assertTrue(c.contains("\"secretKey\""))
+        dump("vpn-formats", c)
+        // the tester never runs two tunnels of one WireGuard key at once
+        val vs = (Masks.searchOrder(true, wg).map { wg to it } + Masks.searchOrder(true, sk).take(10).map { sk to it })
+        val ch = com.vlesscardvpn.core.Tester.chunks(vs, 32)
+        assertEquals(vs.indices.toList(), ch.flatten().sorted())
+        ch.forEach { c -> assertTrue(c.count { vs[it].first.protocol == "wireguard" } <= 1) }
+    }
+
+    @Test fun ladderNoiseServicesAuto() {
+        val r = LinkParser.parse(reality)!!
+        val f = XrayConfigBuilder.outbound(r, "p", Masks.byId("chrome.l2")).getJSONObject("streamSettings").getJSONObject("finalmask")
+            .getJSONArray("tcp").getJSONObject(0).getJSONObject("settings")
+        assertEquals(8, f.getJSONArray("lengths").length()); assertEquals(8, f.getJSONArray("delays").length())
+        val hy = LinkParser.parse(links[7])!!
+        val u = XrayConfigBuilder.outbound(hy, "h", Masks.byId("chrome.z3")).getJSONObject("streamSettings").getJSONObject("finalmask").getJSONArray("udp")
+        assertEquals(listOf("salamander", "noise"), (0 until u.length()).map { u.getJSONObject(it).getString("type") })
+        val svc = JSONObject(XrayConfigBuilder.vpnConfig(listOf(r to null), Settings(services = listOf("youtube", "telegram")), null))
+        val rules = svc.getJSONObject("routing").getJSONArray("rules")
+        val last = rules.getJSONObject(rules.length() - 1)
+        assertEquals("direct", last.getString("outboundTag"))
+        assertTrue(rules.toString().contains("geosite:youtube")); assertTrue(rules.toString().contains("geoip:telegram"))
+        dump("vpn-services", svc.toString())
+        val auto = JSONObject(XrayConfigBuilder.vpnConfig(emptyList(), Settings(mode = Mode.AUTO), 1080))
+        assertTrue(auto.toString().contains("\"outboundTag\":\"byedpi\""))
+        dump("vpn-auto-dpi", auto.toString())
+        val st = com.vlesscardvpn.model.ServerState(maskId = "chrome.n", netMasks = mapOf("Моб.: Beeline" to "chrome.l1"))
+        assertEquals("chrome.l1", st.maskFor("Моб.: Beeline")); assertEquals("chrome.n", st.maskFor("Wi-Fi"))
+        assertEquals(st, com.vlesscardvpn.model.ServerState.fromJson(st.toJson()))
+        val rt = Settings.fromJson(Settings(services = listOf("telegram"), autoHeal = false, lastSubRefresh = 5).toJson())
+        assertEquals(listOf("telegram"), rt.services); assertFalse(rt.autoHeal); assertEquals(5L, rt.lastSubRefresh); assertEquals(Mode.AUTO, rt.mode)
+        assertTrue(com.vlesscardvpn.model.Subs.isWhitelist(com.vlesscardvpn.model.Subs.CATALOG.first { it.group == com.vlesscardvpn.model.Subs.WL }.url))
+        assertEquals(3, com.vlesscardvpn.model.Subs.mirrors("https://raw.githubusercontent.com/zieng2/wl/main/vless_lite.txt").size)
+    }
+
     /** Local e2e: XRAY_LOCAL_LINKS=file with links → every link × every mask on ports 30000+ (checked by tools/xray-local-e2e.sh). */
     @Test fun dumpLocalMatrix() {
         val f = System.getenv("XRAY_LOCAL_LINKS") ?: return
+        File(System.getenv("XRAY_CONFIG_DUMP")).mkdirs()
         val servers = File(f).readLines().mapNotNull { LinkParser.parse(it) }
         val variants = servers.flatMap { s -> (listOf<com.vlesscardvpn.xray.Mask?>(null) + Masks.ALL).map { s to it } }
         // Fixed DPI strategies in front of the server: one host engine per strategy on 1100+i (tools/masks-matrix-ci.sh starts them).
         val dpiPorts = com.vlesscardvpn.core.DpiStrategies.BUILT_IN.mapIndexed { i, st -> st.id to 1100 + i }.toMap()
+            .filterKeys { !it.startsWith("XRAY#") }
         File(System.getenv("XRAY_CONFIG_DUMP"), "dpi-engines.txt").writeText(com.vlesscardvpn.core.DpiStrategies.BUILT_IN.mapIndexed { i, st ->
-            "${st.engine.name} " + st.argv(1100 + i, "ya.ru").joinToString(" ")
+            if (st.engine == com.vlesscardvpn.core.DpiEngine.XRAY) {
+                val f = File(System.getenv("XRAY_CONFIG_DUMP"), "xrdpi-${1100 + i}.json"); f.writeText(com.vlesscardvpn.core.DpiStrategies.xrayConfig(st, 1100 + i))
+                "XRAY ${f.path}"
+            } else "${st.engine.name} " + st.argv(1100 + i, "ya.ru").joinToString(" ")
         }.joinToString("\n"))
         dump("local-matrix", XrayConfigBuilder.testConfig(variants, variants.indices.map { 30000 + it }, 1080, dpiPorts))
         File(System.getenv("XRAY_CONFIG_DUMP"), "local-matrix.txt").writeText(variants.mapIndexed { i, (s, m) -> "${30000 + i} ${s.name} ${m?.id ?: "none"}" }.joinToString("\n"))

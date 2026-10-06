@@ -19,6 +19,11 @@ data class Mask(
     val maxSplit: String = "",
     /** "" = direct, [Masks.CURRENT_DPI] = the strategy chosen for this network, else a DpiStrategies id. */
     val dpi: String = "",
+    /** Per-fragment lengths/delays ("1-1,2-4,5-10"): a "ladder" instead of equal pieces (Xray finalmask lengths/delays). */
+    val lengths: String = "",
+    val delays: String = "",
+    /** UDP noise preset ([Masks.NOISES] id) for Hysteria2 / WireGuard / mKCP: junk datagrams before the handshake. */
+    val noise: String = "",
 ) {
     val viaByeDpi: Boolean get() = dpi.isNotEmpty()
 }
@@ -35,6 +40,8 @@ object Masks {
     val REALITY_FPS = setOf("chrome", "firefox", "safari")
 
     fun compatible(m: Mask, s: com.vlesscardvpn.model.Server): Boolean = when {
+        m.noise.isNotEmpty() -> !s.isTcpBased && s.protocol != "xray"
+        s.protocol == "xray" -> m.id == DEFAULT.id // raw Xray JSON outbound: used as is
         m.viaByeDpi && !s.isTcpBased -> false
         m.viaByeDpi && m.dpi != CURRENT_DPI && m.packets.isNotEmpty() -> false
         m.packets.isNotEmpty() && !s.isTcpBased -> false
@@ -59,19 +66,35 @@ object Masks {
         listOf("p3", "дробление 1-3 пакетов 50-100", "1-3", "50-100", "5-10", "10"),
         listOf("p4", "дробление 1-5 пакетов 100-200", "1-5", "100-200", "10-30", "8"),
         listOf("p5", "дробление 1-2 пакетов, долгая пауза", "1-2", "20-60", "30-60", "4"),
+        // VLESS Card ladders: different piece sizes in a row, so no fixed fragment size to fingerprint.
+        listOf("l1", "лесенка 1→3→8→30 байт", "tlshello", "", "", "0", "1-1,2-4,5-10,20-60", "1-2,2-4,3-6,5-10"),
+        listOf("l2", "шредер зоны SNI", "tlshello", "", "", "0", "90-120,1-2,1-2,1-2,1-2,1-3,1-3,200-400", "1-3,1-2,1-2,1-2,1-2,1-2,1-2,1-3"),
+        listOf("l3", "1 байт + долгая пауза", "1-1", "", "", "0", "1-1,500-1000", "60-120,1-2"),
     )
 
+    /** (id, title, noise items as JSON) — sent before the first UDP datagram; servers drop them. */
+    val NOISES = listOf(
+        listOf("z1", "шум: 3 случайных пакета", """[{"rand":"10-60","delay":"5-10"},{"rand":"10-60","delay":"5-10"},{"rand":"80-200","delay":"5-15"}]"""),
+        listOf("z2", "шум под DNS-запрос", """[{"type":"exp","packet":"<r 2><b 0100 0001 0000 0000 0000 0279 6102 7275 0000 0100 01>","delay":"5-10"},{"rand":"20-80","delay":"5-10"}]"""),
+        listOf("z3", "шум под STUN (звонок)", """[{"type":"exp","packet":"<b 0001 0000 2112 a442><r 12>","delay":"3-8"},{"type":"exp","packet":"<b 0001 0000 2112 a442><r 12>","delay":"3-8"}]"""),
+        listOf("z4", "много мелкого шума", """[{"rand":"1-16","delay":"1-3"},{"rand":"1-16","delay":"1-3"},{"rand":"1-16","delay":"1-3"},{"rand":"1-16","delay":"1-3"},{"rand":"1-16","delay":"1-3"},{"rand":"1-16","delay":"1-3"}]"""),
+    )
+    private val NOISE_BY_ID = NOISES.associate { it[0] to it[2] }
+    fun noiseItems(id: String): String? = NOISE_BY_ID[id]
+
     /**
-     * 7 fingerprints × 12 fragment modes × (direct | via the current DPI strategy) = 168,
-     * plus 7 fingerprints × 21 fixed strategies (5 own VLESS Card, 7 zapret, 9 ByeDPI) = 147. Total 315.
+     * 7 fingerprints × 15 fragment modes × (direct | via the current DPI strategy) = 210, 4 UDP noise masks,
+     * plus 7 fingerprints × 21 fixed strategies (5 own VLESS Card, 7 zapret, 9 ByeDPI) = 147. Total 361.
      */
     val ALL: List<Mask> = buildList {
         for (via in listOf(false, true)) for (f in FRAGMENTS) for (fp in FINGERPRINTS) {
             val id = "${fp}.${f[0]}" + if (via) ".b" else ""
             val title = FP_TITLES.getValue(fp) + ", " + f[1] + if (via) " + обход DPI" else ""
-            add(Mask(id, title, fp, f[2], f[3], f[4], f[5], if (via) CURRENT_DPI else ""))
+            add(Mask(id, title, fp, f[2], f[3], f[4], f[5], if (via) CURRENT_DPI else "", f.getOrElse(6) { "" }, f.getOrElse(7) { "" }))
         }
-        for (st in com.vlesscardvpn.core.DpiStrategies.BUILT_IN) for (fp in FINGERPRINTS)
+        for (n in NOISES) add(Mask("chrome.${n[0]}", "UDP: " + n[1], "chrome", noise = n[0]))
+        // Xray-engine strategies duplicate the outbound's own fragment masks, so they are not offered in front of servers.
+        for (st in com.vlesscardvpn.core.DpiStrategies.BUILT_IN.filter { it.engine != com.vlesscardvpn.core.DpiEngine.XRAY }) for (fp in FINGERPRINTS)
             add(Mask("$fp.d:${st.id}", FP_TITLES.getValue(fp) + " + " + st.label, fp, dpi = st.id))
     }
     private val byId = ALL.associateBy { it.id }
@@ -87,7 +110,7 @@ object Masks {
     fun strategies(masks: Collection<Mask?>): Set<String> = masks.mapNotNull { it?.dpi }.filter { it.isNotEmpty() }.toSet()
 
     fun searchOrder(byeDpiAvailable: Boolean, server: com.vlesscardvpn.model.Server? = null): List<Mask> {
-        val first = listOf("chrome.n", "chrome.h4", "chrome.p2", "firefox.h2", "safari.p3", "edge.h5", "chrome.h1", "ios.p1",
+        val first = listOf("chrome.n", "chrome.z1", "chrome.z2", "chrome.z3", "chrome.z4", "chrome.h4", "chrome.l1", "firefox.l2", "chrome.p2", "firefox.h2", "safari.p3", "edge.h5", "chrome.h1", "ios.p1", "safari.l3", "chrome.l2.b",
             "android.h3", "firefox.h4", "chrome.n.b", "chrome.h4.b", "firefox.p4", "chrome.p5", "chrome.h6", "qq.h2",
             "safari.n", "firefox.n", "edge.p2", "ios.h4", "android.p3", "safari.h1", "chrome.p1.b", "firefox.h3.b",
             // own VLESS Card masking and zapret in front of the server connection

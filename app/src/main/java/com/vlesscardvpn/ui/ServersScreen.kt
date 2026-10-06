@@ -114,6 +114,7 @@ private fun ServerRow(s: Server, st: ServerState, onToggle: () -> Unit, onLong: 
                 if (real > 0) Text(buildString {
                     append(when (st.bigOk) { true -> "256К ✓"; false -> "256К ✗ (обрыв)"; null -> "" })
                     st.ytOk?.let { append(if (it) " · YT ✓" else " · YT ✗") }
+                    st.tgOk?.let { append(if (it) " · TG ✓" else " · TG ✗") }
                 }, fontSize = 11.sp, color = if (st.bigOk == false) Warn else Color.Gray)
             }
         }
@@ -128,7 +129,7 @@ private fun AddDialog(onDismiss: () -> Unit, onAdd: (String) -> Unit) {
         text = {
             Column {
                 OutlinedTextField(value = text, onValueChange = { text = it }, modifier = Modifier.fillMaxWidth().heightIn(min = 120.dp, max = 260.dp),
-                    placeholder = { Text("Ссылки vless:// vmess:// trojan:// ss:// hysteria2:// или текст подписки") })
+                    placeholder = { Text("Ссылки vless:// vmess:// trojan:// ss:// hysteria2:// wireguard:// socks://, WireGuard .conf (WARP), Xray JSON или текст подписки") })
                 TextButton(onClick = {
                     val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                     text = cm.primaryClip?.getItemAt(0)?.coerceToText(ctx)?.toString().orEmpty()
@@ -149,8 +150,8 @@ private fun ServerMenu(s: Server, st: ServerState, onDismiss: () -> Unit) {
         AlertDialog(onDismissRequest = onDismiss, title = { Text("Маскировка: ${options.size} вариантов") },
             text = {
                 LazyColumn(Modifier.heightIn(max = 420.dp)) {
-                    item { TextButton(onClick = { Store.setState(s.id) { it.copy(maskId = "") }; onDismiss() }) { Text("Без маскировки (как в ссылке)") } }
-                    items(options) { m -> TextButton(onClick = { Store.setState(s.id) { it.copy(maskId = m.id) }; onDismiss() }) {
+                    item { TextButton(onClick = { Store.setState(s.id) { it.copy(maskId = "", netMasks = emptyMap()) }; onDismiss() }) { Text("Без маскировки (как в ссылке)") } }
+                    items(options) { m -> TextButton(onClick = { Store.setState(s.id) { it.copy(maskId = m.id, netMasks = emptyMap()) }; onDismiss() }) {
                         Text((if (m.id == st.maskId) "● " else "") + m.title, fontSize = 13.sp) } }
                 }
             }, confirmButton = { TextButton(onClick = onDismiss) { Text("Закрыть") } })

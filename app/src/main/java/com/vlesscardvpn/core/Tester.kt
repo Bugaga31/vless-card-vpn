@@ -23,7 +23,7 @@ import java.net.ServerSocket
 import java.net.Socket
 import java.util.concurrent.TimeUnit
 
-data class Probe(val realMs: Int, val bigOk: Boolean?, val ytOk: Boolean?, val error: String = "") {
+data class Probe(val realMs: Int, val bigOk: Boolean?, val ytOk: Boolean?, val error: String = "", val tgOk: Boolean? = null) {
     val works: Boolean get() = realMs > 0 && bigOk != false
 }
 
@@ -43,6 +43,7 @@ object Tester {
     }
     val BIG_URLS = listOf("https://speed.cloudflare.com/__down?bytes=262144", "https://cachefly.cachefly.net/1mb.test")
     const val YT_URL = "https://www.youtube.com/generate_204"
+    const val TG_URL = "https://api.telegram.org/"
     const val BIG_BYTES = 200_000
 
     suspend fun tcp(servers: List<Server>, parallel: Int = 48, onEach: (Server, Int) -> Unit) = coroutineScope {
@@ -84,8 +85,11 @@ object Tester {
         val ytOk = if (!youtube) null else runCatching {
             client.newCall(Request.Builder().url(YT_URL).header("User-Agent", UA).build()).execute().use { it.code in 200..399 }
         }.getOrDefault(false)
+        val tgOk = if (!youtube) null else runCatching {
+            client.newCall(Request.Builder().url(TG_URL).header("User-Agent", UA).build()).execute().use { it.code in 200..499 }
+        }.getOrDefault(false)
         client.connectionPool.evictAll()
-        return Probe(best.toInt().coerceAtLeast(1), bigOk, ytOk)
+        return Probe(best.toInt().coerceAtLeast(1), bigOk, ytOk, tgOk = tgOk)
     }
 
     private fun download(client: OkHttpClient, url: String): Int =
@@ -101,7 +105,8 @@ object Tester {
         batch: Int = 32, parallel: Int = 12, onEach: (Int, Probe) -> Unit,
     ) = mutex.withLock {
         withContext(Dispatchers.IO) {
-            variants.chunked(batch).forEachIndexed { chunkNo, chunk ->
+            for (idx in chunks(variants, batch)) {
+                val chunk = idx.map { variants[it] }
                 val ports = freePorts(chunk.size)
                 val core = XrayCore.Instance("test")
                 val started = runCatching { core.start(XrayConfigBuilder.testConfig(chunk, ports, byeDpiPort, dpiPorts)) }
@@ -112,21 +117,37 @@ object Tester {
                         val one = XrayCore.Instance("test1")
                         val p = freePorts(1)
                         val ok = runCatching { one.start(XrayConfigBuilder.testConfig(listOf(v), p, byeDpiPort, dpiPorts)) }.isSuccess && one.running
-                        onEach(chunkNo * batch + i, if (ok) probeSocks(p[0], testUrl, youtube = youtube) else Probe(0, null, null, "конфиг не принят ядром"))
+                        onEach(idx[i], if (ok) probeSocks(p[0], testUrl, youtube = youtube) else Probe(0, null, null, "конфиг не принят ядром"))
                         one.stop()
                     }
-                    return@forEachIndexed
+                    continue
                 }
                 try {
                     coroutineScope {
                         val sem = Semaphore(parallel)
                         chunk.indices.map { i ->
-                            async { sem.withPermit { onEach(chunkNo * batch + i, probeSocks(ports[i], testUrl, youtube = youtube)) } }
+                            async { sem.withPermit { onEach(idx[i], probeSocks(ports[i], testUrl, youtube = youtube)) } }
                         }.awaitAll()
                     }
                 } finally { core.stop() }
             }
         }
+    }
+
+    /**
+     * Batches of variant indices. A WireGuard server appears at most once per batch: several tunnels with the same
+     * key at once make the server roam between them and every variant but one stalls.
+     */
+    fun chunks(variants: List<Pair<Server, Mask?>>, batch: Int): List<List<Int>> {
+        val out = mutableListOf<MutableList<Int>>()
+        val wgIn = mutableListOf<MutableSet<String>>()
+        variants.forEachIndexed { i, (s, _) ->
+            val wg = s.protocol == "wireguard"
+            var k = out.indexOfFirst { it.size < batch && (!wg || s.id !in wgIn[out.indexOf(it)]) }
+            if (k < 0) { out += mutableListOf<Int>(); wgIn += mutableSetOf<String>(); k = out.size - 1 }
+            out[k] += i; if (wg) wgIn[k] += s.id
+        }
+        return out
     }
 
     /** SOCKS5 login for the stealth listener (java.net SOCKS client asks the default Authenticator). */

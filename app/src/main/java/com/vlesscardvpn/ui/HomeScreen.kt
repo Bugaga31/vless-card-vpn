@@ -40,15 +40,31 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
                     Store.update { it.copy(settings = it.settings.copy(mode = m)) }
                     if (m != mode && status.state == Tunnel.State.CONNECTED) onConnect() // reconnect with the new mode
                 },
-                    label = { Text(when (m) { Mode.SERVERS -> "Серверы"; Mode.BYEDPI -> "ByeDPI"; Mode.HYBRID -> "Гибрид" }) })
+                    label = { Text(when (m) { Mode.AUTO -> "Авто"; Mode.SERVERS -> "Серверы"; Mode.BYEDPI -> "ByeDPI"; Mode.HYBRID -> "Гибрид" }) })
             }
         }
         Text(when (mode) {
+            Mode.AUTO -> "Сам обновит подписки, проверит серверы, подберёт маскировку и обход DPI. Если маскировку распознают — сменит её сам"
             Mode.SERVERS -> "Весь трафик через выбранные серверы (запросы распределяются между ними)"
             Mode.BYEDPI -> "Без сервера: обход DPI встроенными ByeDPI/zapret (YouTube, Discord и т.п.). Не помогает от блокировки по IP"
             Mode.HYBRID -> "YouTube/Discord/Telegram — через обход DPI, остальное — через серверы"
         }, fontSize = 13.sp, color = Color.Gray, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 6.dp))
-        Spacer(Modifier.height(28.dp))
+        Spacer(Modifier.height(10.dp))
+        // «Только YouTube и Telegram»: отмеченные сервисы идут через VPN, остальное — напрямую.
+        val services = app.settings.services
+        fun toggleService(id: String, v: Boolean) {
+            Store.update { it.copy(settings = it.settings.copy(services = if (v) (it.settings.services + id).distinct() else it.settings.services - id)) }
+            if (status.state == Tunnel.State.CONNECTED) onConnect()
+        }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Через VPN только:", fontSize = 13.sp)
+            Checkbox("youtube" in services, { toggleService("youtube", it) }); Text("YouTube", fontSize = 13.sp)
+            Checkbox("telegram" in services, { toggleService("telegram", it) }); Text("Telegram", fontSize = 13.sp)
+        }
+        Text(if (services.isEmpty()) "Ничего не отмечено — через VPN идёт весь трафик"
+            else "Через VPN: " + com.vlesscardvpn.core.Services.label(services) + ", остальное напрямую (другие сервисы — в Настройках)",
+            fontSize = 11.sp, color = Color.Gray, textAlign = TextAlign.Center)
+        Spacer(Modifier.height(18.dp))
 
         val on = status.state == Tunnel.State.CONNECTED
         val busy = status.state == Tunnel.State.CONNECTING

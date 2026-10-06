@@ -24,17 +24,53 @@ ss://$SS@127.0.0.1:8446#ss
 vless://$U@127.0.0.1:8447?security=reality&type=xhttp&mode=auto&path=%2Fx&sni=www.microsoft.com&pbk=$PBK&sid=ab#xhttp-reality
 vless://$U@127.0.0.1:8448?security=tls&type=grpc&serviceName=gsvc&sni=test.local&alpn=h2&pcs=$P#grpc
 vmess://$VM
+wireguard://iMKDJbeES0wVjl014e%2BVHdsv6vbOtdqgTCw4imW%2FhU4%3D@127.0.0.1:8450?publickey=71yczL51ZaA1iLCrpTjm%2BDim0K1n0RrflsMyyhtrsxE%3D&address=10.0.0.2%2F32#wg
+socks5://mu:mp@127.0.0.1:8451#socks
 L
 chmod +x gradlew
 XRAY_CONFIG_DUMP=/tmp/xcfg XRAY_LOCAL_LINKS=/tmp/links.txt ./gradlew --no-daemon -q :app:testDebugUnitTest --tests 'com.vlesscardvpn.ConfigTest'
 # One engine per fixed strategy (the app's own argv: VLESS Card, zapret, ByeDPI); servers are on loopback.
 while read -r eng args; do
-  if [ "$eng" = TPWS ]; then VCVPN_TPWS_ALLOW_LOCAL=1 /tmp/tpws $args > /dev/null 2>&1 & else /tmp/byedpi $args > /dev/null 2>&1 & fi
-done < /tmp/xcfg/dpi-engines.txt
+  if [ "$eng" = TPWS ]; then VCVPN_TPWS_ALLOW_LOCAL=1 /tmp/tpws $args > /dev/null 2>&1 &
+  elif [ "$eng" = XRAY ]; then $X run -c $args > /dev/null 2>&1 &
+  else /tmp/byedpi $args > /dev/null 2>&1 & fi
+done < <(cat /tmp/xcfg/dpi-engines.txt; echo)
 sleep 1
+# VLESS Card × Xray no-server strategies: real HTTPS to the internet through each engine.
+XOK=0; XALL=0
+while read -r eng args; do
+  [ "$eng" = XRAY ] || continue
+  port=$(basename "$args" .json | sed 's/xrdpi-//'); XALL=$((XALL+1))
+  if curl -s -o /dev/null -m 15 -w '%{http_code}' -x socks5h://127.0.0.1:$port https://www.youtube.com/ | grep -q '^[23]'; then XOK=$((XOK+1)); else echo "xray engine $port failed"; fi
+done < <(cat /tmp/xcfg/dpi-engines.txt; echo)
+echo "Xray no-server strategies: $XOK/$XALL carry HTTPS"
+[ "$XOK" -eq "$XALL" ] || { echo "xray strategies failed"; exit 1; }
 for f in /tmp/xcfg/*.json; do echo "$(basename $f): $($X run -test -c $f 2>&1 | tail -1)"; done
 bash tools/xray-local-e2e.sh $X /tmp/xcfg || true  # raw matrix includes masks the app never offers
 # Only masks the app offers for each server type (Masks.compatible) must pass.
+python3 - <<'PY'
+# WireGuard: one tunnel per key at a time (parallel tunnels with one key make the server roam), so each WG
+# variant gets its own Xray instance here, sequentially, instead of the parallel matrix.
+import json, subprocess, time
+cfg = json.load(open('/tmp/xcfg/local-matrix.json'))
+rows = [l.split() for l in open('/tmp/xcfg/local-matrix.txt')]
+wok = wall = 0
+with open('/tmp/xcfg/wg-result.txt', 'w') as out:
+    for port, name, mask in rows:
+        if name != 'wg' or not (mask in ('none', 'chrome.n') or ('.z' in mask and '.d:' not in mask)): continue
+        tag = 'v%d' % (int(port) - 30000)
+        ob = [o for o in cfg['outbounds'] if o['tag'] == tag][0]
+        json.dump({"inbounds": [{"port": 24900, "listen": "127.0.0.1", "protocol": "socks", "settings": {"auth": "noauth"}}], "outbounds": [ob]}, open('/tmp/wg1.json', 'w'))
+        p = subprocess.Popen(['/tmp/xray/xray', 'run', '-c', '/tmp/wg1.json'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL); time.sleep(1.5)
+        a = subprocess.run(['curl', '-s', '-o', '/dev/null', '-m', '15', '-w', '%{http_code}', '--socks5-hostname', '127.0.0.1:24900', 'https://www.gstatic.com/generate_204'], capture_output=True, text=True).stdout
+        b = subprocess.run(['curl', '-s', '-o', '/dev/null', '-m', '25', '-w', '%{size_download}', '--socks5-hostname', '127.0.0.1:24900', 'https://speed.cloudflare.com/__down?bytes=262144'], capture_output=True, text=True).stdout
+        p.kill(); p.wait()
+        ok = a == '204' and b.isdigit() and int(b) >= 200000
+        wall += 1; wok += ok
+        print(('OK' if ok else 'FAIL'), port, name, mask, a, b, file=out)
+print(f"WireGuard (sequential, own instance): {wok}/{wall}")
+print(open('/tmp/xcfg/wg-result.txt').read())
+PY
 python3 - <<'PY'
 import sys
 ok = fail = 0; bad = []; bok = bfail = 0
@@ -46,7 +82,10 @@ for line in open('/tmp/xcfg/result.txt'):
     offered = True
     if name in ('reality-vision', 'xhttp-reality'): offered = fp in ('chrome', 'firefox', 'safari', 'none')
     elif name == 'grpc': offered = fp != 'android'
-    elif name in ('ss', 'vmess-hu'): offered = fp in ('chrome', 'none')
+    elif name in ('ss', 'vmess-hu', 'socks'): offered = fp in ('chrome', 'none')
+    elif name == 'wg': offered = mask == 'none' or mask == 'chrome.n' or (fp == 'chrome' and '.z' in mask and '.d:' not in mask)
+    if '.z' in mask and '.d:' not in mask and name != 'wg': offered = False
+    if name == 'wg': continue  # judged sequentially above
     if not offered: continue
     if '.d:' in mask:
         sid = mask.split('.d:')[1]
@@ -70,5 +109,7 @@ print(f"fixed strategies (without fake-only): ok={dpi_ok}/{dpi_all}")
 if dpi_all and dpi_ok < dpi_all * 0.8: print("too many fixed-strategy failures"); sys.exit(1)
 # Direct masks must all work; ByeDPI-front variants are flaky under 24-way parallel load in CI
 # (the app tests every mask live before using it, so a flaky one is simply not chosen).
+wg = [l.split()[0] for l in open('/tmp/xcfg/wg-result.txt')]
+if wg.count('FAIL') > 0: print("WireGuard variants failed"); sys.exit(1)
 sys.exit(1 if fail > 0 or bfail > (bok + bfail) * 0.2 else 0)
 PY

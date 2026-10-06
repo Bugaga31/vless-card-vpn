@@ -3,7 +3,10 @@ package com.vlesscardvpn.model
 import org.json.JSONArray
 import org.json.JSONObject
 
-enum class Mode(val title: String) { SERVERS("Серверы"), BYEDPI("Без сервера (ByeDPI)"), HYBRID("Гибрид") }
+enum class Mode(val title: String) {
+    /** Prepares itself (subscriptions → test → masks → DPI search) and picks servers or ByeDPI; heals on failure. */
+    AUTO("Авто"), SERVERS("Серверы"), BYEDPI("Без сервера (ByeDPI)"), HYBRID("Гибрид")
+}
 
 /** Balancer strategy across several selected servers (Xray routing balancer + observatory). */
 enum class Balance(val xray: String, val title: String) {
@@ -12,7 +15,7 @@ enum class Balance(val xray: String, val title: String) {
 }
 
 data class Settings(
-    val mode: Mode = Mode.SERVERS,
+    val mode: Mode = Mode.AUTO,
     val balance: Balance = Balance.LEAST_PING,
     val socksPort: Int = 10808,
     val ruDirect: Boolean = true,
@@ -43,6 +46,13 @@ data class Settings(
     val onlyApps: Boolean = false,
     val quietNotification: Boolean = false,
     val disguise: String = "",
+    /** Only these services (Services ids: youtube, telegram…) go through the VPN; empty = all traffic. */
+    val services: List<String> = emptyList(),
+    /** After a failed check: other good masks → mask search → (Auto) ByeDPI, reconnecting by itself. */
+    val autoHeal: Boolean = true,
+    /** Refresh subscriptions on start / before Auto connect when older than 12 h. */
+    val autoUpdateSubs: Boolean = true,
+    val lastSubRefresh: Long = 0,
 ) {
     fun toJson(): JSONObject = JSONObject().put("mode", mode.name).put("balance", balance.name).put("socksPort", socksPort)
         .put("ruDirect", ruDirect).put("blockAds", blockAds).put("byeDpiArgs", byeDpiArgs).put("byeDpiSni", byeDpiSni)
@@ -52,6 +62,7 @@ data class Settings(
         .put("stealthSocks", stealthSocks).put("blockStun", blockStun).put("blockQuic", blockQuic).put("mux", mux).put("rotateMasks", rotateMasks)
         .put("ruDns", ruDns).put("apps", JSONArray(apps)).put("onlyApps", onlyApps)
         .put("quietNotification", quietNotification).put("disguise", disguise)
+        .put("services", JSONArray(services)).put("autoHeal", autoHeal).put("autoUpdateSubs", autoUpdateSubs).put("lastSubRefresh", lastSubRefresh)
 
     companion object {
         const val DPI_AUTO = "auto"
@@ -59,21 +70,9 @@ data class Settings(
         val DNS_PRESETS = listOf("Cloudflare" to "https://1.1.1.1/dns-query", "Google" to "https://8.8.8.8/dns-query",
             "Quad9" to "https://9.9.9.9/dns-query", "AdGuard (без рекламы)" to "https://94.140.14.14/dns-query")
         const val DEFAULT_BYEDPI = "-o1 -At,r,s -d1 -At,r,s -f-1 -t8 -n {sni} -Qo"
-        private const val IG = "igareck/vpn-configs-for-russia/main"
-        val DEFAULT_SUBSCRIPTIONS = listOf(
-            "https://raw.githubusercontent.com/$IG/BLACK_VLESS_RUS_mobile.txt",
-            "https://raw.githubusercontent.com/$IG/Vless-Reality-White-Lists-Rus-Mobile.txt",
-            "https://raw.githubusercontent.com/$IG/BLACK_VLESS_RUS.txt",
-            "https://raw.githubusercontent.com/$IG/BLACK_SS+All_RUS.txt",
-        )
-        /** Same files on mirrors when raw.githubusercontent.com is blocked. */
-        fun mirrors(url: String): List<String> {
-            val m = Regex("https://raw\\.githubusercontent\\.com/igareck/vpn-configs-for-russia/main/(.+)").find(url) ?: return listOf(url)
-            val f = m.groupValues[1]
-            return listOf(url, "https://gitlab.com/igareck/vpn-configs-for-russia/-/raw/main/$f",
-                "https://codeberg.org/igareck/vpn-configs-for-russia/raw/branch/main/$f",
-                "https://cdn.jsdelivr.net/gh/igareck/vpn-configs-for-russia@main/$f")
-        }
+        val DEFAULT_SUBSCRIPTIONS: List<String> get() = Subs.CATALOG.filter { it.default }.map { it.url }
+        /** Same file on mirrors when raw.githubusercontent.com is blocked (jsDelivr, githack; igareck also on GitLab/Codeberg). */
+        fun mirrors(url: String): List<String> = Subs.mirrors(url)
         fun fromJson(o: JSONObject): Settings {
             val d = Settings()
             fun list(k: String, def: List<String>) = o.optJSONArray(k)?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: def
@@ -91,6 +90,8 @@ data class Settings(
                 blockQuic = o.optBoolean("blockQuic", d.blockQuic), mux = o.optBoolean("mux", d.mux), rotateMasks = o.optBoolean("rotateMasks", d.rotateMasks), ruDns = o.optBoolean("ruDns", d.ruDns),
                 apps = list("apps", d.apps), onlyApps = o.optBoolean("onlyApps", d.onlyApps),
                 quietNotification = o.optBoolean("quietNotification", d.quietNotification), disguise = o.optString("disguise", d.disguise),
+                services = list("services", d.services), autoHeal = o.optBoolean("autoHeal", d.autoHeal),
+                autoUpdateSubs = o.optBoolean("autoUpdateSubs", d.autoUpdateSubs), lastSubRefresh = o.optLong("lastSubRefresh", 0),
             )
         }
     }

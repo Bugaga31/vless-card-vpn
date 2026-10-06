@@ -112,6 +112,17 @@ fun SettingsScreen() {
         Toggle("Мультиплексирование (mux)", "Меньше новых соединений — меньше рукопожатий, которые видит DPI. Не для Vision/XHTTP", s.mux) { v -> set { it.copy(mux = v) } }
         Toggle("Менять маскировку при каждом подключении", "Случайная из рабочих, найденных «Подобрать маскировку», — у трафика нет постоянного отпечатка", s.rotateMasks) { v -> set { it.copy(rotateMasks = v) } }
         Toggle("Блокировать рекламу", null, s.blockAds) { v -> set { it.copy(blockAds = v) } }
+        Toggle("Самовосстановление", "Если проверка после подключения не прошла: другая рабочая маскировка → новый подбор → (Авто) обход DPI без сервера", s.autoHeal) { v -> set { it.copy(autoHeal = v) } }
+
+        Section("Через VPN только эти сервисы")
+        Hint("Ничего не отмечено — через VPN весь трафик. Отмечено — только эти сервисы, остальное напрямую (быстрее, банки и Госуслуги видят обычный IP).")
+        com.vlesscardvpn.core.Services.ALL.forEach { sv ->
+            Row(Modifier.fillMaxWidth().clickable { set { it.copy(services = if (sv.id in it.services) it.services - sv.id else it.services + sv.id) } },
+                verticalAlignment = Alignment.CenterVertically) {
+                Checkbox(sv.id in s.services, { v -> set { it.copy(services = if (v) (it.services + sv.id).distinct() else it.services - sv.id) } })
+                Text(sv.title, fontSize = 14.sp)
+            }
+        }
 
         Section("DNS через туннель")
         Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -119,10 +130,28 @@ fun SettingsScreen() {
         }
 
         Section("Подписки")
-        var subs by remember(s.subscriptions) { mutableStateOf(s.subscriptions.joinToString("\n")) }
-        OutlinedTextField(subs, { v -> subs = v; set { it.copy(subscriptions = v.lines().map { l -> l.trim() }.filter { l -> l.startsWith("http") }) } },
-            label = { Text("Ссылки подписок, по одной в строке") }, modifier = Modifier.fillMaxWidth().heightIn(min = 120.dp))
-        TextButton(onClick = { subs = Settings.DEFAULT_SUBSCRIPTIONS.joinToString("\n"); set { it.copy(subscriptions = Settings.DEFAULT_SUBSCRIPTIONS) } }) { Text("Вернуть стандартные") }
+        Toggle("Обновлять автоматически", "При запуске и перед «Авто», если старше 12 часов", s.autoUpdateSubs) { v -> set { it.copy(autoUpdateSubs = v) } }
+        Hint("Отметьте источники (${s.subscriptions.size} выбрано). Белые списки — для мобильного интернета, когда открываются только российские сайты.")
+        com.vlesscardvpn.model.Subs.CATALOG.groupBy { it.group }.forEach { (group, items) ->
+            Text(group, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+            items.forEach { src ->
+                Row(Modifier.fillMaxWidth().clickable {
+                    set { it.copy(subscriptions = if (src.url in it.subscriptions) it.subscriptions - src.url else it.subscriptions + src.url) }
+                }, verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(src.url in s.subscriptions, { v -> set { it.copy(subscriptions = if (v) (it.subscriptions + src.url).distinct() else it.subscriptions - src.url) } })
+                    Text(src.title, fontSize = 13.sp)
+                }
+            }
+        }
+        val catalog = remember { com.vlesscardvpn.model.Subs.CATALOG.map { it.url }.toSet() }
+        var subs by remember(s.subscriptions) { mutableStateOf(s.subscriptions.filter { it !in catalog }.joinToString("\n")) }
+        OutlinedTextField(subs, { v -> subs = v; set { it.copy(subscriptions = it.subscriptions.filter { u -> u in catalog } + v.lines().map { l -> l.trim() }.filter { l -> l.startsWith("http") }) } },
+            label = { Text("Свои ссылки подписок, по одной в строке") }, modifier = Modifier.fillMaxWidth().heightIn(min = 90.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            TextButton(onClick = { set { it.copy(subscriptions = Settings.DEFAULT_SUBSCRIPTIONS) } }) { Text("Стандартные") }
+            TextButton(onClick = { set { it.copy(subscriptions = (com.vlesscardvpn.model.Subs.CATALOG.map { c -> c.url } + it.subscriptions).distinct()) } }) { Text("Все") }
+            TextButton(onClick = { Actions.refreshSubscriptions() }, enabled = !progress.running) { Text("Обновить сейчас") }
+        }
 
         Section("Проверка")
         var url by remember(s.testUrl) { mutableStateOf(s.testUrl) }

@@ -5,10 +5,12 @@ import java.net.URLDecoder
 
 /** Parses share links and subscription bodies (plain or base64) into [Server]s. Never throws. */
 object LinkParser {
-    private val schemes = listOf("vless://", "vmess://", "trojan://", "ss://", "hysteria2://", "hy2://")
+    private val schemes = listOf("vless://", "vmess://", "trojan://", "ss://", "hysteria2://", "hy2://", "wireguard://", "wg://", "socks://", "socks5://")
 
     fun parseMany(text: String, source: String = ""): List<Server> {
         var body = text.trim().removePrefix("\uFEFF")
+        if (body.startsWith("{") || body.startsWith("[")) XrayJson.parse(body, source).takeIf { it.isNotEmpty() }?.let { return it }
+        if (body.contains("[Interface]", true) && body.contains("[Peer]", true)) return listOfNotNull(wgConf(body, source))
         if (schemes.none { body.contains(it, ignoreCase = true) }) {
             body = Base64.decodeToString(body.replace("\n", "").replace("\r", "").trim()) ?: return emptyList()
         }
@@ -24,6 +26,8 @@ object LinkParser {
             l.startsWith("hysteria2://", true) || l.startsWith("hy2://", true) -> standard(l, "hysteria2", source)
             l.startsWith("vmess://", true) -> vmess(l, source)
             l.startsWith("ss://", true) -> shadowsocks(l, source)
+            l.startsWith("wireguard://", true) || l.startsWith("wg://", true) -> wireguard(l, source)
+            l.startsWith("socks://", true) || l.startsWith("socks5://", true) -> socks(l, source)
             else -> null
         }
     }.getOrNull()?.takeIf { it.port in 1..65535 && it.address.isNotBlank() && it.address.length <= 253 }
@@ -113,6 +117,35 @@ object LinkParser {
             secret = cred.substringAfter(':'), method = method, source = source)
     }
 
+    /** v2rayNG / Hiddify: wireguard://<private key>@host:port?publickey=…&address=…&reserved=1,2,3&mtu=1280#name */
+    private fun wireguard(link: String, source: String): Server? {
+        val p = split(link)
+        val q = p.q
+        val pub = q["publickey"] ?: q["peer_public_key"] ?: q["public_key"] ?: return null
+        return Server(name = p.name.ifEmpty { "WG ${p.host}" }, protocol = "wireguard", address = p.host, port = p.port, secret = p.user,
+            pbk = pub, localAddress = (q["address"] ?: q["ip"] ?: "172.16.0.2/32").replace(" ", ""), reserved = q["reserved"].orEmpty().replace(" ", ""),
+            mtu = q["mtu"]?.toIntOrNull() ?: 0, psk = q["presharedkey"] ?: q["psk"] ?: "", network = "udp", source = source)
+    }
+
+    /** WireGuard .conf (e.g. Cloudflare WARP). AmneziaWG junk options are not supported by Xray and are ignored. */
+    fun wgConf(text: String, source: String = ""): Server? = runCatching {
+        val kv = text.lines().map { it.trim() }.filter { '=' in it && !it.startsWith("#") }
+            .associate { it.substringBefore('=').trim().lowercase() to it.substringAfter('=').trim() }
+        val ep = kv["endpoint"] ?: return null
+        val (host, port) = hostPort(ep)
+        Server(name = "WireGuard $host", protocol = "wireguard", address = host, port = port, secret = kv["privatekey"] ?: return null,
+            pbk = kv["publickey"] ?: return null, localAddress = kv["address"].orEmpty().replace(" ", "").ifEmpty { "172.16.0.2/32" },
+            mtu = kv["mtu"]?.toIntOrNull() ?: 0, psk = kv["presharedkey"].orEmpty(), network = "udp", source = source)
+    }.getOrNull()
+
+    /** socks://base64(user:pass)@host:port or socks5://user:pass@host:port */
+    private fun socks(link: String, source: String): Server {
+        val p = split(link)
+        val cred = if (p.user.isEmpty()) "" else (if (':' in p.user) p.user else Base64.decodeToString(p.user) ?: p.user)
+        return Server(name = p.name.ifEmpty { "SOCKS ${p.host}" }, protocol = "socks", address = p.host, port = p.port,
+            user = cred.substringBefore(':', ""), secret = if (':' in cred) cred.substringAfter(':') else "", source = source)
+    }
+
     val SS_METHODS = setOf("aes-128-gcm", "aes-256-gcm", "chacha20-poly1305", "chacha20-ietf-poly1305", "xchacha20-poly1305",
         "xchacha20-ietf-poly1305", "2022-blake3-aes-128-gcm", "2022-blake3-aes-256-gcm", "2022-blake3-chacha20-poly1305", "none", "plain")
 
@@ -120,6 +153,14 @@ object LinkParser {
     fun toLink(s: Server): String {
         fun enc(v: String) = java.net.URLEncoder.encode(v, "UTF-8").replace("+", "%20")
         val name = enc(s.name)
+        if (s.protocol == "xray") return s.extra
+        if (s.protocol == "wireguard") {
+            val q = listOf("publickey" to s.pbk, "address" to s.localAddress, "reserved" to s.reserved, "mtu" to (if (s.mtu > 0) s.mtu.toString() else ""),
+                "presharedkey" to s.psk).filter { it.second.isNotEmpty() }
+            val host = if (':' in s.address) "[${s.address}]" else s.address
+            return "wireguard://${enc(s.secret)}@$host:${s.port}?" + q.joinToString("&") { "${it.first}=${enc(it.second)}" } + "#$name"
+        }
+        if (s.protocol == "socks") return "socks://" + (if (s.user.isNotEmpty() || s.secret.isNotEmpty()) Base64.encode("${s.user}:${s.secret}") + "@" else "") + "${s.address}:${s.port}#$name"
         if (s.protocol == "shadowsocks") return "ss://" + Base64.encode("${s.method}:${s.secret}") + "@${s.address}:${s.port}#$name"
         if (s.protocol == "vmess") {
             val o = JSONObject().put("v", "2").put("ps", s.name).put("add", s.address).put("port", s.port.toString()).put("id", s.secret)

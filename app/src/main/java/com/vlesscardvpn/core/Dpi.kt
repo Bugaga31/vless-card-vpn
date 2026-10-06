@@ -18,7 +18,9 @@ import java.util.concurrent.TimeUnit
 /** Local anti-DPI engines bundled as non-root child processes (SOCKS5 on 127.0.0.1). */
 enum class DpiEngine(val library: String, val title: String) {
     BYEDPI("libbyedpi.so", "ByeDPI"),
-    TPWS("libtpws.so", "zapret")
+    TPWS("libtpws.so", "zapret"),
+    /** In-process Xray instance: SOCKS → freedom with finalmask fragment (VLESS Card "ladder" patterns). */
+    XRAY("", "Xray")
 }
 
 /** One desync strategy: ByeDPI or zapret tpws arguments (long form, no listen options). */
@@ -34,6 +36,7 @@ data class DpiStrategy(val id: String, val label: String, val engine: DpiEngine,
         return when (engine) {
             DpiEngine.BYEDPI -> ByeDpiArgs.loopbackPrefix(port) + body
             DpiEngine.TPWS -> DpiStrategies.tpwsPrefix(port) + body
+            DpiEngine.XRAY -> listOf("port=$port") + body
         }
     }
 }
@@ -53,7 +56,11 @@ object DpiStrategies {
     private fun bye(id: String, label: String, vararg a: String) = DpiStrategy("BYEDPI#$id", "ByeDPI · $label", DpiEngine.BYEDPI, a.toList())
     private fun tpws(id: String, label: String, vararg a: String) = DpiStrategy("TPWS#$id", "zapret · $label", DpiEngine.TPWS, a.toList())
     private fun own(id: String, label: String, engine: DpiEngine, vararg a: String) =
-        DpiStrategy("${if (engine == DpiEngine.TPWS) "TPWS" else "BYEDPI"}#$id", "VLESS Card · $label", engine, a.toList(), own = true)
+        DpiStrategy("${engine.name}#$id", "VLESS Card · $label", engine, a.toList(), own = true)
+    /** Xray fragment strategy: key=value args (packets, length/delay or lengths/delays lists, maxSplit). */
+    private fun xr(id: String, label: String, vararg a: String) = own(id, "Xray $label", DpiEngine.XRAY, *a)
+
+    val XRAY_LADDER = xr("LADDER", "лесенка Hello 1→3→8→30", "packets=tlshello", "lengths=1-1,2-4,5-10,20-60", "delays=1-2,2-4,3-6,5-10")
 
     /** Every site starts with the gentlest desync; after a DPI reset/timeout/TLS error ByeDPI escalates (cached per IP). */
     val CASCADE = own("VCARD_CASCADE", "адаптивный каскад", DpiEngine.BYEDPI,
@@ -95,6 +102,12 @@ object DpiStrategies {
         bye("MASK_FAKE", "маскировка фейк-SNI", "--disorder", "1", "--fake", "-1", "--ttl", "8", "--fake-sni", S, "--fake-tls-mod", "orig"),
         bye("MASK_FAKE_RAND", "маскировка + случайный TLS", "--fake", "-1", "--ttl", "8", "--fake-sni", S, "--fake-tls-mod", "rand,orig"),
         tpws("MSS", "малый MSS", "--mss=88", "--split-pos=1"),
+        // VLESS Card × Xray-core: TCP fragmentation of the ClientHello inside the app (no extra binary, works on any ABI).
+        XRAY_LADDER,
+        xr("DUST", "пыль Hello 1-5 байт", "packets=tlshello", "length=1-5", "delay=0-1"),
+        xr("SLOW", "медленный Hello", "packets=tlshello", "length=10-30", "delay=10-20"),
+        xr("BIG", "крупные куски Hello", "packets=tlshello", "length=100-200", "delay=10-20"),
+        xr("FIRST", "1 байт + пауза", "packets=1-1", "lengths=1-1,500-1000", "delays=60-120,1-2"),
     )
 
     fun custom(line: String, mask: String): DpiStrategy? = ByeDpiArgs.parse(line, mask).getOrNull()
@@ -120,6 +133,25 @@ object DpiStrategies {
         addAll(BUILT_IN)
     }.filter { tpwsAvailable || it.engine != DpiEngine.TPWS }.distinctBy { it.id }
 
+    /** Xray config of an [DpiEngine.XRAY] strategy: SOCKS 127.0.0.1:port → freedom with the fragment finalmask. */
+    fun xrayConfig(s: DpiStrategy, port: Int): String {
+        val kv = s.args.associate { it.substringBefore('=') to it.substringAfter('=') }
+        val f = org.json.JSONObject().put("packets", kv["packets"] ?: "tlshello")
+        fun list(v: String) = org.json.JSONArray(v.split(',').map { it.trim() })
+        if (kv["lengths"] != null) f.put("lengths", list(kv.getValue("lengths"))).put("delays", list(kv["delays"] ?: "1-2"))
+        else f.put("length", kv["length"] ?: "1-3").put("delay", kv["delay"] ?: "1-3")
+        kv["maxSplit"]?.let { f.put("maxSplit", it) }
+        val o = org.json.JSONObject()
+        o.put("log", org.json.JSONObject().put("loglevel", "warning"))
+        o.put("inbounds", org.json.JSONArray().put(org.json.JSONObject().put("tag", "in").put("listen", "127.0.0.1").put("port", port).put("protocol", "socks")
+            .put("settings", org.json.JSONObject().put("auth", "noauth").put("udp", true).put("ip", "127.0.0.1"))))
+        o.put("outbounds", org.json.JSONArray().put(org.json.JSONObject().put("tag", "out").put("protocol", "freedom")
+            .put("streamSettings", org.json.JSONObject().put("sockopt", org.json.JSONObject().put("domainStrategy", "UseIPv4"))
+                .put("finalmask", org.json.JSONObject().put("tcp", org.json.JSONArray()
+                .put(org.json.JSONObject().put("type", "fragment").put("settings", f)))))))
+        return o.toString()
+    }
+
     fun tpwsPrefix(port: Int): List<String> {
         require(port in 1024..65535)
         return listOf("--socks", "--bind-addr=127.0.0.1", "--port=$port", "--maxconn=256")
@@ -129,10 +161,11 @@ object DpiStrategies {
 /** Runs one strategy as a local SOCKS5 proxy. Its sockets bypass the VPN (the app UID is excluded). */
 class DpiProxy(private val context: Context) : AutoCloseable {
     private var process: Process? = null
+    private var xray: XrayCore.Instance? = null
     var port: Int = 0; private set
     var strategy: DpiStrategy? = null; private set
 
-    fun available(engine: DpiEngine): Boolean = Build.VERSION.SDK_INT >= 26 && exe(engine).let { it.isFile && it.canExecute() }
+    fun available(engine: DpiEngine): Boolean = if (engine == DpiEngine.XRAY) true else Build.VERSION.SDK_INT >= 26 && exe(engine).let { it.isFile && it.canExecute() }
     private fun exe(engine: DpiEngine) = File(context.applicationInfo.nativeLibraryDir, engine.library)
 
     /** Starts [s]; returns the loopback port. [allowLocal] lets zapret reach loopback/LAN targets (debug e2e only). */
@@ -140,6 +173,13 @@ class DpiProxy(private val context: Context) : AutoCloseable {
         close()
         check(available(s.engine)) { "${s.engine.title} недоступен на этом устройстве (нужен Android 8+)" }
         val p = ServerSocket(0, 1, InetAddress.getByName("127.0.0.1")).use { it.localPort }
+        if (s.engine == DpiEngine.XRAY) {
+            XrayCore.init(context)
+            val x = XrayCore.Instance("dpi-${s.id}"); xray = x
+            try { x.start(DpiStrategies.xrayConfig(s, p)); check(x.running) { "Xray не запустился: ${x.lastStatus}" } } catch (e: Throwable) { close(); throw e }
+            port = p; strategy = s
+            return@withContext p
+        }
         val b = ProcessBuilder(listOf(exe(s.engine).absolutePath) + s.argv(p, mask))
             .redirectOutput(File("/dev/null")).redirectError(File("/dev/null"))
         if (allowLocal) b.environment()["VCVPN_TPWS_ALLOW_LOCAL"] = "1"
@@ -158,9 +198,10 @@ class DpiProxy(private val context: Context) : AutoCloseable {
         } catch (e: Throwable) { close(); throw e }
     }
 
-    val alive: Boolean get() = process?.isAlive == true
+    val alive: Boolean get() = process?.isAlive == true || xray?.running == true
 
     override fun close() {
+        xray?.let { it.stop(); xray = null; port = 0 }
         val old = process.also { process = null } ?: return
         port = 0
         old.destroy()
