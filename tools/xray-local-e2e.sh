@@ -6,6 +6,7 @@ XRAY="$1"; DIR="$2"
 "$XRAY" run -c "$DIR/local-matrix.json" > "$DIR/client.log" 2>&1 & PID=$!
 trap 'kill $PID 2>/dev/null' EXIT
 sleep 3
+if ! kill -0 $PID 2>/dev/null; then echo "client Xray exited:"; tail -5 "$DIR/client.log"; fi
 check() {
   port="$1"; rest="$2"
   a=$(curl -s -o /dev/null -m 15 -w "%{http_code}" --socks5-hostname 127.0.0.1:$port https://www.gstatic.com/generate_204)
@@ -16,3 +17,5 @@ export -f check
 xargs -P 24 -L 1 bash -c 'check "$0" "$*"' < "$DIR/local-matrix.txt" > "$DIR/result.txt"
 echo "ok: $(grep -c ^OK "$DIR/result.txt")  fail: $(grep -c ^FAIL "$DIR/result.txt")"
 grep ^FAIL "$DIR/result.txt" | head -20
+kill -0 $PID 2>/dev/null || { echo "client Xray died during the run:"; tail -5 "$DIR/client.log"; }
+pgrep -f "byedpi --ip 127.0.0.1 --port 1080" >/dev/null || echo "ByeDPI :1080 is not running (via-ByeDPI masks fail because of it)"
