@@ -72,12 +72,17 @@ class TunnelService : VpnService() {
     private var dpi: DpiSet? = null
     private var checkJob: Job? = null
     private var netCallback: ConnectivityManager.NetworkCallback? = null
+    /** Self-healing step after failed checks (0 = healthy); reset by a successful check or a user (re)connect. */
+    private var healStep = 0
+    /** Auto mode gave up on servers for this connection: ByeDPI only. */
+    private var autoDpiOnly = false
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_STOP -> { scope.launch { lock.withLock { teardown("") } ; stopSelf() } }
             else -> { // ACTION_START or always-on restart (null intent)
                 foreground("Подключение…")
+                healStep = 0; autoDpiOnly = false
                 scope.launch { lock.withLock { connect() } }
             }
         }
@@ -98,11 +103,16 @@ class TunnelService : VpnService() {
         Tunnel.status.value = Tunnel.Status(Tunnel.State.CONNECTING, "Подключение…")
         try {
             val st = Store.state.value
-            val settings = st.settings
+            val network = Net.key(this)
+            var settings = st.settings
             var selected = st.selected
             if (settings.mode != Mode.BYEDPI && selected.isEmpty()) {
                 // Nothing chosen: take the best servers that passed the last test.
                 selected = st.servers.filter { st.state(it).works }.sortedBy { st.state(it).realMs }.take(5)
+            }
+            if (settings.mode == Mode.AUTO) {
+                settings = settings.copy(mode = if (selected.isEmpty() || autoDpiOnly) Mode.BYEDPI else Mode.SERVERS)
+                if (settings.mode == Mode.BYEDPI) selected = emptyList()
             }
             if (settings.mode != Mode.BYEDPI && selected.isEmpty())
                 error("Нет выбранных серверов. Откройте «Серверы», нажмите «Проверить» и отметьте рабочие.")
@@ -110,13 +120,14 @@ class TunnelService : VpnService() {
             val rotate = settings.rotateMasks
             val withMasks = selected.map { srv ->
                 val ss = st.state(srv)
-                val id = if (rotate && ss.goodMasks.isNotEmpty()) (ss.goodMasks + ss.maskId).filter { it.isNotEmpty() }.random() else ss.maskId
+                val mine = ss.maskFor(network)
+                val id = if (rotate && ss.goodMasks.isNotEmpty()) (ss.goodMasks + mine).filter { it.isNotEmpty() }.random() else mine
                 srv to Masks.byId(id)
             }
             val needCurrent = settings.mode != Mode.SERVERS || withMasks.any { it.second?.dpi == Masks.CURRENT_DPI }
             val fixed = if (settings.mode == Mode.BYEDPI) emptySet() else Masks.strategies(withMasks.map { it.second }) - Masks.CURRENT_DPI
             val set = DpiSet(this); dpi = set
-            set.start(settings, Net.key(this), needCurrent, fixed, allowLocal = BuildConfig.DEBUG)
+            set.start(settings, network, needCurrent, fixed, allowLocal = BuildConfig.DEBUG)
             val bdPort = set.currentPort
             Tunnel.byeDpiPort = bdPort
             val dpiLabel = set.current?.label.orEmpty()
@@ -127,7 +138,7 @@ class TunnelService : VpnService() {
             c.start(config)
             check(c.running) { "Xray не запустился: ${c.lastStatus}" }
             Tunnel.socks = socks
-            Log.i("E2E", "socks port=${socks.port} auth=${socks.auth} dpi=${dpiLabel.ifEmpty { "-" }} fixed=${set.ports.keys}")
+            Log.i("E2E", "socks port=${socks.port} auth=${socks.auth} dpi=${dpiLabel.ifEmpty { "-" }} fixed=${set.ports.keys} mode=${settings.mode} services=${settings.services}")
 
             val b = Builder().setSession("VLESS Card").setMtu(MTU)
                 .addAddress(IPV4, 30).addRoute("0.0.0.0", 0)
@@ -142,11 +153,14 @@ class TunnelService : VpnService() {
             tun = fd
             TProxyService.start(filesDir, fd, socks.port, MTU, IPV4, IPV6, socks.user, socks.pass)
 
-            val route = when (settings.mode) {
+            val auto = st.settings.mode == Mode.AUTO
+            var route = when (settings.mode) {
                 Mode.BYEDPI -> "Без сервера · $dpiLabel"
                 Mode.HYBRID -> "${selected.size} серв. + $dpiLabel для YouTube/Discord"
-                Mode.SERVERS -> if (selected.size == 1) selected[0].name else "${selected.size} серверов · ${settings.balance.title.lowercase()}"
+                else -> if (selected.size == 1) selected[0].name else "${selected.size} серверов · ${settings.balance.title.lowercase()}"
             }
+            if (auto) route = "Авто · $route"
+            if (settings.services.isNotEmpty()) route += " · через VPN только " + com.vlesscardvpn.core.Services.label(settings.services)
             Tunnel.status.value = Tunnel.Status(Tunnel.State.CONNECTED, "Подключено", route, "Проверяю интернет…", null, System.currentTimeMillis())
             foreground(if (settings.quietNotification) "Активно" else "Подключено · $route")
             watchNetwork()
@@ -169,10 +183,41 @@ class TunnelService : VpnService() {
             val p = Tester.probeSocks(port, st.testUrl)
             val cur = Tunnel.status.value
             if (cur.state != Tunnel.State.CONNECTED) return@launch
-            val text = if (p.realMs > 0) "Интернет работает · ${p.realMs} мс · 256 КБ: ${Actions.yn(p.bigOk)} · YouTube: ${Actions.yn(p.ytOk)}"
+            val text = if (p.realMs > 0) "Интернет работает · ${p.realMs} мс · 256 КБ: ${Actions.yn(p.bigOk)} · YouTube: ${Actions.yn(p.ytOk)} · Telegram: ${Actions.yn(p.tgOk)}"
                 else "Нет ответа через выбранный маршрут (${p.error}). Проверьте серверы или включите маскировку."
             Tunnel.status.value = cur.copy(check = text, checkOk = p.works)
-            Log.i("E2E", "check ok=${p.works} ms=${p.realMs} big=${p.bigOk} yt=${p.ytOk} err=${p.error}")
+            Log.i("E2E", "check ok=${p.works} ms=${p.realMs} big=${p.bigOk} yt=${p.ytOk} tg=${p.tgOk} err=${p.error}")
+            if (p.works) healStep = 0 else heal()
+        }
+    }
+
+    /**
+     * Masking got blocked (or the server died): 1) next good masks, 2) a fresh mask search for the selected servers,
+     * 3) Auto mode only — ByeDPI without servers. Each step reconnects by itself.
+     */
+    private fun heal() {
+        val st = Store.state.value
+        if (!st.settings.autoHeal || st.settings.mode == Mode.BYEDPI || autoDpiOnly) return
+        val servers = st.selected.ifEmpty { st.servers.filter { st.state(it).works }.sortedBy { st.state(it).realMs }.take(5) }
+        healStep++
+        val cur = Tunnel.status.value
+        scope.launch {
+            when {
+                healStep == 1 && Actions.nextMasks(servers) -> Tunnel.status.value = cur.copy(check = "Маскировку, похоже, распознали — переключаюсь на другую…", checkOk = null)
+                healStep <= 2 -> {
+                    healStep = 2
+                    Tunnel.status.value = cur.copy(check = "Подбираю новую маскировку для серверов…", checkOk = null)
+                    runCatching { Actions.doFindMasks(servers, 24) }
+                }
+                st.settings.mode == Mode.AUTO -> {
+                    autoDpiOnly = true
+                    Tunnel.status.value = cur.copy(check = "Серверы не отвечают — перехожу на обход DPI без сервера…", checkOk = null)
+                }
+                else -> return@launch
+            }
+            Log.i("E2E", "heal step=$healStep")
+            delay(500)
+            lock.withLock { connect() }
         }
     }
 
@@ -190,7 +235,8 @@ class TunnelService : VpnService() {
                 // Another network (Wi-Fi ↔ mobile): its own DPI strategy may be remembered — restart with it.
                 val st = Store.state.value.settings
                 val cur = dpi?.current
-                if (cur != null && DpiStrategies.resolve(st, Net.key(this@TunnelService)).id != cur.id) {
+                val masksDiffer = Store.state.value.let { a -> a.selected.any { a.state(it).netMasks.isNotEmpty() } }
+                if (cur != null && DpiStrategies.resolve(st, Net.key(this@TunnelService)).id != cur.id || masksDiffer) {
                     scope.launch { delay(1500); lock.withLock { connect() } }
                 } else verifySoon(3000)
             }

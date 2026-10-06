@@ -24,14 +24,27 @@ ss://$SS@127.0.0.1:8446#ss
 vless://$U@127.0.0.1:8447?security=reality&type=xhttp&mode=auto&path=%2Fx&sni=www.microsoft.com&pbk=$PBK&sid=ab#xhttp-reality
 vless://$U@127.0.0.1:8448?security=tls&type=grpc&serviceName=gsvc&sni=test.local&alpn=h2&pcs=$P#grpc
 vmess://$VM
+wireguard://iMKDJbeES0wVjl014e%2BVHdsv6vbOtdqgTCw4imW%2FhU4%3D@127.0.0.1:8450?publickey=71yczL51ZaA1iLCrpTjm%2BDim0K1n0RrflsMyyhtrsxE%3D&address=10.0.0.2%2F32#wg
+socks5://mu:mp@127.0.0.1:8451#socks
 L
 chmod +x gradlew
 XRAY_CONFIG_DUMP=/tmp/xcfg XRAY_LOCAL_LINKS=/tmp/links.txt ./gradlew --no-daemon -q :app:testDebugUnitTest --tests 'com.vlesscardvpn.ConfigTest'
 # One engine per fixed strategy (the app's own argv: VLESS Card, zapret, ByeDPI); servers are on loopback.
 while read -r eng args; do
-  if [ "$eng" = TPWS ]; then VCVPN_TPWS_ALLOW_LOCAL=1 /tmp/tpws $args > /dev/null 2>&1 & else /tmp/byedpi $args > /dev/null 2>&1 & fi
+  if [ "$eng" = TPWS ]; then VCVPN_TPWS_ALLOW_LOCAL=1 /tmp/tpws $args > /dev/null 2>&1 &
+  elif [ "$eng" = XRAY ]; then $X run -c $args > /dev/null 2>&1 &
+  else /tmp/byedpi $args > /dev/null 2>&1 & fi
 done < /tmp/xcfg/dpi-engines.txt
 sleep 1
+# VLESS Card × Xray no-server strategies: real HTTPS to the internet through each engine.
+XOK=0; XALL=0
+while read -r eng args; do
+  [ "$eng" = XRAY ] || continue
+  port=$(basename "$args" .json | sed 's/xrdpi-//'); XALL=$((XALL+1))
+  if curl -s -o /dev/null -m 15 -w '%{http_code}' -x socks5h://127.0.0.1:$port https://www.youtube.com/ | grep -q '^[23]'; then XOK=$((XOK+1)); else echo "xray engine $port failed"; fi
+done < /tmp/xcfg/dpi-engines.txt
+echo "Xray no-server strategies: $XOK/$XALL carry HTTPS"
+[ "$XOK" -eq "$XALL" ] || { echo "xray strategies failed"; exit 1; }
 for f in /tmp/xcfg/*.json; do echo "$(basename $f): $($X run -test -c $f 2>&1 | tail -1)"; done
 bash tools/xray-local-e2e.sh $X /tmp/xcfg || true  # raw matrix includes masks the app never offers
 # Only masks the app offers for each server type (Masks.compatible) must pass.
@@ -46,7 +59,9 @@ for line in open('/tmp/xcfg/result.txt'):
     offered = True
     if name in ('reality-vision', 'xhttp-reality'): offered = fp in ('chrome', 'firefox', 'safari', 'none')
     elif name == 'grpc': offered = fp != 'android'
-    elif name in ('ss', 'vmess-hu'): offered = fp in ('chrome', 'none')
+    elif name in ('ss', 'vmess-hu', 'socks'): offered = fp in ('chrome', 'none')
+    elif name == 'wg': offered = mask == 'none' or mask == 'chrome.n' or (fp == 'chrome' and '.z' in mask and '.d:' not in mask)
+    if '.z' in mask and '.d:' not in mask and name != 'wg': offered = False
     if not offered: continue
     if '.d:' in mask:
         sid = mask.split('.d:')[1]

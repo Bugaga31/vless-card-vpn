@@ -23,7 +23,7 @@ import java.net.ServerSocket
 import java.net.Socket
 import java.util.concurrent.TimeUnit
 
-data class Probe(val realMs: Int, val bigOk: Boolean?, val ytOk: Boolean?, val error: String = "") {
+data class Probe(val realMs: Int, val bigOk: Boolean?, val ytOk: Boolean?, val error: String = "", val tgOk: Boolean? = null) {
     val works: Boolean get() = realMs > 0 && bigOk != false
 }
 
@@ -43,6 +43,7 @@ object Tester {
     }
     val BIG_URLS = listOf("https://speed.cloudflare.com/__down?bytes=262144", "https://cachefly.cachefly.net/1mb.test")
     const val YT_URL = "https://www.youtube.com/generate_204"
+    const val TG_URL = "https://api.telegram.org/"
     const val BIG_BYTES = 200_000
 
     suspend fun tcp(servers: List<Server>, parallel: Int = 48, onEach: (Server, Int) -> Unit) = coroutineScope {
@@ -84,8 +85,11 @@ object Tester {
         val ytOk = if (!youtube) null else runCatching {
             client.newCall(Request.Builder().url(YT_URL).header("User-Agent", UA).build()).execute().use { it.code in 200..399 }
         }.getOrDefault(false)
+        val tgOk = if (!youtube) null else runCatching {
+            client.newCall(Request.Builder().url(TG_URL).header("User-Agent", UA).build()).execute().use { it.code in 200..499 }
+        }.getOrDefault(false)
         client.connectionPool.evictAll()
-        return Probe(best.toInt().coerceAtLeast(1), bigOk, ytOk)
+        return Probe(best.toInt().coerceAtLeast(1), bigOk, ytOk, tgOk = tgOk)
     }
 
     private fun download(client: OkHttpClient, url: String): Int =

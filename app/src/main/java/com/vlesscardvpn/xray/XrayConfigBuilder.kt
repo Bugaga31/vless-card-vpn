@@ -23,8 +23,17 @@ object XrayConfigBuilder {
 
     /** Proxy outbound for [s] with masking [mask] (per outbound, so many masks work at once). */
     fun outbound(s: Server, tag: String, mask: Mask?, mux: Boolean = false): JSONObject {
+        if (s.protocol == "xray") return JSONObject(s.extra).put("tag", tag)
         val o = JSONObject().put("tag", tag)
         when (s.protocol) {
+            "wireguard" -> o.put("protocol", "wireguard").put("settings", JSONObject().put("secretKey", s.secret)
+                .put("address", JSONArray(csv(s.localAddress).ifEmpty { listOf("172.16.0.2/32") }))
+                .put("peers", arr(JSONObject().put("publicKey", s.pbk).put("endpoint", (if (':' in s.address) "[${s.address}]" else s.address) + ":${s.port}")
+                    .put("keepAlive", 25).apply { if (s.psk.isNotEmpty()) put("preSharedKey", s.psk) }))
+                .put("mtu", if (s.mtu > 0) s.mtu else 1280).put("noKernelTun", true)
+                .apply { csv(s.reserved).mapNotNull { it.toIntOrNull() }.takeIf { it.size == 3 }?.let { put("reserved", JSONArray(it)) } })
+            "socks" -> o.put("protocol", "socks").put("settings", JSONObject().put("address", s.address).put("port", s.port)
+                .apply { if (s.user.isNotEmpty() || s.secret.isNotEmpty()) put("user", s.user).put("pass", s.secret) })
             "vless" -> o.put("protocol", "vless").put("settings", JSONObject().put("vnext", arr(JSONObject()
                 .put("address", s.address).put("port", s.port).put("users", arr(JSONObject().put("id", s.secret)
                     .put("encryption", s.encryption.ifEmpty { "none" }).put("level", 0).apply { if (s.flow.isNotEmpty()) put("flow", s.flow) })))))
@@ -51,8 +60,8 @@ object XrayConfigBuilder {
 
     private fun stream(s: Server, mask: Mask?): JSONObject {
         val st = JSONObject()
-        val net = when (s.protocol) { "shadowsocks" -> "tcp"; "hysteria2" -> "hysteria"; else -> s.network }
-        st.put("network", net)
+        val net = when (s.protocol) { "shadowsocks", "socks" -> "tcp"; "hysteria2" -> "hysteria"; "wireguard" -> ""; else -> s.network }
+        if (net.isNotEmpty()) st.put("network", net)
         var hostSni = ""
         when (net) {
             "tcp" -> if (s.headerType == "http") {
@@ -76,7 +85,7 @@ object XrayConfigBuilder {
             "kcp" -> st.put("kcpSettings", JSONObject().put("header", JSONObject().put("type", s.headerType.ifEmpty { "none" })).apply { if (s.path.isNotEmpty()) put("seed", s.path) })
             "hysteria" -> st.put("hysteriaSettings", JSONObject().put("version", 2).put("auth", s.secret))
         }
-        val security = if (s.protocol == "hysteria2") "tls" else s.security
+        val security = when (s.protocol) { "hysteria2" -> "tls"; "wireguard", "socks", "shadowsocks" -> ""; else -> s.security }
         val fp = when {
             mask != null && mask.fingerprint.isNotEmpty() && s.protocol != "hysteria2" -> mask.fingerprint
             s.fp.isNotEmpty() -> s.fp
@@ -104,12 +113,19 @@ object XrayConfigBuilder {
         }
         val fm = JSONObject()
         if (mask != null && mask.packets.isNotEmpty() && s.isTcpBased) {
-            val f = JSONObject().put("packets", mask.packets).put("length", mask.length).put("delay", mask.delay)
+            val f = JSONObject().put("packets", mask.packets)
+            if (mask.lengths.isNotEmpty()) f.put("lengths", JSONArray(csv(mask.lengths))).put("delays", JSONArray(csv(mask.delays)))
+            else f.put("length", mask.length).put("delay", mask.delay)
             if (mask.maxSplit.isNotEmpty() && mask.maxSplit != "0") f.put("maxSplit", mask.maxSplit)
             fm.put("tcp", arr(JSONObject().put("type", "fragment").put("settings", f)))
         }
         if (s.protocol == "hysteria2" && s.obfsPassword.isNotEmpty())
             fm.put("udp", arr(JSONObject().put("type", "salamander").put("settings", JSONObject().put("password", s.obfsPassword))))
+        val noise = mask?.noise?.let { Masks.noiseItems(it) }
+        if (noise != null && !s.isTcpBased) {
+            val u = fm.optJSONArray("udp") ?: JSONArray().also { fm.put("udp", it) }
+            u.put(JSONObject().put("type", "noise").put("settings", JSONObject().put("noise", JSONArray(noise))))
+        }
         if (fm.length() > 0) st.put("finalmask", fm)
         val sock = JSONObject().put("tcpKeepAliveInterval", 15)
         if (mask?.viaByeDpi == true && s.isTcpBased) sock.put("dialerProxy", dpiTag(mask.dpi))
@@ -143,8 +159,10 @@ object XrayConfigBuilder {
      * Config for the running VPN: SOCKS inbound 127.0.0.1:[Settings.socksPort] (hev-socks5-tunnel feeds the TUN into it),
      * one outbound per selected server, balancer + observatory across them, DNS via DoH through the tunnel.
      */
-    fun vpnConfig(servers: List<Pair<Server, Mask?>>, settings: Settings, byeDpiPort: Int?, socks: SocksAuth = SocksAuth(settings.socksPort),
+    fun vpnConfig(servers: List<Pair<Server, Mask?>>, settings0: Settings, byeDpiPort: Int?, socks: SocksAuth = SocksAuth(settings0.socksPort),
                   dpiPorts: Map<String, Int> = emptyMap()): String {
+        // Auto: servers when there are working ones, otherwise the DPI engine alone.
+        val settings = if (settings0.mode == Mode.AUTO) settings0.copy(mode = if (servers.isEmpty()) Mode.BYEDPI else Mode.SERVERS) else settings0
         require(settings.mode == Mode.BYEDPI || servers.isNotEmpty()) { "Не выбран ни один сервер" }
         require(settings.mode == Mode.SERVERS || byeDpiPort != null) { "ByeDPI не запущен" }
         val c = base()
@@ -195,7 +213,13 @@ object XrayConfigBuilder {
             rules.put(JSONObject().put("domain", JSONArray(RU_DOMAINS)).put("outboundTag", "direct"))
             rules.put(JSONObject().put("ip", arr("geoip:ru")).put("outboundTag", "direct"))
         }
-        rules.put(toMain(JSONObject().put("network", "tcp,udp")))
+        val only = com.vlesscardvpn.core.Services.domains(settings.services)
+        if (only.isNotEmpty()) {
+            // "Only YouTube + Telegram through the VPN": those services → main route, everything else direct.
+            rules.put(toMain(JSONObject().put("domain", JSONArray(only))))
+            com.vlesscardvpn.core.Services.ips(settings.services).takeIf { it.isNotEmpty() }?.let { rules.put(toMain(JSONObject().put("ip", JSONArray(it)))) }
+            rules.put(JSONObject().put("network", "tcp,udp").put("outboundTag", "direct"))
+        } else rules.put(toMain(JSONObject().put("network", "tcp,udp")))
         val routing = JSONObject().put("domainStrategy", "AsIs").put("rules", rules)
         if (many) {
             routing.put("balancers", arr(JSONObject().put("tag", "balancer").put("selector", arr(PROXY_PREFIX))

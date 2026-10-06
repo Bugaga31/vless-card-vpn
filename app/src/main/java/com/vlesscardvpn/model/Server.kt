@@ -5,7 +5,7 @@ import org.json.JSONObject
 /** One proxy server parsed from a share link (vless/vmess/trojan/ss/hysteria2). Immutable. */
 data class Server(
     val name: String,
-    val protocol: String,          // vless, vmess, trojan, shadowsocks, hysteria2
+    val protocol: String,          // vless, vmess, trojan, shadowsocks, hysteria2, wireguard, socks, xray (raw JSON outbound in [extra])
     val address: String,
     val port: Int,
     val secret: String,            // uuid / password / auth
@@ -33,15 +33,21 @@ data class Server(
     val obfsPassword: String = "",
     val extra: String = "",
     val source: String = "",
+    // WireGuard: secret = private key, pbk = peer public key; SOCKS: user + secret
+    val localAddress: String = "",
+    val reserved: String = "",
+    val mtu: Int = 0,
+    val psk: String = "",
+    val user: String = "",
 ) {
     /** Stable identity: same endpoint + credentials + transport = same server, regardless of name. */
     val id: String get() = Integer.toHexString(listOf(protocol, address.lowercase(), port, secret, network, security, sni, pbk, sid, path, host, serviceName, flow).joinToString("|").hashCode()) +
         Integer.toHexString("$address$secret$port".hashCode())
 
-    val isTcpBased: Boolean get() = protocol != "hysteria2" && network != "kcp"
+    val isTcpBased: Boolean get() = protocol !in UDP_PROTOCOLS && protocol != "xray" && network != "kcp"
     val label: String get() = buildString {
-        append(when (protocol) { "shadowsocks" -> "SS"; "hysteria2" -> "Hy2"; else -> protocol.uppercase() })
-        if (protocol != "hysteria2" && protocol != "shadowsocks") append(" · ").append(network)
+        append(when (protocol) { "shadowsocks" -> "SS"; "hysteria2" -> "Hy2"; "wireguard" -> "WireGuard"; "socks" -> "SOCKS"; "xray" -> "Xray JSON"; else -> protocol.uppercase() })
+        if (protocol in setOf("vless", "vmess", "trojan")) append(" · ").append(network)
         if (security.isNotEmpty()) append(" · ").append(security)
     }
 
@@ -53,6 +59,7 @@ data class Server(
         opt("alpn", alpn); opt("pbk", pbk); opt("sid", sid); opt("spx", spx); opt("pqv", pqv); opt("host", host)
         opt("path", path); opt("serviceName", serviceName); opt("mode", mode); opt("headerType", headerType)
         if (insecure) put("insecure", true); opt("ech", ech); opt("pcs", pcs); opt("vcn", vcn); opt("obfsPassword", obfsPassword); opt("extra", extra); opt("source", source)
+        opt("localAddress", localAddress); opt("reserved", reserved); if (mtu > 0) put("mtu", mtu); opt("psk", psk); opt("user", user)
     }
 
     companion object {
@@ -65,7 +72,9 @@ data class Server(
             serviceName = o.optString("serviceName"), mode = o.optString("mode"), headerType = o.optString("headerType"),
             insecure = o.optBoolean("insecure"), ech = o.optString("ech"), pcs = o.optString("pcs"), vcn = o.optString("vcn"), obfsPassword = o.optString("obfsPassword"),
             extra = o.optString("extra"), source = o.optString("source"),
+            localAddress = o.optString("localAddress"), reserved = o.optString("reserved"), mtu = o.optInt("mtu"), psk = o.optString("psk"), user = o.optString("user"),
         )
+        val UDP_PROTOCOLS = setOf("hysteria2", "wireguard")
     }
 }
 
@@ -82,12 +91,17 @@ data class ServerState(
     val failCount: Int = 0,
     /** Other masks that passed the last search, fastest first (used by "менять маскировку"). */
     val goodMasks: List<String> = emptyList(),
+    /** Network ("Wi-Fi", "Моб.: Beeline") → mask found on that network: switching networks switches masks. */
+    val netMasks: Map<String, String> = emptyMap(),
+    val tgOk: Boolean? = null,
 ) {
+    fun maskFor(network: String): String = netMasks[network] ?: maskId
     val works: Boolean get() = realMs > 0 && bigOk != false
     fun toJson(): JSONObject = JSONObject().apply {
         if (selected) put("sel", true); put("tcp", tcpMs); put("real", realMs); bigOk?.let { put("big", it) }; ytOk?.let { put("yt", it) }
         if (maskId.isNotEmpty()) put("mask", maskId); put("at", checkedAt); put("ok", okCount); put("fail", failCount)
         if (goodMasks.isNotEmpty()) put("good", org.json.JSONArray(goodMasks))
+        if (netMasks.isNotEmpty()) put("net", JSONObject(netMasks as Map<*, *>)); tgOk?.let { put("tg", it) }
     }
     companion object {
         fun fromJson(o: JSONObject) = ServerState(
@@ -95,6 +109,8 @@ data class ServerState(
             bigOk = if (o.has("big")) o.optBoolean("big") else null, ytOk = if (o.has("yt")) o.optBoolean("yt") else null,
             maskId = o.optString("mask"), checkedAt = o.optLong("at"), okCount = o.optInt("ok"), failCount = o.optInt("fail"),
             goodMasks = o.optJSONArray("good")?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: emptyList(),
+            netMasks = o.optJSONObject("net")?.let { m -> m.keys().asSequence().associateWith { m.getString(it) } } ?: emptyMap(),
+            tgOk = if (o.has("tg")) o.optBoolean("tg") else null,
         )
     }
 }

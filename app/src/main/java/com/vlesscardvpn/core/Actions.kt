@@ -84,6 +84,7 @@ object Actions {
             }
         }
         step(subs.size, subs.size)
+        if (ok > 0) Store.update { it.copy(settings = it.settings.copy(lastSubRefresh = System.currentTimeMillis())) }
         then?.invoke()
         return if (ok == 0) "Подписки не загрузились (нет сети или всё заблокировано)" else "Загружено серверов: $total из $ok подписок"
     }
@@ -122,8 +123,11 @@ object Actions {
     /** TCP ping of all servers, then real test of the [realLimit] fastest. */
     fun testAll(onlySelected: Boolean = false, realLimit: Int = 150) = launch("Проверка серверов") {
         val st0 = Store.state.value
-        val list = if (onlySelected) st0.selected else st0.servers
-        if (list.isEmpty()) return@launch "Нет серверов — добавьте ссылку или обновите подписки"
+        doTestAll(if (onlySelected) st0.selected else st0.servers, realLimit)
+    }
+
+    private suspend fun doTestAll(list: List<Server>, realLimit: Int): String {
+        if (list.isEmpty()) return "Нет серверов — добавьте ссылку или обновите подписки"
         progress.value = progress.value.copy(title = "TCP-пинг")
         val done = AtomicInteger()
         val tcp = java.util.concurrent.ConcurrentHashMap<String, Int>()
@@ -134,7 +138,7 @@ object Actions {
         }
         val alive = list.filter { (tcp[it.id] ?: 0) > 0 }.sortedBy { tcp[it.id] }.take(realLimit)
         val working = realTest(alive, "Проверка через Xray")
-        "Работают: $working из ${alive.size} доступных по TCP (всего ${list.size})"
+        return "Работают: $working из ${alive.size} доступных по TCP (всего ${list.size})"
     }
 
     private suspend fun realTest(servers: List<Server>, title: String): Int {
@@ -142,7 +146,8 @@ object Actions {
         progress.value = progress.value.copy(title = title, done = 0, total = servers.size)
         val pinned = pinCertificates(servers)
         val st = Store.state.value
-        val variants = pinned.map { it to (Masks.byId(st.state(it).maskId)) }
+        val net = Net.key(app)
+        val variants = pinned.map { it to (Masks.byId(st.state(it).maskFor(net))) }
         val (own, port) = dpiForTests(variants.map { it.second })
         val done = AtomicInteger(); val ok = AtomicInteger()
         try {
@@ -150,7 +155,7 @@ object Actions {
                 val s = variants[i].first
                 if (p.works) ok.incrementAndGet()
                 Store.setState(s.id) {
-                    it.copy(realMs = p.realMs, bigOk = p.bigOk, ytOk = p.ytOk, checkedAt = System.currentTimeMillis(),
+                    it.copy(realMs = p.realMs, bigOk = p.bigOk, ytOk = p.ytOk, tgOk = p.tgOk, checkedAt = System.currentTimeMillis(),
                         okCount = it.okCount + if (p.works) 1 else 0, failCount = it.failCount + if (p.works) 0 else 1)
                 }
                 step(done.incrementAndGet(), variants.size)
@@ -159,9 +164,11 @@ object Actions {
         return ok.get()
     }
 
-    /** For each server, tries masks in [Masks.searchOrder] and keeps the fastest working one. */
-    fun findMasks(servers: List<Server>, perServer: Int = 48) = launch("Подбор маскировки") {
-        if (servers.isEmpty()) return@launch "Выберите серверы"
+    /** For each server, tries masks in [Masks.searchOrder] and keeps the fastest working one (remembered per network). */
+    fun findMasks(servers: List<Server>, perServer: Int = 48) = launch("Подбор маскировки") { doFindMasks(servers, perServer) }
+
+    suspend fun doFindMasks(servers: List<Server>, perServer: Int = 48): String {
+        if (servers.isEmpty()) return "Выберите серверы"
         val pinned = pinCertificates(servers)
         val probe = DpiProxy(app)
         val dpiOk = probe.available(DpiEngine.BYEDPI)
@@ -172,6 +179,7 @@ object Actions {
         val best = HashMap<String, Pair<Mask, Probe>>()
         val good = HashMap<String, MutableList<Pair<Mask, Int>>>()
         val done = AtomicInteger()
+        progress.value = progress.value.copy(title = "Подбор маскировки")
         try {
             Tester.real(variants, Store.state.value.settings.testUrl, port, own.ports, youtube = false, batch = 48, parallel = 8) { i, p ->
                 val (s, m) = variants[i]
@@ -182,16 +190,81 @@ object Actions {
                 }
                 step(done.incrementAndGet(), variants.size)
             }
-        } finally { own?.close() }
+        } finally { own.close() }
+        val net = Net.key(app)
         pinned.forEach { s ->
             val b = best[s.id]
             Store.setState(s.id) {
                 if (b == null) it.copy(realMs = 0, checkedAt = System.currentTimeMillis())
-                else it.copy(maskId = b.first.id, realMs = b.second.realMs, bigOk = b.second.bigOk, checkedAt = System.currentTimeMillis(),
-                    goodMasks = good[s.id].orEmpty().sortedBy { g -> g.second }.map { g -> g.first.id }.filter { g -> g != b.first.id }.take(6))
+                else it.copy(maskId = b.first.id, netMasks = it.netMasks + (net to b.first.id), realMs = b.second.realMs, bigOk = b.second.bigOk,
+                    checkedAt = System.currentTimeMillis(),
+                    goodMasks = good[s.id].orEmpty().sortedBy { g -> g.second }.map { g -> g.first.id }.filter { g -> g != b.first.id }.take(8))
             }
         }
-        "Маскировка найдена для ${best.size} из ${pinned.size} серверов (перебрано ${variants.size} вариантов)"
+        return "Маскировка найдена для ${best.size} из ${pinned.size} серверов (перебрано ${variants.size} вариантов, сеть «$net»)"
+    }
+
+    /**
+     * Self-healing after a failed check: the next good mask of every selected server (remembered for this network).
+     * Returns false when there is nothing left to rotate to.
+     */
+    fun nextMasks(servers: List<Server>): Boolean {
+        val net = Net.key(app)
+        var changed = false
+        Store.update { st ->
+            st.copy(states = st.states + servers.mapNotNull { s ->
+                val ss = st.state(s)
+                val next = ss.goodMasks.firstOrNull() ?: return@mapNotNull null
+                changed = true
+                // the failing mask goes to the end of the list: it may work again later or on another network
+                s.id to ss.copy(maskId = next, netMasks = ss.netMasks + (net to next), goodMasks = ss.goodMasks.drop(1) + ss.maskFor(net))
+            })
+        }
+        return changed
+    }
+
+    // ---------- Auto mode ----------
+    /**
+     * «Авто»: fresh subscriptions → test → masks for the best candidates → DPI search when no server works →
+     * the 5 fastest selected. Then [onReady] connects (servers, or ByeDPI if none passed).
+     */
+    fun autoConnect(onReady: () -> Unit) {
+        val busy = job
+        if (busy?.isActive == true) { scope.launch { busy.join(); autoPrepare(onReady) }; return }
+        autoPrepare(onReady)
+    }
+
+    private fun autoPrepare(onReady: () -> Unit) = launch("Авто-настройка") {
+        val now = System.currentTimeMillis()
+        val st0 = Store.state.value
+        val notes = mutableListOf<String>()
+        if (st0.servers.isEmpty() || st0.settings.autoUpdateSubs && now - st0.settings.lastSubRefresh > 12 * 3600_000L) {
+            progress.value = progress.value.copy(title = "Авто: обновляю подписки"); notes += doRefresh()
+        }
+        fun fresh() = Store.state.value.let { st -> st.servers.filter { st.state(it).works && now - st.state(it).checkedAt < 6 * 3600_000L } }
+        if (fresh().size < 3 && Store.state.value.servers.isNotEmpty()) {
+            progress.value = progress.value.copy(title = "Авто: проверяю серверы")
+            notes += doTestAll(Store.state.value.servers, 80)
+        }
+        if (fresh().size < 3) {
+            val st = Store.state.value
+            val candidates = st.servers.filter { st.state(it).tcpMs > 0 && !st.state(it).works }.sortedBy { st.state(it).tcpMs }.take(10)
+            if (candidates.isNotEmpty()) notes += doFindMasks(candidates, 24)
+        }
+        val working = fresh()
+        if (working.isEmpty()) {
+            val st = Store.state.value.settings
+            if (st.dpiRemembered[Net.key(app)] == null) { progress.value = progress.value.copy(title = "Авто: подбираю обход DPI"); notes += doFindDpi() }
+        }
+        val n = selectBest(5, working)
+        withContext(Dispatchers.Main) { onReady() }
+        if (n > 0) "Авто: выбрано $n лучших серверов — подключаюсь" else "Авто: рабочих серверов нет — подключаюсь через обход DPI без сервера"
+    }
+
+    /** Subscriptions older than 12 h are refreshed in the background on app start. */
+    fun maybeAutoRefresh() {
+        val st = Store.state.value.settings
+        if (st.autoUpdateSubs && System.currentTimeMillis() - st.lastSubRefresh > 12 * 3600_000L) refreshSubscriptions()
     }
 
     /** Selects the [n] fastest working servers (deselects others). */
@@ -228,12 +301,14 @@ object Actions {
      * own local proxy, 4 at a time; a strategy works if the real YouTube page downloads. The best one in plan order
      * (gentlest first) is remembered for the current network and used automatically.
      */
-    fun findDpi() = launch("Подбор обхода DPI") {
+    fun findDpi() = launch("Подбор обхода DPI") { doFindDpi() }
+
+    private suspend fun doFindDpi(): String {
         val st = Store.state.value.settings
         val network = Net.key(app)
         val probe = DpiProxy(app)
         val plan = DpiStrategies.plan(st, network, probe.available(DpiEngine.TPWS)).filter { probe.available(it.engine) }
-        if (plan.isEmpty()) return@launch "Обход DPI недоступен на этом устройстве (нужен Android 8+)"
+        if (plan.isEmpty()) return "Обход DPI недоступен на этом устройстве"
         dpiResults.value = emptyMap()
         val done = AtomicInteger()
         step(0, plan.size)
@@ -258,11 +333,12 @@ object Actions {
         val best = working.firstOrNull()
         val zapretOk = working.count { it.engine == DpiEngine.TPWS }
         val ownOk = working.count { it.own }
+        val xrOk = working.count { it.engine == DpiEngine.XRAY }
         if (best != null) Store.update { a ->
             a.copy(settings = a.settings.copy(dpiRemembered = a.settings.dpiRemembered + (network to best.id) + (Settings.ANY_NETWORK to best.id)))
         }
-        if (best == null) "Сеть «$network»: ни одна из ${plan.size} стратегий не открыла YouTube. Нужен сервер (режим «Серверы»)."
-        else "Сеть «$network»: работают ${working.size} из ${plan.size} (zapret: $zapretOk, своих VLESS Card: $ownOk). Выбрана: ${best.label}"
+        return if (best == null) "Сеть «$network»: ни одна из ${plan.size} стратегий не открыла YouTube. Нужен сервер (режим «Серверы»)."
+        else "Сеть «$network»: работают ${working.size} из ${plan.size} (zapret: $zapretOk, своих VLESS Card: $ownOk, из них Xray: $xrOk). Выбрана: ${best.label}"
     }
 
     // ---------- network diagnosis (DPI / white lists) ----------
@@ -312,7 +388,7 @@ object Actions {
     /** White-list mode: keep only servers from white-list subscriptions selected and test them. */
     fun whitelistServers() = launch("Серверы для белых списков") {
         val loaded = doRefresh()
-        val wl = Store.state.value.servers.filter { it.source.contains("White", ignoreCase = true) }
+        val wl = Store.state.value.servers.filter { com.vlesscardvpn.model.Subs.isWhitelist(it.source) }
         if (wl.isEmpty()) return@launch "$loaded. Серверов для белых списков нет."
         Store.update { st -> st.copy(states = st.servers.associate { s -> s.id to st.state(s).copy(selected = false) }) }
         val working = realTest(wl.take(150), "Серверы для белых списков")
@@ -330,5 +406,5 @@ object Actions {
 
     fun yn(b: Boolean?) = when (b) { true -> "да"; false -> "нет"; null -> "—" }
 
-    const val MAX_PER_SUB = 600
+    const val MAX_PER_SUB = 1000
 }

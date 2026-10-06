@@ -13,19 +13,28 @@ import com.vlesscardvpn.vpn.TunnelService
 
 class MainActivity : ComponentActivity() {
     private val vpnPermission = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { r ->
-        if (r.resultCode == RESULT_OK) TunnelService.start(this)
+        if (r.resultCode == RESULT_OK) start()
+    }
+
+    /** Auto mode prepares servers/masks/DPI first (Actions.autoConnect), the other modes connect right away. */
+    private fun start() {
+        if (com.vlesscardvpn.core.Store.state.value.settings.mode == com.vlesscardvpn.model.Mode.AUTO)
+            com.vlesscardvpn.core.Actions.autoConnect { TunnelService.start(this) }
+        else TunnelService.start(this)
     }
     private val notifPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
 
     fun connect() {
         val intent = VpnService.prepare(this)
-        if (intent != null) vpnPermission.launch(intent) else TunnelService.start(this)
+        if (intent != null) vpnPermission.launch(intent) else start()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED)
             notifPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+        com.vlesscardvpn.core.Actions.init(this)
+        if (!BuildConfig.DEBUG) com.vlesscardvpn.core.Actions.maybeAutoRefresh()
         setContent { AppUi(onConnect = { connect() }, onDisconnect = { TunnelService.stop(this) }) }
         e2e(intent)
     }

@@ -44,12 +44,12 @@ r=json.loads(sys.argv[1]); res=r.get("results",[])
 ok = r.get("vpn") and len(res)==4 and res[0]["code"]==204 and res[1]["code"]==200 and res[1]["bytes"]>=1048576 and res[2]["code"]==200 and res[3]["code"]==204
 print(("PASS " if ok else "BAD ")+json.dumps(r)); sys.exit(0 if ok else 1)' "$1"; }
 
-run_case() { # $1 name, $2 state
+run_case() { # $1 name, $2 state, $3 seconds to wait for the connect result
   echo "=== case $1"
   adb shell am start -n $PKG/.MainActivity --ez e2e_disconnect true >/dev/null; sleep 3; : > $W/access.log
   load $2; adb logcat -c
   adb shell am start -n $PKG/.MainActivity --ez e2e_connect true >/dev/null
-  C=$(waitlog "check ok=|connect failed" 60) || { fail "$1: no connect result"; return; }
+  C=$(waitlog "check ok=|connect failed" ${3:-60}) || { fail "$1: no connect result"; return; }
   echo "app: $C"
   echo "$C" | grep -q "check ok=true" || fail "$1: in-app check through 127.0.0.1:10808 failed"
   R=$(probe $1); okprobe "$R" || fail "$1: probe app traffic through VPN failed"
@@ -87,6 +87,23 @@ for p in 8443 8444; do
   [ "$c" -gt 0 ] || fail "ownmask: server :$p not reached through own masking"
 done
 
+: > $W/access.log
+run_case xraydpi xraydpi.json
+adb logcat -d -s E2E:I | grep "socks port=" | tail -1 | grep -q "dpi=VLESS Card · Xray" || fail "xraydpi: Xray fragment engine was not used"
+
+: > $W/access.log
+run_case services services.json
+yt=$(grep "email: u8443" $W/access.log | grep -c "youtube"); gs=$(grep "email: u8443" $W/access.log | grep -c "gstatic\|cloudflare")
+echo "services: through server youtube=$yt other=$gs"
+[ "$yt" -gt 0 ] || fail "services: YouTube did not go through the server"
+[ "$gs" -eq 0 ] || fail "services: other sites went through the server (must be direct)"
+
+: > $W/access.log
+run_case auto auto.json 180
+adb logcat -d -s E2E:I | grep "socks port=" | tail -1 | grep -q "mode=SERVERS" || fail "auto: did not pick the working server"
+c=$(grep -c "email: u8443" $W/access.log); echo "auto: server :8443 accepted $c"
+[ "$c" -gt 0 ] || fail "auto: traffic did not go through the auto-picked server"
+
 echo "=== DPI strategy search (all engines start and carry HTTPS)"
 adb shell am start -n $PKG/.MainActivity --ez e2e_disconnect true >/dev/null; sleep 2
 adb logcat -c
@@ -96,6 +113,7 @@ echo "dpi: $D"
 N=$(echo "$D" | sed -n 's/.*работают \([0-9]*\) из \([0-9]*\).*/\1/p')
 [ "${N:-0}" -ge 15 ] || fail "dpi search: expected at least 15 working strategies (no DPI on the emulator)"
 echo "$D" | grep -q "zapret: [1-9]" || fail "dpi search: no zapret strategy worked"
+echo "$D" | grep -q "Xray: [1-9]" || fail "dpi search: no VLESS Card × Xray strategy worked"
 
 echo "=== in-app tester (multi-inbound Xray instance)"
 adb shell am start -n $PKG/.MainActivity --ez e2e_disconnect true >/dev/null; sleep 2

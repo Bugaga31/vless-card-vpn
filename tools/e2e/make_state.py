@@ -30,3 +30,7 @@ write(f"{out}/tpws.json", [reality], [], {}, mode="BYEDPI", dpiStrategy="TPWS#SP
 # Own VLESS Card cascade (ByeDPI) and zapret host shredder in front of two servers at once.
 write(f"{out}/ownmask.json", [reality, ws], ["e2e-reality", "e2e-ws-tls"],
       {"e2e-reality": "chrome.d:BYEDPI#VCARD_CASCADE", "e2e-ws-tls": "firefox.d:TPWS#VCARD_SHRED"}, balance="ROUND_ROBIN")
+# 1.0.61: VLESS Card × Xray no-server strategy, "only YouTube + Telegram through the VPN", Auto mode (tests and picks by itself).
+write(f"{out}/xraydpi.json", [reality], [], {}, mode="BYEDPI", dpiStrategy="XRAY#LADDER")
+write(f"{out}/services.json", [reality], ["e2e-reality"], {}, services=["youtube", "telegram"])
+write(f"{out}/auto.json", [reality, dead], [], {}, mode="AUTO", autoUpdateSubs=False, lastSubRefresh=4102444800000)
