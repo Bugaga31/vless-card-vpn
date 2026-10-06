@@ -127,6 +127,7 @@ load warp.json; adb logcat -c
 adb shell am start -n $PKG/.MainActivity --ez e2e_warp true >/dev/null
 WR=$(waitlog "action\[WARP\]" 420) || fail "warp: no result"
 adb logcat -d -s E2E:I | grep "warp " ; echo "warp: $WR"
+adb logcat -d -s E2E:I | grep "warp accounts" | grep -q "plus=[1-9]" && echo "warp: WARP+ key bound" || echo "::warning title=warp::no WARP+ key could be bound (all built-in keys busy?)"
 if echo "$WR" | grep -q "WARP готов"; then
   adb logcat -c
   adb shell am start -n $PKG/.MainActivity --ez e2e_connect true >/dev/null

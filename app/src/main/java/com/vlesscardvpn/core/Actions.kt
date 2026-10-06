@@ -254,7 +254,21 @@ object Actions {
                 runCatching { Warp.register() }.onSuccess { accs += it }.onFailure { err = it.message ?: it.javaClass.simpleName }
             }
         }
-        android.util.Log.i("E2E", "warp accounts=${accs.size} err=$err")
+        // WARP+: bind a key to every account (own keys first, then the built-in public ones).
+        val cfg = Store.state.value.settings
+        val own = WarpKeys.parse(cfg.warpKeys)
+        var plusErr = ""
+        if (own.isNotEmpty() || cfg.warpBuiltinKeys) {
+            progress.value = progress.value.copy(title = "WARP: ключ WARP+")
+            withContext(Dispatchers.IO) {
+                accs.indices.forEach { i ->
+                    val (key, e) = Warp.upgrade(accs[i], own, cfg.warpBuiltinKeys)
+                    if (key != null) accs[i] = accs[i].copy(plus = true) else plusErr = e
+                }
+            }
+        }
+        val plus = accs.count { it.plus }
+        android.util.Log.i("E2E", "warp accounts=${accs.size} plus=$plus err=$err plusErr=$plusErr")
         if (accs.isEmpty()) return "WARP: регистрация не удалась ($err). Попробуйте после подключения к любому серверу или ByeDPI."
         val per = Warp.ENDPOINTS.size / accs.size
         val list = accs.flatMapIndexed { i, a -> Warp.servers(a, Warp.ENDPOINTS.drop(i * per).take(minOf(per, 4))) }
@@ -267,7 +281,9 @@ object Actions {
         // one endpoint per account: two tunnels with the same key at once would roam and stall
         if (ok.isNotEmpty()) selectBest(3, ok.sortedBy { st.state(it).realMs }.distinctBy { it.secret })
         return if (ok.isEmpty()) "WARP: аккаунтов ${accs.size}, но ни одна точка входа не ответила ($res). WireGuard в этой сети, похоже, режут."
-        else "WARP готов: рабочих точек входа ${ok.size} (по одной на аккаунт, всего ${list.size}), выбраны. Нажмите «Подключить»."
+        else "WARP готов: рабочих точек входа ${ok.size} (по одной на аккаунт, всего ${list.size}), выбраны. " +
+            (if (plus > 0) "WARP+: $plus из ${accs.size} аккаунтов. " else if (plusErr.isNotEmpty()) "WARP+ не подключился ($plusErr) — обычный WARP. " else "") +
+            "Нажмите «Подключить»."
     }
 
     // ---------- Auto mode ----------
