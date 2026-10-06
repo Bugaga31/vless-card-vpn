@@ -36,23 +36,28 @@ data class Probe(val realMs: Int, val bigOk: Boolean?, val ytOk: Boolean?, val e
  * Many servers/masks are tested at once through one Xray instance (one SOCKS port per variant).
  */
 object Tester {
+    val SKIPPED = Probe(0, null, null, "пропущено")
     private val mutex = Mutex()
     private val base: OkHttpClient by lazy {
         OkHttpClient.Builder().connectTimeout(8, TimeUnit.SECONDS).readTimeout(8, TimeUnit.SECONDS)
             .callTimeout(15, TimeUnit.SECONDS).retryOnConnectionFailure(false).build()
+    }
+    /** Searches (many variants): one attempt and shorter timeouts — a mask that needs 8 s is useless anyway. */
+    private val fast: OkHttpClient by lazy {
+        base.newBuilder().connectTimeout(5, TimeUnit.SECONDS).readTimeout(5, TimeUnit.SECONDS).callTimeout(9, TimeUnit.SECONDS).build()
     }
     val BIG_URLS = listOf("https://speed.cloudflare.com/__down?bytes=262144", "https://cachefly.cachefly.net/1mb.test")
     const val YT_URL = "https://www.youtube.com/generate_204"
     const val TG_URL = "https://api.telegram.org/"
     const val BIG_BYTES = 200_000
 
-    suspend fun tcp(servers: List<Server>, parallel: Int = 48, onEach: (Server, Int) -> Unit) = coroutineScope {
+    suspend fun tcp(servers: List<Server>, parallel: Int = 96, onEach: (Server, Int) -> Unit) = coroutineScope {
         val sem = Semaphore(parallel)
         servers.map { s -> async(Dispatchers.IO) { sem.withPermit { onEach(s, if (s.isTcpBased) tcpOne(s.address, s.port) else resolves(s.address)) } } }.awaitAll()
     }
 
     /** ms (≥1) or 0 when unreachable. UDP-only protocols (Hysteria2) return 1 if the name resolves. */
-    fun tcpOne(host: String, port: Int, timeoutMs: Int = 3000): Int = runCatching {
+    fun tcpOne(host: String, port: Int, timeoutMs: Int = 2500): Int = runCatching {
         val addr = InetAddress.getByName(host)
         val t0 = System.nanoTime()
         Socket().use { it.connect(InetSocketAddress(addr, port), timeoutMs) }
@@ -67,10 +72,10 @@ object Tester {
     }
 
     /** Requests through a local SOCKS port (the tester's or the running VPN's). */
-    fun probeSocks(port: Int, testUrl: String, big: Boolean = true, youtube: Boolean = true): Probe {
-        val client = base.newBuilder().proxy(Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", port))).build()
+    fun probeSocks(port: Int, testUrl: String, big: Boolean = true, youtube: Boolean = true, attempts: Int = 2): Probe {
+        val client = (if (attempts == 1) fast else base).newBuilder().proxy(Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", port))).build()
         var best = Long.MAX_VALUE; var err = ""
-        repeat(2) {
+        repeat(attempts) {
             val t0 = System.nanoTime()
             runCatching {
                 client.newCall(Request.Builder().url(testUrl).header("User-Agent", UA).build()).execute().use { r ->
@@ -102,10 +107,15 @@ object Tester {
     /** Tests [variants] (server + mask) in parallel through one temporary Xray instance. */
     suspend fun real(
         variants: List<Pair<Server, Mask?>>, testUrl: String, byeDpiPort: Int?, dpiPorts: Map<String, Int> = emptyMap(), youtube: Boolean = true,
-        batch: Int = 32, parallel: Int = 12, onEach: (Int, Probe) -> Unit,
+        batch: Int = 32, parallel: Int = 12, attempts: Int = 2,
+        /** Early stop: variants for which this returns true are not probed (reported as skipped). */
+        skip: (Int) -> Boolean = { false },
+        onEach: (Int, Probe) -> Unit,
     ) = mutex.withLock {
         withContext(Dispatchers.IO) {
-            for (idx in chunks(variants, batch)) {
+            for (all in chunks(variants, batch)) {
+                val idx = all.filter { i -> if (skip(i)) { onEach(i, SKIPPED); false } else true }
+                if (idx.isEmpty()) continue
                 val chunk = idx.map { variants[it] }
                 val ports = freePorts(chunk.size)
                 val core = XrayCore.Instance("test")
@@ -117,7 +127,7 @@ object Tester {
                         val one = XrayCore.Instance("test1")
                         val p = freePorts(1)
                         val ok = runCatching { one.start(XrayConfigBuilder.testConfig(listOf(v), p, byeDpiPort, dpiPorts)) }.isSuccess && one.running
-                        onEach(idx[i], if (ok) probeSocks(p[0], testUrl, youtube = youtube) else Probe(0, null, null, "конфиг не принят ядром"))
+                        onEach(idx[i], if (ok) probeSocks(p[0], testUrl, youtube = youtube, attempts = attempts) else Probe(0, null, null, "конфиг не принят ядром"))
                         one.stop()
                     }
                     continue
@@ -126,7 +136,7 @@ object Tester {
                     coroutineScope {
                         val sem = Semaphore(parallel)
                         chunk.indices.map { i ->
-                            async { sem.withPermit { onEach(idx[i], probeSocks(ports[i], testUrl, youtube = youtube)) } }
+                            async { sem.withPermit { onEach(idx[i], if (skip(idx[i])) SKIPPED else probeSocks(ports[i], testUrl, youtube = youtube, attempts = attempts)) } }
                         }.awaitAll()
                     }
                 } finally { core.stop() }
@@ -143,9 +153,11 @@ object Tester {
         val wgIn = mutableListOf<MutableSet<String>>()
         variants.forEachIndexed { i, (s, _) ->
             val wg = s.protocol == "wireguard"
-            var k = out.indexOfFirst { it.size < batch && (!wg || s.id !in wgIn[out.indexOf(it)]) }
+            // by private key: WARP endpoints of one account share the key and would steal the session from each other
+            val key = s.secret
+            var k = out.indices.firstOrNull { out[it].size < batch && (!wg || key !in wgIn[it]) } ?: -1
             if (k < 0) { out += mutableListOf<Int>(); wgIn += mutableSetOf<String>(); k = out.size - 1 }
-            out[k] += i; if (wg) wgIn[k] += s.id
+            out[k] += i; if (wg) wgIn[k] += key
         }
         return out
     }

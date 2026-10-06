@@ -132,26 +132,17 @@ class TunnelService : VpnService() {
             Tunnel.byeDpiPort = bdPort
             val dpiLabel = set.current?.label.orEmpty()
             Tunnel.dpiLabel = dpiLabel
-            val socks = if (settings.stealthSocks) SocksAuth(randomPort(), randomToken(), randomToken()) else SocksAuth(settings.socksPort)
-            val config = XrayConfigBuilder.vpnConfig(withMasks, settings, bdPort, socks, set.ports)
+            val proxy = settings.proxyOnly
+            // Proxy mode: other apps must find the proxy, so the fixed port without a password (only on 127.0.0.1 unless shared).
+            val socks = if (settings.stealthSocks && !proxy) SocksAuth(randomPort(), randomToken(), randomToken()) else SocksAuth(settings.socksPort)
+            val config = XrayConfigBuilder.vpnConfig(withMasks, settings, bdPort, socks, set.ports,
+                listen = if (proxy && settings.lanShare) "0.0.0.0" else "127.0.0.1", httpPort = if (proxy) settings.httpPort else null)
             val c = XrayCore.Instance("vpn"); core = c
             c.start(config)
             check(c.running) { "Xray не запустился: ${c.lastStatus}" }
             Tunnel.socks = socks
-            Log.i("E2E", "socks port=${socks.port} auth=${socks.auth} dpi=${dpiLabel.ifEmpty { "-" }} fixed=${set.ports.keys} mode=${settings.mode} services=${settings.services}")
-
-            val b = Builder().setSession("VLESS Card").setMtu(MTU)
-                .addAddress(IPV4, 30).addRoute("0.0.0.0", 0)
-                .addAddress(IPV6, 126).addRoute("::", 0)
-                .addDnsServer("1.1.1.1")
-                .setConfigureIntent(PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE))
-            val apps = settings.apps.filter { it != packageName }
-            if (settings.onlyApps && apps.isNotEmpty()) apps.forEach { runCatching { b.addAllowedApplication(it) } }
-            else { b.addDisallowedApplication(packageName); apps.forEach { runCatching { b.addDisallowedApplication(it) } } }
-            if (Build.VERSION.SDK_INT >= 29) b.setMetered(false)
-            val fd = b.establish() ?: error("Система не дала создать VPN (нет разрешения)")
-            tun = fd
-            TProxyService.start(filesDir, fd, socks.port, MTU, IPV4, IPV6, socks.user, socks.pass)
+            Log.i("E2E", "socks port=${socks.port} auth=${socks.auth} dpi=${dpiLabel.ifEmpty { "-" }} fixed=${set.ports.keys} mode=${settings.mode} services=${settings.services} proxy=$proxy")
+            if (!proxy) startTun(settings, socks)
 
             val auto = st.settings.mode == Mode.AUTO
             var route = when (settings.mode) {
@@ -161,6 +152,7 @@ class TunnelService : VpnService() {
             }
             if (auto) route = "Авто · $route"
             if (settings.services.isNotEmpty()) route += " · через VPN только " + com.vlesscardvpn.core.Services.label(settings.services)
+            if (proxy) route = "Прокси SOCKS5 :${socks.port} · HTTP :${settings.httpPort}" + (if (settings.lanShare) " (для всей сети: ${lanIp() ?: "IP телефона"})" else "") + " · $route"
             Tunnel.status.value = Tunnel.Status(Tunnel.State.CONNECTED, "Подключено", route, "Проверяю интернет…", null, System.currentTimeMillis())
             foreground(if (settings.quietNotification) "Активно" else "Подключено · $route")
             watchNetwork()
@@ -172,6 +164,27 @@ class TunnelService : VpnService() {
             stopSelf()
         }
     }
+
+    private fun startTun(settings: com.vlesscardvpn.model.Settings, socks: SocksAuth) {
+        val b = Builder().setSession("VLESS Card").setMtu(MTU)
+            .addAddress(IPV4, 30).addRoute("0.0.0.0", 0)
+            .addAddress(IPV6, 126).addRoute("::", 0)
+            .addDnsServer("1.1.1.1")
+            .setConfigureIntent(PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE))
+        val apps = settings.apps.filter { it != packageName }
+        if (!settings.perApp) b.addDisallowedApplication(packageName)
+        else if (settings.onlyApps && apps.isNotEmpty()) apps.forEach { runCatching { b.addAllowedApplication(it) } }
+        else { b.addDisallowedApplication(packageName); apps.forEach { runCatching { b.addDisallowedApplication(it) } } }
+        if (Build.VERSION.SDK_INT >= 29) b.setMetered(false)
+        val fd = b.establish() ?: error("Система не дала создать VPN (нет разрешения)")
+        tun = fd
+        TProxyService.start(filesDir, fd, socks.port, MTU, IPV4, IPV6, socks.user, socks.pass)
+    }
+
+    private fun lanIp(): String? = runCatching {
+        java.net.NetworkInterface.getNetworkInterfaces().toList().filter { it.isUp && !it.isLoopback && !it.name.startsWith("tun") }
+            .flatMap { it.inetAddresses.toList() }.firstOrNull { it is java.net.Inet4Address && it.isSiteLocalAddress }?.hostAddress
+    }.getOrNull()
 
     /** End-to-end check through the running chain (app → 127.0.0.1:socks → Xray → server → internet). */
     private fun verifySoon(delayMs: Long) {

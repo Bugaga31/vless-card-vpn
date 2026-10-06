@@ -25,6 +25,8 @@ class MainActivity : ComponentActivity() {
     private val notifPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
 
     fun connect() {
+        // Proxy mode has no TUN: no VPN permission needed.
+        if (com.vlesscardvpn.core.Store.state.value.settings.proxyOnly) { start(); return }
         val intent = VpnService.prepare(this)
         if (intent != null) vpnPermission.launch(intent) else start()
     }
@@ -49,6 +51,7 @@ class MainActivity : ComponentActivity() {
         if (i.getBooleanExtra("e2e_disconnect", false)) TunnelService.stop(this)
         if (i.getBooleanExtra("e2e_test", false)) com.vlesscardvpn.core.Actions.testAll()
         if (i.getBooleanExtra("e2e_dpi", false)) com.vlesscardvpn.core.Actions.findDpi()
+        if (i.getBooleanExtra("e2e_warp", false)) com.vlesscardvpn.core.Actions.setupWarp()
         if (i.getBooleanExtra("e2e_masks", false)) com.vlesscardvpn.core.Actions.findMasks(com.vlesscardvpn.core.Store.state.value.servers)
     }
 }

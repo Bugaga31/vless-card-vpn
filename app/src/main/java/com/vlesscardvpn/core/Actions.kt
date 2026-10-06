@@ -74,19 +74,27 @@ object Actions {
 
     private suspend fun doRefresh(then: (() -> Unit)? = null): String {
         val subs = Store.state.value.settings.subscriptions
-        var ok = 0; var total = 0
-        subs.forEachIndexed { i, url ->
-            step(i, subs.size)
-            val body = withContext(Dispatchers.IO) { fetch(url) }
-            if (body != null) {
-                val list = LinkParser.parseMany(body, url).take(MAX_PER_SUB)
-                Store.replaceSource(url, list); ok++; total += list.size
-            }
+        val ok = AtomicInteger(); val total = AtomicInteger(); val done = AtomicInteger()
+        step(0, subs.size)
+        coroutineScope {
+            val sem = Semaphore(6) // all sources at once instead of one by one (each may try 4 mirrors)
+            subs.map { url ->
+                async(Dispatchers.IO) {
+                    sem.withPermit {
+                        val body = fetch(url)
+                        if (body != null) {
+                            val list = LinkParser.parseMany(body, url).take(MAX_PER_SUB)
+                            Store.replaceSource(url, list); ok.incrementAndGet(); total.addAndGet(list.size)
+                        }
+                        step(done.incrementAndGet(), subs.size)
+                    }
+                }
+            }.awaitAll()
         }
         step(subs.size, subs.size)
-        if (ok > 0) Store.update { it.copy(settings = it.settings.copy(lastSubRefresh = System.currentTimeMillis())) }
+        if (ok.get() > 0) Store.update { it.copy(settings = it.settings.copy(lastSubRefresh = System.currentTimeMillis())) }
         then?.invoke()
-        return if (ok == 0) "Подписки не загрузились (нет сети или всё заблокировано)" else "Загружено серверов: $total из $ok подписок"
+        return if (ok.get() == 0) "Подписки не загрузились (нет сети или всё заблокировано)" else "Загружено серверов: ${total.get()} из ${ok.get()} подписок"
     }
 
     fun importText(text: String): Int {
@@ -97,9 +105,10 @@ object Actions {
     // ---------- tests ----------
     /** Self-signed TLS servers: fetch and pin the certificate hash (Xray 26 has no allowInsecure). */
     suspend fun pinCertificates(servers: List<Server>): List<Server> = withContext(Dispatchers.IO) {
-        servers.map { s ->
-            if (!s.insecure || s.pcs.isNotEmpty() || s.security != "tls" && s.protocol != "hysteria2") return@map s
-            val req = JSONObject().put("address", s.address).put("port", s.port).put("serverName", s.sni.ifEmpty { s.host.ifEmpty { s.address } }).put("timeoutMs", 5000)
+        val sem = Semaphore(16) // in parallel: subscriptions have many self-signed servers, 3 s each one by one was slow
+        servers.map { s -> async { sem.withPermit {
+            if (!s.insecure || s.pcs.isNotEmpty() || s.security != "tls" && s.protocol != "hysteria2") return@withPermit s
+            val req = JSONObject().put("address", s.address).put("port", s.port).put("serverName", s.sni.ifEmpty { s.host.ifEmpty { s.address } }).put("timeoutMs", 3000)
             val res = runCatching {
                 JSONObject(if (s.protocol == "hysteria2") Libv2ray.fetchQuicCertSha256(req.toString()) else Libv2ray.fetchTlsCertSha256(req.toString()))
             }.getOrNull()
@@ -107,7 +116,7 @@ object Actions {
             if (sha.isEmpty()) s else s.copy(pcs = sha).also { pinned ->
                 Store.update { st -> st.copy(servers = st.servers.map { if (it.id == s.id) pinned else it }) }
             }
-        }
+        } } }.awaitAll()
     }
 
     /** Engines needed to test these masks: reuses the VPN's current one when connected. */
@@ -151,7 +160,7 @@ object Actions {
         val (own, port) = dpiForTests(variants.map { it.second })
         val done = AtomicInteger(); val ok = AtomicInteger()
         try {
-            Tester.real(variants, st.settings.testUrl, port, own.ports) { i, p ->
+            Tester.real(variants, st.settings.testUrl, port, own.ports, batch = 48, parallel = 16) { i, p ->
                 val s = variants[i].first
                 if (p.works) ok.incrementAndGet()
                 Store.setState(s.id) {
@@ -167,26 +176,32 @@ object Actions {
     /** For each server, tries masks in [Masks.searchOrder] and keeps the fastest working one (remembered per network). */
     fun findMasks(servers: List<Server>, perServer: Int = 48) = launch("Подбор маскировки") { doFindMasks(servers, perServer) }
 
-    suspend fun doFindMasks(servers: List<Server>, perServer: Int = 48): String {
+    suspend fun doFindMasks(servers: List<Server>, perServer: Int = 48, enough: Int = 3, group: (Server) -> String = { it.id }): String {
         if (servers.isEmpty()) return "Выберите серверы"
         val pinned = pinCertificates(servers)
         val probe = DpiProxy(app)
         val dpiOk = probe.available(DpiEngine.BYEDPI)
         val tpwsOk = probe.available(DpiEngine.TPWS)
-        val order = { s: Server -> Masks.searchOrder(dpiOk, s).filter { tpwsOk || !it.dpi.startsWith("TPWS#") }.take(perServer) }
-        val variants: List<Pair<Server, Mask?>> = pinned.flatMap { s -> order(s).map { s to it } }
+        val cfg = Store.state.value.settings
+        val order = { s: Server -> Masks.searchOrder(dpiOk, s, cfg.maskFamilies, cfg.maskFps).filter { tpwsOk || !it.dpi.startsWith("TPWS#") }.take(perServer) }
+        // Interleaved (1st mask of every server, then the 2nd…): parallel probes hit different servers, and a server
+        // that already has [enough] working masks stops early instead of trying all of them.
+        val lists = pinned.map { s -> order(s).map { s to it } }
+        val variants: List<Pair<Server, Mask?>> = (0 until (lists.maxOfOrNull { it.size } ?: 0)).flatMap { r -> lists.mapNotNull { it.getOrNull(r) } }
         val (own, port) = dpiForTests(variants.map { it.second })
         val best = HashMap<String, Pair<Mask, Probe>>()
         val good = HashMap<String, MutableList<Pair<Mask, Int>>>()
+        val found = HashMap<String, Int>()
         val done = AtomicInteger()
         progress.value = progress.value.copy(title = "Подбор маскировки")
         try {
-            Tester.real(variants, Store.state.value.settings.testUrl, port, own.ports, youtube = false, batch = 48, parallel = 8) { i, p ->
+            Tester.real(variants, cfg.testUrl, port, own.ports, youtube = false, batch = 64, parallel = 12, attempts = 1,
+                skip = { i -> synchronized(best) { (found[group(variants[i].first)] ?: 0) >= enough } }) { i, p ->
                 val (s, m) = variants[i]
                 synchronized(best) {
                     val cur = best[s.id]
                     if (p.works && m != null && (cur == null || p.realMs < cur.second.realMs)) best[s.id] = m to p
-                    if (p.works && m != null) good.getOrPut(s.id) { mutableListOf() } += m to p.realMs
+                    if (p.works && m != null) { good.getOrPut(s.id) { mutableListOf() } += m to p.realMs; found.merge(group(s), 1, Int::plus) }
                 }
                 step(done.incrementAndGet(), variants.size)
             }
@@ -221,6 +236,38 @@ object Actions {
             })
         }
         return changed
+    }
+
+    // ---------- WARP ----------
+    /**
+     * «WARP»: registers up to 3 free Cloudflare accounts (one key each — the tester runs one WireGuard tunnel per key
+     * at a time), 4 endpoints per account, then searches UDP noise masks for them and selects the working ones.
+     */
+    fun setupWarp(accounts: Int = 3) = launch("WARP") { doSetupWarp(accounts) }
+
+    suspend fun doSetupWarp(accounts: Int = 3): String {
+        progress.value = progress.value.copy(title = "WARP: регистрация")
+        val accs = mutableListOf<Warp.Account>(); var err = ""
+        withContext(Dispatchers.IO) {
+            repeat(accounts) { i ->
+                step(i, accounts)
+                runCatching { Warp.register() }.onSuccess { accs += it }.onFailure { err = it.message ?: it.javaClass.simpleName }
+            }
+        }
+        android.util.Log.i("E2E", "warp accounts=${accs.size} err=$err")
+        if (accs.isEmpty()) return "WARP: регистрация не удалась ($err). Попробуйте после подключения к любому серверу или ByeDPI."
+        val per = Warp.ENDPOINTS.size / accs.size
+        val list = accs.flatMapIndexed { i, a -> Warp.servers(a, Warp.ENDPOINTS.drop(i * per).take(minOf(per, 4))) }
+        Store.replaceSource(Warp.SOURCE, list)
+        // one working endpoint per account is enough (only one tunnel per key can run at a time anyway)
+        val res = doFindMasks(list, perServer = 6, enough = 1, group = { it.secret })
+        val st = Store.state.value
+        val ok = list.filter { st.state(it).works }
+        android.util.Log.i("E2E", "warp servers=${list.size} working=${ok.size} masks=${ok.map { st.state(it).maskId }}")
+        // one endpoint per account: two tunnels with the same key at once would roam and stall
+        if (ok.isNotEmpty()) selectBest(3, ok.sortedBy { st.state(it).realMs }.distinctBy { it.secret })
+        return if (ok.isEmpty()) "WARP: аккаунтов ${accs.size}, но ни одна точка входа не ответила ($res). WireGuard в этой сети, похоже, режут."
+        else "WARP готов: рабочих точек входа ${ok.size} (по одной на аккаунт, всего ${list.size}), выбраны. Нажмите «Подключить»."
     }
 
     // ---------- Auto mode ----------
@@ -313,7 +360,7 @@ object Actions {
         val done = AtomicInteger()
         step(0, plan.size)
         coroutineScope {
-            val sem = Semaphore(4)
+            val sem = Semaphore(8)
             plan.map { s ->
                 async(Dispatchers.IO) {
                     sem.withPermit {

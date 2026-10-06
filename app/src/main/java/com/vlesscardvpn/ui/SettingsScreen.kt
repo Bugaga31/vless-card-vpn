@@ -124,6 +124,32 @@ fun SettingsScreen() {
             }
         }
 
+        Section("Режим «Прокси»")
+        Hint("Без VPN-значка: приложения сами ходят через SOCKS5 127.0.0.1:${s.socksPort} или HTTP 127.0.0.1:${s.httpPort} (Telegram, браузеры, торренты).")
+        var port by remember(s.socksPort) { mutableStateOf(s.socksPort.toString()) }
+        OutlinedTextField(port, { v -> port = v; v.toIntOrNull()?.takeIf { it in 1024..65534 }?.let { p -> set { it.copy(socksPort = p) } } },
+            label = { Text("Порт SOCKS5 (HTTP = +1)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+        Toggle("Раздавать в Wi-Fi / точку доступа", "Другие устройства подключаются к IP телефона (без пароля — только в своей сети)", s.lanShare) { v -> set { it.copy(lanShare = v) } }
+        OutlinedButton(onClick = {
+            runCatching { ctx.startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse("tg://socks?server=127.0.0.1&port=${s.socksPort}")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+        }, modifier = Modifier.fillMaxWidth()) { Text("Добавить прокси в Telegram") }
+
+        Section("Подбор маскировки: что перебирать")
+        Hint("Ничего не отмечено — все виды. Меньше видов — быстрее подбор. Сервер перестаёт перебираться после 3 рабочих масок.")
+        com.vlesscardvpn.xray.Masks.FAMILIES.forEach { (id, title) ->
+            Row(Modifier.fillMaxWidth().clickable { set { it.copy(maskFamilies = if (id in it.maskFamilies) it.maskFamilies - id else it.maskFamilies + id) } },
+                verticalAlignment = Alignment.CenterVertically) {
+                Checkbox(id in s.maskFamilies, { v -> set { it.copy(maskFamilies = if (v) (it.maskFamilies + id).distinct() else it.maskFamilies - id) } })
+                Text(title, fontSize = 14.sp)
+            }
+        }
+        Hint("Отпечатки браузера (TLS)")
+        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            com.vlesscardvpn.xray.Masks.FINGERPRINTS.forEach { fp ->
+                FilterChip(selected = fp in s.maskFps, onClick = { set { it.copy(maskFps = if (fp in it.maskFps) it.maskFps - fp else it.maskFps + fp) } }, label = { Text(fp) })
+            }
+        }
+
         Section("DNS через туннель")
         Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             Settings.DNS_PRESETS.forEach { (n, u) -> FilterChip(selected = s.dnsUrl == u, onClick = { set { it.copy(dnsUrl = u) } }, label = { Text(n) }) }
@@ -166,7 +192,7 @@ fun SettingsScreen() {
 }
 
 @Composable
-private fun AppsDialog(s: Settings, onDismiss: () -> Unit, onSave: (List<String>, Boolean) -> Unit) {
+fun AppsDialog(s: Settings, onDismiss: () -> Unit, onSave: (List<String>, Boolean) -> Unit) {
     val ctx = LocalContext.current
     val all = remember { Apps.launcherApps(ctx) }
     var chosen by remember { mutableStateOf(s.apps.toSet()) }

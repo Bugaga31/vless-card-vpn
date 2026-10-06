@@ -53,7 +53,18 @@ data class Settings(
     /** Refresh subscriptions on start / before Auto connect when older than 12 h. */
     val autoUpdateSubs: Boolean = true,
     val lastSubRefresh: Long = 0,
+    /** Connection type: false = VPN (TUN, all/selected apps), true = proxy only (SOCKS [socksPort] + HTTP [socksPort]+1, no VPN icon). */
+    val proxyOnly: Boolean = false,
+    /** Proxy mode: listen on 0.0.0.0 so other devices in the Wi-Fi / hotspot can use it. */
+    val lanShare: Boolean = false,
+    /** false = every app goes through the VPN regardless of [apps]. */
+    val perApp: Boolean = true,
+    /** Mask families used by the mask search (Masks.FAMILIES ids); empty = all. */
+    val maskFamilies: List<String> = emptyList(),
+    /** uTLS fingerprints used by the mask search; empty = all. */
+    val maskFps: List<String> = emptyList(),
 ) {
+    val httpPort: Int get() = if (socksPort < 65535) socksPort + 1 else socksPort - 1
     fun toJson(): JSONObject = JSONObject().put("mode", mode.name).put("balance", balance.name).put("socksPort", socksPort)
         .put("ruDirect", ruDirect).put("blockAds", blockAds).put("byeDpiArgs", byeDpiArgs).put("byeDpiSni", byeDpiSni)
         .put("hybridDomains", JSONArray(hybridDomains)).put("testUrl", testUrl).put("dnsUrl", dnsUrl)
@@ -63,6 +74,8 @@ data class Settings(
         .put("ruDns", ruDns).put("apps", JSONArray(apps)).put("onlyApps", onlyApps)
         .put("quietNotification", quietNotification).put("disguise", disguise)
         .put("services", JSONArray(services)).put("autoHeal", autoHeal).put("autoUpdateSubs", autoUpdateSubs).put("lastSubRefresh", lastSubRefresh)
+        .put("proxyOnly", proxyOnly).put("lanShare", lanShare).put("perApp", perApp)
+        .put("maskFamilies", JSONArray(maskFamilies)).put("maskFps", JSONArray(maskFps))
 
     companion object {
         const val DPI_AUTO = "auto"
@@ -92,6 +105,8 @@ data class Settings(
                 quietNotification = o.optBoolean("quietNotification", d.quietNotification), disguise = o.optString("disguise", d.disguise),
                 services = list("services", d.services), autoHeal = o.optBoolean("autoHeal", d.autoHeal),
                 autoUpdateSubs = o.optBoolean("autoUpdateSubs", d.autoUpdateSubs), lastSubRefresh = o.optLong("lastSubRefresh", 0),
+                proxyOnly = o.optBoolean("proxyOnly", false), lanShare = o.optBoolean("lanShare", false), perApp = o.optBoolean("perApp", true),
+                maskFamilies = list("maskFamilies", emptyList()), maskFps = list("maskFps", emptyList()),
             )
         }
     }

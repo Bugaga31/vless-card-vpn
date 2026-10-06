@@ -53,6 +53,7 @@ fun ServersScreen() {
         Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(onClick = { addOpen = true }) { Text("Добавить") }
             OutlinedButton(onClick = { Actions.refreshSubscriptions() }, enabled = !progress.running) { Text("Подписки") }
+            OutlinedButton(onClick = { Actions.setupWarp() }, enabled = !progress.running) { Text("WARP") }
             OutlinedButton(onClick = { Actions.testAll(onlySelected = filter == Filter.SELECTED) }, enabled = !progress.running) { Text("Проверить") }
             OutlinedButton(onClick = {
                 val target = app.selected.ifEmpty { app.servers.filter { app.state(it).tcpMs > 0 }.sortedBy { app.state(it).tcpMs }.take(10) }
