@@ -34,7 +34,7 @@ while read -r eng args; do
   if [ "$eng" = TPWS ]; then VCVPN_TPWS_ALLOW_LOCAL=1 /tmp/tpws $args > /dev/null 2>&1 &
   elif [ "$eng" = XRAY ]; then $X run -c $args > /dev/null 2>&1 &
   else /tmp/byedpi $args > /dev/null 2>&1 & fi
-done < /tmp/xcfg/dpi-engines.txt
+done < <(cat /tmp/xcfg/dpi-engines.txt; echo)
 sleep 1
 # VLESS Card × Xray no-server strategies: real HTTPS to the internet through each engine.
 XOK=0; XALL=0
