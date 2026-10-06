@@ -200,7 +200,24 @@ class TunnelService : VpnService() {
                 else "Нет ответа через выбранный маршрут (${p.error}). Проверьте серверы или включите маскировку."
             Tunnel.status.value = cur.copy(check = text, checkOk = p.works)
             Log.i("E2E", "check ok=${p.works} ms=${p.realMs} big=${p.bigOk} yt=${p.ytOk} tg=${p.tgOk} err=${p.error}")
-            if (p.works) healStep = 0 else heal()
+            if (p.works) { healStep = 0; scheduleOptimize() } else heal()
+        }
+    }
+
+    private var optJob: kotlinx.coroutines.Job? = null
+    /** Background speed-up while connected: first pass 3 min after a good check, then every 20 min. */
+    private fun scheduleOptimize() {
+        if (optJob?.isActive == true) return
+        optJob = scope.launch {
+            delay(180_000)
+            while (Tunnel.status.value.state == Tunnel.State.CONNECTED) {
+                val reconnect = runCatching { Actions.optimize() }.getOrDefault(false)
+                if (reconnect && Tunnel.status.value.state == Tunnel.State.CONNECTED) {
+                    Log.i("E2E", "optimize: switching to faster servers")
+                    lock.withLock { connect() }
+                }
+                delay(20 * 60_000L)
+            }
         }
     }
 
@@ -259,6 +276,7 @@ class TunnelService : VpnService() {
 
     private fun teardown(error: String?) {
         checkJob?.cancel()
+        if (error != null) optJob?.cancel()
         netCallback?.let { cb -> runCatching { getSystemService(ConnectivityManager::class.java)?.unregisterNetworkCallback(cb) } }
         netCallback = null
         TProxyService.stop()

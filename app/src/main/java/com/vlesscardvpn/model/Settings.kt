@@ -67,6 +67,8 @@ data class Settings(
     val warpKeys: String = "",
     /** Try the built-in public WARP+ keys when there is no own key (or it is used up). */
     val warpBuiltinKeys: Boolean = true,
+    /** Background: get ready on app start, re-test and switch to faster servers while connected. */
+    val autoOptimize: Boolean = true,
 ) {
     val httpPort: Int get() = if (socksPort < 65535) socksPort + 1 else socksPort - 1
     fun toJson(): JSONObject = JSONObject().put("mode", mode.name).put("balance", balance.name).put("socksPort", socksPort)
@@ -80,7 +82,7 @@ data class Settings(
         .put("services", JSONArray(services)).put("autoHeal", autoHeal).put("autoUpdateSubs", autoUpdateSubs).put("lastSubRefresh", lastSubRefresh)
         .put("proxyOnly", proxyOnly).put("lanShare", lanShare).put("perApp", perApp)
         .put("maskFamilies", JSONArray(maskFamilies)).put("maskFps", JSONArray(maskFps))
-        .put("warpKeys", warpKeys).put("warpBuiltinKeys", warpBuiltinKeys)
+        .put("warpKeys", warpKeys).put("warpBuiltinKeys", warpBuiltinKeys).put("autoOptimize", autoOptimize)
 
     companion object {
         const val DPI_AUTO = "auto"
@@ -112,7 +114,7 @@ data class Settings(
                 autoUpdateSubs = o.optBoolean("autoUpdateSubs", d.autoUpdateSubs), lastSubRefresh = o.optLong("lastSubRefresh", 0),
                 proxyOnly = o.optBoolean("proxyOnly", false), lanShare = o.optBoolean("lanShare", false), perApp = o.optBoolean("perApp", true),
                 maskFamilies = list("maskFamilies", emptyList()), maskFps = list("maskFps", emptyList()),
-                warpKeys = o.optString("warpKeys", ""), warpBuiltinKeys = o.optBoolean("warpBuiltinKeys", true),
+                warpKeys = o.optString("warpKeys", ""), warpBuiltinKeys = o.optBoolean("warpBuiltinKeys", true), autoOptimize = o.optBoolean("autoOptimize", true),
             )
         }
     }

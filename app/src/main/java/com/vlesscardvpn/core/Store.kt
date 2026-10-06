@@ -21,9 +21,16 @@ data class AppState(
     val servers: List<Server> = emptyList(),
     val states: Map<String, ServerState> = emptyMap(),
     val settings: Settings = Settings(),
+    /** Network → mask id → (ok, fail) over all servers: the mask search tries what worked on this network first. */
+    val maskStats: Map<String, Map<String, MaskStat>> = emptyMap(),
 ) {
     fun state(s: Server): ServerState = states[s.id] ?: ServerState()
     val selected: List<Server> get() = servers.filter { state(it).selected }
+}
+
+data class MaskStat(val ok: Int = 0, val fail: Int = 0) {
+    /** Laplace-smoothed success rate: unknown masks sit in the middle (0.5). */
+    val score: Double get() = (ok + 1.0) / (ok + fail + 2.0)
 }
 
 /** App state persisted as one JSON file (servers, test results, settings). */
@@ -68,6 +75,22 @@ object Store {
     fun setState(id: String, change: (ServerState) -> ServerState) =
         update { st -> st.copy(states = st.states + (id to change(st.states[id] ?: ServerState()))) }
 
+    /** Many results in one state change (one map copy instead of one per server: 10 000 servers were O(n²)). */
+    fun setStates(changes: Map<String, (ServerState) -> ServerState>) {
+        if (changes.isEmpty()) return
+        update { st -> st.copy(states = HashMap(st.states).apply { changes.forEach { (id, f) -> put(id, f(get(id) ?: ServerState())) } }) }
+    }
+
+    /** Mask search results for [network]: (mask id → worked?) added to the per-network statistics. */
+    fun recordMasks(network: String, results: List<Pair<String, Boolean>>) {
+        if (results.isEmpty()) return
+        update { st ->
+            val m = HashMap(st.maskStats[network].orEmpty())
+            results.forEach { (id, ok) -> val c = m[id] ?: MaskStat(); m[id] = if (ok) c.copy(ok = c.ok + 1) else c.copy(fail = c.fail + 1) }
+            st.copy(maskStats = st.maskStats + (network to m))
+        }
+    }
+
     fun saveNow() { saveJob?.cancel(); save() }
 
     private fun save() {
@@ -79,8 +102,9 @@ object Store {
 
     fun encode(s: AppState): JSONObject = JSONObject()
         .put("servers", JSONArray().apply { s.servers.forEach { put(it.toJson()) } })
-        .put("states", JSONObject().apply { s.states.forEach { (k, v) -> if (s.servers.any { it.id == k }) put(k, v.toJson()) } })
+        .put("states", JSONObject().apply { val ids = s.servers.mapTo(HashSet()) { it.id }; s.states.forEach { (k, v) -> if (k in ids) put(k, v.toJson()) } })
         .put("settings", s.settings.toJson())
+        .put("maskStats", JSONObject().apply { s.maskStats.forEach { (net, m) -> put(net, JSONObject().apply { m.forEach { (id, st) -> put(id, JSONArray().put(st.ok).put(st.fail)) } }) } })
 
     fun decode(o: JSONObject): AppState {
         val arr = o.optJSONArray("servers") ?: JSONArray()
@@ -88,7 +112,11 @@ object Store {
         val so = o.optJSONObject("states") ?: JSONObject()
         val states = so.keys().asSequence().associateWith { ServerState.fromJson(so.getJSONObject(it)) }
         val settings = o.optJSONObject("settings")?.let { Settings.fromJson(it) } ?: Settings()
-        return AppState(servers, states, settings)
+        val ms = o.optJSONObject("maskStats") ?: JSONObject()
+        val maskStats = ms.keys().asSequence().associateWith { net ->
+            val m = ms.getJSONObject(net); m.keys().asSequence().associateWith { id -> m.getJSONArray(id).let { MaskStat(it.optInt(0), it.optInt(1)) } }
+        }
+        return AppState(servers, states, settings, maskStats)
     }
 
     /** Adds servers (dedupe by id). Returns number of new ones. */

@@ -8,6 +8,7 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import kotlinx.coroutines.launch
 import com.vlesscardvpn.ui.AppUi
 import com.vlesscardvpn.vpn.TunnelService
 
@@ -36,7 +37,7 @@ class MainActivity : ComponentActivity() {
         if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED)
             notifPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
         com.vlesscardvpn.core.Actions.init(this)
-        if (!BuildConfig.DEBUG) com.vlesscardvpn.core.Actions.maybeAutoRefresh()
+        if (!BuildConfig.DEBUG) com.vlesscardvpn.core.Actions.warmup() // background: subscriptions, tests, masks — ready before «Подключить»
         setContent { AppUi(onConnect = { connect() }, onDisconnect = { TunnelService.stop(this) }) }
         e2e(intent)
     }
@@ -51,6 +52,9 @@ class MainActivity : ComponentActivity() {
         if (i.getBooleanExtra("e2e_disconnect", false)) TunnelService.stop(this)
         if (i.getBooleanExtra("e2e_test", false)) com.vlesscardvpn.core.Actions.testAll()
         if (i.getBooleanExtra("e2e_dpi", false)) com.vlesscardvpn.core.Actions.findDpi()
+        if (i.getBooleanExtra("e2e_optimize", false)) kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+            android.util.Log.i("E2E", "optimize result=${runCatching { com.vlesscardvpn.core.Actions.optimize() }.getOrElse { "error " + it.message }}")
+        }
         if (i.getBooleanExtra("e2e_warp", false)) com.vlesscardvpn.core.Actions.setupWarp()
         if (i.getBooleanExtra("e2e_masks", false)) com.vlesscardvpn.core.Actions.findMasks(com.vlesscardvpn.core.Store.state.value.servers)
     }

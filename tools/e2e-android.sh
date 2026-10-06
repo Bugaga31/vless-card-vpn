@@ -70,6 +70,11 @@ c=$(grep -c "email: u" $W/access.log); echo "byedpi: server lines $c (must be 0;
 
 : > $W/access.log
 run_case multi multi.json
+# Background speed-up: the selected e2e-dead server must be noticed and dropped (no buttons).
+adb shell am start -n $PKG/.MainActivity --ez e2e_optimize true >/dev/null
+O=$(waitlog "optimize result=" 150) || fail "optimize: no result"
+echo "optimize: $O"; adb logcat -d -s E2E:I | grep "optimize sel=" | tail -1
+echo "$O" | grep -q "result=true" || fail "optimize: did not switch away from the dead server"
 for p in 8443 8444 8447; do
   c=$(grep -c "email: u$p" $W/access.log); echo "multi: server :$p accepted $c"
   [ "$c" -gt 0 ] || fail "multi: round-robin never used server :$p"

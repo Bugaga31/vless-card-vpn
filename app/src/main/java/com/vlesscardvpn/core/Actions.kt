@@ -135,22 +135,24 @@ object Actions {
         doTestAll(if (onlySelected) st0.selected else st0.servers, realLimit)
     }
 
-    private suspend fun doTestAll(list: List<Server>, realLimit: Int): String {
+    private suspend fun doTestAll(list: List<Server>, realLimit: Int, big: Boolean = true): String {
         if (list.isEmpty()) return "Нет серверов — добавьте ссылку или обновите подписки"
         progress.value = progress.value.copy(title = "TCP-пинг")
         val done = AtomicInteger()
         val tcp = java.util.concurrent.ConcurrentHashMap<String, Int>()
+        val batch = StateBatch()
         Tester.tcp(list) { s, ms ->
             tcp[s.id] = ms
-            Store.setState(s.id) { it.copy(tcpMs = ms, realMs = if (ms == 0) 0 else it.realMs, checkedAt = System.currentTimeMillis()) }
+            batch.put(s.id) { it.copy(tcpMs = ms, realMs = if (ms == 0) 0 else it.realMs, checkedAt = System.currentTimeMillis()) }
             step(done.incrementAndGet(), list.size)
         }
+        batch.flush()
         val alive = list.filter { (tcp[it.id] ?: 0) > 0 }.sortedBy { tcp[it.id] }.take(realLimit)
-        val working = realTest(alive, "Проверка через Xray")
+        val working = realTest(alive, "Проверка через Xray", big)
         return "Работают: $working из ${alive.size} доступных по TCP (всего ${list.size})"
     }
 
-    private suspend fun realTest(servers: List<Server>, title: String): Int {
+    private suspend fun realTest(servers: List<Server>, title: String, big: Boolean = true): Int {
         if (servers.isEmpty()) return 0
         progress.value = progress.value.copy(title = title, done = 0, total = servers.size)
         val pinned = pinCertificates(servers)
@@ -159,17 +161,18 @@ object Actions {
         val variants = pinned.map { it to (Masks.byId(st.state(it).maskFor(net))) }
         val (own, port) = dpiForTests(variants.map { it.second })
         val done = AtomicInteger(); val ok = AtomicInteger()
+        val states = StateBatch(25)
         try {
-            Tester.real(variants, st.settings.testUrl, port, own.ports, batch = 48, parallel = 16) { i, p ->
+            Tester.real(variants, st.settings.testUrl, port, own.ports, batch = 48, parallel = 16, big = big) { i, p ->
                 val s = variants[i].first
                 if (p.works) ok.incrementAndGet()
-                Store.setState(s.id) {
+                states.put(s.id) {
                     it.copy(realMs = p.realMs, bigOk = p.bigOk, ytOk = p.ytOk, tgOk = p.tgOk, checkedAt = System.currentTimeMillis(),
                         okCount = it.okCount + if (p.works) 1 else 0, failCount = it.failCount + if (p.works) 0 else 1)
                 }
                 step(done.incrementAndGet(), variants.size)
             }
-        } finally { own?.close() }
+        } finally { own?.close(); states.flush() }
         return ok.get()
     }
 
@@ -183,7 +186,12 @@ object Actions {
         val dpiOk = probe.available(DpiEngine.BYEDPI)
         val tpwsOk = probe.available(DpiEngine.TPWS)
         val cfg = Store.state.value.settings
-        val order = { s: Server -> Masks.searchOrder(dpiOk, s, cfg.maskFamilies, cfg.maskFps).filter { tpwsOk || !it.dpi.startsWith("TPWS#") }.take(perServer) }
+        val net0 = Net.key(app)
+        val stats = Store.state.value.maskStats[net0].orEmpty()
+        // Learned order: masks that passed on this network (on any server) first, untested next, proven failures last.
+        fun bucket(m: Mask): Int { val st = stats[m.id] ?: return 1; return if (st.ok > 0) 0 else if (st.fail >= 4) 2 else 1 }
+        val order = { s: Server -> Masks.searchOrder(dpiOk, s, cfg.maskFamilies, cfg.maskFps).filter { tpwsOk || !it.dpi.startsWith("TPWS#") }
+            .sortedWith(compareBy<Mask>({ bucket(it) }, { -(stats[it.id]?.takeIf { s -> s.ok > 0 }?.score ?: 0.0) })).take(perServer) }
         // Interleaved (1st mask of every server, then the 2nd…): parallel probes hit different servers, and a server
         // that already has [enough] working masks stops early instead of trying all of them.
         val lists = pinned.map { s -> order(s).map { s to it } }
@@ -192,6 +200,7 @@ object Actions {
         val best = HashMap<String, Pair<Mask, Probe>>()
         val good = HashMap<String, MutableList<Pair<Mask, Int>>>()
         val found = HashMap<String, Int>()
+        val tried = mutableListOf<Triple<String, String, Boolean>>()
         val done = AtomicInteger()
         progress.value = progress.value.copy(title = "Подбор маскировки")
         try {
@@ -202,11 +211,14 @@ object Actions {
                     val cur = best[s.id]
                     if (p.works && m != null && (cur == null || p.realMs < cur.second.realMs)) best[s.id] = m to p
                     if (p.works && m != null) { good.getOrPut(s.id) { mutableListOf() } += m to p.realMs; found.merge(group(s), 1, Int::plus) }
+                    if (m != null && p !== Tester.SKIPPED) tried += Triple(s.id, m.id, p.works)
                 }
                 step(done.incrementAndGet(), variants.size)
             }
         } finally { own.close() }
         val net = Net.key(app)
+        // Failures of a server where nothing worked say nothing about the masks (the server may be dead).
+        Store.recordMasks(net, tried.filter { (sid, _, ok) -> ok || good.containsKey(sid) }.map { it.second to it.third })
         pinned.forEach { s ->
             val b = best[s.id]
             Store.setState(s.id) {
@@ -238,6 +250,84 @@ object Actions {
         return changed
     }
 
+    /** Collects per-server results from parallel callbacks and applies them to the store in chunks. */
+    class StateBatch(private val size: Int = 200) {
+        private val pending = java.util.concurrent.ConcurrentHashMap<String, (com.vlesscardvpn.model.ServerState) -> com.vlesscardvpn.model.ServerState>()
+        fun put(id: String, f: (com.vlesscardvpn.model.ServerState) -> com.vlesscardvpn.model.ServerState) { pending[id] = f; if (pending.size >= size) flush() }
+        @Synchronized fun flush() {
+            val snap = HashMap(pending); snap.keys.forEach { pending.remove(it) }
+            Store.setStates(snap)
+        }
+    }
+
+    // ---------- background optimisation (no buttons) ----------
+    private fun unmetered(): Boolean = runCatching {
+        val cm = app.getSystemService(android.net.ConnectivityManager::class.java)
+        cm.getNetworkCapabilities(cm.activeNetwork)?.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_NOT_METERED) == true
+    }.getOrDefault(false)
+
+    /**
+     * App start, VPN off: quietly gets everything ready so «Подключить» is instant — fresh subscriptions, tested servers,
+     * masks for the reachable ones that don't open sites. Lighter on mobile data (fewer servers, no 256 KB download).
+     */
+    fun warmup() {
+        val st = Store.state.value
+        if (!st.settings.autoOptimize || job?.isActive == true || Tunnel.status.value.state != Tunnel.State.IDLE) return
+        val now = System.currentTimeMillis()
+        val fresh = st.servers.count { st.state(it).works && now - st.state(it).checkedAt < 3 * 3600_000L }
+        val subsStale = st.settings.autoUpdateSubs && now - st.settings.lastSubRefresh > 12 * 3600_000L
+        if (fresh >= 5 && !subsStale) return
+        launch("Фоновая подготовка") {
+            val wifi = unmetered()
+            val notes = mutableListOf<String>()
+            if (subsStale || Store.state.value.servers.isEmpty()) notes += doRefresh()
+            val s1 = Store.state.value
+            if (s1.servers.count { s1.state(it).works && now - s1.state(it).checkedAt < 3 * 3600_000L } < 5)
+                notes += doTestAll(s1.servers, if (wifi) 120 else 40, big = wifi)
+            val s2 = Store.state.value
+            if (s2.servers.count { s2.state(it).works } < 3) {
+                val cand = s2.servers.filter { s2.state(it).tcpMs > 0 && !s2.state(it).works }.sortedBy { s2.state(it).tcpMs }.take(if (wifi) 10 else 5)
+                if (cand.isNotEmpty()) notes += doFindMasks(cand, 24)
+            }
+            "Готово к подключению: " + notes.joinToString("; ")
+        }
+    }
+
+    /**
+     * While connected, every ~20 min (TunnelService): re-tests the selected servers and the best other ones outside
+     * the tunnel. If a selected server died or others are clearly faster, switches to the fastest and reconnects;
+     * if nothing works, searches new masks. Returns true when the service should reconnect.
+     */
+    suspend fun optimize(): Boolean {
+        val st = Store.state.value
+        if (!st.settings.autoOptimize || job?.isActive == true) return false
+        if (st.settings.mode == com.vlesscardvpn.model.Mode.BYEDPI) return false
+        val wifi = unmetered()
+        // Auto with nothing selected connects to the 5 best: compare against those.
+        val sel = st.selected.ifEmpty { st.servers.filter { st.state(it).works }.sortedBy { st.state(it).realMs }.take(5) }
+        val others = st.servers.filter { it !in sel && st.state(it).works }.sortedBy { st.state(it).realMs }.take(if (wifi) 12 else 6)
+        val cand = (sel + others).distinctBy { it.id }
+        if (cand.isEmpty()) return false
+        val prev = progress.value
+        realTest(cand, "Фоновая проверка", big = wifi)
+        progress.value = prev
+        val now = Store.state.value
+        val selOk = sel.filter { now.state(it).works }
+        val best = cand.filter { now.state(it).works }.sortedBy { now.state(it).realMs }
+        if (best.isEmpty()) {
+            val alive = now.servers.filter { now.state(it).tcpMs > 0 }.sortedBy { now.state(it).tcpMs }.take(8)
+            if (alive.isNotEmpty()) doFindMasks(alive, 24)
+            val after = Store.state.value
+            return if (alive.any { after.state(it).works }) { selectBest(5, alive.filter { after.state(it).works }); true } else false
+        }
+        val median = selOk.map { now.state(it).realMs }.sorted().let { if (it.isEmpty()) Int.MAX_VALUE else it[it.size / 2] }
+        val bestMs = now.state(best.first()).realMs
+        val switch = selOk.size < sel.size || (median > bestMs * 1.6 && median - bestMs > 150)
+        android.util.Log.i("E2E", "optimize sel=${sel.size} ok=${selOk.size} median=$median best=$bestMs switch=$switch")
+        if (switch) selectBest(minOf(5, best.size), best)
+        return switch && sel.map { it.id }.toSet() != Store.state.value.selected.map { it.id }.toSet()
+    }
+
     // ---------- WARP ----------
     /**
      * «WARP»: registers up to 3 free Cloudflare accounts (one key each — the tester runs one WireGuard tunnel per key
@@ -248,16 +338,24 @@ object Actions {
     suspend fun doSetupWarp(accounts: Int = 3): String {
         progress.value = progress.value.copy(title = "WARP: регистрация")
         val accs = mutableListOf<Warp.Account>(); var err = ""
+        var dpi: DpiSet? = null
+        var plusErr = ""
+        try {
         withContext(Dispatchers.IO) {
             repeat(accounts) { i ->
                 step(i, accounts)
-                runCatching { Warp.register() }.onSuccess { accs += it }.onFailure { err = it.message ?: it.javaClass.simpleName }
+                var r = runCatching { Warp.register() }
+                if (r.isFailure && dpi == null) {
+                    // Cloudflare API blocked: retry through the DPI bypass picked for this network.
+                    dpi = runCatching { DpiSet(app).start(Store.state.value.settings, Net.key(app), true, emptySet(), com.vlesscardvpn.BuildConfig.DEBUG) }.getOrNull()
+                    dpi?.currentPort?.let { Warp.extraSocks = listOf(it); r = runCatching { Warp.register() } }
+                }
+                r.onSuccess { accs += it }.onFailure { err = it.message ?: it.javaClass.simpleName }
             }
         }
         // WARP+: bind a key to every account (own keys first, then the built-in public ones).
         val cfg = Store.state.value.settings
         val own = WarpKeys.parse(cfg.warpKeys)
-        var plusErr = ""
         if (own.isNotEmpty() || cfg.warpBuiltinKeys) {
             progress.value = progress.value.copy(title = "WARP: ключ WARP+")
             withContext(Dispatchers.IO) {
@@ -267,6 +365,7 @@ object Actions {
                 }
             }
         }
+        } finally { dpi?.close(); Warp.extraSocks = emptyList() }
         val plus = accs.count { it.plus }
         android.util.Log.i("E2E", "warp accounts=${accs.size} plus=$plus err=$err plusErr=$plusErr")
         if (accs.isEmpty()) return "WARP: регистрация не удалась ($err). Попробуйте после подключения к любому серверу или ByeDPI."
@@ -274,7 +373,7 @@ object Actions {
         val list = accs.flatMapIndexed { i, a -> Warp.servers(a, Warp.ENDPOINTS.drop(i * per).take(minOf(per, 4))) }
         Store.replaceSource(Warp.SOURCE, list)
         // one working endpoint per account is enough (only one tunnel per key can run at a time anyway)
-        val res = doFindMasks(list, perServer = 6, enough = 1, group = { it.secret })
+        val res = doFindMasks(list, perServer = 24, enough = 1, group = { it.secret })
         val st = Store.state.value
         val ok = list.filter { st.state(it).works }
         android.util.Log.i("E2E", "warp servers=${list.size} working=${ok.size} masks=${ok.map { st.state(it).maskId }}")
@@ -335,7 +434,9 @@ object Actions {
         var c = 0
         val ids = among?.map { it.id }?.toHashSet()
         Store.update { st ->
-            val best = st.servers.filter { (ids == null || it.id in ids) && st.state(it).works }.sortedBy { st.state(it).realMs }.take(n).map { it.id }.toSet()
+            // one WireGuard tunnel per key (WARP accounts): two with the same key would steal the session from each other
+            val best = st.servers.filter { (ids == null || it.id in ids) && st.state(it).works }.sortedBy { st.state(it).realMs }
+                .distinctBy { if (it.protocol == "wireguard") "wg:" + it.secret else it.id }.take(n).map { it.id }.toSet()
             c = best.size
             st.copy(states = st.servers.associate { s -> s.id to st.state(s).copy(selected = s.id in best) } )
         }

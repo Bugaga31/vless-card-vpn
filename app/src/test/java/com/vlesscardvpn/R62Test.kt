@@ -69,4 +69,30 @@ class R62Test {
         val s = Settings.fromJson(Settings(warpKeys = "abc", warpBuiltinKeys = false).toJson())
         assertTrue(s.warpKeys == "abc" && !s.warpBuiltinKeys)
     }
+
+    @Test fun wgMasksAndWarpDump() {
+        val warp = Warp.servers(Warp.Account("@WPRIV@", "bmXOC+F1FxEMF9dyiK2H5/1SUtzH0JuVo51h2wPfgyo=", "@WV4@", "", "11,22,33", "x"), listOf("162.159.192.1:2408"))[0]
+        val wg = Server("wg", "wireguard", "1.2.3.4", 51820, "k", pbk = "p")
+        val wm = Masks.searchOrder(true, warp)
+        assertTrue(wm.any { it.hop == Masks.HOP_WARP } && wm.any { it.noise == "z6" })
+        assertTrue(Masks.searchOrder(true, wg).none { it.hop == Masks.HOP_WARP })
+        val tls = Server("a", "vless", "1.2.3.4", 443, "11111111-1111-1111-1111-111111111111", security = "tls", sni = "a.com")
+        assertTrue(Masks.searchOrder(true, tls).none { it.hop.isNotEmpty() || it.noise.isNotEmpty() })
+        val hy = Server("h", "hysteria2", "1.2.3.4", 443, "pw", sni = "a.com")
+        assertTrue(Masks.searchOrder(true, hy).none { it.noise == "z5" || it.hop.isNotEmpty() })
+        val o = XrayConfigBuilder.outbound(warp, "p", Masks.byId("chrome.z5.hw"))
+        val udp = o.getJSONObject("streamSettings").getJSONObject("finalmask").getJSONArray("udp")
+        assertEquals("noise", udp.getJSONObject(0).getString("type")); assertEquals("udphop", udp.getJSONObject(1).getString("type"))
+        val dir = System.getenv("XRAY_CONFIG_DUMP") ?: return
+        java.io.File(dir).mkdirs()
+        val ids = wm.map { it.id }
+        java.io.File(dir, "warp-masks.txt").writeText(ids.joinToString("\n"))
+        ids.forEach { id ->
+            val ob = XrayConfigBuilder.outbound(warp, "w", Masks.byId(id))
+            val c = JSONObject().put("log", JSONObject().put("loglevel", "warning"))
+                .put("inbounds", org.json.JSONArray().put(JSONObject().put("listen", "127.0.0.1").put("port", 24901).put("protocol", "socks").put("settings", JSONObject().put("udp", true))))
+                .put("outbounds", org.json.JSONArray().put(ob))
+            java.io.File(dir, "warp-$id.json").writeText(c.toString())
+        }
+    }
 }
