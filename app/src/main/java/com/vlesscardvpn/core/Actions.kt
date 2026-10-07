@@ -179,7 +179,8 @@ object Actions {
     /** For each server, tries masks in [Masks.searchOrder] and keeps the fastest working one (remembered per network). */
     fun findMasks(servers: List<Server>, perServer: Int = 48) = launch("Подбор маскировки") { doFindMasks(servers, perServer) }
 
-    suspend fun doFindMasks(servers: List<Server>, perServer: Int = 48, enough: Int = 3, group: (Server) -> String = { it.id }): String {
+    suspend fun doFindMasks(servers: List<Server>, perServer: Int = 48, enough: Int = 3, group: (Server) -> String = { it.id }, budgetMs: Long = Long.MAX_VALUE): String {
+        val deadline = if (budgetMs == Long.MAX_VALUE) Long.MAX_VALUE else System.currentTimeMillis() + budgetMs
         if (servers.isEmpty()) return "Выберите серверы"
         val pinned = pinCertificates(servers)
         val probe = DpiProxy(app)
@@ -205,7 +206,7 @@ object Actions {
         progress.value = progress.value.copy(title = "Подбор маскировки")
         try {
             Tester.real(variants, cfg.testUrl, port, own.ports, youtube = false, batch = 64, parallel = 12, attempts = 1,
-                skip = { i -> synchronized(best) { (found[group(variants[i].first)] ?: 0) >= enough } }) { i, p ->
+                skip = { i -> System.currentTimeMillis() > deadline || synchronized(best) { (found[group(variants[i].first)] ?: 0) >= enough } }) { i, p ->
                 val (s, m) = variants[i]
                 synchronized(best) {
                     val cur = best[s.id]
@@ -369,11 +370,11 @@ object Actions {
         val plus = accs.count { it.plus }
         android.util.Log.i("E2E", "warp accounts=${accs.size} plus=$plus err=$err plusErr=$plusErr")
         if (accs.isEmpty()) return "WARP: регистрация не удалась ($err). Попробуйте после подключения к любому серверу или ByeDPI."
-        val per = Warp.ENDPOINTS.size / accs.size
-        val list = accs.flatMapIndexed { i, a -> Warp.servers(a, Warp.ENDPOINTS.drop(i * per).take(minOf(per, 4))) }
+        val list = accs.flatMapIndexed { i, a -> Warp.servers(a, Warp.endpointsFor(i)) }
         Store.replaceSource(Warp.SOURCE, list)
         // one working endpoint per account is enough (only one tunnel per key can run at a time anyway)
-        val res = doFindMasks(list, perServer = 24, enough = 1, group = { it.secret })
+        // 10 most likely masks, 2.5 min at most: an account whose endpoints are all dead must not stall the search
+        val res = doFindMasks(list, perServer = 10, enough = 1, group = { it.secret }, budgetMs = 150_000)
         val st = Store.state.value
         val ok = list.filter { st.state(it).works }
         android.util.Log.i("E2E", "warp servers=${list.size} working=${ok.size} masks=${ok.map { st.state(it).maskId }}")

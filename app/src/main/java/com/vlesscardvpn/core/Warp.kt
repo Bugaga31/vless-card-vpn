@@ -31,6 +31,12 @@ object Warp {
         "162.159.193.5:1002", "188.114.97.6:955", "162.159.195.9:7103", "188.114.98.11:3854",
     )
 
+    /** 4 endpoints per account: the main 162.159.192.x range first (most reliable), then other ranges and ports. */
+    fun endpointsFor(i: Int): List<String> = listOf(
+        listOf("162.159.192.1:2408", "162.159.192.5:500", "162.159.192.9:4500")[i % 3],
+        ENDPOINTS[(1 + i * 3) % ENDPOINTS.size], ENDPOINTS[(2 + i * 3) % ENDPOINTS.size], ENDPOINTS[(3 + i * 3) % ENDPOINTS.size],
+    ).distinct()
+
     data class Account(val privateKey: String, val peerKey: String, val v4: String, val v6: String, val reserved: String, val id: String,
                        val token: String = "", val plus: Boolean = false)
 
