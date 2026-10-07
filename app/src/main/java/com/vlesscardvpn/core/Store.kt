@@ -42,7 +42,7 @@ data class MaskStat(val ok: Int = 0, val fail: Int = 0) {
 object Store {
     private val _state = MutableStateFlow(AppState())
     val state: StateFlow<AppState> = _state
-    private val scope = CoroutineScope(SupervisorJob() + Bg.cpu)
+    private val scope = CoroutineScope(SupervisorJob() + Bg.cpu + kotlinx.coroutines.CoroutineExceptionHandler { _, e -> android.util.Log.w("VLESS", "background job failed", e) })
     private val busyN = java.util.concurrent.atomic.AtomicInteger()
     /** A check / search is running: the list redraws and the file is saved less often. */
     val busy: Boolean get() = busyN.get() > 0
@@ -138,9 +138,12 @@ object Store {
 
     private fun save() {
         val f = file ?: return
-        val tmp = File(f.path + ".tmp")
-        tmp.writeText(encode(_state.value).toString())
-        tmp.renameTo(f)
+        // a full disk or a race must not crash the app; the next save will retry
+        runCatching {
+            val tmp = File(f.path + ".tmp")
+            tmp.writeText(encode(_state.value).toString())
+            if (!tmp.renameTo(f)) { f.delete(); tmp.renameTo(f) }
+        }
     }
 
     fun encode(s: AppState): JSONObject = JSONObject()

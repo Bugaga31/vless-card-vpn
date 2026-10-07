@@ -204,5 +204,30 @@ object Tester {
         return last
     }
 
+    /**
+     * What a DPI strategy must really open (not only the YouTube page): the page, YouTube's image/video CDN
+     * (throttled by SNI like googlevideo) and Discord. Score = how many passed (0-3); null bytes = skipped.
+     */
+    val DPI_SITES = listOf("https://www.youtube.com/" to 48_000, "https://i.ytimg.com/vi/jNQXAC9IVRw/hqdefault.jpg" to 12_000, "https://discord.com/" to 16_000)
+    data class DpiScore(val score: Int, val ms: Int, val youtube: Boolean, val error: String = "")
+    fun probeDpiSites(port: Int): DpiScore {
+        val client = base.newBuilder().proxy(Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", port)))
+            .readTimeout(6, TimeUnit.SECONDS).callTimeout(10, TimeUnit.SECONDS).build()
+        var score = 0; var ms = 0; var yt = false; var err = ""
+        DPI_SITES.forEachIndexed { i, (url, need) ->
+            val t0 = System.nanoTime()
+            val ok = runCatching {
+                client.newCall(Request.Builder().url(url).header("User-Agent", UA).build()).execute().use { r ->
+                    val src = r.body!!.byteStream(); val buf = ByteArray(16384); var total = 0
+                    while (total < need) { val n = src.read(buf); if (n < 0) break; total += n }
+                    total >= need || r.code in 200..399 && total > 0 && i > 0 && total >= r.body!!.contentLength().coerceAtLeast(1)
+                }
+            }.getOrElse { err = it.message ?: it.javaClass.simpleName; false }
+            if (ok) { score++; ms += ((System.nanoTime() - t0) / 1_000_000).toInt(); if (i == 0) yt = true }
+        }
+        client.connectionPool.evictAll()
+        return DpiScore(score, if (score > 0) ms / score else 0, yt, err)
+    }
+
     const val UA = "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0 Mobile Safari/537.36"
 }
