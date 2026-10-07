@@ -160,7 +160,7 @@ object Masks {
         }
 
     fun searchOrder(byeDpiAvailable: Boolean, server: com.vlesscardvpn.model.Server? = null): List<Mask> {
-        val first = listOf("chrome.n", "chrome.z5", "chrome.z5.hw", "chrome.z6.hw", "chrome.z9", "chrome.z1.hl", "chrome.z7", "chrome.hw", "chrome.z1", "chrome.z2", "chrome.z3", "chrome.z4", "chrome.h4", "chrome.l1", "firefox.l2", "chrome.p2", "firefox.h2", "safari.p3", "edge.h5", "chrome.h1", "ios.p1", "safari.l3", "chrome.l2.b",
+        val first = listOf("chrome.n", "chrome.z5", "chrome.z1", "chrome.z5.hw", "chrome.z6.hw", "chrome.z9", "chrome.z1.hl", "chrome.z7", "chrome.hw", "chrome.z2", "chrome.z3", "chrome.z4", "chrome.h4", "chrome.l1", "firefox.l2", "chrome.p2", "firefox.h2", "safari.p3", "edge.h5", "chrome.h1", "ios.p1", "safari.l3", "chrome.l2.b",
             "android.h3", "firefox.h4", "chrome.n.b", "chrome.h4.b", "firefox.p4", "chrome.p5", "chrome.h6", "qq.h2",
             "safari.n", "firefox.n", "edge.p2", "ios.h4", "android.p3", "safari.h1", "chrome.p1.b", "firefox.h3.b",
             // own VLESS Card masking and zapret in front of the server connection
