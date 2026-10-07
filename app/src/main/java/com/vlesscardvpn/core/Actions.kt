@@ -5,6 +5,7 @@ import com.vlesscardvpn.model.LinkParser
 import com.vlesscardvpn.model.Server
 import com.vlesscardvpn.model.Settings
 import com.vlesscardvpn.xray.Mask
+import com.vlesscardvpn.xray.MaskLab
 import com.vlesscardvpn.xray.Masks
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -49,7 +50,17 @@ object Actions {
         }
     }
 
-    private fun step(done: Int, total: Int) { progress.value = progress.value.copy(done = done, total = total) }
+    @Volatile private var lastStepAt = 0L
+    /**
+     * Progress from parallel probes: at most ~6 updates a second (and always the last one). Hundreds of results per
+     * second used to recompose the whole screen for every single server — that was the lag during big checks.
+     */
+    private fun step(done: Int, total: Int) {
+        val now = android.os.SystemClock.uptimeMillis()
+        if (done < total && now - lastStepAt < 160) return
+        lastStepAt = now
+        progress.value = progress.value.copy(done = done, total = total)
+    }
 
     // ---------- subscriptions ----------
     private val http by lazy { OkHttpClient.Builder().connectTimeout(10, TimeUnit.SECONDS).readTimeout(20, TimeUnit.SECONDS).build() }
@@ -174,7 +185,7 @@ object Actions {
         val variants = pinned.map { it to (Masks.byId(st.state(it).maskFor(net))) }
         val (own, port) = dpiForTests(variants.map { it.second })
         val done = AtomicInteger(); val ok = AtomicInteger()
-        val states = StateBatch(25)
+        val states = StateBatch(200)
         try {
             Tester.real(variants, st.settings.testUrl, port, own.ports, batch = 48, parallel = 16, big = big) { i, p ->
                 val s = variants[i].first
@@ -204,8 +215,24 @@ object Actions {
         val stats = Store.state.value.maskStats[net0].orEmpty()
         // Learned order: masks that passed on this network (on any server) first, untested next, proven failures last.
         fun bucket(m: Mask): Int { val st = stats[m.id] ?: return 1; return if (st.ok > 0) 0 else if (st.fail >= 4) 2 else 1 }
-        val order = { s: Server -> Masks.searchOrder(dpiOk, s, cfg.maskFamilies, cfg.maskFps).filter { tpwsOk || !it.dpi.startsWith("TPWS#") }
-            .sortedWith(compareBy<Mask>({ bucket(it) }, { -(stats[it.id]?.takeIf { s -> s.ok > 0 }?.score ?: 0.0) })).take(perServer) }
+        // «Эволюция масок»: kept auto masks + fresh mutants of what passed here; a few slots per server right after the proven masks.
+        val evo = cfg.maskEvolution && (cfg.maskFamilies.isEmpty() || "auto" in cfg.maskFamilies)
+        val kept = if (evo) Masks.auto else emptyList()
+        val st0 = Store.state.value
+        val parents = if (!evo) emptyList() else (stats.entries.filter { it.value.ok > 0 }.sortedByDescending { it.value.score }.mapNotNull { Masks.byId(it.key) } +
+            servers.mapNotNull { Masks.byId(st0.state(it).maskFor(net0)) }).filter { it.id != Masks.DEFAULT.id || stats.isEmpty() }.distinctBy { it.id }.take(12)
+        val slots = if (evo) (perServer / 5).coerceAtLeast(1) else 0
+        val pool = if (evo) MaskLab.breed(parents, (slots * 4).coerceIn(6, 40), known = kept.map { it.id }.toSet()) else emptyList()
+        val untried = kept.filter { stats[it.id] == null }
+        val evoCand = (0 until maxOf(untried.size, pool.size)).flatMap { i -> listOfNotNull(untried.getOrNull(i), pool.getOrNull(i)) }
+        val order = { s: Server ->
+            val ok = { m: Mask -> Masks.compatible(m, s) && (dpiOk || !m.viaByeDpi) }
+            val fresh = evoCand.filter(ok).shuffled().take(slots)
+            val base = (Masks.searchOrder(dpiOk, s, cfg.maskFamilies, cfg.maskFps) + kept.filter(ok)).distinctBy { it.id }
+                .filter { (tpwsOk || !it.dpi.startsWith("TPWS#")) && it !in fresh }
+                .sortedWith(compareBy<Mask>({ bucket(it) }, { -(stats[it.id]?.takeIf { s -> s.ok > 0 }?.score ?: 0.0) })).take((perServer - fresh.size).coerceAtLeast(1))
+            base.take(3) + fresh + base.drop(3)
+        }
         // Interleaved (1st mask of every server, then the 2nd…): parallel probes hit different servers, and a server
         // that already has [enough] working masks stops early instead of trying all of them.
         val lists = pinned.map { s -> order(s).map { s to it } }
@@ -231,8 +258,15 @@ object Actions {
             }
         } finally { own.close() }
         val net = Net.key(app)
+        // Passed mutants join the auto masks (before any server points at them); failed fresh ones are forgotten.
+        val keptIds = kept.map { it.id }.toSet()
+        val winners = tried.filter { it.third && it.second.startsWith(MaskLab.PREFIX) }.map { it.second }.distinct()
+            .mapNotNull { id -> Masks.byId(id) ?: pool.firstOrNull { it.id == id } }
+        if (winners.isNotEmpty()) Store.update { st -> st.copy(settings = st.settings.copy(autoMasks = MaskLab.keep(st.settings.autoMasks, winners))) }
+        val winIds = winners.map { it.id }.toSet()
         // Failures of a server where nothing worked say nothing about the masks (the server may be dead).
-        Store.recordMasks(net, tried.filter { (sid, _, ok) -> ok || good.containsKey(sid) }.map { it.second to it.third })
+        Store.recordMasks(net, tried.filter { (sid, mid, ok) -> (ok || good.containsKey(sid)) && (!mid.startsWith(MaskLab.PREFIX) || mid in keptIds || mid in winIds) }
+            .map { it.second to it.third })
         pinned.forEach { s ->
             val b = best[s.id]
             Store.setState(s.id) {
@@ -242,7 +276,8 @@ object Actions {
                     goodMasks = good[s.id].orEmpty().sortedBy { g -> g.second }.map { g -> g.first.id }.filter { g -> g != b.first.id }.take(8))
             }
         }
-        return "Маскировка найдена для ${best.size} из ${pinned.size} серверов (перебрано ${variants.size} вариантов, сеть «$net»)"
+        val bred = if (evo) ", новых авто-масок: ${winIds.count { it !in keptIds }}" else ""
+        return "Маскировка найдена для ${best.size} из ${pinned.size} серверов (перебрано ${variants.size} вариантов$bred, сеть «$net»)"
     }
 
     /**
@@ -265,11 +300,18 @@ object Actions {
     }
 
     /** Collects per-server results from parallel callbacks and applies them to the store in chunks. */
-    class StateBatch(private val size: Int = 200) {
+    class StateBatch(private val size: Int = 200, private val maxAgeMs: Long = 700) {
         private val pending = java.util.concurrent.ConcurrentHashMap<String, (com.vlesscardvpn.model.ServerState) -> com.vlesscardvpn.model.ServerState>()
-        fun put(id: String, f: (com.vlesscardvpn.model.ServerState) -> com.vlesscardvpn.model.ServerState) { pending[id] = f; if (pending.size >= size) flush() }
+        @Volatile private var lastFlush = System.currentTimeMillis()
+        /** Flushes by size or by time: the list updates smoothly instead of once per result. */
+        fun put(id: String, f: (com.vlesscardvpn.model.ServerState) -> com.vlesscardvpn.model.ServerState) {
+            pending[id] = f
+            if (pending.size >= size || System.currentTimeMillis() - lastFlush > maxAgeMs) flush()
+        }
         @Synchronized fun flush() {
+            lastFlush = System.currentTimeMillis()
             val snap = HashMap(pending); snap.keys.forEach { pending.remove(it) }
+            if (snap.isEmpty()) return
             Store.setStates(snap)
         }
     }

@@ -11,6 +11,9 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.transform
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import org.json.JSONArray
@@ -38,6 +41,12 @@ object Store {
     private val _state = MutableStateFlow(AppState())
     val state: StateFlow<AppState> = _state
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    /**
+     * For lists and the home screen: the same state, but at most ~3 times a second. A big check streams thousands
+     * of results; redrawing on each one made the app stutter. The first change after a pause shows at once.
+     */
+    val ui: StateFlow<AppState> = _state.transform { emit(it); delay(300) }
+        .stateIn(scope, SharingStarted.Eagerly, _state.value)
     private var file: File? = null
     private var saveJob: Job? = null
     private val lock = Any()
@@ -50,8 +59,11 @@ object Store {
     }
 
     private var syncedMasks: List<String>? = null
+    private var syncedAuto: List<String>? = null
     /** «Мои маскировки» live in Settings; Masks (used by the config builder and the search) reads them from here. */
     @Synchronized private fun syncMasks() {
+        val auto = _state.value.settings.autoMasks
+        if (auto !== syncedAuto) { syncedAuto = auto; com.vlesscardvpn.xray.Masks.auto = com.vlesscardvpn.xray.MaskLab.load(auto) }
         val my = _state.value.settings.myMasks
         if (my === syncedMasks) return
         syncedMasks = my

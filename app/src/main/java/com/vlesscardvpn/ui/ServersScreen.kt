@@ -34,19 +34,20 @@ private enum class Filter(val title: String) { ALL("Все"), WORKING("Рабо�
 @Composable
 fun ServersScreen() {
     val ctx = LocalContext.current
-    val app by Store.state.collectAsState()
+    val app by Store.ui.collectAsState()
     val progress by Actions.progress.collectAsState()
     var filter by remember { mutableStateOf(Filter.ALL) }
     var addOpen by remember { mutableStateOf(false) }
     var menuFor by remember { mutableStateOf<Server?>(null) }
 
-    val list = remember(app, filter) {
+    // Sorting thousands of servers happens off the main thread; the old list stays on screen meanwhile.
+    val list by produceState(initialValue = emptyList<Server>(), app, filter) { value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
         val rank = { s: Server -> val st = app.state(s)
             when { st.selected -> 0; st.works -> 1; st.tcpMs > 0 && st.realMs < 0 -> 2; st.realMs < 0 && st.tcpMs < 0 -> 3; else -> 4 } }
         app.servers.filter { when (filter) { Filter.ALL -> true; Filter.WORKING -> app.state(it).works; Filter.SELECTED -> app.state(it).selected } }
             .sortedWith(compareBy<Server>(rank).thenBy { app.state(it).realMs.let { ms -> if (ms > 0) ms else Int.MAX_VALUE } }
                 .thenBy { app.state(it).tcpMs.let { ms -> if (ms > 0) ms else Int.MAX_VALUE } })
-    }
+    } }
 
     Column(Modifier.fillMaxSize().padding(horizontal = 12.dp)) {
         Spacer(Modifier.height(10.dp))
@@ -176,7 +177,7 @@ private fun ServerMenu(s: Server, st: ServerState, onDismiss: () -> Unit) {
                 TextButton(onClick = { Actions.findMasks(listOf(s)); onDismiss() }) { Text("Подобрать маскировку (перебор до 32 вариантов)") }
                 TextButton(onClick = { masks = true }) { Text("Выбрать маскировку вручную") }
                 TextButton(onClick = { fork = true }) { Text("Сделать свою на основе текущей") }
-                Masks.byId(st.maskId)?.takeIf { it.custom }?.let { m -> TextButton(onClick = { shareMyMask(ctx, m); onDismiss() }) { Text("Поделиться маскировкой") } }
+                Masks.byId(st.maskId)?.takeIf { it.custom || it.auto }?.let { m -> TextButton(onClick = { shareMyMask(ctx, m); onDismiss() }) { Text("Поделиться маскировкой") } }
                 TextButton(onClick = {
                     (ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("link", LinkParser.toLink(s)))
                     Toast.makeText(ctx, "Ссылка скопирована", Toast.LENGTH_SHORT).show(); onDismiss()

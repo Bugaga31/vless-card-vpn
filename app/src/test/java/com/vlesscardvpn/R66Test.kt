@@ -3,6 +3,7 @@ package com.vlesscardvpn
 import com.vlesscardvpn.core.WarpKeys
 import com.vlesscardvpn.model.Server
 import com.vlesscardvpn.model.Settings
+import com.vlesscardvpn.xray.MaskLab
 import com.vlesscardvpn.xray.Masks
 import com.vlesscardvpn.xray.MyMasks
 import com.vlesscardvpn.xray.XrayConfigBuilder
@@ -18,7 +19,7 @@ class R66Test {
     private val tls = Server("a", "vless", "1.2.3.4", 443, "11111111-1111-1111-1111-111111111111", security = "tls", sni = "a.com")
     private val wg = Server("wg", "wireguard", "1.2.3.4", 51820, "k", pbk = "p")
 
-    @After fun reset() { Masks.custom = emptyList() }
+    @After fun reset() { Masks.custom = emptyList(); Masks.auto = emptyList() }
 
     @Test fun myMaskLinkRoundTrip() {
         val m = MyMasks.fork(Masks.byId("firefox.l2")!!, "Шредер для Билайна")
@@ -64,7 +65,8 @@ class R66Test {
     }
 
     @Test fun newBuiltInMasks() {
-        listOf("chrome.l4", "safari.l5", "firefox.l6", "chrome.p6", "chrome.z10", "chrome.z11", "chrome.z10.hw", "chrome.z11.hl").forEach {
+        listOf("chrome.l4", "safari.l5", "firefox.l6", "chrome.p6", "chrome.z10", "chrome.z11", "chrome.z10.hw", "chrome.z11.hl",
+            "chrome.h7", "safari.p7", "firefox.l7.b", "chrome.z12", "chrome.z12.hw").forEach {
             assertTrue(it, Masks.byId(it) != null)
         }
         Masks.ALL.filter { it.lengths.isNotEmpty() }.forEach { assertEquals(it.id, it.lengths.split(',').size, it.delays.split(',').size) }
@@ -96,5 +98,37 @@ class R66Test {
         val s = Settings(warpKeyOff = listOf("x"), warpKeyStatus = mapOf("k" to "ok@1"), myMasks = listOf("{\"t\":\"a\",\"fp\":\"chrome\"}"))
         val r = Settings.fromJson(s.toJson())
         assertEquals(s.warpKeyOff, r.warpKeyOff); assertEquals(s.warpKeyStatus, r.warpKeyStatus); assertEquals(s.myMasks, r.myMasks)
+    }
+
+    @Test fun maskEvolution() {
+        val parents = listOf("firefox.l2", "chrome.h3", "chrome.z5", "chrome.z6.hw", "chrome.n").map { Masks.byId(it)!! }
+        val pool = MaskLab.breed(parents, 40, known = emptySet(), seed = 42)
+        assertEquals(40, pool.size)
+        assertEquals(pool, MaskLab.breed(parents, 40, known = emptySet(), seed = 42)) // deterministic per seed
+        pool.forEach { m ->
+            assertTrue(m.id, m.auto && !m.custom && m.id.startsWith(MaskLab.PREFIX) && m.title.startsWith("Авто:"))
+            assertEquals(m.id, Masks.family(m), "auto")
+            if (m.lengths.isNotEmpty()) assertEquals(m.id, m.lengths.split(',').size, m.delays.split(',').size)
+            // every mutant must build a valid outbound for some server type
+            val s = if (m.hop == Masks.HOP_WARP) wg.copy(source = "warp") else if (m.hasNoise || m.hop.isNotEmpty()) wg else tls
+            assertTrue(m.id, Masks.compatible(m, s))
+            XrayConfigBuilder.outbound(s, "t", m).toString()
+        }
+        assertTrue(pool.any { it.hasNoise } && pool.any { it.packets.isNotEmpty() })
+        // no parents: random newcomers; known ids are skipped
+        val fresh = MaskLab.breed(emptyList(), 10, known = setOf(pool[0].id), seed = 1)
+        assertEquals(10, fresh.size); assertFalse(fresh.any { it.id == pool[0].id })
+        // round trip through Settings; a mutant of a mutant is the next generation
+        val kept = MaskLab.keep(emptyList(), pool.take(3))
+        assertEquals(pool.take(3), MaskLab.load(kept))
+        assertTrue(MaskLab.keep(kept, pool).size <= MaskLab.CAP)
+        val child = (1..20).mapNotNull { MaskLab.mutate(pool[0], kotlin.random.Random(it)) }.first()
+        assertTrue(child.title, child.title.contains("поколение 2"))
+        // auto masks resolve by id (servers point at them) and stay out of the plain search order
+        Masks.auto = pool
+        assertEquals(pool[5], Masks.byId(pool[5].id))
+        assertFalse(Masks.searchOrder(true, tls).any { it.auto })
+        val r = Settings.fromJson(Settings(autoMasks = kept, maskEvolution = false).toJson())
+        assertEquals(kept, r.autoMasks); assertFalse(r.maskEvolution)
     }
 }

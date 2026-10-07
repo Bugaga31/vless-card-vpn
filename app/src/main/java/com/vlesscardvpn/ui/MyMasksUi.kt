@@ -90,6 +90,42 @@ fun MyMasksSection() {
         }) { Text("Вставить ссылку") }
     }
     if (creating || edit != null) MaskEditor(edit, onDismiss = { creating = false; edit = null })
+    MaskEvolutionSection()
+}
+
+/** «Эволюция масок»: auto masks bred from what passed (MaskLab); the best can be kept as own ones or shared. */
+@Composable
+fun MaskEvolutionSection() {
+    val ctx = LocalContext.current
+    val app by Store.state.collectAsState()
+    val auto = remember(app.settings.autoMasks) { com.vlesscardvpn.xray.MaskLab.load(app.settings.autoMasks) }
+    var all by remember { mutableStateOf(false) }
+    Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text("Эволюция масок", fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
+            Text("При каждом подборе пробуются мутанты масок, которые прошли в этой сети: другие размеры кусков, паузы, ступеньки, шум. " +
+                "Прошедшие остаются и дают следующее поколение — маски уходят от шаблонов, которые выучил ТСПУ.", fontSize = 12.sp, color = Color.Gray)
+        }
+        Switch(app.settings.maskEvolution, { v -> Store.update { st -> st.copy(settings = st.settings.copy(maskEvolution = v)) } })
+    }
+    if (auto.isEmpty()) { Text("Авто-масок пока нет — появятся после «Подобрать маскировку».", fontSize = 12.sp, color = Color.Gray); return }
+    Text("Выведено авто-масок: ${auto.size}", fontSize = 12.sp)
+    (if (all) auto else auto.take(5)).forEach { m ->
+        Card(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(10.dp)) {
+                Text(m.title, fontWeight = FontWeight.Medium, fontSize = 14.sp)
+                Text(describeMask(m), fontSize = 11.sp, color = Color.Gray)
+                Row {
+                    TextButton(onClick = { saveMyMask(MyMasks.fork(m, m.title.replace("Авто:", "Моя:"))); Toast.makeText(ctx, "Добавлено в «Мои маскировки»", Toast.LENGTH_SHORT).show() }) { Text("В мои") }
+                    TextButton(onClick = { shareMyMask(ctx, m) }) { Text("Поделиться") }
+                }
+            }
+        }
+    }
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        if (auto.size > 5) OutlinedButton(onClick = { all = !all }) { Text(if (all) "Свернуть" else "Показать все") }
+        OutlinedButton(onClick = { Store.update { st -> st.copy(settings = st.settings.copy(autoMasks = emptyList())) } }) { Text("Очистить", color = Bad) }
+    }
 }
 
 private enum class Kind(val title: String) { FRAG("Дробление (TCP)"), LADDER("Лесенка (TCP)"), NOISE("Шум (UDP, WireGuard)"), PLAIN("Только отпечаток") }

@@ -73,7 +73,7 @@ object MyMasks {
     }
 
     /** Stable id from the parameters (not the title): renaming keeps learned statistics. */
-    private fun idOf(m: Mask): String = toJson(m.copy(title = "")).toString().let { s ->
+    fun idOf(m: Mask): String = toJson(m.copy(title = "")).toString().let { s ->
         java.security.MessageDigest.getInstance("SHA-256").digest(s.toByteArray()).take(5).joinToString("") { "%02x".format(it) }
     }
 
