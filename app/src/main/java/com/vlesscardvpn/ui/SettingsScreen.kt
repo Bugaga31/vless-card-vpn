@@ -25,6 +25,7 @@ import com.vlesscardvpn.core.ByeDpiArgs
 import com.vlesscardvpn.core.DpiStrategies
 import com.vlesscardvpn.core.Net
 import com.vlesscardvpn.core.Store
+import com.vlesscardvpn.core.Tester
 import com.vlesscardvpn.core.XrayCore
 import com.vlesscardvpn.model.Balance
 import com.vlesscardvpn.model.Settings
@@ -44,7 +45,7 @@ fun SettingsScreen() {
         val current = DpiStrategies.resolve(s, network)
         Hint("Используется в режимах «ByeDPI» и «Гибрид» и как маскировка «через ByeDPI» для серверов. Сейчас: ${current.label} (сеть «$network»).")
         Button(onClick = { Actions.findDpi() }, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text("Подобрать обход для этой сети") }
-        LiveProgress { it.title == "Подбор обхода DPI" || it.title == "Проверка обхода DPI" }
+        LiveProgress { it.title == "Подбор обхода DPI" || it.title == "Проверка обхода DPI" || it.title.startsWith("Финал") }
         val results by Actions.dpiResults.collectAsState()
         var showAll by remember { mutableStateOf(false) }
         StrategyRow("Авто — подобранная для сети", s.dpiStrategy == Settings.DPI_AUTO, null) { set { it.copy(dpiStrategy = Settings.DPI_AUTO) } }
@@ -246,7 +247,7 @@ private fun StrategyRow(label: String, selected: Boolean, r: Actions.DpiResult?,
     Row(Modifier.fillMaxWidth().clickable(onClick = onClick), verticalAlignment = Alignment.CenterVertically) {
         RadioButton(selected = selected, onClick = onClick)
         Text(label, Modifier.weight(1f), fontSize = 13.sp)
-        if (r != null) Text(if (r.ok) "✓ ${r.ms} мс" else "✗", color = if (r.ok) Good else Bad, fontSize = 12.sp)
+        if (r != null) Text(if (!r.ok) "✗" else if (r.score >= 0) "✓ ${r.score}/${Tester.DPI_SITES.size * 2} · ${r.ms} мс" else "✓ ${r.ms} мс", color = if (r.ok) Good else Bad, fontSize = 12.sp)
     }
 }
 

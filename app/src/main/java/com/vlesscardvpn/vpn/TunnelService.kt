@@ -31,6 +31,7 @@ import com.vlesscardvpn.core.Tunnel
 import com.vlesscardvpn.core.XrayCore
 import com.vlesscardvpn.model.Mode
 import com.vlesscardvpn.xray.Masks
+import com.vlesscardvpn.model.Settings
 import com.vlesscardvpn.xray.XrayConfigBuilder
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -65,7 +66,8 @@ class TunnelService : VpnService() {
         }
     }
 
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    /** A failure in a background job (check, heal, speed-up) must never take the whole app down. */
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO + kotlinx.coroutines.CoroutineExceptionHandler { _, e -> Log.w(TAG, "background job failed", e) })
     private val lock = Mutex()
     private var tun: ParcelFileDescriptor? = null
     private var core: XrayCore.Instance? = null
@@ -78,13 +80,19 @@ class TunnelService : VpnService() {
     private var autoDpiOnly = false
     /** Servers of the running connection (selected or the best ones taken automatically). */
     @Volatile private var usedServers: List<com.vlesscardvpn.model.Server> = emptyList()
+    /** DPI-strategy repairs in a row (reset by a good check). */
+    private var dpiHeals = 0
+    /** Connect attempts that failed to start (Auto mode retries with safer settings). */
+    private var connectFails = 0
+    /** Retry after a failed start: links' own settings, no masks. */
+    private var safeMasks = false
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_STOP -> { scope.launch { lock.withLock { teardown("") } ; stopSelf() } }
             else -> { // ACTION_START or always-on restart (null intent)
                 foreground("Подключение…")
-                healStep = 0; autoDpiOnly = false
+                healStep = 0; autoDpiOnly = false; dpiHeals = 0; connectFails = 0; safeMasks = false
                 scope.launch { lock.withLock { connect() } }
             }
         }
@@ -94,7 +102,8 @@ class TunnelService : VpnService() {
     override fun onRevoke() { scope.launch { lock.withLock { teardown("VPN отключён системой или другим VPN") }; stopSelf() } }
 
     override fun onDestroy() {
-        runCatching { kotlinx.coroutines.runBlocking { lock.withLock { teardown(null) } } }
+        // Never block the main thread on a long connect/heal holding the lock (that was an ANR): wait 1.5 s at most.
+        runCatching { kotlinx.coroutines.runBlocking { kotlinx.coroutines.withTimeoutOrNull(1500) { lock.withLock { teardown(null) } } ?: teardown(null) } }
         scope.cancel()
         super.onDestroy()
     }
@@ -125,7 +134,7 @@ class TunnelService : VpnService() {
                 val ss = st.state(srv)
                 val mine = ss.maskFor(network)
                 val id = if (rotate && ss.goodMasks.isNotEmpty()) (ss.goodMasks + mine).filter { it.isNotEmpty() }.random() else mine
-                srv to Masks.byId(id)
+                srv to if (safeMasks) null else Masks.byId(id)
             }
             val needCurrent = settings.mode != Mode.SERVERS || withMasks.any { it.second?.dpi == Masks.CURRENT_DPI }
             val fixed = if (settings.mode == Mode.BYEDPI) emptySet() else Masks.strategies(withMasks.map { it.second }) - Masks.CURRENT_DPI
@@ -161,8 +170,18 @@ class TunnelService : VpnService() {
             watchNetwork()
             verifySoon(0)
         } catch (e: Throwable) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
             Log.w(TAG, "connect failed", e)
             Log.i("E2E", "connect failed: ${e.message}")
+            // Auto mode doesn't give up on a failed start: 1) without masks, 2) DPI bypass without servers.
+            if (Store.state.value.settings.mode == Mode.AUTO && connectFails < 2) {
+                connectFails++
+                if (connectFails == 1) safeMasks = true else autoDpiOnly = true
+                Log.i("E2E", "connect retry #$connectFails safe=$safeMasks dpiOnly=$autoDpiOnly")
+                teardown(null)
+                Tunnel.status.value = Tunnel.Status(Tunnel.State.CONNECTING, "Подключение…", check = "Не запустилось (${e.message?.take(80)}) — пробую по-другому…")
+                connect(); return
+            }
             teardown(e.message ?: e.javaClass.simpleName)
             stopSelf()
         }
@@ -207,7 +226,7 @@ class TunnelService : VpnService() {
                 else "Нет ответа через выбранный маршрут (${p.error}). " + if (st.mode == Mode.AUTO && st.autoHeal) "Ищу рабочий вариант сам…" else "Проверьте серверы или включите маскировку."
             Tunnel.status.value = cur.copy(check = text, checkOk = p.works)
             Log.i("E2E", "check ok=${p.works} ms=${p.realMs} big=${p.bigOk} yt=${p.ytOk} tg=${p.tgOk} err=${p.error} warp=$warp")
-            if (p.works) { healStep = 0; scheduleOptimize(); watchdog(); if (serverless()) rescueLater() } else heal()
+            if (p.works) { healStep = 0; dpiHeals = 0; connectFails = 0; scheduleOptimize(); watchdog(); if (serverless()) rescueLater() } else heal()
         }
     }
 
@@ -276,13 +295,20 @@ class TunnelService : VpnService() {
      */
     private fun heal() {
         val st = Store.state.value
-        if (!st.settings.autoHeal || st.settings.mode == Mode.BYEDPI || healJob?.isActive == true) return
+        if (!st.settings.autoHeal || healJob?.isActive == true) return
         val auto = st.settings.mode == Mode.AUTO
-        if (autoDpiOnly) {
-            // ByeDPI alone doesn't open sites either: pick another strategy for this network, keep looking for servers
+        if (st.settings.mode == Mode.BYEDPI || autoDpiOnly) {
+            // DPI bypass without a server stopped working: the next strategy remembered for this network, else a new search
+            if (st.settings.dpiStrategy != Settings.DPI_AUTO || dpiHeals >= 6) {
+                healStatus(if (dpiHeals >= 6) "Обход DPI в этой сети не помогает — нужен сервер (режим «Авто» найдёт его сам)" else "Стратегия выбрана вручную — включите «Авто» в Настройках → Обход DPI")
+                return
+            }
+            dpiHeals++
             healJob = scope.launch {
-                healStatus("Обход DPI не помог — подбираю другую стратегию и продолжаю искать серверы…")
-                runCatching { Store.busy { Actions.doFindDpi() } }
+                if (!Actions.online()) { healStatus("Нет интернета у самой сети — жду, когда появится…"); dpiHeals--; delay(20_000); verifySoon(0); return@launch }
+                if (dpiHeals % 3 != 0 && Actions.nextDpi()) healStatus("Стратегию, похоже, распознали — переключаюсь на запасную…")
+                else { healStatus("Подбираю новую стратегию обхода для этой сети…"); runCatching { Store.busy { Actions.doFindDpi() } } }
+                Log.i("E2E", "heal dpi=$dpiHeals")
                 delay(500); lock.withLock { connect() }
             }
             return
@@ -315,6 +341,7 @@ class TunnelService : VpnService() {
                 healStatus("Серверы раз за разом отваливаются — пока обход DPI без сервера, поиск идёт в фоне…")
             }
             Log.i("E2E", "heal step=$healStep dpiOnly=$autoDpiOnly")
+            safeMasks = false; connectFails = 0
             delay(500)
             lock.withLock { connect() }
         }

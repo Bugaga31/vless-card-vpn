@@ -113,9 +113,10 @@ object DpiStrategies {
     fun custom(line: String, mask: String): DpiStrategy? = ByeDpiArgs.parse(line, mask).getOrNull()
         ?.let { DpiStrategy(CUSTOM_ID, "Своя строка: ${line.take(40)}", DpiEngine.BYEDPI, it) }
 
-    fun byId(id: String?, s: Settings): DpiStrategy? = when (id) {
-        null, "", Settings.DPI_AUTO -> null
-        CUSTOM_ID -> custom(s.byeDpiArgs, s.byeDpiSni)
+    fun byId(id: String?, s: Settings): DpiStrategy? = when {
+        id == null || id == "" || id == Settings.DPI_AUTO -> null
+        id == CUSTOM_ID -> custom(s.byeDpiArgs, s.byeDpiSni)
+        id.startsWith(DpiEvo.PREFIX) -> DpiEvo.decode(id)
         else -> BUILT_IN.firstOrNull { it.id == id }
     }
 
@@ -126,10 +127,11 @@ object DpiStrategies {
             ?: custom(s.byeDpiArgs, s.byeDpiSni) ?: BUILT_IN.first()
     }
 
-    /** Search order: custom line, the remembered one, then all built-ins (zapret only if the binary exists). */
+    /** Search order: custom line, the remembered ones of this network (best first), then all built-ins (zapret only if the binary exists). */
     fun plan(s: Settings, network: String, tpwsAvailable: Boolean): List<DpiStrategy> = buildList {
         custom(s.byeDpiArgs, s.byeDpiSni)?.let { add(it) }
         byId(s.dpiRemembered[network], s)?.let { add(it) }
+        s.dpiRanking[network].orEmpty().forEach { id -> byId(id, s)?.let { add(it) } }
         addAll(BUILT_IN)
     }.filter { tpwsAvailable || it.engine != DpiEngine.TPWS }.distinctBy { it.id }
 
@@ -239,4 +241,59 @@ class DpiSet(private val context: Context) : AutoCloseable {
     }
 
     override fun close() { procs.forEach { it.close() }; procs.clear(); ports.clear(); currentPort = null; current = null }
+}
+
+/**
+ * «Эволюция стратегий» (VLESS Card): the TSPU is tuned against the popular ByeDPI lines. Winners of a search get
+ * mutants — other split / disorder positions, another fake TTL, a TLS record split added — and the best of all wins.
+ * A mutant lives entirely in its id ("EVO#" + arguments), so it is remembered per network like any strategy.
+ */
+object DpiEvo {
+    const val PREFIX = "EVO#"
+    private const val SEP = "\u001f"
+    private val POS_FLAGS = setOf("--split", "--disorder", "--tlsrec", "--oob", "--disoob", "--fake")
+    private val NUM = Regex("-?\\d+")
+
+    fun encode(args: List<String>): String = PREFIX + args.joinToString(SEP)
+    fun decode(id: String): DpiStrategy? {
+        val args = id.removePrefix(PREFIX).split(SEP).filter { it.isNotEmpty() }
+        if (args.isEmpty() || args.size > 64) return null
+        return DpiStrategy(id, "VLESS Card · выведенная: " + args.filter { it.startsWith("--") }.joinToString(" ") { it.removePrefix("--") }.take(40), DpiEngine.BYEDPI, args, own = true)
+    }
+
+    /** Jitters one position like "1+s", "3", "2:4:3+s", "-1+se": numbers move by 1-3, the sign and suffix stay. */
+    private fun shift(v: String, rnd: kotlin.random.Random): String = NUM.replace(v) { m ->
+        val n = m.value.toInt(); val d = rnd.nextInt(1, 4) * if (rnd.nextBoolean()) 1 else -1
+        (if (n < 0) (n + d).coerceIn(-8, -1) else (n + d).coerceIn(1, 16)).toString()
+    }
+
+    fun mutate(base: DpiStrategy, rnd: kotlin.random.Random): DpiStrategy? {
+        if (base.engine != DpiEngine.BYEDPI) return null
+        val a = base.args.toMutableList()
+        var changed = false
+        for (i in 0 until a.size - 1) {
+            when {
+                a[i] in POS_FLAGS && rnd.nextInt(3) == 0 -> { a[i + 1] = shift(a[i + 1], rnd); changed = true }
+                a[i] == "--ttl" && rnd.nextInt(2) == 0 -> { a[i + 1] = rnd.nextInt(3, 13).toString(); changed = true }
+            }
+        }
+        if ("--tlsrec" !in a && rnd.nextInt(3) == 0) { a += listOf("--tlsrec", "1+s"); changed = true }
+        if (!changed) { val i = a.indices.firstOrNull { a[it] in POS_FLAGS && it + 1 < a.size } ?: return null; a[i + 1] = shift(a[i + 1], rnd) }
+        if (a == base.args) return null
+        return decode(encode(a))
+    }
+
+    /** [n] distinct mutants of [parents] (best first get more). */
+    fun breed(parents: List<DpiStrategy>, n: Int, seed: Long = System.nanoTime()): List<DpiStrategy> {
+        val bye = parents.filter { it.engine == DpiEngine.BYEDPI }
+        if (bye.isEmpty()) return emptyList()
+        val rnd = kotlin.random.Random(seed)
+        val out = LinkedHashMap<String, DpiStrategy>()
+        var guard = 0
+        while (out.size < n && guard++ < n * 10) {
+            val p = bye[(rnd.nextDouble().let { it * it } * bye.size).toInt().coerceAtMost(bye.size - 1)]
+            mutate(p, rnd)?.let { m -> if (parents.none { it.args == m.args }) out.putIfAbsent(m.id, m) }
+        }
+        return out.values.toList()
+    }
 }

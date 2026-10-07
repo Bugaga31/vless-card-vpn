@@ -35,7 +35,7 @@ import java.util.concurrent.atomic.AtomicInteger
 object Actions {
     data class Progress(val title: String = "", val done: Int = 0, val total: Int = 0, val running: Boolean = false, val message: String = "")
     val progress = MutableStateFlow(Progress())
-    private val scope = CoroutineScope(SupervisorJob() + Bg.cpu)
+    private val scope = CoroutineScope(SupervisorJob() + Bg.cpu + kotlinx.coroutines.CoroutineExceptionHandler { _, e -> android.util.Log.w("VLESS", "background job failed", e) })
     /** Only "is something running": buttons don't redraw the whole screen on every progress step. */
     val running: kotlinx.coroutines.flow.StateFlow<Boolean> = progress.map { it.running }.distinctUntilChanged()
         .stateIn(scope, kotlinx.coroutines.flow.SharingStarted.Eagerly, false)
@@ -618,7 +618,7 @@ object Actions {
     }
 
     // ---------- DPI strategy search (как в ByeByeDPI «тест стратегий») ----------
-    data class DpiResult(val ok: Boolean, val ms: Int, val error: String)
+    data class DpiResult(val ok: Boolean, val ms: Int, val error: String, val score: Int = -1)
     /** Strategy id → result of the last search (this session). */
     val dpiResults = MutableStateFlow<Map<String, DpiResult>>(emptyMap())
 
@@ -629,6 +629,12 @@ object Actions {
      */
     fun findDpi() = launch("Подбор обхода DPI") { doFindDpi() }
 
+    /**
+     * Smart DPI search: 1) every strategy against the YouTube page (fast); 2) the 8 fastest that passed plus mutants
+     * of the 3 best ByeDPI ones («эволюция стратегий») — two rounds against YouTube, its image CDN and Discord.
+     * The winner opens the most sites most reliably, then is the fastest. The top 5 are remembered for this network:
+     * if the chosen one stops working, the next is used at once instead of a new search.
+     */
     suspend fun doFindDpi(): String {
         val st = Store.state.value.settings
         val network = Net.key(app)
@@ -638,33 +644,71 @@ object Actions {
         dpiResults.value = emptyMap()
         val done = AtomicInteger()
         step(0, plan.size)
-        coroutineScope {
-            val sem = Semaphore(8)
-            plan.map { s ->
+        suspend fun run(list: List<DpiStrategy>, par: Int, test: (DpiStrategy, Int) -> DpiResult) = coroutineScope {
+            val sem = Semaphore(par)
+            list.map { s ->
                 async(Bg.io) {
                     sem.withPermit {
                         val px = DpiProxy(app)
-                        val r = try {
-                            val port = px.start(s, st.byeDpiSni, allowLocal = com.vlesscardvpn.BuildConfig.DEBUG)
-                            Tester.probeDpi(port, attempts = if (s.adaptive) 3 else 2)
-                        } catch (e: Throwable) { Tester.DpiProbe(false, 0, 0, e.message ?: "не запустился") } finally { px.close() }
-                        dpiResults.value = dpiResults.value + (s.id to DpiResult(r.ok, r.ms, r.error))
-                        step(done.incrementAndGet(), plan.size)
+                        val r = try { test(s, px.start(s, st.byeDpiSni, allowLocal = com.vlesscardvpn.BuildConfig.DEBUG)) }
+                            catch (e: Throwable) { DpiResult(false, 0, e.message ?: "не запустился") } finally { px.close() }
+                        synchronized(dpiResults) { dpiResults.value = dpiResults.value + (s.id to r) }
+                        step(done.incrementAndGet(), progress.value.total)
                     }
                 }
             }.awaitAll()
         }
-        val res = dpiResults.value
-        val working = plan.filter { res[it.id]?.ok == true }
-        val best = working.firstOrNull()
-        val zapretOk = working.count { it.engine == DpiEngine.TPWS }
-        val ownOk = working.count { it.own }
-        val xrOk = working.count { it.engine == DpiEngine.XRAY }
-        if (best != null) Store.update { a ->
-            a.copy(settings = a.settings.copy(dpiRemembered = a.settings.dpiRemembered + (network to best.id) + (Settings.ANY_NETWORK to best.id)))
+        run(plan, 8) { _, port -> Tester.probeDpi(port, attempts = 2).let { DpiResult(it.ok, it.ms, it.error) } }
+        val first = dpiResults.value
+        val passed = plan.filter { first[it.id]?.ok == true }.sortedBy { first.getValue(it.id).ms }
+        // Stage 2: finals + evolution
+        val finals = passed.take(8)
+        val mutants = if (finals.isEmpty()) DpiEvo.breed(plan.filter { it.engine == DpiEngine.BYEDPI }.take(6), 6) else DpiEvo.breed(finals.take(3), 9)
+        val stage2 = (finals + mutants).distinctBy { it.id }
+        val scores = java.util.concurrent.ConcurrentHashMap<String, MutableList<Tester.DpiScore>>()
+        if (stage2.isNotEmpty()) {
+            progress.value = progress.value.copy(title = "Финал: YouTube, видео-CDN, Discord", done = 0, total = stage2.size * 2)
+            done.set(0)
+            repeat(2) {
+                run(stage2, 6) { strat, port ->
+                    var sc = Tester.probeDpiSites(port)
+                    // a learning (--auto) strategy may spend the first connections on detection: one more chance
+                    if (strat.adaptive && sc.score < Tester.DPI_SITES.size) sc = Tester.probeDpiSites(port).takeIf { it.score > sc.score } ?: sc
+                    scores.getOrPut(strat.id) { java.util.Collections.synchronizedList(mutableListOf()) } += sc
+                    DpiResult(sc.youtube, sc.ms, sc.error, sc.score)
+                }
+            }
         }
-        return if (best == null) "Сеть «$network»: ни одна из ${plan.size} стратегий не открыла YouTube. Нужен сервер (режим «Серверы»)."
-        else "Сеть «$network»: работают ${working.size} из ${plan.size} (zapret: $zapretOk, своих VLESS Card: $ownOk, из них Xray: $xrOk). Выбрана: ${best.label}"
+        // rank: total score over 2 rounds, YouTube both times, then speed
+        fun total(id: String) = scores[id].orEmpty().sumOf { it.score }
+        fun ytBoth(id: String) = scores[id].orEmpty().count { it.youtube }
+        fun msOf(id: String) = scores[id].orEmpty().filter { it.ms > 0 }.map { it.ms }.average().takeIf { !it.isNaN() } ?: Double.MAX_VALUE
+        val ranked = stage2.filter { ytBoth(it.id) > 0 }.sortedWith(compareByDescending<DpiStrategy> { ytBoth(it.id) }.thenByDescending { total(it.id) }.thenBy { msOf(it.id) })
+        val best = ranked.firstOrNull() ?: passed.firstOrNull()
+        val max = Tester.DPI_SITES.size * 2
+        dpiResults.value = first + ranked.associate { it.id to DpiResult(true, msOf(it.id).toInt(), "", total(it.id)) }
+        if (best != null) Store.update { a ->
+            a.copy(settings = a.settings.copy(dpiRemembered = a.settings.dpiRemembered + (network to best.id) + (Settings.ANY_NETWORK to best.id),
+                dpiRanking = a.settings.dpiRanking + (network to (ranked.ifEmpty { passed }).take(5).map { it.id })))
+        }
+        val evoWon = best?.id?.startsWith(DpiEvo.PREFIX) == true
+        return if (best == null) "Сеть «$network»: ни одна из ${plan.size} стратегий не открыла YouTube. Нужен сервер — режим «Авто» найдёт его сам."
+        else "Сеть «$network»: YouTube открыли ${passed.size} из ${plan.size}, в финале ${stage2.size} (из них выведенных: ${mutants.size}). " +
+            "Выбрана: ${best.label}" + (if (scores.containsKey(best.id)) " — ${total(best.id)} из $max проверок (YouTube, видео-CDN, Discord)" else "") +
+            if (evoWon) ". Победила выведенная стратегия — такой нет ни в одном списке." else ""
+    }
+
+    /** ByeDPI-only stopped working: the next strategy remembered for this network (no new search). */
+    fun nextDpi(): Boolean {
+        val st = Store.state.value.settings
+        val net = Net.key(app)
+        val rank = st.dpiRanking[net].orEmpty()
+        val cur = DpiStrategies.resolve(st, net).id
+        if (st.dpiStrategy != Settings.DPI_AUTO || rank.size < 2) return false
+        val next = rank[(rank.indexOf(cur) + 1) % rank.size].takeIf { it != cur } ?: return false
+        Store.update { a -> a.copy(settings = a.settings.copy(dpiRemembered = a.settings.dpiRemembered + (net to next),
+            dpiRanking = a.settings.dpiRanking + (net to (rank - cur + cur)))) }
+        return true
     }
 
     // ---------- network diagnosis (DPI / white lists) ----------
