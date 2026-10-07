@@ -80,7 +80,9 @@ fun ServersScreen() {
         }
         if (app.servers.isEmpty()) {
             Text("Список пуст. Нажмите «Подписки» — загрузятся бесплатные серверы для России (igareck, с зеркал), " +
-                "или «Добавить» и вставьте свои ссылки vless:// vmess:// trojan:// ss:// hysteria2://.", color = Color.Gray, modifier = Modifier.padding(top = 16.dp))
+                "или «Добавить» и вставьте свои ссылки vless:// vmess:// trojan:// ss:// hysteria2://.\n\n" +
+                "Публичные серверы держат посторонние люди: владелец видит, куда вы ходите, и может читать трафик без HTTPS. " +
+                "Не входите через них в банк и важные аккаунты.", color = Color.Gray, modifier = Modifier.padding(top = 16.dp))
         }
         LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(vertical = 6.dp)) {
             items(list, key = { it.id }) { s ->
@@ -106,7 +108,9 @@ private fun ServerRow(s: Server, st: ServerState, onToggle: () -> Unit, onLong: 
             Column(Modifier.weight(1f)) {
                 Text(s.name, maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.Medium, fontSize = 14.sp)
                 val mask = Masks.byId(st.maskId)?.title
-                Text(s.label + (mask?.let { " · $it" } ?: ""), maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 11.sp, color = Color.Gray)
+                // Catalog subscriptions are third-party free servers: mark them so they are not mistaken for your own.
+                val isPublic = com.vlesscardvpn.model.Subs.find(s.source) != null
+                Text(s.label + (if (isPublic) " · публичный" else "") + (mask?.let { " · $it" } ?: ""), maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 11.sp, color = Color.Gray)
             }
             Column(horizontalAlignment = Alignment.End) {
                 val real = st.realMs
