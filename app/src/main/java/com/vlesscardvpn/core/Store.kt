@@ -14,6 +14,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.transform
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import org.json.JSONArray
@@ -40,13 +42,28 @@ data class MaskStat(val ok: Int = 0, val fail: Int = 0) {
 object Store {
     private val _state = MutableStateFlow(AppState())
     val state: StateFlow<AppState> = _state
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val scope = CoroutineScope(SupervisorJob() + Bg.cpu)
+    private val busyN = java.util.concurrent.atomic.AtomicInteger()
+    /** A check / search is running: the list redraws and the file is saved less often. */
+    val busy: Boolean get() = busyN.get() > 0
+    suspend fun <T> busy(block: suspend () -> T): T { busyN.incrementAndGet(); try { return block() } finally { busyN.decrementAndGet() } }
     /**
-     * For lists and the home screen: the same state, but at most ~3 times a second. A big check streams thousands
-     * of results; redrawing on each one made the app stutter. The first change after a pause shows at once.
+     * For lists: the same state, but during a big check at most ~3 times a second (thousands of results used to
+     * redraw the list for each one). When idle, a tap shows at once.
      */
-    val ui: StateFlow<AppState> = _state.transform { emit(it); delay(300) }
+    val ui: StateFlow<AppState> = _state.transform { emit(it); delay(if (busy) 350 else 30) }
         .stateIn(scope, SharingStarted.Eagerly, _state.value)
+    /** Settings only: screens that show settings don't redraw for every server result. */
+    val settings: StateFlow<Settings> = _state.map { it.settings }.distinctUntilChanged()
+        .stateIn(scope, SharingStarted.Eagerly, _state.value.settings)
+
+    /** What the home screen shows about servers (counted in the background, not on the UI thread). */
+    data class Summary(val total: Int = 0, val working: Int = 0, val selectedCount: Int = 0, val selectedNames: List<String> = emptyList(), val mask: String = "")
+    val summary: StateFlow<Summary> = ui.map { st ->
+        val sel = st.selected
+        val mask = sel.firstNotNullOfOrNull { com.vlesscardvpn.xray.Masks.byId(st.state(it).maskId)?.takeIf { m -> m.id != com.vlesscardvpn.xray.Masks.DEFAULT.id } }?.title.orEmpty()
+        Summary(st.servers.size, st.servers.count { st.state(it).works }, sel.size, sel.take(3).map { it.name }, mask)
+    }.distinctUntilChanged().stateIn(scope, SharingStarted.Eagerly, Summary())
     private var file: File? = null
     private var saveJob: Job? = null
     private val lock = Any()
@@ -91,8 +108,10 @@ object Store {
         _state.update(change)
         syncMasks()
         synchronized(lock) {
+            // During a check: one save every few seconds instead of encoding thousands of servers after every batch.
+            if (busy && saveJob?.isActive == true) return
             saveJob?.cancel()
-            saveJob = scope.launch { delay(400); save() }
+            saveJob = scope.launch { delay(if (busy) 4000 else 400); save() }
         }
     }
 

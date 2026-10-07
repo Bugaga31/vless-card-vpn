@@ -27,9 +27,8 @@ private enum class KeyFilter(val title: String) { ALL("Все"), OK("Рабоч�
  */
 @Composable
 fun WarpKeysDialog(onDismiss: () -> Unit) {
-    val app by Store.state.collectAsState()
-    val s = app.settings
-    val progress by Actions.progress.collectAsState()
+    val s by Store.settings.collectAsState()
+    val busy by Actions.running.collectAsState()
     fun set(f: (Settings) -> Settings) = Store.update { it.copy(settings = f(it.settings)) }
     val own = remember(s.warpKeys) { WarpKeys.parse(s.warpKeys) }
     val all = remember(own, s.warpBuiltinKeys) { (own + if (s.warpBuiltinKeys) WarpKeys.BUILT_IN else emptyList()).distinct() }
@@ -75,7 +74,7 @@ fun WarpKeysDialog(onDismiss: () -> Unit) {
                                 }
                                 Text((if (k in own) "свой · " else "") + txt, fontSize = 11.sp, color = col)
                             }
-                            TextButton(onClick = { Actions.setupWarp(onlyKey = k); onDismiss() }, enabled = !progress.running && st(k) != WarpKeys.BAD) { Text("Подключить") }
+                            TextButton(onClick = { Actions.setupWarp(onlyKey = k); onDismiss() }, enabled = !busy && st(k) != WarpKeys.BAD) { Text("Подключить") }
                         }
                     }
                 }

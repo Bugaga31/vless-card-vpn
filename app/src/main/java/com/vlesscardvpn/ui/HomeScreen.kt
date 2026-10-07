@@ -27,12 +27,14 @@ import com.vlesscardvpn.model.Mode
 @Composable
 fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () -> Unit) {
     val status by Tunnel.status.collectAsState()
-    val app by Store.ui.collectAsState()
-    val progress by Actions.progress.collectAsState()
-    val mode = app.settings.mode
+    // Only settings and a small summary: the home screen does not redraw for every server result of a check.
+    val cfg by Store.settings.collectAsState()
+    val sum by Store.summary.collectAsState()
+    val busy by Actions.running.collectAsState()
+    val mode = cfg.mode
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
         Text("VLESS Card", fontSize = 26.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onBackground)
-        Text("${BuildConfig.VERSION_NAME} · Xray · " + if (app.settings.stealthSocks) "прокси скрыт (случайный порт + пароль)" else "SOCKS 127.0.0.1:${app.settings.socksPort}",
+        Text("${BuildConfig.VERSION_NAME} · Xray · " + if (cfg.stealthSocks) "прокси скрыт (случайный порт + пароль)" else "SOCKS 127.0.0.1:${cfg.socksPort}",
             fontSize = 12.sp, color = Color.Gray)
         Spacer(Modifier.height(16.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -51,7 +53,7 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
             Mode.HYBRID -> "YouTube/Discord/Telegram — через обход DPI, остальное — через серверы"
         }, fontSize = 13.sp, color = Color.Gray, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 6.dp))
         Spacer(Modifier.height(10.dp))
-        val st = app.settings
+        val st = cfg
         fun reconnect() { if (status.state == Tunnel.State.CONNECTED) onConnect() }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("Тип:", fontSize = 13.sp)
@@ -78,7 +80,7 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
             }
         }
         // «Только YouTube и Telegram»: отмеченные сервисы идут через VPN, остальное — напрямую.
-        val services = app.settings.services
+        val services = cfg.services
         fun toggleService(id: String, v: Boolean) {
             Store.update { it.copy(settings = it.settings.copy(services = if (v) (it.settings.services + id).distinct() else it.settings.services - id)) }
             if (status.state == Tunnel.State.CONNECTED) onConnect()
@@ -109,24 +111,28 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
         Spacer(Modifier.height(20.dp))
 
         if (mode != Mode.BYEDPI) {
-            val sel = app.selected
-            val working = app.servers.count { app.state(it).works }
             Card(Modifier.fillMaxWidth().clickable { openServers() }, shape = RoundedCornerShape(14.dp),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
                 Column(Modifier.padding(14.dp)) {
-                    Text(if (sel.isEmpty()) "Серверы не выбраны" else "Выбрано серверов: ${sel.size}", fontWeight = FontWeight.SemiBold)
                     Text(when {
-                        app.servers.isEmpty() -> "Откройте «Серверы» → «Подписки» или вставьте свою ссылку"
-                        sel.isEmpty() && working > 0 -> "Рабочих по последней проверке: $working. Без выбора подключусь к 5 лучшим."
-                        sel.isEmpty() -> "Всего ${app.servers.size}. Нажмите «Проверить» на вкладке «Серверы»."
-                        else -> sel.take(3).joinToString { it.name } + if (sel.size > 3) " и ещё ${sel.size - 3}" else ""
+                        sum.selectedCount > 0 -> "Выбрано серверов: ${sum.selectedCount}"
+                        mode == Mode.AUTO -> "Серверы выберу сам"
+                        else -> "Серверы не выбраны"
+                    }, fontWeight = FontWeight.SemiBold)
+                    Text(when {
+                        sum.total == 0 -> "Откройте «Серверы» → «Подписки» или вставьте свою ссылку"
+                        sum.selectedCount == 0 && sum.working > 0 -> "Рабочих по последней проверке: ${sum.working}. Подключусь к 5 самым быстрым — выбирать ничего не нужно."
+                        sum.selectedCount == 0 -> "Всего ${sum.total}. Нажмите «Подключить» — проверю и выберу сам."
+                        else -> sum.selectedNames.joinToString() + if (sum.selectedCount > 3) " и ещё ${sum.selectedCount - 3}" else ""
                     }, fontSize = 13.sp, color = Color.Gray)
+                    Text("Маскировка: авто" + (if (sum.mask.isNotEmpty()) " — ${sum.mask}" else " (подбирается сама под сеть)"), fontSize = 12.sp, color = Color.Gray,
+                        maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
                 }
             }
         }
         if (mode != Mode.SERVERS) {
             Spacer(Modifier.height(10.dp))
-            OutlinedButton(onClick = { Actions.findDpi() }, enabled = !progress.running, modifier = Modifier.fillMaxWidth()) { Text("Подобрать обход DPI для этой сети") }
+            OutlinedButton(onClick = { Actions.findDpi() }, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text("Подобрать обход DPI для этой сети") }
         }
         Spacer(Modifier.height(12.dp))
         val report by Actions.netReport.collectAsState()
@@ -139,19 +145,28 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
                     Text(report.details, fontSize = 12.sp, color = Color.Gray)
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(onClick = { Actions.diagnoseNetwork() }, enabled = !progress.running) { Text("Проверить сеть") }
+                    OutlinedButton(onClick = { Actions.diagnoseNetwork() }, enabled = !busy) { Text("Проверить сеть") }
                     when (report.kind) {
                         Actions.Kind.WHITELIST -> Button(onClick = { Store.update { it.copy(settings = it.settings.copy(mode = Mode.SERVERS)) }; Actions.whitelistServers() },
-                            enabled = !progress.running) { Text("Серверы для белых списков") }
-                        Actions.Kind.DPI -> Button(onClick = { Actions.findDpi() }, enabled = !progress.running) { Text("Подобрать обход") }
+                            enabled = !busy) { Text("Серверы для белых списков") }
+                        Actions.Kind.DPI -> Button(onClick = { Actions.findDpi() }, enabled = !busy) { Text("Подобрать обход") }
                         else -> {}
                     }
                 }
             }
         }
-        if (progress.running || progress.message.isNotEmpty()) {
-            Spacer(Modifier.height(12.dp)); ProgressBlock(progress)
-        }
+        Spacer(Modifier.height(12.dp)); LiveProgress(stop = true)
+    }
+}
+
+/** Progress that redraws only itself (6 times a second during a check), not the screen around it. */
+@Composable
+fun LiveProgress(stop: Boolean = false, show: (Actions.Progress) -> Boolean = { true }) {
+    val p by Actions.progress.collectAsState()
+    if (!(p.running || p.message.isNotEmpty()) || !show(p)) return
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.weight(1f)) { ProgressBlock(p) }
+        if (stop && p.running) TextButton(onClick = { Actions.cancel() }) { Text("Стоп") }
     }
 }
 

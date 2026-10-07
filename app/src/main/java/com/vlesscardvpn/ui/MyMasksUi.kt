@@ -57,8 +57,8 @@ fun shareMyMask(ctx: Context, m: Mask) {
 @Composable
 fun MyMasksSection() {
     val ctx = LocalContext.current
-    val app by Store.state.collectAsState()
-    val mine = remember(app.settings.myMasks) { MyMasks.load(app.settings.myMasks) }
+    val cfg by Store.settings.collectAsState()
+    val mine = remember(cfg.myMasks) { MyMasks.load(cfg.myMasks) }
     var edit by remember { mutableStateOf<Mask?>(null) }
     var creating by remember { mutableStateOf(false) }
     Text("Мои маскировки", fontWeight = FontWeight.SemiBold, fontSize = 16.sp, modifier = Modifier.padding(top = 8.dp))
@@ -97,8 +97,8 @@ fun MyMasksSection() {
 @Composable
 fun MaskEvolutionSection() {
     val ctx = LocalContext.current
-    val app by Store.state.collectAsState()
-    val auto = remember(app.settings.autoMasks) { com.vlesscardvpn.xray.MaskLab.load(app.settings.autoMasks) }
+    val cfg by Store.settings.collectAsState()
+    val auto = remember(cfg.autoMasks) { com.vlesscardvpn.xray.MaskLab.load(cfg.autoMasks) }
     var all by remember { mutableStateOf(false) }
     Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
@@ -106,7 +106,7 @@ fun MaskEvolutionSection() {
             Text("При каждом подборе пробуются мутанты масок, которые прошли в этой сети: другие размеры кусков, паузы, ступеньки, шум. " +
                 "Прошедшие остаются и дают следующее поколение — маски уходят от шаблонов, которые выучил ТСПУ.", fontSize = 12.sp, color = Color.Gray)
         }
-        Switch(app.settings.maskEvolution, { v -> Store.update { st -> st.copy(settings = st.settings.copy(maskEvolution = v)) } })
+        Switch(cfg.maskEvolution, { v -> Store.update { st -> st.copy(settings = st.settings.copy(maskEvolution = v)) } })
     }
     if (auto.isEmpty()) { Text("Авто-масок пока нет — появятся после «Подобрать маскировку».", fontSize = 12.sp, color = Color.Gray); return }
     Text("Выведено авто-масок: ${auto.size}", fontSize = 12.sp)
