@@ -31,9 +31,8 @@ import com.vlesscardvpn.model.Settings
 
 @Composable
 fun SettingsScreen() {
-    val app by Store.state.collectAsState()
-    val s = app.settings
-    val progress by Actions.progress.collectAsState()
+    val s by Store.settings.collectAsState()
+    val busy by Actions.running.collectAsState()
     val ctx = LocalContext.current
     fun set(f: (Settings) -> Settings) = Store.update { it.copy(settings = f(it.settings)) }
     var appsDialog by remember { mutableStateOf(false) }
@@ -44,8 +43,8 @@ fun SettingsScreen() {
         val network = remember { Net.key(ctx) }
         val current = DpiStrategies.resolve(s, network)
         Hint("Используется в режимах «ByeDPI» и «Гибрид» и как маскировка «через ByeDPI» для серверов. Сейчас: ${current.label} (сеть «$network»).")
-        Button(onClick = { Actions.findDpi() }, enabled = !progress.running, modifier = Modifier.fillMaxWidth()) { Text("Подобрать обход для этой сети") }
-        if (progress.title == "Подбор обхода DPI" || progress.title == "Проверка обхода DPI") ProgressBlock(progress)
+        Button(onClick = { Actions.findDpi() }, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text("Подобрать обход для этой сети") }
+        LiveProgress { it.title == "Подбор обхода DPI" || it.title == "Проверка обхода DPI" }
         val results by Actions.dpiResults.collectAsState()
         var showAll by remember { mutableStateOf(false) }
         StrategyRow("Авто — подобранная для сети", s.dpiStrategy == Settings.DPI_AUTO, null) { set { it.copy(dpiStrategy = Settings.DPI_AUTO) } }
@@ -70,7 +69,7 @@ fun SettingsScreen() {
         Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             ByeDpiArgs.MASK_DOMAINS.forEach { d -> FilterChip(selected = s.byeDpiSni == d, onClick = { set { it.copy(byeDpiSni = d) } }, label = { Text(d) }) }
         }
-        OutlinedButton(onClick = { Actions.testByeDpi() }, enabled = !progress.running) { Text("Проверить текущую") }
+        OutlinedButton(onClick = { Actions.testByeDpi() }, enabled = !busy) { Text("Проверить текущую") }
         var hybrid by remember(s.hybridDomains) { mutableStateOf(s.hybridDomains.joinToString(", ")) }
         OutlinedTextField(hybrid, { v -> hybrid = v; set { it.copy(hybridDomains = v.split(',', ' ', '\n').map { d -> d.trim() }.filter { d -> d.isNotEmpty() }) } },
             label = { Text("Гибрид: эти сайты — через обход DPI (geosite:… или домены)") }, modifier = Modifier.fillMaxWidth())
@@ -149,7 +148,7 @@ fun SettingsScreen() {
             Text("Ключи WARP+: выбрать и включить" + if (okKeys > 0) " (рабочих: $okKeys)" else "")
         }
         if (keysDialog) WarpKeysDialog(onDismiss = { keysDialog = false })
-        OutlinedButton(onClick = { Actions.setupWarp() }, enabled = !progress.running, modifier = Modifier.fillMaxWidth()) { Text("Настроить WARP сейчас") }
+        OutlinedButton(onClick = { Actions.setupWarp() }, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text("Настроить WARP сейчас") }
 
         MyMasksSection()
 
@@ -195,7 +194,7 @@ fun SettingsScreen() {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             TextButton(onClick = { set { it.copy(subscriptions = Settings.DEFAULT_SUBSCRIPTIONS) } }) { Text("Стандартные") }
             TextButton(onClick = { set { it.copy(subscriptions = (com.vlesscardvpn.model.Subs.CATALOG.map { c -> c.url } + it.subscriptions).distinct()) } }) { Text("Все") }
-            TextButton(onClick = { Actions.refreshSubscriptions() }, enabled = !progress.running) { Text("Обновить сейчас") }
+            TextButton(onClick = { Actions.refreshSubscriptions() }, enabled = !busy) { Text("Обновить сейчас") }
         }
 
         Section("Проверка")

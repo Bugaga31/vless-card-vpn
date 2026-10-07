@@ -35,7 +35,7 @@ private enum class Filter(val title: String) { ALL("Все"), WORKING("Рабо�
 fun ServersScreen() {
     val ctx = LocalContext.current
     val app by Store.ui.collectAsState()
-    val progress by Actions.progress.collectAsState()
+    val busy by Actions.running.collectAsState()
     var filter by remember { mutableStateOf(Filter.ALL) }
     var addOpen by remember { mutableStateOf(false) }
     var menuFor by remember { mutableStateOf<Server?>(null) }
@@ -53,32 +53,30 @@ fun ServersScreen() {
         Spacer(Modifier.height(10.dp))
         Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(onClick = { addOpen = true }) { Text("Добавить") }
-            OutlinedButton(onClick = { Actions.refreshSubscriptions() }, enabled = !progress.running) { Text("Подписки") }
-            OutlinedButton(onClick = { Actions.setupWarp() }, enabled = !progress.running) { Text("WARP") }
-            OutlinedButton(onClick = { Actions.testAll(onlySelected = filter == Filter.SELECTED) }, enabled = !progress.running) { Text("Проверить") }
+            OutlinedButton(onClick = { Actions.refreshSubscriptions() }, enabled = !busy) { Text("Подписки") }
+            OutlinedButton(onClick = { Actions.setupWarp() }, enabled = !busy) { Text("WARP") }
+            OutlinedButton(onClick = { Actions.testAll(onlySelected = filter == Filter.SELECTED) }, enabled = !busy) { Text("Проверить") }
             OutlinedButton(onClick = {
                 val target = app.selected.ifEmpty { app.servers.filter { app.state(it).tcpMs > 0 }.sortedBy { app.state(it).tcpMs }.take(10) }
                 Actions.findMasks(target)
-            }, enabled = !progress.running) { Text("Подобрать маскировку") }
+            }, enabled = !busy) { Text("Авто-маскировка") }
             OutlinedButton(onClick = {
                 val n = Actions.selectBest(5); Toast.makeText(ctx, if (n == 0) "Сначала нажмите «Проверить»" else "Выбрано: $n", Toast.LENGTH_SHORT).show()
             }) { Text("5 лучших") }
             OutlinedButton(onClick = {
                 val dead = app.servers.filter { val st = app.state(it); !st.selected && (st.tcpMs == 0 || st.realMs == 0) }.map { it.id }.toSet()
                 Store.remove(dead); Toast.makeText(ctx, "Удалено: ${dead.size}", Toast.LENGTH_SHORT).show()
-            }, enabled = !progress.running) { Text("Удалить нерабочие") }
+            }, enabled = !busy) { Text("Удалить нерабочие") }
         }
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Filter.values().forEach { f -> FilterChip(selected = filter == f, onClick = { filter = f }, label = { Text(f.title) }) }
             Spacer(Modifier.weight(1f))
             Text("${list.size}", color = Color.Gray, fontSize = 12.sp)
         }
-        if (progress.running || progress.message.isNotEmpty()) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.weight(1f)) { ProgressBlock(progress) }
-                if (progress.running) TextButton(onClick = { Actions.cancel() }) { Text("Стоп") }
-            }
-        }
+        LiveProgress(stop = true)
+        if (app.settings.mode == com.vlesscardvpn.model.Mode.AUTO && app.servers.isNotEmpty())
+            Text("Режим «Авто»: выбирать ничего не нужно — при подключении возьму 5 самых быстрых рабочих и сам подберу маскировку. " +
+                "Отмечайте серверы, только если нужны конкретные.", fontSize = 12.sp, color = Color.Gray, modifier = Modifier.padding(vertical = 4.dp))
         if (app.servers.isEmpty()) {
             Text("Список пуст. Нажмите «Подписки» — загрузятся бесплатные серверы для России (igareck, с зеркал), " +
                 "или «Добавить» и вставьте свои ссылки vless:// vmess:// trojan:// ss:// hysteria2://.\n\n" +
@@ -174,9 +172,14 @@ private fun ServerMenu(s: Server, st: ServerState, onDismiss: () -> Unit) {
         text = {
             Column {
                 Text("${s.label}\n${s.address}:${s.port}", fontSize = 13.sp, color = Color.Gray)
-                TextButton(onClick = { Actions.findMasks(listOf(s)); onDismiss() }) { Text("Подобрать маскировку (перебор до 32 вариантов)") }
-                TextButton(onClick = { masks = true }) { Text("Выбрать маскировку вручную") }
-                TextButton(onClick = { fork = true }) { Text("Сделать свою на основе текущей") }
+                Text("Маскировка: " + (Masks.byId(st.maskId)?.title ?: "авто") + " — подбирается сама под сеть и меняется, если её распознают.", fontSize = 12.sp, color = Color.Gray)
+                TextButton(onClick = { Actions.findMasks(listOf(s)); onDismiss() }) { Text("Подобрать заново для этой сети") }
+                var expert by remember { mutableStateOf(false) }
+                TextButton(onClick = { expert = !expert }) { Text(if (expert) "Для опытных ▾" else "Для опытных ▸") }
+                if (expert) {
+                    TextButton(onClick = { masks = true }) { Text("Выбрать маскировку вручную") }
+                    TextButton(onClick = { fork = true }) { Text("Сделать свою на основе текущей") }
+                }
                 Masks.byId(st.maskId)?.takeIf { it.custom || it.auto }?.let { m -> TextButton(onClick = { shareMyMask(ctx, m); onDismiss() }) { Text("Поделиться маскировкой") } }
                 TextButton(onClick = {
                     (ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("link", LinkParser.toLink(s)))

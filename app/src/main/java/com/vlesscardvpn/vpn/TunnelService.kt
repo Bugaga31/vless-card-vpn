@@ -74,8 +74,10 @@ class TunnelService : VpnService() {
     private var netCallback: ConnectivityManager.NetworkCallback? = null
     /** Self-healing step after failed checks (0 = healthy); reset by a successful check or a user (re)connect. */
     private var healStep = 0
-    /** Auto mode gave up on servers for this connection: ByeDPI only. */
+    /** Auto mode gave up on servers for this connection: ByeDPI only (the search goes on in the background). */
     private var autoDpiOnly = false
+    /** Servers of the running connection (selected or the best ones taken automatically). */
+    @Volatile private var usedServers: List<com.vlesscardvpn.model.Server> = emptyList()
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
@@ -117,6 +119,7 @@ class TunnelService : VpnService() {
             if (settings.mode != Mode.BYEDPI && selected.isEmpty())
                 error("Нет выбранных серверов. Откройте «Серверы», нажмите «Проверить» и отметьте рабочие.")
             selected = Actions.pinCertificates(selected)
+            usedServers = selected
             val rotate = settings.rotateMasks
             val withMasks = selected.map { srv ->
                 val ss = st.state(srv)
@@ -196,11 +199,15 @@ class TunnelService : VpnService() {
             val p = Tester.probeSocks(port, st.testUrl)
             val cur = Tunnel.status.value
             if (cur.state != Tunnel.State.CONNECTED) return@launch
-            val text = if (p.realMs > 0) "Интернет работает · ${p.realMs} мс · 256 КБ: ${Actions.yn(p.bigOk)} · YouTube: ${Actions.yn(p.ytOk)} · Telegram: ${Actions.yn(p.tgOk)}"
-                else "Нет ответа через выбранный маршрут (${p.error}). Проверьте серверы или включите маскировку."
+            // WARP: ask Cloudflare itself whether the traffic comes through WARP (warp=on / plus), so it's clear it works.
+            val warp = if (p.realMs > 0 && usedServers.any { Masks.isWarp(it) }) when (Tester.warpTrace(port)) {
+                "plus" -> " · WARP+: включён ✓"; "on" -> " · WARP: включён ✓"; "off" -> " · WARP: не через Cloudflare ✗"; else -> " · WARP: Cloudflare не ответил"
+            } else ""
+            val text = if (p.realMs > 0) "Интернет работает · ${p.realMs} мс · 256 КБ: ${Actions.yn(p.bigOk)} · YouTube: ${Actions.yn(p.ytOk)} · Telegram: ${Actions.yn(p.tgOk)}$warp"
+                else "Нет ответа через выбранный маршрут (${p.error}). " + if (st.mode == Mode.AUTO && st.autoHeal) "Ищу рабочий вариант сам…" else "Проверьте серверы или включите маскировку."
             Tunnel.status.value = cur.copy(check = text, checkOk = p.works)
-            Log.i("E2E", "check ok=${p.works} ms=${p.realMs} big=${p.bigOk} yt=${p.ytOk} tg=${p.tgOk} err=${p.error}")
-            if (p.works) { healStep = 0; scheduleOptimize() } else heal()
+            Log.i("E2E", "check ok=${p.works} ms=${p.realMs} big=${p.bigOk} yt=${p.ytOk} tg=${p.tgOk} err=${p.error} warp=$warp")
+            if (p.works) { healStep = 0; scheduleOptimize(); watchdog(); if (serverless()) rescueLater() } else heal()
         }
     }
 
@@ -216,7 +223,7 @@ class TunnelService : VpnService() {
             delay(firstDelay)
             var calm = 0
             while (Tunnel.status.value.state == Tunnel.State.CONNECTED) {
-                val reconnect = runCatching { Actions.optimize() }.getOrDefault(false)
+                val reconnect = runCatching { Store.busy { Actions.optimize() } }.getOrDefault(false)
                 if (reconnect && Tunnel.status.value.state == Tunnel.State.CONNECTED) {
                     Log.i("E2E", "optimize: switching to faster servers")
                     lock.withLock { connect() }
@@ -234,33 +241,103 @@ class TunnelService : VpnService() {
         if (optJob?.isActive == true) optKick.trySend(Unit) else scheduleOptimize(firstDelay = 45_000)
     }
 
+    private var watchJob: Job? = null
     /**
-     * Masking got blocked (or the server died): 1) next good masks, 2) a fresh mask search for the selected servers,
-     * 3) Auto mode only — ByeDPI without servers. Each step reconnects by itself.
+     * Watchdog: a light request through the tunnel every 45 s. Two misses in a row = the connection broke
+     * (masking recognised, server died) → self-healing, without waiting for the user to notice.
+     */
+    private fun watchdog() {
+        if (watchJob?.isActive == true) return
+        watchJob = scope.launch {
+            var miss = 0
+            while (Tunnel.status.value.state == Tunnel.State.CONNECTED) {
+                delay(45_000)
+                if (healJob?.isActive == true) continue
+                val port = Tunnel.socks?.port ?: break
+                val ok = Tester.probeSocks(port, Store.state.value.settings.testUrl, big = false, youtube = false, attempts = 1).realMs > 0
+                miss = if (ok) 0 else miss + 1
+                if (miss >= 2) {
+                    Log.i("E2E", "watchdog: connection lost")
+                    val cur = Tunnel.status.value
+                    Tunnel.status.value = cur.copy(check = "Связь пропала — ищу рабочий вариант…", checkOk = false)
+                    heal(); break
+                }
+            }
+        }
+    }
+
+    private var healJob: Job? = null
+    private fun healStatus(text: String) { val cur = Tunnel.status.value; if (cur.state == Tunnel.State.CONNECTED) Tunnel.status.value = cur.copy(check = text, checkOk = null) }
+
+    /**
+     * Masking got blocked (or the server died): 1) next good masks, 2) mask search for the selected servers.
+     * Auto mode never gives up: other working servers → mask search with mask evolution → fresh subscriptions,
+     * full re-test and WARP; only then ByeDPI without servers, and the search goes on in the background.
      */
     private fun heal() {
         val st = Store.state.value
-        if (!st.settings.autoHeal || st.settings.mode == Mode.BYEDPI || autoDpiOnly) return
-        val servers = st.selected.ifEmpty { st.servers.filter { st.state(it).works }.sortedBy { st.state(it).realMs }.take(5) }
-        healStep++
-        val cur = Tunnel.status.value
-        scope.launch {
-            when {
-                healStep == 1 && Actions.nextMasks(servers) -> Tunnel.status.value = cur.copy(check = "Маскировку, похоже, распознали — переключаюсь на другую…", checkOk = null)
-                healStep <= 2 -> {
-                    healStep = 2
-                    Tunnel.status.value = cur.copy(check = "Подбираю новую маскировку для серверов…", checkOk = null)
-                    runCatching { Actions.doFindMasks(servers, 24) }
-                }
-                st.settings.mode == Mode.AUTO -> {
-                    autoDpiOnly = true
-                    Tunnel.status.value = cur.copy(check = "Серверы не отвечают — перехожу на обход DPI без сервера…", checkOk = null)
-                }
-                else -> return@launch
+        if (!st.settings.autoHeal || st.settings.mode == Mode.BYEDPI || healJob?.isActive == true) return
+        val auto = st.settings.mode == Mode.AUTO
+        if (autoDpiOnly) {
+            // ByeDPI alone doesn't open sites either: pick another strategy for this network, keep looking for servers
+            healJob = scope.launch {
+                healStatus("Обход DPI не помог — подбираю другую стратегию и продолжаю искать серверы…")
+                runCatching { Store.busy { Actions.doFindDpi() } }
+                delay(500); lock.withLock { connect() }
             }
-            Log.i("E2E", "heal step=$healStep")
+            return
+        }
+        val servers = usedServers
+        healStep++
+        healJob = scope.launch {
+            if (!Actions.online()) {
+                // no internet at all (lift, metro): nothing to fix, check again a bit later
+                healStatus("Нет интернета у самой сети — жду, когда появится…")
+                healStep--; delay(20_000); verifySoon(0); return@launch
+            }
+            if (healStep == 1 && Actions.nextMasks(servers)) {
+                healStatus("Маскировку, похоже, распознали — переключаюсь на другую…")
+            } else if (!auto) {
+                if (healStep > 2) return@launch
+                healStep = 2
+                healStatus("Подбираю новую маскировку для серверов…")
+                runCatching { Store.busy { Actions.doFindMasks(servers, 24) } }
+            } else if (healStep <= 4) {
+                var n = 0
+                for (level in 1..3) {
+                    healStatus("Авто-поиск, шаг $level из 3: " + when (level) { 1 -> "переключаюсь на другие рабочие серверы"; 2 -> "подбираю маскировку"; else -> "перепроверяю всё" } + "…")
+                    n = runCatching { Store.busy { Actions.autoRescue(servers, level) { step -> healStatus("Авто-поиск, шаг $level из 3: $step…") } } }.getOrDefault(0)
+                    if (n > 0) break
+                }
+                if (n == 0) { autoDpiOnly = true; healStatus("Серверы пока не нашлись — включаю обход DPI без сервера и ищу дальше в фоне…") }
+            } else {
+                autoDpiOnly = true
+                healStatus("Серверы раз за разом отваливаются — пока обход DPI без сервера, поиск идёт в фоне…")
+            }
+            Log.i("E2E", "heal step=$healStep dpiOnly=$autoDpiOnly")
             delay(500)
             lock.withLock { connect() }
+        }
+    }
+
+    private var rescueJob: Job? = null
+    /** Auto mode running without servers (none worked, or none known yet). */
+    private fun serverless() = Store.state.value.settings.mode == Mode.AUTO && (autoDpiOnly || usedServers.isEmpty())
+    /** Auto mode on ByeDPI only: every 3 min look for servers again; as soon as some work, switch back to them. */
+    private fun rescueLater() {
+        if (rescueJob?.isActive == true) return
+        rescueJob = scope.launch {
+            while (serverless() && Tunnel.status.value.state == Tunnel.State.CONNECTED) {
+                delay(180_000)
+                if (healJob?.isActive == true) continue
+                val n = runCatching { Store.busy { Actions.autoRescue(emptyList(), 3) } }.getOrDefault(0)
+                if (n > 0 && serverless()) {
+                    Log.i("E2E", "rescue: servers found again")
+                    autoDpiOnly = false; healStep = 0
+                    lock.withLock { connect() }
+                    break
+                }
+            }
         }
     }
 
@@ -289,7 +366,8 @@ class TunnelService : VpnService() {
     }
 
     private fun teardown(error: String?) {
-        checkJob?.cancel()
+        checkJob?.cancel(); watchJob?.cancel()
+        if (error != null) { healJob?.cancel(); rescueJob?.cancel() }
         if (error != null) optJob?.cancel()
         netCallback?.let { cb -> runCatching { getSystemService(ConnectivityManager::class.java)?.unregisterNetworkCallback(cb) } }
         netCallback = null

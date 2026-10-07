@@ -53,7 +53,7 @@ object Tester {
 
     suspend fun tcp(servers: List<Server>, parallel: Int = 96, onEach: (Server, Int) -> Unit) = coroutineScope {
         val sem = Semaphore(parallel)
-        servers.map { s -> async(Dispatchers.IO) { sem.withPermit { onEach(s, if (s.isTcpBased) tcpOne(s.address, s.port) else resolves(s.address)) } } }.awaitAll()
+        servers.map { s -> async(Bg.io) { sem.withPermit { onEach(s, if (s.isTcpBased) tcpOne(s.address, s.port) else resolves(s.address)) } } }.awaitAll()
     }
 
     /** ms (≥1) or 0 when unreachable. UDP-only protocols (Hysteria2) return 1 if the name resolves. */
@@ -97,6 +97,14 @@ object Tester {
         return Probe(best.toInt().coerceAtLeast(1), bigOk, ytOk, tgOk = tgOk)
     }
 
+    /** Cloudflare trace through the running tunnel: "on" / "plus" when traffic really goes through WARP, "off" otherwise, null = no answer. */
+    fun warpTrace(port: Int): String? = runCatching {
+        val client = fast.newBuilder().proxy(Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", port))).build()
+        client.newCall(Request.Builder().url("https://www.cloudflare.com/cdn-cgi/trace").header("User-Agent", UA).build()).execute().use { r ->
+            r.body?.string().orEmpty().lineSequence().firstOrNull { it.startsWith("warp=") }?.substringAfter('=')?.trim()
+        }
+    }.getOrNull()
+
     private fun download(client: OkHttpClient, url: String): Int =
         client.newCall(Request.Builder().url(url).header("User-Agent", UA).build()).execute().use { r ->
             check(r.isSuccessful); val src = r.body!!.byteStream(); val buf = ByteArray(16384); var total = 0
@@ -112,7 +120,7 @@ object Tester {
         skip: (Int) -> Boolean = { false },
         onEach: (Int, Probe) -> Unit,
     ) = mutex.withLock {
-        withContext(Dispatchers.IO) {
+        withContext(Bg.io) {
             for (all in chunks(variants, batch)) {
                 val idx = all.filter { i -> if (skip(i)) { onEach(i, SKIPPED); false } else true }
                 if (idx.isEmpty()) continue

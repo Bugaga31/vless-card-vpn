@@ -9,6 +9,9 @@ import com.vlesscardvpn.xray.MaskLab
 import com.vlesscardvpn.xray.Masks
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -32,7 +35,10 @@ import java.util.concurrent.atomic.AtomicInteger
 object Actions {
     data class Progress(val title: String = "", val done: Int = 0, val total: Int = 0, val running: Boolean = false, val message: String = "")
     val progress = MutableStateFlow(Progress())
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val scope = CoroutineScope(SupervisorJob() + Bg.cpu)
+    /** Only "is something running": buttons don't redraw the whole screen on every progress step. */
+    val running: kotlinx.coroutines.flow.StateFlow<Boolean> = progress.map { it.running }.distinctUntilChanged()
+        .stateIn(scope, kotlinx.coroutines.flow.SharingStarted.Eagerly, false)
     private var job: Job? = null
     private lateinit var app: Context
 
@@ -44,7 +50,7 @@ object Actions {
         if (job?.isActive == true) return
         progress.value = Progress(title, running = true)
         job = scope.launch {
-            val msg = runCatching { withContext(Dispatchers.IO) { XrayCore.init(app) }; block() }.getOrElse { it.message ?: "Ошибка" }
+            val msg = Store.busy { runCatching { withContext(Dispatchers.IO) { XrayCore.init(app) }; block() }.getOrElse { it.message ?: "Ошибка" } }
             android.util.Log.i("E2E", "action[$title]: $msg")
             progress.value = progress.value.copy(running = false, message = msg)
         }
@@ -90,7 +96,7 @@ object Actions {
         coroutineScope {
             val sem = Semaphore(6) // all sources at once instead of one by one (each may try 4 mirrors)
             subs.map { url ->
-                async(Dispatchers.IO) {
+                async(Bg.io) {
                     sem.withPermit {
                         val body = fetch(url)
                         if (body != null) {
@@ -128,7 +134,7 @@ object Actions {
 
     // ---------- tests ----------
     /** Self-signed TLS servers: fetch and pin the certificate hash (Xray 26 has no allowInsecure). */
-    suspend fun pinCertificates(servers: List<Server>): List<Server> = withContext(Dispatchers.IO) {
+    suspend fun pinCertificates(servers: List<Server>): List<Server> = withContext(Bg.io) {
         val sem = Semaphore(16) // in parallel: subscriptions have many self-signed servers, 3 s each one by one was slow
         servers.map { s -> async { sem.withPermit {
             if (!s.insecure || s.pcs.isNotEmpty() || s.security != "tls" && s.protocol != "hysteria2") return@withPermit s
@@ -156,7 +162,11 @@ object Actions {
     /** TCP ping of all servers, then real test of the [realLimit] fastest. */
     fun testAll(onlySelected: Boolean = false, realLimit: Int = 150) = launch("Проверка серверов") {
         val st0 = Store.state.value
-        doTestAll(if (onlySelected) st0.selected else st0.servers, realLimit)
+        val r = doTestAll(if (onlySelected) st0.selected else st0.servers, realLimit)
+        // Few work: masks for the reachable ones right away (no separate button to find)
+        val st1 = Store.state.value
+        val cand = st1.servers.filter { st1.state(it).tcpMs > 0 && !st1.state(it).works }.sortedBy { st1.state(it).tcpMs }.take(8)
+        if (!onlySelected && st1.servers.count { st1.state(it).works } < 5 && cand.isNotEmpty()) r + ". " + doFindMasks(cand, 24, budgetMs = 120_000) else r
     }
 
     private suspend fun doTestAll(list: List<Server>, realLimit: Int, big: Boolean = true): String {
@@ -257,6 +267,23 @@ object Actions {
                 step(done.incrementAndGet(), variants.size)
             }
         } finally { own.close() }
+        // Double check: a mask that passed once can be a fluke (the TSPU sometimes lets the first connection through).
+        // The 2 fastest of every server are probed again, now with YouTube; the one that passes again wins.
+        val confirm = pinned.flatMap { s -> good[s.id].orEmpty().sortedBy { it.second }.take(2).map { s to it.first } }
+        if (confirm.size > pinned.size / 2 && System.currentTimeMillis() < deadline) {
+            val res = java.util.concurrent.ConcurrentHashMap<Int, Probe>()
+            progress.value = progress.value.copy(title = "Двойная проверка маскировок")
+            val (own2, port2) = dpiForTests(confirm.map { it.second })
+            try {
+                Tester.real(confirm, cfg.testUrl, port2, own2.ports, youtube = true, batch = 64, parallel = 12, attempts = 1) { i, p -> res[i] = p; step(i + 1, confirm.size) }
+            } finally { own2.close() }
+            pinned.forEach { s ->
+                val mine = confirm.indices.filter { confirm[it].first.id == s.id }
+                val pick = mine.firstOrNull { res[it]?.works == true && res[it]?.ytOk == true } ?: mine.firstOrNull { res[it]?.works == true }
+                if (pick != null) best[s.id] = confirm[pick].second to res.getValue(pick)
+                mine.forEach { i -> if (res[i]?.works == false) synchronized(best) { tried += Triple(s.id, confirm[i].second.id, false) } }
+            }
+        }
         val net = Net.key(app)
         // Passed mutants join the auto masks (before any server points at them); failed fresh ones are forgotten.
         val keptIds = kept.map { it.id }.toSet()
@@ -397,7 +424,16 @@ object Actions {
      * «WARP»: registers up to 3 free Cloudflare accounts (one key each — the tester runs one WireGuard tunnel per key
      * at a time), 4 endpoints per account, then searches UDP noise masks for them and selects the working ones.
      */
-    fun setupWarp(accounts: Int = 3, onlyKey: String? = null) = launch("WARP") { doSetupWarp(if (onlyKey != null) 1 else accounts, onlyKey) }
+    fun setupWarp(accounts: Int = 3, onlyKey: String? = null) = launch("WARP") {
+        val msg = doSetupWarp(if (onlyKey != null) 1 else accounts, onlyKey)
+        // Ready = connect right away (or reconnect onto WARP): no guessing whether WARP is on.
+        val st = Store.state.value
+        val warpOk = st.selected.any { Masks.isWarp(it) && st.state(it).works }
+        if (warpOk && (st.settings.proxyOnly || android.net.VpnService.prepare(app) == null)) {
+            withContext(Dispatchers.Main) { com.vlesscardvpn.vpn.TunnelService.start(app) }
+            msg.replace("Нажмите «Подключить».", "Подключаюсь через WARP — на главном экране будет «WARP: включён ✓».")
+        } else msg
+    }
 
     /** Remembers Cloudflare's answers about WARP+ keys («Ключи WARP+» shows them; used-up keys go last next time). */
     private fun rememberKeys(results: Map<String, String>) {
@@ -470,9 +506,56 @@ object Actions {
      * the 5 fastest selected. Then [onReady] connects (servers, or ByeDPI if none passed).
      */
     fun autoConnect(onReady: () -> Unit) {
+        val st = Store.state.value
+        val working = st.servers.filter { st.state(it).works }
         val busy = job
+        // Instant start: something worked before → connect now; the tunnel itself re-checks, heals and keeps searching.
+        if (working.isNotEmpty() || st.servers.isEmpty() && st.settings.dpiRemembered[Net.key(app)] != null) {
+            if (busy?.isActive == true && progress.value.title == "Фоновая подготовка") cancel()
+            if (st.selected.none { st.state(it).works }) selectBest(5, working)
+            onReady(); return
+        }
+        Tunnel.status.value = Tunnel.Status(Tunnel.State.CONNECTING, "Готовлю серверы…", check = "Первый запуск в этой сети: проверяю серверы и маскировку, обычно до минуты")
         if (busy?.isActive == true) { scope.launch { busy.join(); autoPrepare(onReady) }; return }
         autoPrepare(onReady)
+    }
+
+    /** «Подключение…» tapped again while Auto is still preparing: stop preparing. */
+    fun cancelPrepare() {
+        if (progress.value.title.startsWith("Авто")) cancel()
+        if (Tunnel.status.value.state == Tunnel.State.CONNECTING && Tunnel.socks == null) Tunnel.status.value = Tunnel.Status()
+    }
+
+    /** Is there internet at all outside the VPN (this app is excluded from it)? Russian and foreign hosts. */
+    fun online(): Boolean = listOf("ya.ru" to 443, "1.1.1.1" to 443, "vk.com" to 443).any { (h, p) -> Tester.tcpOne(h, p, 2500) > 0 }
+
+    /**
+     * Auto mode, the connection stopped working: find something that works instead of giving up.
+     * level 1 — other servers that passed; 2 — mask search (with mask evolution) for the reachable ones;
+     * 3 — fresh subscriptions + full re-test + WARP. Returns the number of servers selected (0 = nothing found).
+     */
+    suspend fun autoRescue(failed: Collection<Server>, level: Int, onStep: (String) -> Unit = {}): Int {
+        val now = System.currentTimeMillis()
+        val ids = failed.map { it.id }.toHashSet()
+        if (ids.isNotEmpty()) Store.setStates(failed.associate { s -> s.id to { x: com.vlesscardvpn.model.ServerState -> x.copy(realMs = 0, checkedAt = now) } })
+        fun working() = Store.state.value.let { st -> st.servers.filter { it.id !in ids && st.state(it).works } }
+        working().takeIf { it.isNotEmpty() }?.let { return selectBest(5, it) }
+        if (level < 2) return 0
+        onStep("подбираю маскировку для доступных серверов")
+        val st = Store.state.value
+        val cand = (failed + st.servers.filter { st.state(it).tcpMs > 0 && it.id !in ids }.sortedBy { st.state(it).tcpMs }.take(10)).distinctBy { it.id }
+        if (cand.isNotEmpty()) doFindMasks(cand, 24, budgetMs = 120_000)
+        Store.state.value.let { s2 -> s2.servers.filter { s2.state(it).works } }.takeIf { it.isNotEmpty() }?.let { return selectBest(5, it) }
+        if (level < 3) return 0
+        onStep("обновляю подписки и перепроверяю все серверы")
+        if (now - st.settings.lastSubRefresh > 3600_000L || st.servers.size < 20) doRefresh()
+        doTestAll(Store.state.value.servers, 80)
+        Store.state.value.let { s3 -> s3.servers.filter { s3.state(it).works } }.takeIf { it.isNotEmpty() }?.let { return selectBest(5, it) }
+        val s4 = Store.state.value
+        val c2 = s4.servers.filter { s4.state(it).tcpMs > 0 }.sortedBy { s4.state(it).tcpMs }.take(10)
+        if (c2.isNotEmpty()) doFindMasks(c2, 24, budgetMs = 120_000)
+        if (Store.state.value.servers.none { Masks.isWarp(it) && Store.state.value.state(it).works }) { onStep("настраиваю WARP"); runCatching { doSetupWarp(2, null) } }
+        return Store.state.value.let { s5 -> s5.servers.filter { s5.state(it).works } }.let { if (it.isEmpty()) 0 else selectBest(5, it) }
     }
 
     private fun autoPrepare(onReady: () -> Unit) = launch("Авто-настройка") {
@@ -529,7 +612,7 @@ object Actions {
         val b = DpiProxy(app)
         try {
             val port = b.start(strategy, st.byeDpiSni, allowLocal = com.vlesscardvpn.BuildConfig.DEBUG)
-            val p = withContext(Dispatchers.IO) { Tester.probeDpi(port) }
+            val p = withContext(Bg.io) { Tester.probeDpi(port) }
             if (p.ok) "${strategy.label}: YouTube открылся за ${p.ms} мс" else "${strategy.label}: не работает (${p.error})"
         } finally { b.close() }
     }
@@ -546,7 +629,7 @@ object Actions {
      */
     fun findDpi() = launch("Подбор обхода DPI") { doFindDpi() }
 
-    private suspend fun doFindDpi(): String {
+    suspend fun doFindDpi(): String {
         val st = Store.state.value.settings
         val network = Net.key(app)
         val probe = DpiProxy(app)
@@ -558,7 +641,7 @@ object Actions {
         coroutineScope {
             val sem = Semaphore(8)
             plan.map { s ->
-                async(Dispatchers.IO) {
+                async(Bg.io) {
                     sem.withPermit {
                         val px = DpiProxy(app)
                         val r = try {
@@ -609,9 +692,9 @@ object Actions {
         val foreign = listOf("https://www.gstatic.com/generate_204", "https://www.cloudflare.com/cdn-cgi/trace", "https://github.com/", "https://telegram.org/")
         step(0, ru.size + foreign.size + 1)
         val (ruOk, fOk, yt) = coroutineScope {
-            val a = ru.map { async(Dispatchers.IO) { reach(it) } }
-            val b = foreign.map { async(Dispatchers.IO) { reach(it) } }
-            val c = async(Dispatchers.IO) { bigYoutube() }
+            val a = ru.map { async(Bg.io) { reach(it) } }
+            val b = foreign.map { async(Bg.io) { reach(it) } }
+            val c = async(Bg.io) { bigYoutube() }
             Triple(a.awaitAll().count { it }, b.awaitAll().count { it }, c.await())
         }
         step(ru.size + foreign.size + 1, ru.size + foreign.size + 1)
