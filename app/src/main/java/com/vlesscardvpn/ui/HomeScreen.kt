@@ -27,7 +27,7 @@ import com.vlesscardvpn.model.Mode
 @Composable
 fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () -> Unit) {
     val status by Tunnel.status.collectAsState()
-    val app by Store.state.collectAsState()
+    val app by Store.ui.collectAsState()
     val progress by Actions.progress.collectAsState()
     val mode = app.settings.mode
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {

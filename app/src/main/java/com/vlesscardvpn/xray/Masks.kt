@@ -29,8 +29,15 @@ data class Mask(
      * the DPI, the server roams), [Masks.HOP_WARP] = also a new WARP port every 10-20 s (Cloudflare listens on 54 ports).
      */
     val hop: String = "",
+    /** «Мои маскировки»: own UDP noise items (Xray finalmask noise JSON) instead of a [Masks.NOISES] preset. */
+    val noiseJson: String = "",
+    /** Made by the user (Settings → Мои маскировки) or imported from a vcmask:// link. */
+    val custom: Boolean = false,
+    /** Bred by [MaskLab] from masks that passed on the user's networks (Settings.autoMasks). */
+    val auto: Boolean = false,
 ) {
     val viaByeDpi: Boolean get() = dpi.isNotEmpty()
+    val hasNoise: Boolean get() = noise.isNotEmpty() || noiseJson.isNotEmpty()
 }
 
 object Masks {
@@ -51,7 +58,7 @@ object Masks {
         m.hop == HOP_WARP -> isWarp(s)
         m.hop.isNotEmpty() -> s.protocol == "wireguard"
         m.noise.isNotEmpty() && WG_NOISES.any { it[0] == m.noise } -> s.protocol == "wireguard"
-        m.noise.isNotEmpty() -> !s.isTcpBased && s.protocol != "xray"
+        m.hasNoise -> !s.isTcpBased && s.protocol != "xray"
         s.protocol == "xray" -> m.id == DEFAULT.id // raw Xray JSON outbound: used as is
         m.viaByeDpi && !s.isTcpBased -> false
         m.viaByeDpi && m.dpi != CURRENT_DPI && m.packets.isNotEmpty() -> false
@@ -81,6 +88,14 @@ object Masks {
         listOf("l1", "лесенка 1→3→8→30 байт", "tlshello", "", "", "0", "1-1,2-4,5-10,20-60", "1-2,2-4,3-6,5-10"),
         listOf("l2", "шредер зоны SNI", "tlshello", "", "", "0", "90-120,1-2,1-2,1-2,1-2,1-3,1-3,200-400", "1-3,1-2,1-2,1-2,1-2,1-2,1-2,1-3"),
         listOf("l3", "1 байт + долгая пауза", "1-1", "", "", "0", "1-1,500-1000", "60-120,1-2"),
+        // 1.0.66: more own shapes — the TSPU learns fixed patterns, so every family has a different rhythm.
+        listOf("l4", "лесенка вниз 60→20→5→1", "tlshello", "", "", "0", "40-60,15-20,4-6,1-1,1-1", "1-2,2-4,4-8,8-12,1-2"),
+        listOf("l5", "рваный ритм: мелко-крупно", "tlshello", "", "", "0", "1-2,30-60,1-2,30-60,1-2,100-200", "5-10,1-2,5-10,1-2,5-10,1-2"),
+        listOf("l6", "SNI по 1 байту с паузами", "tlshello", "", "", "0", "70-110,1-1,1-1,1-1,1-1,1-1,1-1,1-1,1-1,300-600", "1-2,3-5,3-5,3-5,3-5,3-5,3-5,3-5,3-5,1-2"),
+        listOf("p6", "дробление 1-4 пакетов 1-10, паузы 2-6", "1-4", "1-10", "2-6", "6"),
+        listOf("h7", "дробление Hello 1-2 байта, пауза 10-30", "tlshello", "1-2", "10-30", "4"),
+        listOf("p7", "дробление 2 пакетов 30-80", "1-2", "30-80", "3-8", "0"),
+        listOf("l7", "лесенка Фибоначчи 1,1,2,3,5,8,13,21", "tlshello", "", "", "0", "1-1,1-1,2-2,3-3,5-5,8-8,13-13,21-21", "1-1,1-1,2-2,3-3,5-5,8-8,13-13,21-21"),
     )
 
     /** (id, title, noise items as JSON) — sent before the first UDP datagram; servers drop them. */
@@ -96,6 +111,9 @@ object Masks {
         listOf("z6", "шум под QUIC (HTTP/3 браузера)", """[{"type":"exp","packet":"<b c3 00000001 08><r 8><b 00 00 44 d0><r 1150>","delay":"2-5"},{"type":"exp","packet":"<b c3 00000001 08><r 8><b 00 00 44 d0><r 1150>","delay":"2-5"}]"""),
         listOf("z7", "шум под DTLS (видеозвонок)", """[{"type":"exp","packet":"<b 16 fefd 0000 0000 0000 0000><r 2><b 01><r 3><b 0000><r 110>","delay":"3-6"},{"rand":"20-60","delay":"2-4"}]"""),
         listOf("z8", "шум под голос RTP", """[{"type":"exp","packet":"<b 80 60><r 10><r 160>","delay":"20-20"},{"type":"exp","packet":"<b 80 60><r 10><r 160>","delay":"20-20"},{"type":"exp","packet":"<b 80 60><r 10><r 160>","delay":"20-20"}]"""),
+        listOf("z10", "AmneziaWG: 1 большой + 6 мелких", """[{"rand":"900-1200","delay":"1-3"},{"rand":"10-40","delay":"1-2"},{"rand":"10-40","delay":"1-2"},{"rand":"10-40","delay":"1-2"},{"rand":"10-40","delay":"1-2"},{"rand":"10-40","delay":"1-2"},{"rand":"10-40","delay":"1-2"}]"""),
+        listOf("z11", "шум под QUIC + мусор AmneziaWG", """[{"type":"exp","packet":"<b c3 00000001 08><r 8><b 00 00 44 d0><r 1150>","delay":"2-5"},{"rand":"40-70","delay":"1-3"},{"rand":"40-70","delay":"1-3"},{"rand":"40-70","delay":"1-3"}]"""),
+        listOf("z12", "шум под онлайн-игру (8 пакетов)", """[{"rand":"20-60","delay":"8-16"},{"rand":"20-60","delay":"8-16"},{"rand":"20-60","delay":"8-16"},{"rand":"20-60","delay":"8-16"},{"rand":"20-60","delay":"8-16"},{"rand":"20-60","delay":"8-16"},{"rand":"20-60","delay":"8-16"},{"rand":"20-60","delay":"8-16"}]"""),
         listOf("z9", "AmneziaWG: 10 пакетов 50-1000 байт", """[{"rand":"50-1000","delay":"1-2"},{"rand":"50-1000","delay":"1-2"},{"rand":"50-1000","delay":"1-2"},{"rand":"50-1000","delay":"1-2"},{"rand":"50-1000","delay":"1-2"},{"rand":"50-1000","delay":"1-2"},{"rand":"50-1000","delay":"1-2"},{"rand":"50-1000","delay":"1-2"},{"rand":"50-1000","delay":"1-2"},{"rand":"50-1000","delay":"1-2"}]"""),
     )
     const val HOP_LOCAL = "hl"
@@ -106,8 +124,8 @@ object Masks {
     fun noiseItems(id: String): String? = NOISE_BY_ID[id]
 
     /**
-     * 7 fingerprints × 15 fragment modes × (direct | via the current DPI strategy) = 210, 4 UDP noise masks,
-     * plus 7 fingerprints × 21 fixed strategies (5 own VLESS Card, 7 zapret, 9 ByeDPI) = 147. Total 361.
+     * 7 fingerprints × 22 fragment modes × (direct | via the current DPI strategy) = 308, 4 UDP + 8 WireGuard noise masks, 18 port-hopping,
+     * plus 7 fingerprints × 21 fixed strategies (5 own VLESS Card, 7 zapret, 9 ByeDPI) = 147. Total 485 (+ «Мои маскировки» and auto masks of MaskLab).
      */
     val ALL: List<Mask> = buildList {
         for (via in listOf(false, true)) for (f in FRAGMENTS) for (fp in FINGERPRINTS) {
@@ -120,7 +138,7 @@ object Masks {
         for (n in WG_NOISES) add(Mask("chrome.${n[0]}", "WireGuard: " + n[1], "chrome", noise = n[0]))
         for (h in listOf(HOP_LOCAL to "смена порта каждые 10-20 с", HOP_WARP to "прыжки по 54 портам WARP")) {
             add(Mask("chrome.${h.first}", "WireGuard: " + h.second, "chrome", hop = h.first))
-            for (n in listOf("z1", "z5", "z6", "z7", "z9")) add(Mask("chrome.$n.${h.first}", "WireGuard: " + ((NOISES + WG_NOISES).first { it[0] == n }[1]) + " + " + h.second, "chrome", noise = n, hop = h.first))
+            for (n in listOf("z1", "z5", "z6", "z7", "z9", "z10", "z11", "z12")) add(Mask("chrome.$n.${h.first}", "WireGuard: " + ((NOISES + WG_NOISES).first { it[0] == n }[1]) + " + " + h.second, "chrome", noise = n, hop = h.first))
         }
         // Xray-engine strategies duplicate the outbound's own fragment masks, so they are not offered in front of servers.
         for (st in com.vlesscardvpn.core.DpiStrategies.BUILT_IN.filter { it.engine != com.vlesscardvpn.core.DpiEngine.XRAY }) for (fp in FINGERPRINTS)
@@ -129,7 +147,18 @@ object Masks {
     private val byId = ALL.associateBy { it.id }
     val DEFAULT: Mask = byId.getValue("chrome.n")
 
-    fun byId(id: String?): Mask? = if (id.isNullOrEmpty()) null else byId[id]
+    /** «Мои маскировки» (Settings.myMasks), kept in sync by Store. Tried first by the mask search. */
+    @Volatile var custom: List<Mask> = emptyList()
+        set(v) { field = v; customById = (auto + v).associateBy { it.id } }
+    /** Auto masks of the mask evolution (Settings.autoMasks), kept in sync by Store. */
+    @Volatile var auto: List<Mask> = emptyList()
+        set(v) { field = v; customById = (v + custom).associateBy { it.id } }
+    @Volatile private var customById: Map<String, Mask> = emptyMap()
+
+    fun byId(id: String?): Mask? = if (id.isNullOrEmpty()) null else byId[id] ?: customById[id]
+
+    /** Noise items of a mask: its own JSON («Мои маскировки») or the preset. */
+    fun noiseFor(m: Mask): String? = m.noiseJson.ifEmpty { null } ?: m.noise.takeIf { it.isNotEmpty() }?.let { noiseItems(it) }
 
     /**
      * Order in which "Подобрать маскировку" tries masks: most likely to pass Russian TSPU first, then the rest.
@@ -139,11 +168,13 @@ object Masks {
     fun strategies(masks: Collection<Mask?>): Set<String> = masks.mapNotNull { it?.dpi }.filter { it.isNotEmpty() }.toSet()
 
     /** Families the user can switch on/off for the mask search (Settings.maskFamilies). */
-    val FAMILIES = listOf("plain" to "Без дробления", "frag" to "Дробление", "ladder" to "Лесенки (свои)", "viadpi" to "Через обход DPI",
-        "own" to "Свои VLESS Card", "zapret" to "zapret", "byedpi" to "ByeDPI", "noise" to "UDP-шум")
+    val FAMILIES = listOf("my" to "Мои маскировки", "plain" to "Без дробления", "frag" to "Дробление", "ladder" to "Лесенки (свои)", "viadpi" to "Через обход DPI",
+        "own" to "Свои VLESS Card", "zapret" to "zapret", "byedpi" to "ByeDPI", "noise" to "UDP-шум", "auto" to "Авто-маски (эволюция)")
 
     fun family(m: Mask): String = when {
-        m.noise.isNotEmpty() || m.hop.isNotEmpty() -> "noise"
+        m.custom -> "my"
+        m.auto -> "auto"
+        m.hasNoise || m.hop.isNotEmpty() -> "noise"
         m.dpi.startsWith("BYEDPI#VCARD") || m.dpi.startsWith("TPWS#VCARD") -> "own"
         m.dpi.startsWith("TPWS#") -> "zapret"
         m.dpi.isNotEmpty() && m.dpi != CURRENT_DPI -> "byedpi"
@@ -156,18 +187,19 @@ object Masks {
     /** [searchOrder] limited to the families / fingerprints chosen in Settings (empty = all). Plain chrome stays as a baseline. */
     fun searchOrder(byeDpiAvailable: Boolean, server: com.vlesscardvpn.model.Server?, families: Collection<String>, fps: Collection<String>): List<Mask> =
         searchOrder(byeDpiAvailable, server).filter { m ->
-            m.id == DEFAULT.id || (families.isEmpty() || family(m) in families) && (fps.isEmpty() || m.fingerprint in fps || m.noise.isNotEmpty())
+            m.id == DEFAULT.id || m.custom || (families.isEmpty() || family(m) in families) && (fps.isEmpty() || m.fingerprint in fps || m.hasNoise)
         }
 
     fun searchOrder(byeDpiAvailable: Boolean, server: com.vlesscardvpn.model.Server? = null): List<Mask> {
-        val first = listOf("chrome.n", "chrome.z5", "chrome.z1", "chrome.z5.hw", "chrome.z6.hw", "chrome.z9", "chrome.z1.hl", "chrome.z7", "chrome.hw", "chrome.z2", "chrome.z3", "chrome.z4", "chrome.h4", "chrome.l1", "firefox.l2", "chrome.p2", "firefox.h2", "safari.p3", "edge.h5", "chrome.h1", "ios.p1", "safari.l3", "chrome.l2.b",
+        val first = listOf("chrome.n", "chrome.z5", "chrome.z10", "chrome.z1", "chrome.z5.hw", "chrome.z6.hw", "chrome.z9", "chrome.z1.hl", "chrome.z11.hw", "chrome.z12", "chrome.z7", "chrome.hw", "chrome.z2", "chrome.z3", "chrome.z4", "chrome.h4", "chrome.l1", "firefox.l2", "chrome.l4", "safari.l5", "firefox.l6", "chrome.p6", "firefox.l7", "chrome.h7", "safari.p7", "chrome.p2", "firefox.h2", "safari.p3", "edge.h5", "chrome.h1", "ios.p1", "safari.l3", "chrome.l2.b",
             "android.h3", "firefox.h4", "chrome.n.b", "chrome.h4.b", "firefox.p4", "chrome.p5", "chrome.h6", "qq.h2",
             "safari.n", "firefox.n", "edge.p2", "ios.h4", "android.p3", "safari.h1", "chrome.p1.b", "firefox.h3.b",
             // own VLESS Card masking and zapret in front of the server connection
             "chrome.d:BYEDPI#VCARD_CASCADE", "firefox.d:TPWS#VCARD_SHRED", "chrome.d:BYEDPI#VCARD_SHRED", "safari.d:BYEDPI#VCARD_STEALTH",
             "chrome.d:BYEDPI#VCARD_RECVER", "chrome.d:TPWS#SPLIT_DISORDER", "firefox.d:TPWS#TLSREC", "chrome.d:BYEDPI#OOB_THEN_DISORDER",
             "safari.d:TPWS#HOST_DISORDER", "chrome.d:BYEDPI#MULTI_DISORDER", "chrome.d:TPWS#TLSREC_OOB", "firefox.d:BYEDPI#MASK_AUTO_FAKE")
-        val ordered = (first.mapNotNull { byId[it] } + ALL).distinct()
+        // own masks right after the plain baseline: the user made them for this network
+        val ordered = (listOfNotNull(byId["chrome.n"]) + custom + first.mapNotNull { byId[it] } + ALL).distinct()
         return ordered.filter { (byeDpiAvailable || !it.viaByeDpi) && (server == null || compatible(it, server)) }
     }
 }

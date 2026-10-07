@@ -54,7 +54,7 @@ class ConfigTest {
     }
 
     @Test fun maskCatalog() {
-        assertEquals(378, Masks.ALL.size)
+        assertEquals(485, Masks.ALL.size)
         assertEquals(147, Masks.ALL.count { it.viaByeDpi && it.dpi != Masks.CURRENT_DPI })
         val r = LinkParser.parse(reality)!!
         val ws = LinkParser.parse(links[1])!!
@@ -173,7 +173,7 @@ class ConfigTest {
         val all = listOf(wg, wc, sk) + js
         all.forEach { sv -> Masks.searchOrder(true, sv).forEach { m -> assertTrue("${sv.name} ${m.id}", Masks.compatible(m, sv)) } }
         assertEquals(listOf("chrome.n"), Masks.searchOrder(true, js[0]).map { it.id })
-        assertEquals(16, Masks.searchOrder(true, wg).size) // plain + 4 UDP noise + 5 WireGuard noise + port hopping (×6)
+        assertEquals(22, Masks.searchOrder(true, wg).size) // plain + 4 UDP noise + 8 WireGuard noise + port hopping (×9)
         val c = XrayConfigBuilder.vpnConfig(all.map { it to Masks.byId(if (!it.isTcpBased && it.protocol != "xray") "chrome.z2" else "chrome.n") }, Settings(), null)
         assertTrue(c.contains("\"noise\"")); assertTrue(c.contains("\"secretKey\""))
         dump("vpn-formats", c)

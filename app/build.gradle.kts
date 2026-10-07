@@ -10,6 +10,9 @@ plugins {
 val releaseNumber = providers.environmentVariable("GITHUB_RUN_NUMBER").orNull?.toIntOrNull() ?: 59
 val betaPreview = providers.gradleProperty("betaPreview").orNull == "true"
 val armOnly = betaPreview || providers.gradleProperty("armOnly").orNull == "true"
+// -PsplitAbi=true: besides the universal APK, also build one APK per ABI (arm64 is ~2x smaller to download).
+val splitAbi = providers.gradleProperty("splitAbi").orNull == "true"
+val targetAbis = if (armOnly) listOf("arm64-v8a", "armeabi-v7a") else listOf("arm64-v8a", "armeabi-v7a", "x86_64", "x86")
 
 // Xray-core for Android (2dust/AndroidLibXrayLite), pinned by version and SHA-256.
 val xrayVersion = "v26.9.30"
@@ -40,11 +43,25 @@ android {
         targetSdk = 34
         versionCode = releaseNumber
         versionName = "1.0.$releaseNumber"
-        ndk { abiFilters.addAll(if (armOnly) listOf("arm64-v8a", "armeabi-v7a") else listOf("arm64-v8a", "armeabi-v7a", "x86_64", "x86")) }
+        // AGP forbids ndk.abiFilters together with ABI splits, so the split block carries the same list.
+        if (!splitAbi) ndk { abiFilters.addAll(targetAbis) }
+    }
+    splits {
+        abi {
+            isEnable = splitAbi
+            reset()
+            include(*targetAbis.toTypedArray())
+            isUniversalApk = true
+        }
     }
     testOptions { unitTests.isReturnDefaultValues = true }
     buildTypes {
-        release { isMinifyEnabled = false }
+        release {
+            // R8: drops unused code (mostly material-icons-extended) — classes.dex was ~32 MB.
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+        }
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_1_8
@@ -56,6 +73,8 @@ android {
     packaging {
         resources { excludes += "/META-INF/{AL2.0,LGPL2.1}" }
         jniLibs { useLegacyPackaging = true; keepDebugSymbols += "**/libbyedpi.so"; keepDebugSymbols += "**/libtpws.so" }
+        // With ABI splits ndk.abiFilters is off, so drop the x86 libgojni.so that libv2ray.aar ships.
+        if (splitAbi && armOnly) jniLibs { excludes += "lib/x86/**"; excludes += "lib/x86_64/**" }
     }
     sourceSets["main"].jniLibs.srcDir(layout.buildDirectory.dir("generated/byedpi"))
     sourceSets["main"].jniLibs.srcDir(layout.buildDirectory.dir("generated/hev"))

@@ -2,6 +2,8 @@ name: Release (signed, emulator-verified)
 on:
   push:
     tags: ['beta-build-*', 'release-build-*']
+    # A branch with the same name also starts a release (for tools that can create branches but not tags).
+    branches: ['beta-build-*', 'release-build-*']
 env:
   VERSION: ${{ github.ref_name }}
 permissions:
@@ -29,7 +31,7 @@ jobs:
         run: |
           N=${VERSION#beta-build-}; export GITHUB_RUN_NUMBER=${N#release-build-}
           chmod +x gradlew
-          ./gradlew -PbetaPreview=true --no-daemon --max-workers=2 :app:testDebugUnitTest :app:assembleRelease
+          ./gradlew -PbetaPreview=true -PsplitAbi=true --no-daemon --max-workers=2 :app:testDebugUnitTest :app:assembleRelease
       - name: Sign with persistent Beta key (v1+v2+v3)
         env:
           KS_B64: ${{ secrets.BETA_KEYSTORE_B64 }}
@@ -38,11 +40,20 @@ jobs:
           BT=$ANDROID_HOME/build-tools/34.0.0
           echo "$KS_B64" | base64 -d > beta.jks
           mkdir -p release
-          $BT/zipalign -f -p 4 app/build/outputs/apk/release/app-release-unsigned.apk aligned.apk
-          $BT/apksigner sign --ks beta.jks --ks-key-alias beta --ks-pass env:KSP --key-pass env:KSP \
-            --v1-signing-enabled true --v2-signing-enabled true --v3-signing-enabled true \
-            --min-sdk-version 21 --out release/VLESS-Card-Beta.apk aligned.apk
+          OUT=app/build/outputs/apk/release
+          sign() {
+            $BT/zipalign -f -p 4 "$1" aligned.apk
+            $BT/apksigner sign --ks beta.jks --ks-key-alias beta --ks-pass env:KSP --key-pass env:KSP \
+              --v1-signing-enabled true --v2-signing-enabled true --v3-signing-enabled true \
+              --min-sdk-version 21 --out "$2" aligned.apk
+            $BT/apksigner verify --min-sdk-version 21 "$2"
+          }
+          # Universal APK keeps the old file name (emulator check and existing download links).
+          sign $OUT/app-universal-release-unsigned.apk release/VLESS-Card-Beta.apk
+          # arm64-only: about half the download, for almost all modern phones.
+          sign $OUT/app-arm64-v8a-release-unsigned.apk release/VLESS-Card-Beta-arm64.apk
           rm -f beta.jks aligned.apk release/*.idsig
+          ls -l release/*.apk
           $BT/apksigner verify -v --min-sdk-version 21 release/VLESS-Card-Beta.apk | tee verify.txt
           grep -q "v1 scheme (JAR signing): true" verify.txt
           grep -q "v2 scheme (APK Signature Scheme v2): true" verify.txt
@@ -122,16 +133,17 @@ jobs:
           V=${VERSION#beta-build-}; V=${V#release-build-}
           cd release
           mv VLESS-Card-Beta.apk VLESS-Card-Beta-1.0.$V.apk
-          sha256sum VLESS-Card-Beta-1.0.$V.apk > SHA256SUMS-Beta.txt
+          mv VLESS-Card-Beta-arm64.apk VLESS-Card-Beta-1.0.$V-arm64.apk
+          sha256sum VLESS-Card-Beta-1.0.$V.apk VLESS-Card-Beta-1.0.$V-arm64.apk > SHA256SUMS-Beta.txt
           read T F < tests.txt || true
           NOTES=../docs/release-1.0.$V.md; [ -f "$NOTES" ] || NOTES=../docs/beta-1.0.$V.md
           [ -f "$NOTES" ] || NOTES=/dev/null
-          { cat "$NOTES"; echo; echo "### Автоматические проверки этой сборки"; echo "- JVM-тесты: $T, ошибок: $F"; echo "- Подписи v1 + v2 + v3, постоянный ключ Beta (следующие версии ставятся поверх)"; echo "- Этот же файл установлен и запущен на эмуляторах Android 11 и 14 (ARM-трансляция x86_64)"; echo "- Реальный телефон и сети РФ этим не проверяются"; } > notes.md
+          { cat "$NOTES"; echo; echo "### Автоматические проверки этой сборки"; echo "- JVM-тесты: $T, ошибок: $F"; echo "- Подписи v1 + v2 + v3, постоянный ключ Beta (следующие версии ставятся поверх)"; echo "- Файл *-arm64.apk — то же приложение только для 64-битных телефонов (почти все с 2017 года), качать примерно вдвое меньше"; echo "- Суммы SHA-256 обоих файлов — в SHA256SUMS-Beta.txt"; echo "- Универсальный файл установлен и запущен на эмуляторах Android 11 и 14 (ARM-трансляция x86_64)"; echo "- Реальный телефон и сети РФ этим не проверяются"; } > notes.md
           case "$VERSION" in
-            release-build-*) gh release create "v1.0.$V" VLESS-Card-Beta-1.0.$V.apk SHA256SUMS-Beta.txt \
+            release-build-*) gh release create "v1.0.$V" VLESS-Card-Beta-1.0.$V.apk VLESS-Card-Beta-1.0.$V-arm64.apk SHA256SUMS-Beta.txt \
                 --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --latest \
                 --title "VLESS Card 1.0.$V" --notes-file notes.md ;;
-            *) gh release create "beta-v1.0.$V" VLESS-Card-Beta-1.0.$V.apk SHA256SUMS-Beta.txt \
+            *) gh release create "beta-v1.0.$V" VLESS-Card-Beta-1.0.$V.apk VLESS-Card-Beta-1.0.$V-arm64.apk SHA256SUMS-Beta.txt \
                 --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease --draft \
                 --title "VLESS Card · Beta 1.0.$V" --notes-file notes.md ;;
           esac

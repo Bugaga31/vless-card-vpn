@@ -142,7 +142,16 @@ fun SettingsScreen() {
             modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp, max = 140.dp))
         if (s.warpKeys.isNotBlank()) Hint("Найдено ключей: ${com.vlesscardvpn.core.WarpKeys.parse(s.warpKeys).size}")
         Toggle("Встроенные ключи WARP+", "${com.vlesscardvpn.core.WarpKeys.BUILT_IN.size} публичных ключей: пробуются по очереди, если своего нет или он занят", s.warpBuiltinKeys) { v -> set { it.copy(warpBuiltinKeys = v) } }
+        var keysDialog by remember { mutableStateOf(false) }
+        val okKeys = (com.vlesscardvpn.core.WarpKeys.parse(s.warpKeys) + com.vlesscardvpn.core.WarpKeys.BUILT_IN).distinct()
+            .count { com.vlesscardvpn.core.WarpKeys.status(s.warpKeyStatus, it) == com.vlesscardvpn.core.WarpKeys.OK }
+        OutlinedButton(onClick = { keysDialog = true }, modifier = Modifier.fillMaxWidth()) {
+            Text("Ключи WARP+: выбрать и включить" + if (okKeys > 0) " (рабочих: $okKeys)" else "")
+        }
+        if (keysDialog) WarpKeysDialog(onDismiss = { keysDialog = false })
         OutlinedButton(onClick = { Actions.setupWarp() }, enabled = !progress.running, modifier = Modifier.fillMaxWidth()) { Text("Настроить WARP сейчас") }
+
+        MyMasksSection()
 
         Section("Подбор маскировки: что перебирать")
         Hint("Ничего не отмечено — все виды. Меньше видов — быстрее подбор. Сервер перестаёт перебираться после 3 рабочих масок.")

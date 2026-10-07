@@ -34,19 +34,20 @@ private enum class Filter(val title: String) { ALL("Все"), WORKING("Рабо�
 @Composable
 fun ServersScreen() {
     val ctx = LocalContext.current
-    val app by Store.state.collectAsState()
+    val app by Store.ui.collectAsState()
     val progress by Actions.progress.collectAsState()
     var filter by remember { mutableStateOf(Filter.ALL) }
     var addOpen by remember { mutableStateOf(false) }
     var menuFor by remember { mutableStateOf<Server?>(null) }
 
-    val list = remember(app, filter) {
+    // Sorting thousands of servers happens off the main thread; the old list stays on screen meanwhile.
+    val list by produceState(initialValue = emptyList<Server>(), app, filter) { value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
         val rank = { s: Server -> val st = app.state(s)
             when { st.selected -> 0; st.works -> 1; st.tcpMs > 0 && st.realMs < 0 -> 2; st.realMs < 0 && st.tcpMs < 0 -> 3; else -> 4 } }
         app.servers.filter { when (filter) { Filter.ALL -> true; Filter.WORKING -> app.state(it).works; Filter.SELECTED -> app.state(it).selected } }
             .sortedWith(compareBy<Server>(rank).thenBy { app.state(it).realMs.let { ms -> if (ms > 0) ms else Int.MAX_VALUE } }
                 .thenBy { app.state(it).tcpMs.let { ms -> if (ms > 0) ms else Int.MAX_VALUE } })
-    }
+    } }
 
     Column(Modifier.fillMaxSize().padding(horizontal = 12.dp)) {
         Spacer(Modifier.height(10.dp))
@@ -80,7 +81,9 @@ fun ServersScreen() {
         }
         if (app.servers.isEmpty()) {
             Text("Список пуст. Нажмите «Подписки» — загрузятся бесплатные серверы для России (igareck, с зеркал), " +
-                "или «Добавить» и вставьте свои ссылки vless:// vmess:// trojan:// ss:// hysteria2://.", color = Color.Gray, modifier = Modifier.padding(top = 16.dp))
+                "или «Добавить» и вставьте свои ссылки vless:// vmess:// trojan:// ss:// hysteria2://.\n\n" +
+                "Публичные серверы держат посторонние люди: владелец видит, куда вы ходите, и может читать трафик без HTTPS. " +
+                "Не входите через них в банк и важные аккаунты.", color = Color.Gray, modifier = Modifier.padding(top = 16.dp))
         }
         LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(vertical = 6.dp)) {
             items(list, key = { it.id }) { s ->
@@ -90,8 +93,13 @@ fun ServersScreen() {
     }
 
     if (addOpen) AddDialog(onDismiss = { addOpen = false }, onAdd = { text ->
-        val n = Actions.importText(text); addOpen = false
-        Toast.makeText(ctx, if (n == 0) "Ссылки не найдены или уже есть" else "Добавлено: $n", Toast.LENGTH_SHORT).show()
+        val n = Actions.importText(text); val nm = Actions.importMasks(text); addOpen = false
+        Toast.makeText(ctx, when {
+            n == 0 && nm == 0 -> "Ссылки не найдены или уже есть"
+            nm == 0 -> "Добавлено: $n"
+            n == 0 -> "Добавлено маскировок: $nm (Настройки → Мои маскировки)"
+            else -> "Добавлено: $n, маскировок: $nm"
+        }, Toast.LENGTH_SHORT).show()
     })
     menuFor?.let { s -> ServerMenu(s, app.state(s), onDismiss = { menuFor = null }) }
 }
@@ -106,7 +114,9 @@ private fun ServerRow(s: Server, st: ServerState, onToggle: () -> Unit, onLong: 
             Column(Modifier.weight(1f)) {
                 Text(s.name, maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.Medium, fontSize = 14.sp)
                 val mask = Masks.byId(st.maskId)?.title
-                Text(s.label + (mask?.let { " · $it" } ?: ""), maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 11.sp, color = Color.Gray)
+                // Catalog subscriptions are third-party free servers: mark them so they are not mistaken for your own.
+                val isPublic = com.vlesscardvpn.model.Subs.find(s.source) != null
+                Text(s.label + (if (isPublic) " · публичный" else "") + (mask?.let { " · $it" } ?: ""), maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 11.sp, color = Color.Gray)
             }
             Column(horizontalAlignment = Alignment.End) {
                 val real = st.realMs
@@ -130,7 +140,7 @@ private fun AddDialog(onDismiss: () -> Unit, onAdd: (String) -> Unit) {
         text = {
             Column {
                 OutlinedTextField(value = text, onValueChange = { text = it }, modifier = Modifier.fillMaxWidth().heightIn(min = 120.dp, max = 260.dp),
-                    placeholder = { Text("Ссылки vless:// vmess:// trojan:// ss:// hysteria2:// wireguard:// socks://, WireGuard .conf (WARP), Xray JSON или текст подписки") })
+                    placeholder = { Text("Ссылки vless:// vmess:// trojan:// ss:// hysteria2:// wireguard:// socks://, WireGuard .conf (WARP), Xray JSON, текст подписки или маскировки vcmask://") })
                 TextButton(onClick = {
                     val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                     text = cm.primaryClip?.getItemAt(0)?.coerceToText(ctx)?.toString().orEmpty()
@@ -146,6 +156,8 @@ private fun AddDialog(onDismiss: () -> Unit, onAdd: (String) -> Unit) {
 private fun ServerMenu(s: Server, st: ServerState, onDismiss: () -> Unit) {
     val ctx = LocalContext.current
     var masks by remember { mutableStateOf(false) }
+    var fork by remember { mutableStateOf(false) }
+    if (fork) { MaskEditor(Masks.byId(st.maskId) ?: Masks.DEFAULT, onDismiss = { fork = false; onDismiss() }); return }
     if (masks) {
         val options = Masks.searchOrder(true, s)
         AlertDialog(onDismissRequest = onDismiss, title = { Text("Маскировка: ${options.size} вариантов") },
@@ -164,6 +176,8 @@ private fun ServerMenu(s: Server, st: ServerState, onDismiss: () -> Unit) {
                 Text("${s.label}\n${s.address}:${s.port}", fontSize = 13.sp, color = Color.Gray)
                 TextButton(onClick = { Actions.findMasks(listOf(s)); onDismiss() }) { Text("Подобрать маскировку (перебор до 32 вариантов)") }
                 TextButton(onClick = { masks = true }) { Text("Выбрать маскировку вручную") }
+                TextButton(onClick = { fork = true }) { Text("Сделать свою на основе текущей") }
+                Masks.byId(st.maskId)?.takeIf { it.custom || it.auto }?.let { m -> TextButton(onClick = { shareMyMask(ctx, m); onDismiss() }) { Text("Поделиться маскировкой") } }
                 TextButton(onClick = {
                     (ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("link", LinkParser.toLink(s)))
                     Toast.makeText(ctx, "Ссылка скопирована", Toast.LENGTH_SHORT).show(); onDismiss()
