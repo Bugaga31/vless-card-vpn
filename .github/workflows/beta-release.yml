@@ -2,6 +2,8 @@ name: Release (signed, emulator-verified)
 on:
   push:
     tags: ['beta-build-*', 'release-build-*']
+    # A branch with the same name also starts a release (for tools that can create branches but not tags).
+    branches: ['beta-build-*', 'release-build-*']
 env:
   VERSION: ${{ github.ref_name }}
 permissions:
