@@ -140,12 +140,16 @@ object Warp {
         return err
     }
 
-    /** User keys first, then the built-in ones (shuffled); stops at the first key that binds. Returns the key used. */
-    fun upgrade(a: Account, own: List<String>, builtIn: Boolean, maxTries: Int = 12): Pair<String?, String> {
-        val order = own + if (builtIn) WarpKeys.BUILT_IN.shuffled().filter { it !in own } else emptyList()
+    /**
+     * Tries keys in the given order ([WarpKeys.order]); stops at the first that binds. [onResult] gets every
+     * answer (to remember used-up / invalid keys). Returns the key used (or null) and the last error.
+     */
+    fun upgrade(a: Account, order: List<String>, maxTries: Int = 12, onResult: (String, String?) -> Unit = { _, _ -> }): Pair<String?, String> {
         var last = ""
-        for (k in order.take(maxTries + own.size)) {
-            val e = applyLicense(a, k) ?: return k to ""
+        for (k in order.take(maxTries)) {
+            val e = applyLicense(a, k)
+            onResult(k, e)
+            if (e == null) return k to ""
             last = e
         }
         return null to last

@@ -97,6 +97,19 @@ object Actions {
         return if (ok.get() == 0) "Подписки не загрузились (нет сети или всё заблокировано)" else "Загружено серверов: ${total.get()} из ${ok.get()} подписок"
     }
 
+    /** vcmask:// links in pasted text → «Мои маскировки». Returns how many new ones were added. */
+    fun importMasks(text: String): Int {
+        val found = com.vlesscardvpn.xray.MyMasks.parseLinks(text)
+        if (found.isEmpty()) return 0
+        var added = 0
+        Store.update { st ->
+            val have = com.vlesscardvpn.xray.MyMasks.load(st.settings.myMasks).map { it.id }.toSet()
+            val fresh = found.filter { it.id !in have }; added = fresh.size
+            st.copy(settings = st.settings.copy(myMasks = st.settings.myMasks + fresh.map { com.vlesscardvpn.xray.MyMasks.store(it) }))
+        }
+        return added
+    }
+
     fun importText(text: String): Int {
         val list = LinkParser.parseMany(text, "manual")
         return Store.addServers(list)
@@ -299,7 +312,11 @@ object Actions {
      * the tunnel. If a selected server died or others are clearly faster, switches to the fastest and reconnects;
      * if nothing works, searches new masks. Returns true when the service should reconnect.
      */
+    /** Whether the last [optimize] pass switched servers (TunnelService checks again sooner then). */
+    @Volatile var lastOptimizeSwitched = false
+
     suspend fun optimize(): Boolean {
+        lastOptimizeSwitched = false
         val st = Store.state.value
         if (!st.settings.autoOptimize || job?.isActive == true) return false
         if (st.settings.mode == com.vlesscardvpn.model.Mode.BYEDPI) return false
@@ -323,9 +340,13 @@ object Actions {
         }
         val median = selOk.map { now.state(it).realMs }.sorted().let { if (it.isEmpty()) Int.MAX_VALUE else it[it.size / 2] }
         val bestMs = now.state(best.first()).realMs
-        val switch = selOk.size < sel.size || (median > bestMs * 1.6 && median - bestMs > 150)
+        // Ping is not everything: a server that answers fast but breaks big downloads (256 KB) feels slow — video stalls.
+        val selBroken = wifi && selOk.isNotEmpty() && selOk.all { now.state(it).bigOk == false } && best.any { now.state(it).bigOk == true }
+        val switch = selOk.size < sel.size || selBroken || (median > bestMs * 1.6 && median - bestMs > 150)
+        lastOptimizeSwitched = switch
         android.util.Log.i("E2E", "optimize sel=${sel.size} ok=${selOk.size} median=$median best=$bestMs switch=$switch")
-        if (switch) selectBest(minOf(5, best.size), best)
+        val pick = if (selBroken) best.filter { now.state(it).bigOk == true } else best
+        if (switch) selectBest(minOf(5, pick.size), pick)
         return switch && sel.map { it.id }.toSet() != Store.state.value.selected.map { it.id }.toSet()
     }
 
@@ -334,9 +355,15 @@ object Actions {
      * «WARP»: registers up to 3 free Cloudflare accounts (one key each — the tester runs one WireGuard tunnel per key
      * at a time), 4 endpoints per account, then searches UDP noise masks for them and selects the working ones.
      */
-    fun setupWarp(accounts: Int = 3) = launch("WARP") { doSetupWarp(accounts) }
+    fun setupWarp(accounts: Int = 3, onlyKey: String? = null) = launch("WARP") { doSetupWarp(if (onlyKey != null) 1 else accounts, onlyKey) }
 
-    suspend fun doSetupWarp(accounts: Int = 3): String {
+    /** Remembers Cloudflare's answers about WARP+ keys («Ключи WARP+» shows them; used-up keys go last next time). */
+    private fun rememberKeys(results: Map<String, String>) {
+        if (results.isNotEmpty()) Store.update { st -> st.copy(settings = st.settings.copy(warpKeyStatus = st.settings.warpKeyStatus + results)) }
+    }
+
+    /** [onlyKey]: «Подключить с этим ключом» in «Ключи WARP+» — one account, just this key. */
+    suspend fun doSetupWarp(accounts: Int = 3, onlyKey: String? = null): String {
         progress.value = progress.value.copy(title = "WARP: регистрация")
         val accs = mutableListOf<Warp.Account>(); var err = ""
         var dpi: DpiSet? = null
@@ -357,14 +384,23 @@ object Actions {
         // WARP+: bind a key to every account (own keys first, then the built-in public ones).
         val cfg = Store.state.value.settings
         val own = WarpKeys.parse(cfg.warpKeys)
-        if (own.isNotEmpty() || cfg.warpBuiltinKeys) {
+        val order = if (onlyKey != null) mutableListOf(onlyKey)
+            else WarpKeys.order(own, cfg.warpBuiltinKeys, cfg.warpKeyOff, cfg.warpKeyStatus).toMutableList()
+        if (order.isNotEmpty()) {
             progress.value = progress.value.copy(title = "WARP: ключ WARP+")
+            val seen = HashMap<String, String>()
             withContext(Dispatchers.IO) {
                 accs.indices.forEach { i ->
-                    val (key, e) = Warp.upgrade(accs[i], own, cfg.warpBuiltinKeys)
-                    if (key != null) accs[i] = accs[i].copy(plus = true) else plusErr = e
+                    val (key, e) = Warp.upgrade(accs[i], order, maxTries = if (onlyKey != null) 1 else 12) { k, err ->
+                        WarpKeys.classify(err)?.let { seen[k] = WarpKeys.mark(it) }
+                        // used up / invalid: don't retry it for the next account
+                        if (err != null && WarpKeys.classify(err) != null) order.remove(k)
+                    }
+                    // a key that worked is the best bet for the next account too
+                    if (key != null) { accs[i] = accs[i].copy(plus = true); order.remove(key); order.add(0, key) } else plusErr = e
                 }
             }
+            rememberKeys(seen)
         }
         } finally { dpi?.close(); Warp.extraSocks = emptyList() }
         val plus = accs.count { it.plus }

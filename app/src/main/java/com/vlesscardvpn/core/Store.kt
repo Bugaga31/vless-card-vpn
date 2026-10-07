@@ -46,6 +46,16 @@ object Store {
         if (file != null) return
         val f = File(context.filesDir, "state.json"); file = f
         if (f.isFile) runCatching { _state.value = decode(JSONObject(f.readText())) }
+        syncMasks()
+    }
+
+    private var syncedMasks: List<String>? = null
+    /** «Мои маскировки» live in Settings; Masks (used by the config builder and the search) reads them from here. */
+    @Synchronized private fun syncMasks() {
+        val my = _state.value.settings.myMasks
+        if (my === syncedMasks) return
+        syncedMasks = my
+        com.vlesscardvpn.xray.Masks.custom = com.vlesscardvpn.xray.MyMasks.load(my)
     }
 
     /** Re-reads state.json (used by the debug e2e hook after the file was replaced). */
@@ -62,10 +72,12 @@ object Store {
             })
         }
         _state.value = st
+        syncMasks()
     }
 
     fun update(change: (AppState) -> AppState) {
         _state.update(change)
+        syncMasks()
         synchronized(lock) {
             saveJob?.cancel()
             saveJob = scope.launch { delay(400); save() }
@@ -141,6 +153,7 @@ object Store {
     fun wipe(context: Context) = synchronized(lock) {
         saveJob?.cancel()
         _state.value = AppState()
+        syncMasks()
         runCatching { File(context.filesDir, "state.json").delete() }
         runCatching { File(context.filesDir, "hev-socks5-tunnel.yaml").delete() }
         runCatching { context.cacheDir.deleteRecursively() }

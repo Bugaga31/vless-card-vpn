@@ -31,6 +31,42 @@ object WarpKeys {
         "o29KRJ01-1qEP72w9-0N7q8js5", "h7TZ90a5-Nz68G5p4-PV7084hF", "d954HgE0-l8o027Dp-8J453LWY", "IMo058V3-3X27gp0o-mC96d51a", "l0624WEw-5N49m6iC-oU013N2K",
         "6TG0h37k-20CIx6N5-7yV63Wb4", "179YS3Dk-fA08CB16-4QJ81af2", "fH951IO3-3D24OmP1-0x8kl12n", "I1W362YH-jfbL3865-9ebF7h38", "6z521pex-Q5TI1h48-s2o5D9F1",
     )
+    const val OK = "ok"
+    const val FULL = "full"
+    const val BAD = "bad"
+    /** A key that was "full" (too many devices) gets another chance after this: devices fall off over time. */
+    private const val FULL_RETRY_MS = 3 * 24 * 3600_000L
+
+    /** Cloudflare's answer → status to remember; null = network trouble, says nothing about the key. */
+    fun classify(error: String?): String? = when {
+        error == null -> OK
+        error.contains("too many", true) || error.contains("device", true) -> FULL
+        error.contains("invalid", true) || error.contains("not found", true) || error.contains("license", true) -> BAD
+        else -> null
+    }
+
+    fun mark(status: String, now: Long = System.currentTimeMillis()) = "$status@$now"
+    /** Current status of a key: OK / FULL / BAD, or null when never checked (or FULL long ago). */
+    fun status(stored: Map<String, String>, key: String, now: Long = System.currentTimeMillis()): String? {
+        val v = stored[key] ?: return null
+        val st = v.substringBefore('@'); val at = v.substringAfter('@', "0").toLongOrNull() ?: 0
+        return if (st == FULL && now - at > FULL_RETRY_MS) null else st
+    }
+
+    /**
+     * Order in which keys are tried: own keys first (in the order typed), then built-in ones — known to work,
+     * never checked (shuffled), used up. Keys switched off or known invalid are not tried at all.
+     */
+    fun order(own: List<String>, builtIn: Boolean, off: Collection<String>, stored: Map<String, String>, now: Long = System.currentTimeMillis()): List<String> {
+        val offSet = off.toSet()
+        fun usable(k: String) = k !in offSet && status(stored, k, now) != BAD
+        val mine = own.filter(::usable)
+        if (!builtIn) return mine
+        val rest = BUILT_IN.filter { it !in mine && usable(it) }.shuffled()
+            .sortedBy { when (status(stored, it, now)) { OK -> 0; null -> 1; else -> 2 } }
+        return mine + rest
+    }
+
     private val KEY = Regex("\\b[A-Za-z0-9]{8}-[A-Za-z0-9]{8}-[A-Za-z0-9]{8}\\b")
     /** All keys found in pasted text (a single key or a whole channel post). */
     fun parse(text: String): List<String> = KEY.findAll(text).map { it.value }.distinct().toList()

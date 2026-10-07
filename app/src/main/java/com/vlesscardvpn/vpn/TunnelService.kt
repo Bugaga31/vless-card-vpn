@@ -205,20 +205,33 @@ class TunnelService : VpnService() {
     }
 
     private var optJob: kotlinx.coroutines.Job? = null
-    /** Background speed-up while connected: first pass 3 min after a good check, then every 20 min. */
-    private fun scheduleOptimize() {
+    /**
+     * Background speed-up while connected. Adaptive: first pass 2 min after a good check; after a switch the next
+     * one comes in 5 min (confirm the new choice), and while nothing changes the interval grows 10 → 20 → 30 min,
+     * so a stable connection is left alone and the battery is spared. A network change restarts the cycle.
+     */
+    private fun scheduleOptimize(firstDelay: Long = 120_000) {
         if (optJob?.isActive == true) return
         optJob = scope.launch {
-            delay(180_000)
+            delay(firstDelay)
+            var calm = 0
             while (Tunnel.status.value.state == Tunnel.State.CONNECTED) {
                 val reconnect = runCatching { Actions.optimize() }.getOrDefault(false)
                 if (reconnect && Tunnel.status.value.state == Tunnel.State.CONNECTED) {
                     Log.i("E2E", "optimize: switching to faster servers")
                     lock.withLock { connect() }
                 }
-                delay(20 * 60_000L)
+                calm = if (Actions.lastOptimizeSwitched) 0 else minOf(calm + 1, 3)
+                // sleep until the next pass, or wake early (45 s) when the network changes
+                if (kotlinx.coroutines.withTimeoutOrNull(longArrayOf(5, 10, 20, 30)[calm] * 60_000L) { optKick.receive() } != null) { calm = 0; delay(45_000) }
             }
         }
+    }
+
+    /** New network (Wi-Fi ↔ mobile): other servers may be faster here — re-run the speed-up soon. */
+    private val optKick = kotlinx.coroutines.channels.Channel<Unit>(kotlinx.coroutines.channels.Channel.CONFLATED)
+    private fun optimizeSoon() {
+        if (optJob?.isActive == true) optKick.trySend(Unit) else scheduleOptimize(firstDelay = 45_000)
     }
 
     /**
@@ -269,6 +282,7 @@ class TunnelService : VpnService() {
                 if (cur != null && DpiStrategies.resolve(st, Net.key(this@TunnelService)).id != cur.id || masksDiffer) {
                     scope.launch { delay(1500); lock.withLock { connect() } }
                 } else verifySoon(3000)
+                if (Store.state.value.settings.autoOptimize) optimizeSoon()
             }
         }
         runCatching { cm.registerDefaultNetworkCallback(cb); netCallback = cb }

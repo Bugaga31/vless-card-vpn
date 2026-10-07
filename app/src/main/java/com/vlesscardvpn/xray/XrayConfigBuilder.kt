@@ -121,7 +121,7 @@ object XrayConfigBuilder {
         }
         if (s.protocol == "hysteria2" && s.obfsPassword.isNotEmpty())
             fm.put("udp", arr(JSONObject().put("type", "salamander").put("settings", JSONObject().put("password", s.obfsPassword))))
-        val noise = mask?.noise?.let { Masks.noiseItems(it) }
+        val noise = mask?.let { Masks.noiseFor(it) }
         if (noise != null && !s.isTcpBased) {
             val u = fm.optJSONArray("udp") ?: JSONArray().also { fm.put("udp", it) }
             u.put(JSONObject().put("type", "noise").put("settings", JSONObject().put("noise", JSONArray(noise))))

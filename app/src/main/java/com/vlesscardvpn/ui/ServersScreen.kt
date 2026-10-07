@@ -92,8 +92,13 @@ fun ServersScreen() {
     }
 
     if (addOpen) AddDialog(onDismiss = { addOpen = false }, onAdd = { text ->
-        val n = Actions.importText(text); addOpen = false
-        Toast.makeText(ctx, if (n == 0) "Ссылки не найдены или уже есть" else "Добавлено: $n", Toast.LENGTH_SHORT).show()
+        val n = Actions.importText(text); val nm = Actions.importMasks(text); addOpen = false
+        Toast.makeText(ctx, when {
+            n == 0 && nm == 0 -> "Ссылки не найдены или уже есть"
+            nm == 0 -> "Добавлено: $n"
+            n == 0 -> "Добавлено маскировок: $nm (Настройки → Мои маскировки)"
+            else -> "Добавлено: $n, маскировок: $nm"
+        }, Toast.LENGTH_SHORT).show()
     })
     menuFor?.let { s -> ServerMenu(s, app.state(s), onDismiss = { menuFor = null }) }
 }
@@ -134,7 +139,7 @@ private fun AddDialog(onDismiss: () -> Unit, onAdd: (String) -> Unit) {
         text = {
             Column {
                 OutlinedTextField(value = text, onValueChange = { text = it }, modifier = Modifier.fillMaxWidth().heightIn(min = 120.dp, max = 260.dp),
-                    placeholder = { Text("Ссылки vless:// vmess:// trojan:// ss:// hysteria2:// wireguard:// socks://, WireGuard .conf (WARP), Xray JSON или текст подписки") })
+                    placeholder = { Text("Ссылки vless:// vmess:// trojan:// ss:// hysteria2:// wireguard:// socks://, WireGuard .conf (WARP), Xray JSON, текст подписки или маскировки vcmask://") })
                 TextButton(onClick = {
                     val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                     text = cm.primaryClip?.getItemAt(0)?.coerceToText(ctx)?.toString().orEmpty()
@@ -150,6 +155,8 @@ private fun AddDialog(onDismiss: () -> Unit, onAdd: (String) -> Unit) {
 private fun ServerMenu(s: Server, st: ServerState, onDismiss: () -> Unit) {
     val ctx = LocalContext.current
     var masks by remember { mutableStateOf(false) }
+    var fork by remember { mutableStateOf(false) }
+    if (fork) { MaskEditor(Masks.byId(st.maskId) ?: Masks.DEFAULT, onDismiss = { fork = false; onDismiss() }); return }
     if (masks) {
         val options = Masks.searchOrder(true, s)
         AlertDialog(onDismissRequest = onDismiss, title = { Text("Маскировка: ${options.size} вариантов") },
@@ -168,6 +175,8 @@ private fun ServerMenu(s: Server, st: ServerState, onDismiss: () -> Unit) {
                 Text("${s.label}\n${s.address}:${s.port}", fontSize = 13.sp, color = Color.Gray)
                 TextButton(onClick = { Actions.findMasks(listOf(s)); onDismiss() }) { Text("Подобрать маскировку (перебор до 32 вариантов)") }
                 TextButton(onClick = { masks = true }) { Text("Выбрать маскировку вручную") }
+                TextButton(onClick = { fork = true }) { Text("Сделать свою на основе текущей") }
+                Masks.byId(st.maskId)?.takeIf { it.custom }?.let { m -> TextButton(onClick = { shareMyMask(ctx, m); onDismiss() }) { Text("Поделиться маскировкой") } }
                 TextButton(onClick = {
                     (ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("link", LinkParser.toLink(s)))
                     Toast.makeText(ctx, "Ссылка скопирована", Toast.LENGTH_SHORT).show(); onDismiss()
