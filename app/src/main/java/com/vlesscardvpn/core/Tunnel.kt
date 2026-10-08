@@ -18,6 +18,8 @@ object Tunnel {
     /** Running VPN's local SOCKS listener (random port + login in stealth mode); null when disconnected. */
     @Volatile var socks: com.vlesscardvpn.xray.SocksAuth? = null
     @Volatile var dpiLabel: String = ""
+    /** «Умный YouTube» is on in the running connection (YouTube through the DPI bypass, the rest through the servers). */
+    @Volatile var ytViaDpi: Boolean = false
     /** Traffic of the app (Xray) at connect: the home screen shows what went through the VPN in this session. */
     @Volatile var rx0: Long = 0
     @Volatile var tx0: Long = 0

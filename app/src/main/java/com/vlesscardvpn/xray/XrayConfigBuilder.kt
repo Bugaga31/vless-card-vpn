@@ -265,8 +265,10 @@ object XrayConfigBuilder {
             }
         }
         c.put("routing", routing)
+        // bufferSize (KB per connection): on arm64 Xray's default is only 4 KB — a video stream waits on the hand-off between
+        // the app side and the server side. 64 KB keeps the pipe full (memory only while a connection is busy).
         c.put("policy", JSONObject().put("levels", JSONObject().put("0", JSONObject().put("handshake", 6).put("connIdle", 300)
-            .put("uplinkOnly", 2).put("downlinkOnly", 5))))
+            .put("uplinkOnly", 2).put("downlinkOnly", 5).apply { if (settings.turbo) put("bufferSize", 64) })))
         return c.toString(2)
     }
 
