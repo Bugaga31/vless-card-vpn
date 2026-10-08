@@ -108,10 +108,18 @@ class TunnelService : VpnService() {
         super.onDestroy()
     }
 
-    private suspend fun connect() {
-        teardown(null)
+    /**
+     * [soft]: internal reconnect (network change, healing, speed-up) — the TUN and its local proxy stay, only Xray and
+     * the DPI engines restart. No moment without VPN: apps don't leak past it and don't drop everything on "VPN off".
+     */
+    private suspend fun connect(soft: Boolean = false) {
+        val prevSocks = Tunnel.socks
+        val keepTun = soft && tun != null && prevSocks != null && !Store.state.value.settings.proxyOnly
+        teardown(null, keepTun)
         Store.init(this); XrayCore.init(this); Actions.init(this)
-        Tunnel.status.value = Tunnel.Status(Tunnel.State.CONNECTING, "Подключение…")
+        val prev = Tunnel.status.value
+        Tunnel.status.value = if (keepTun && prev.state == Tunnel.State.CONNECTED) prev.copy(check = "Переподключаюсь без разрыва VPN…", checkOk = null)
+            else Tunnel.Status(Tunnel.State.CONNECTING, "Подключение…")
         try {
             val st = Store.state.value
             val network = Net.key(this)
@@ -146,7 +154,7 @@ class TunnelService : VpnService() {
             Tunnel.dpiLabel = dpiLabel
             val proxy = settings.proxyOnly
             // Proxy mode: other apps must find the proxy, so the fixed port without a password (only on 127.0.0.1 unless shared).
-            val socks = if (settings.stealthSocks && !proxy) SocksAuth(randomPort(), randomToken(), randomToken()) else SocksAuth(settings.socksPort)
+            val socks = if (keepTun && prevSocks != null) prevSocks else if (settings.stealthSocks && !proxy) SocksAuth(randomPort(), randomToken(), randomToken()) else SocksAuth(settings.socksPort)
             val config = XrayConfigBuilder.vpnConfig(withMasks, settings, bdPort, socks, set.ports,
                 listen = if (proxy && settings.lanShare) "0.0.0.0" else "127.0.0.1", httpPort = if (proxy) settings.httpPort else null)
             val c = XrayCore.Instance("vpn"); core = c
@@ -154,7 +162,7 @@ class TunnelService : VpnService() {
             check(c.running) { "Xray не запустился: ${c.lastStatus}" }
             Tunnel.socks = socks
             Log.i("E2E", "socks port=${socks.port} auth=${socks.auth} dpi=${dpiLabel.ifEmpty { "-" }} fixed=${set.ports.keys} mode=${settings.mode} services=${settings.services} proxy=$proxy")
-            if (!proxy) startTun(settings, socks)
+            if (!proxy && !keepTun) startTun(settings, socks)
 
             val auto = st.settings.mode == Mode.AUTO
             var route = when (settings.mode) {
@@ -193,7 +201,7 @@ class TunnelService : VpnService() {
         val b = Builder().setSession(if (settings.randomTun || settings.quietNotification) "Sync" else "VLESS Card").setMtu(MTU)
             .addAddress(v4, 30).addRoute("0.0.0.0", 0)
             .addAddress(v6, 126).addRoute("::", 0)
-            .addDnsServer("1.1.1.1")
+            .addDnsServer("1.1.1.1").addDnsServer("8.8.8.8")
             .setConfigureIntent(PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE))
         val apps = settings.apps.filter { it != packageName }
         if (!settings.perApp) b.addDisallowedApplication(packageName)
@@ -262,9 +270,11 @@ class TunnelService : VpnService() {
             var calm = 0
             while (Tunnel.status.value.state == Tunnel.State.CONNECTED) {
                 val reconnect = runCatching { Store.busy { Actions.optimize() } }.getOrDefault(false)
-                if (reconnect && Tunnel.status.value.state == Tunnel.State.CONNECTED) {
+                // the user is in a call / watching video: wait a minute; still busy → skip, the next pass decides again
+                val busyNow = reconnect && userActive() && run { Log.i("E2E", "optimize: user is busy — switch postponed"); delay(60_000); userActive() }
+                if (reconnect && !busyNow && Tunnel.status.value.state == Tunnel.State.CONNECTED) {
                     Log.i("E2E", "optimize: switching to faster servers")
-                    lock.withLock { connect() }
+                    lock.withLock { connect(soft = true) }
                 }
                 calm = if (Actions.lastOptimizeSwitched) 0 else minOf(calm + 1, 3)
                 // sleep until the next pass, or wake early (45 s) when the network changes
@@ -273,12 +283,21 @@ class TunnelService : VpnService() {
         }
     }
 
+    /** Traffic is flowing (call, video, download: > 40 KB/s for 5 s): non-urgent switches wait so they don't cut it. */
+    private suspend fun userActive(): Boolean {
+        val a = android.net.TrafficStats.getTotalRxBytes() + android.net.TrafficStats.getTotalTxBytes()
+        delay(5000)
+        val b = android.net.TrafficStats.getTotalRxBytes() + android.net.TrafficStats.getTotalTxBytes()
+        return a > 0 && b - a > 200_000
+    }
+
     /** New network (Wi-Fi ↔ mobile): other servers may be faster here — re-run the speed-up soon. */
     private val optKick = kotlinx.coroutines.channels.Channel<Unit>(kotlinx.coroutines.channels.Channel.CONFLATED)
     private fun optimizeSoon() {
         if (optJob?.isActive == true) optKick.trySend(Unit) else scheduleOptimize(firstDelay = 45_000)
     }
 
+    private var netJob: Job? = null
     private var watchJob: Job? = null
     /**
      * Watchdog: a light request through the tunnel every 45 s. Two misses in a row = the connection broke
@@ -288,11 +307,20 @@ class TunnelService : VpnService() {
         if (watchJob?.isActive == true) return
         watchJob = scope.launch {
             var miss = 0
+            var offline = false
             while (Tunnel.status.value.state == Tunnel.State.CONNECTED) {
-                delay(45_000)
+                delay(if (offline) 10_000 else 45_000)
                 if (healJob?.isActive == true) continue
                 val port = Tunnel.socks?.port ?: break
                 val ok = Tester.probeSocks(port, Store.state.value.settings.testUrl, big = false, youtube = false, attempts = 1).realMs > 0
+                if (!ok && !Actions.online()) {
+                    miss = 0
+                    val cur = Tunnel.status.value
+                    if (cur.state == Tunnel.State.CONNECTED) Tunnel.status.value = cur.copy(check = "Нет интернета у самой сети — VPN ждёт и восстановится сам", checkOk = null)
+                    offline = true
+                    continue
+                }
+                if (ok && offline) { offline = false; verifySoon(0); break } // internet is back: full check (WARP, YouTube…)
                 miss = if (ok) 0 else miss + 1
                 if (miss >= 2) {
                     Log.i("E2E", "watchdog: connection lost")
@@ -328,7 +356,7 @@ class TunnelService : VpnService() {
                 if (dpiHeals % 3 != 0 && Actions.nextDpi()) healStatus("Стратегию, похоже, распознали — переключаюсь на запасную…")
                 else { healStatus("Подбираю новую стратегию обхода для этой сети…"); runCatching { Store.busy { Actions.doFindDpi() } } }
                 Log.i("E2E", "heal dpi=$dpiHeals")
-                delay(500); lock.withLock { connect() }
+                delay(500); lock.withLock { connect(soft = true) }
             }
             return
         }
@@ -362,7 +390,7 @@ class TunnelService : VpnService() {
             Log.i("E2E", "heal step=$healStep dpiOnly=$autoDpiOnly")
             safeMasks = false; connectFails = 0
             delay(500)
-            lock.withLock { connect() }
+            lock.withLock { connect(soft = true) }
         }
     }
 
@@ -380,7 +408,7 @@ class TunnelService : VpnService() {
                 if (n > 0 && serverless()) {
                     Log.i("E2E", "rescue: servers found again")
                     autoDpiOnly = false; healStep = 0
-                    lock.withLock { connect() }
+                    lock.withLock { connect(soft = true) }
                     break
                 }
             }
@@ -390,37 +418,47 @@ class TunnelService : VpnService() {
     private fun watchNetwork() {
         val cm = getSystemService(ConnectivityManager::class.java) ?: return
         var last: Network? = null
+        var lost = false
         val cb = object : ConnectivityManager.NetworkCallback() {
             override fun onAvailable(network: Network) {
                 val caps = cm.getNetworkCapabilities(network)
                 if (caps?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) == true) return
-                val changed = last != null && last != network
-                last = network
+                val changed = last != null && (last != network || lost)
+                last = network; lost = false
                 setUnderlyingNetworks(arrayOf(network))
                 if (!changed) return
-                // Another network (Wi-Fi ↔ mobile): its own DPI strategy may be remembered — restart with it.
-                val st = Store.state.value.settings
-                val cur = dpi?.current
-                val masksDiffer = Store.state.value.let { a -> a.selected.any { a.state(it).netMasks.isNotEmpty() } }
-                if (cur != null && DpiStrategies.resolve(st, Net.key(this@TunnelService)).id != cur.id || masksDiffer) {
-                    scope.launch { delay(1500); lock.withLock { connect() } }
-                } else verifySoon(3000)
+                // Another network (Wi-Fi ↔ mobile) or the same one back: connections to the server died with the old
+                // network (apps used to hang for minutes). Restart Xray at once — its DPI strategy and masks for this network too.
+                netJob?.cancel()
+                netJob = scope.launch {
+                    delay(1500)
+                    Log.i("E2E", "network changed → soft restart")
+                    lock.withLock { connect(soft = true) }
+                }
                 if (Store.state.value.settings.autoOptimize) optimizeSoon()
+            }
+
+            override fun onLost(network: Network) {
+                if (network != last) return
+                lost = true
+                netJob?.cancel()
+                val cur = Tunnel.status.value
+                if (cur.state == Tunnel.State.CONNECTED) Tunnel.status.value = cur.copy(check = "Сеть пропала — VPN ждёт её и восстановится сам", checkOk = null)
             }
         }
         runCatching { cm.registerDefaultNetworkCallback(cb); netCallback = cb }
     }
 
-    private fun teardown(error: String?) {
-        checkJob?.cancel(); watchJob?.cancel(); coverJob?.cancel()
+    private fun teardown(error: String?, keepTun: Boolean = false) {
+        checkJob?.cancel(); watchJob?.cancel(); coverJob?.cancel(); if (error != null) netJob?.cancel()
         if (error != null) { healJob?.cancel(); rescueJob?.cancel() }
         if (error != null) optJob?.cancel()
         netCallback?.let { cb -> runCatching { getSystemService(ConnectivityManager::class.java)?.unregisterNetworkCallback(cb) } }
         netCallback = null
-        TProxyService.stop()
+        if (!keepTun) TProxyService.stop()
         core?.stop(); core = null
-        dpi?.close(); dpi = null; Tunnel.byeDpiPort = null; Tunnel.socks = null
-        runCatching { tun?.close() }; tun = null
+        dpi?.close(); dpi = null; Tunnel.byeDpiPort = null
+        if (!keepTun) { Tunnel.socks = null; runCatching { tun?.close() }; tun = null }
         if (error != null) {
             Tunnel.status.value = if (error.isEmpty()) Tunnel.Status() else Tunnel.Status(Tunnel.State.ERROR, error)
             stopForeground(STOP_FOREGROUND_REMOVE)

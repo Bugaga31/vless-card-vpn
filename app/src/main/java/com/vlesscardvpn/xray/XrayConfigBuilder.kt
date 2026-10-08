@@ -15,6 +15,10 @@ object XrayConfigBuilder {
     const val BYEDPI_TAG = "byedpi"
     const val PROXY_PREFIX = "proxy-"
     const val RU_DNS = "77.88.8.8"
+    val DNS_FALLBACKS = listOf("https://8.8.8.8/dns-query", "https://9.9.9.9/dns-query", "8.8.8.8", "1.1.1.1")
+    /** DoH/DoT names resolved without asking anyone (Private DNS and «свой DNS» by name work even when DNS is broken). */
+    val DNS_HOSTS = mapOf("dns.google" to "8.8.8.8", "cloudflare-dns.com" to "1.1.1.1", "one.one.one.one" to "1.1.1.1",
+        "dns.quad9.net" to "9.9.9.9", "dns.adguard-dns.com" to "94.140.14.14", "common.dot.dns.yandex.net" to "77.88.8.8")
     val RU_DOMAINS = listOf("geosite:category-ru", "domain:ru", "domain:su", "domain:xn--p1ai")
     private val IPV4_LITERAL = Regex("^\\d{1,3}(\\.\\d{1,3}){3}$")
 
@@ -50,7 +54,7 @@ object XrayConfigBuilder {
             else -> throw IllegalArgumentException("unsupported protocol ${s.protocol}")
         }
         o.put("streamSettings", stream(s, mask))
-        if (mux && muxable(s)) o.put("mux", JSONObject().put("enabled", true).put("concurrency", 8)
+        if ((mux || mask?.mux == true) && muxable(s)) o.put("mux", JSONObject().put("enabled", true).put("concurrency", 8)
             .put("xudpConcurrency", 16).put("xudpProxyUDP443", "reject"))
         return o
     }
@@ -92,12 +96,15 @@ object XrayConfigBuilder {
             else -> "chrome"
         }
         if (security == "tls" || security == "reality") {
-            val sni = s.sni.ifEmpty { hostSni.takeIf { it.isNotEmpty() } ?: s.address.takeIf { !IPV4_LITERAL.matches(it) && ':' !in it }.orEmpty() }
+            val sni0 = s.sni.ifEmpty { hostSni.takeIf { it.isNotEmpty() } ?: s.address.takeIf { !IPV4_LITERAL.matches(it) && ':' !in it }.orEmpty() }
+            // «Белый SNI»: the certificate is pinned by hash, so the name in the hello is free to look like a Russian site
+            val sni = if (mask != null && mask.sni.isNotEmpty() && security == "tls" && s.pcs.isNotEmpty() && s.protocol != "hysteria2") mask.sni else sni0
             val t = JSONObject()
             if (sni.isNotEmpty()) t.put("serverName", sni)
             if (s.protocol != "hysteria2") t.put("fingerprint", fp)
             if (security == "tls") {
-                val alpn = csv(s.alpn).ifEmpty { if (s.protocol == "hysteria2") listOf("h3") else emptyList() }
+                val alpn = if (mask != null && mask.alpn.isNotEmpty() && s.protocol != "hysteria2") csv(mask.alpn)
+                    else csv(s.alpn).ifEmpty { if (s.protocol == "hysteria2") listOf("h3") else emptyList() }
                 if (alpn.isNotEmpty()) t.put("alpn", JSONArray(alpn))
                 // Xray 26 removed allowInsecure: self-signed servers are pinned by certificate SHA-256 instead.
                 if (s.pcs.isNotEmpty()) t.put("pinnedPeerCertSha256", s.pcs)
@@ -136,6 +143,7 @@ object XrayConfigBuilder {
         if (fm.length() > 0) st.put("finalmask", fm)
         val sock = JSONObject().put("tcpKeepAliveInterval", 15)
         if (mask?.viaByeDpi == true && s.isTcpBased) sock.put("dialerProxy", dpiTag(mask.dpi))
+        else if (mask != null && mask.mss > 0 && s.isTcpBased) sock.put("tcpMaxSeg", mask.mss)
         st.put("sockopt", sock)
         return st
     }
@@ -188,7 +196,8 @@ object XrayConfigBuilder {
         if (useServers) servers.forEachIndexed { i, (s, m) -> outs.put(outbound(s, "$PROXY_PREFIX$i", resolveMask(m, byeDpiPort, dpiPorts), settings.mux)) }
         outs.put(JSONObject().put("tag", "direct").put("protocol", "freedom").put("settings", JSONObject().put("domainStrategy", "UseIPv4")))
         outs.put(JSONObject().put("tag", "block").put("protocol", "blackhole"))
-        outs.put(JSONObject().put("tag", "dns-out").put("protocol", "dns"))
+        // MX/TXT/SRV/HTTPS records are passed on instead of dropped (apps used to hang waiting for them)
+        outs.put(JSONObject().put("tag", "dns-out").put("protocol", "dns").put("settings", JSONObject().put("nonIPQuery", "skip")))
         dpiOutbounds(outs, byeDpiPort, if (useServers) dpiPorts else emptyMap())
         c.put("outbounds", outs)
 
@@ -202,9 +211,10 @@ object XrayConfigBuilder {
         val ruDns = settings.ruDns && settings.ruDirect && useServers
         if (ruDns) dnsServers.put(JSONObject().put("address", RU_DNS).put("port", 53)
             .put("domains", JSONArray(RU_DOMAINS)).put("skipFallback", true))
-        dnsServers.put(settings.dnsUrl)
-        if (settings.dnsUrl != "https://8.8.8.8/dns-query") dnsServers.put("https://8.8.8.8/dns-query")
-        c.put("dns", JSONObject().put("servers", dnsServers).put("queryStrategy", "UseIPv4").put("tag", "dns-module"))
+        // a chain, not one server: if Cloudflare DoH is slowed down here, Google, Quad9 and plain DNS through the tunnel answer
+        (listOf(settings.dnsUrl) + DNS_FALLBACKS).distinct().forEach { dnsServers.put(it) }
+        c.put("dns", JSONObject().put("servers", dnsServers).put("queryStrategy", "UseIPv4").put("tag", "dns-module")
+            .put("hosts", JSONObject(DNS_HOSTS as Map<*, *>)))
 
         val rules = JSONArray()
         rules.put(JSONObject().put("inboundTag", arr("socks")).put("port", "53").put("outboundTag", "dns-out"))
