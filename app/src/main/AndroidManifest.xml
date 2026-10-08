@@ -25,7 +25,23 @@
             android:name=".MainActivity"
             android:exported="true"
             android:launchMode="singleTask"
-            android:windowSoftInputMode="adjustResize" />
+            android:windowSoftInputMode="adjustResize">
+            <!-- Tap a link in Telegram/browser → the app opens and adds it. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="vless" /><data android:scheme="vmess" /><data android:scheme="trojan" /><data android:scheme="ss" />
+                <data android:scheme="hysteria2" /><data android:scheme="hy2" /><data android:scheme="vcmask" /><data android:scheme="vcnet" />
+                <data android:scheme="vcbackup" />
+            </intent-filter>
+            <!-- «Поделиться» → VLESS Card: a text with links. -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+        </activity>
         <!-- Launcher entries: only one is enabled at a time (Настройки → Скрытность → Иконка). -->
         <activity-alias android:name=".LauncherDefault" android:targetActivity=".MainActivity" android:exported="true" android:enabled="true">
             <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter>

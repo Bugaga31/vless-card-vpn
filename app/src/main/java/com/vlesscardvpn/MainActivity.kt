@@ -40,9 +40,35 @@ class MainActivity : ComponentActivity() {
         if (!BuildConfig.DEBUG) com.vlesscardvpn.core.Actions.warmup() // background: subscriptions, tests, masks — ready before «Подключить»
         setContent { AppUi(onConnect = { connect() }, onDisconnect = { com.vlesscardvpn.core.Actions.cancelPrepare(); TunnelService.stop(this) }) }
         e2e(intent)
+        importFrom(intent)
     }
 
-    override fun onNewIntent(intent: android.content.Intent) { super.onNewIntent(intent); e2e(intent) }
+    override fun onNewIntent(intent: android.content.Intent) { super.onNewIntent(intent); e2e(intent); importFrom(intent) }
+
+    /** A tapped vless://… link or a text shared to the app: import it right away. */
+    private fun importFrom(i: android.content.Intent?) {
+        val text = when (i?.action) {
+            android.content.Intent.ACTION_VIEW -> i.dataString
+            android.content.Intent.ACTION_SEND -> i.getStringExtra(android.content.Intent.EXTRA_TEXT)
+            else -> null
+        } ?: return
+        i?.action = null // not again on rotation
+        android.widget.Toast.makeText(this, com.vlesscardvpn.core.Actions.importAny(text), android.widget.Toast.LENGTH_LONG).show()
+    }
+
+    /** Copied a link somewhere else and came back: offer to add it (once per copied text). Android 10+ reads the clipboard only with focus. */
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (!hasFocus) return
+        val text = runCatching { (getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager).primaryClip?.getItemAt(0)?.text?.toString() }.getOrNull() ?: return
+        if (text.length > 200_000) return
+        val prefs = getSharedPreferences("clip", MODE_PRIVATE)
+        val h = text.hashCode()
+        if (prefs.getInt("last", 0) == h) return
+        prefs.edit().putInt("last", h).apply()
+        val what = com.vlesscardvpn.core.Actions.clipSummary(text)
+        if (what.isNotEmpty()) com.vlesscardvpn.core.Actions.clipOffer.value = text to what
+    }
 
     /** Debug builds only: hooks for the emulator end-to-end check (tools/e2e-android.sh). */
     private fun e2e(i: android.content.Intent?) {

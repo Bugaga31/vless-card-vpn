@@ -16,6 +16,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -28,7 +29,7 @@ import com.vlesscardvpn.model.Server
 import com.vlesscardvpn.model.ServerState
 import com.vlesscardvpn.xray.Masks
 
-private enum class Filter(val title: String) { ALL("Все"), WORKING("Рабочие"), SELECTED("Выбранные") }
+private enum class Filter(val title: String) { ALL("Все"), WORKING("Рабочие"), SELECTED("Выбранные"), FAV("★ Избранные") }
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -39,12 +40,15 @@ fun ServersScreen() {
     var filter by remember { mutableStateOf(Filter.ALL) }
     var addOpen by remember { mutableStateOf(false) }
     var menuFor by remember { mutableStateOf<Server?>(null) }
+    var country by remember { mutableStateOf("") }
 
     // Sorting thousands of servers happens off the main thread; the old list stays on screen meanwhile.
-    val list by produceState(initialValue = emptyList<Server>(), app, filter) { value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+    val list by produceState(initialValue = emptyList<Server>(), app, filter, country) { value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
         val rank = { s: Server -> val st = app.state(s)
             when { st.selected -> 0; st.works -> 1; st.tcpMs > 0 && st.realMs < 0 -> 2; st.realMs < 0 && st.tcpMs < 0 -> 3; else -> 4 } }
-        app.servers.filter { when (filter) { Filter.ALL -> true; Filter.WORKING -> app.state(it).works; Filter.SELECTED -> app.state(it).selected } }
+        val favs = app.settings.favorites.toHashSet()
+        app.servers.filter { when (filter) { Filter.ALL -> true; Filter.WORKING -> app.state(it).works; Filter.SELECTED -> app.state(it).selected; Filter.FAV -> it.id in favs } }
+            .filter { country.isEmpty() || com.vlesscardvpn.core.Countries.of(it.name) == country }
             .sortedWith(compareBy<Server>(rank).thenBy { app.state(it).let { st -> if (st.works) st.score else if (st.realMs > 0) st.realMs + 5000 else Int.MAX_VALUE } }
                 .thenBy { app.state(it).tcpMs.let { ms -> if (ms > 0) ms else Int.MAX_VALUE } })
     } }
@@ -68,10 +72,16 @@ fun ServersScreen() {
                 Store.remove(dead); Toast.makeText(ctx, "Удалено: ${dead.size}", Toast.LENGTH_SHORT).show()
             }, enabled = !busy) { Text("Удалить нерабочие") }
         }
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(Modifier.horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Filter.values().forEach { f -> FilterChip(selected = filter == f, onClick = { filter = f }, label = { Text(f.title) }) }
-            Spacer(Modifier.weight(1f))
             Text("${list.size}", color = Color.Gray, fontSize = 12.sp)
+        }
+        val countries = remember(app) { Actions.countries(app) }
+        if (countries.isNotEmpty()) Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            FilterChip(selected = country.isEmpty(), onClick = { country = "" }, label = { Text("🌐 Все страны") })
+            countries.take(20).forEach { (c, n) ->
+                FilterChip(selected = country == c, onClick = { country = if (country == c) "" else c }, label = { Text("${com.vlesscardvpn.core.Countries.flag(c)} $c · $n") })
+            }
         }
         LiveProgress(stop = true)
         if (app.settings.mode == com.vlesscardvpn.model.Mode.AUTO && app.servers.isNotEmpty())
@@ -85,33 +95,27 @@ fun ServersScreen() {
         }
         LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(vertical = 6.dp)) {
             items(list, key = { it.id }) { s ->
-                ServerRow(s, app.state(s), onToggle = { Store.setState(s.id) { st -> st.copy(selected = !st.selected) } }, onLong = { menuFor = s })
+                ServerRow(s, app.state(s), fav = s.id in app.settings.favorites, onToggle = { Store.setState(s.id) { st -> st.copy(selected = !st.selected) } }, onLong = { menuFor = s })
             }
         }
     }
 
     if (addOpen) AddDialog(onDismiss = { addOpen = false }, onAdd = { text ->
-        val n = Actions.importText(text); val nm = Actions.importMasks(text); val np = Actions.importNetProfile(text) ?: Actions.importBackup(text); addOpen = false
-        if (np != null) Toast.makeText(ctx, np, Toast.LENGTH_LONG).show()
-        else Toast.makeText(ctx, when {
-            n == 0 && nm == 0 -> "Ссылки не найдены или уже есть"
-            nm == 0 -> "Добавлено: $n"
-            n == 0 -> "Добавлено маскировок: $nm (Настройки → Мои маскировки)"
-            else -> "Добавлено: $n, маскировок: $nm"
-        }, Toast.LENGTH_SHORT).show()
+        addOpen = false
+        Toast.makeText(ctx, Actions.importAny(text), Toast.LENGTH_LONG).show()
     })
     menuFor?.let { s -> ServerMenu(s, app.state(s), onDismiss = { menuFor = null }) }
 }
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun ServerRow(s: Server, st: ServerState, onToggle: () -> Unit, onLong: () -> Unit) {
+private fun ServerRow(s: Server, st: ServerState, fav: Boolean = false, onToggle: () -> Unit, onLong: () -> Unit) {
     Card(Modifier.fillMaxWidth().padding(vertical = 3.dp).combinedClickable(onClick = onToggle, onLongClick = onLong),
         colors = CardDefaults.cardColors(containerColor = if (st.selected) Color(0xFF1C2A44) else MaterialTheme.colorScheme.surface)) {
         Row(Modifier.padding(horizontal = 6.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
             Checkbox(checked = st.selected, onCheckedChange = { onToggle() })
             Column(Modifier.weight(1f)) {
-                Text(s.name, maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.Medium, fontSize = 14.sp)
+                Text((if (fav) "★ " else "") + s.name, maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.Medium, fontSize = 14.sp)
                 val mask = Masks.byId(st.maskId)?.title
                 // Catalog subscriptions are third-party free servers: mark them so they are not mistaken for your own.
                 val isPublic = com.vlesscardvpn.model.Subs.find(s.source) != null
@@ -156,6 +160,8 @@ private fun ServerMenu(s: Server, st: ServerState, onDismiss: () -> Unit) {
     val ctx = LocalContext.current
     var masks by remember { mutableStateOf(false) }
     var fork by remember { mutableStateOf(false) }
+    var qr by remember { mutableStateOf(false) }
+    if (qr) { QrDialog(s.name, LinkParser.toLink(s), onDismiss = { qr = false; onDismiss() }); return }
     if (fork) { MaskEditor(Masks.byId(st.maskId) ?: Masks.DEFAULT, onDismiss = { fork = false; onDismiss() }); return }
     if (masks) {
         val options = Masks.searchOrder(true, s)
@@ -186,7 +192,38 @@ private fun ServerMenu(s: Server, st: ServerState, onDismiss: () -> Unit) {
                     (ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("link", LinkParser.toLink(s)))
                     Toast.makeText(ctx, "Ссылка скопирована", Toast.LENGTH_SHORT).show(); onDismiss()
                 }) { Text("Копировать ссылку") }
+                val fav = s.id in Store.state.value.settings.favorites
+                TextButton(onClick = { Actions.toggleFavorite(s.id); onDismiss() }) {
+                    Text(if (fav) "Убрать из избранного" else "★ В избранное (Авто всегда берёт его, если работает)")
+                }
+                TextButton(onClick = { qr = true }) { Text("QR-код (отсканировать другим телефоном)") }
+                TextButton(onClick = {
+                    ctx.startActivity(android.content.Intent.createChooser(android.content.Intent(android.content.Intent.ACTION_SEND).setType("text/plain")
+                        .putExtra(android.content.Intent.EXTRA_TEXT, LinkParser.toLink(s)), "Поделиться сервером"))
+                    onDismiss()
+                }) { Text("Поделиться") }
                 TextButton(onClick = { Store.remove(setOf(s.id)); onDismiss() }) { Text("Удалить", color = Bad) }
             }
         }, confirmButton = { TextButton(onClick = onDismiss) { Text("Закрыть") } })
 }
+
+/** QR of a link: scan it with the camera / another VPN app on the other phone. Contains the server key — show only to your own. */
+@Composable
+fun QrDialog(title: String, text: String, onDismiss: () -> Unit) {
+    val bmp = remember(text) { qrBitmap(text, 720) }
+    AlertDialog(onDismissRequest = onDismiss, title = { Text(title, maxLines = 2) },
+        text = {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                if (bmp != null) androidx.compose.foundation.Image(bmp.asImageBitmap(), "QR", Modifier.size(280.dp))
+                else Text("Ссылка слишком длинная для QR-кода")
+                Text("Внутри ключ сервера — показывайте только себе и тем, кому доверяете.", fontSize = 12.sp, color = Color.Gray)
+            }
+        }, confirmButton = { TextButton(onClick = onDismiss) { Text("Закрыть") } })
+}
+
+fun qrBitmap(text: String, size: Int): android.graphics.Bitmap? = runCatching {
+    val m = com.google.zxing.qrcode.QRCodeWriter().encode(text, com.google.zxing.BarcodeFormat.QR_CODE, size, size,
+        mapOf(com.google.zxing.EncodeHintType.MARGIN to 2, com.google.zxing.EncodeHintType.CHARACTER_SET to "UTF-8"))
+    val px = IntArray(m.width * m.height) { i -> if (m.get(i % m.width, i / m.width)) 0xFF000000.toInt() else 0xFFFFFFFF.toInt() }
+    android.graphics.Bitmap.createBitmap(px, m.width, m.height, android.graphics.Bitmap.Config.ARGB_8888)
+}.getOrNull()
