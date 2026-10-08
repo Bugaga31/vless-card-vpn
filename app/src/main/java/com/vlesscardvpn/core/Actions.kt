@@ -346,14 +346,17 @@ object Actions {
         val done = AtomicInteger()
         val tcp = java.util.concurrent.ConcurrentHashMap<String, Int>()
         val batch = StateBatch()
-        Tester.tcp(list) { s, ms ->
+        Tester.tcp(list, parallel = 192, timeoutMs = 2000) { s, ms ->
             tcp[s.id] = ms
             batch.put(s.id) { it.copy(tcpMs = ms, realMs = if (ms == 0) 0 else it.realMs, checkedAt = System.currentTimeMillis()) }
             step(done.incrementAndGet(), list.size)
         }
         batch.flush()
         val alive = list.filter { (tcp[it.id] ?: 0) > 0 }.sortedBy { tcp[it.id] }.take(realLimit)
-        val working = realTest(alive, "Проверка через Xray", big)
+        // one attempt for all (fast), a second one only for those that failed although TCP answers
+        var working = realTest(alive, "Проверка через Xray", big, attempts = 1)
+        val again = Store.state.value.let { s -> alive.filter { !s.state(it).works } }
+        if (again.isNotEmpty() && again.size < alive.size * 3 / 4 + 4) working += realTest(again, "Повторная проверка", big, attempts = 2)
         return "Работают: $working из ${alive.size} доступных по TCP (всего ${list.size})"
     }
 
@@ -616,6 +619,33 @@ object Actions {
         }
     }
 
+    /**
+     * «Умный YouTube» (Авто): on this network, is YouTube faster through the DPI bypass straight to Google than through
+     * the servers? Measured once per network (two rounds, the better of each), remembered in [Settings.ytDpi]; the bypass
+     * must win clearly (×1.3 + 0.5 Мбит/с), otherwise the servers stay. True = a reconnect is needed to switch.
+     */
+    suspend fun decideYoutube(): Boolean {
+        val st = Store.state.value; val s = st.settings; val net = Net.key(app)
+        if (s.mode != com.vlesscardvpn.model.Mode.AUTO || !s.smartYoutube || s.services.isNotEmpty() || s.proxyOnly) return false
+        if (s.ytDpi.containsKey(net) || Tunnel.ytViaDpi) return false
+        if (s.dpiRemembered[net] == null && s.dpiRemembered[Net.family(net)] == null) return false
+        val vpn = Tunnel.socks?.port ?: return false
+        val set = DpiSet(app)
+        val (srv, dpi) = try {
+            set.start(s, net, true, emptySet(), com.vlesscardvpn.BuildConfig.DEBUG)
+            val dp = set.currentPort ?: return false
+            var a = 0; var b = 0
+            repeat(2) { a = maxOf(a, Tester.ytSpeed(vpn)); b = maxOf(b, Tester.ytSpeed(dp)) }
+            a to b
+        } catch (e: Throwable) { return false } finally { set.close() }
+        val use = ytDpiWins(srv, dpi)
+        android.util.Log.i("E2E", "smart youtube net=$net server=$srv dpi=$dpi use=$use")
+        Store.update { a -> a.copy(settings = a.settings.copy(ytDpi = a.settings.ytDpi + (net to use))) }
+        return use
+    }
+
+    fun ytDpiWins(serverKbps: Int, dpiKbps: Int) = dpiKbps > 0 && dpiKbps > serverKbps * 1.3 + 500
+
     /** Whether the last [optimize] pass switched servers (TunnelService checks again sooner then). */
     @Volatile var lastOptimizeSwitched = false
 
@@ -625,6 +655,7 @@ object Actions {
         if (!st.settings.autoOptimize || job?.isActive == true) return false
         if (st.settings.mode == com.vlesscardvpn.model.Mode.BYEDPI) return false
         val wifi = unmetered()
+        var ytSwitch = false
         if (deepPending) {
             // connected right after the quick check: now test the rest calmly (outside the tunnel) and lighten heavy masks
             deepPending = false
@@ -636,13 +667,14 @@ object Actions {
             lightenMasks(wifi)
             // Wi-Fi: a real 3-second download through the 5 best (≈ what YouTube gets), not a 256 KB guess
             if (wifi) Store.state.value.let { s1 -> realSpeed(s1.servers.filter { s1.state(it).works }.sortedBy { s1.state(it).score }.take(5)) }
+            ytSwitch = runCatching { decideYoutube() }.getOrDefault(false)
             progress.value = prev0
         }
         // Auto with nothing selected connects to the 5 best: compare against those.
         val sel = st.selected.ifEmpty { st.servers.filter { st.state(it).works }.sortedBy { st.state(it).score }.take(5) }
         val others = st.servers.filter { it !in sel && st.state(it).works }.sortedBy { st.state(it).score }.take(if (wifi) 12 else 6)
         val cand = (sel + others).distinctBy { it.id }
-        if (cand.isEmpty()) return false
+        if (cand.isEmpty()) return ytSwitch
         val prev = progress.value
         realTest(cand, "Фоновая проверка", big = wifi)
         progress.value = prev
@@ -653,7 +685,7 @@ object Actions {
             val alive = now.servers.filter { now.state(it).tcpMs > 0 }.sortedBy { now.state(it).tcpMs }.take(8)
             if (alive.isNotEmpty()) doFindMasks(alive, 24)
             val after = Store.state.value
-            return if (alive.any { after.state(it).works }) { selectBest(5, close = true, among = alive.filter { after.state(it).works }); true } else false
+            return if (alive.any { after.state(it).works }) { selectBest(5, close = true, among = alive.filter { after.state(it).works }); true } else ytSwitch
         }
         val median = selOk.map { now.state(it).score }.sorted().let { if (it.isEmpty()) Int.MAX_VALUE else it[it.size / 2] }
         val bestMs = now.state(best.first()).score
@@ -664,7 +696,7 @@ object Actions {
         android.util.Log.i("E2E", "optimize sel=${sel.size} ok=${selOk.size} median=$median best=$bestMs switch=$switch")
         val pick = if (selBroken) best.filter { now.state(it).bigOk == true } else best
         if (switch) selectBest(minOf(5, pick.size), close = true, among = pick)
-        return switch && sel.map { it.id }.toSet() != Store.state.value.selected.map { it.id }.toSet()
+        return ytSwitch || (switch && sel.map { it.id }.toSet() != Store.state.value.selected.map { it.id }.toSet())
     }
 
     // ---------- WARP ----------
@@ -982,7 +1014,12 @@ object Actions {
                 }
             }.awaitAll()
         }
-        run(plan, 8) { _, port -> Tester.probeDpi(port, attempts = 2).let { DpiResult(it.ok, it.ms, it.error) } }
+        // Stage 1: one attempt each, 12 at a time; after 12 passes the rest is skipped (the final re-checks them twice anyway)
+        val passes = AtomicInteger()
+        run(plan, 12) { _, port ->
+            if (passes.get() >= 12) DpiResult(false, 0, "пропущена: уже хватает рабочих")
+            else Tester.probeDpi(port, attempts = 1).let { if (it.ok) passes.incrementAndGet(); DpiResult(it.ok, it.ms, it.error) }
+        }
         val first = dpiResults.value
         val passed = plan.filter { first[it.id]?.ok == true }.sortedBy { first.getValue(it.id).ms }
         // Stage 2: finals + evolution

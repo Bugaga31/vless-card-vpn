@@ -261,6 +261,19 @@ object Tester {
     })
 
     data class DpiProbe(val ok: Boolean, val ms: Int, val bytes: Int, val error: String = "")
+    /** YouTube page download speed through a SOCKS port (kbit/s, 0 = failed / cut): the whole page, up to 4 s. */
+    fun ytSpeed(port: Int): Int = runCatching {
+        val client = base.newBuilder().proxy(Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", port))).readTimeout(6, TimeUnit.SECONDS).callTimeout(12, TimeUnit.SECONDS).build()
+        val t0 = System.nanoTime()
+        client.newCall(Request.Builder().url(DPI_URL).header("User-Agent", UA).build()).execute().use { r ->
+            val src = r.body!!.byteStream(); val buf = ByteArray(32768); var total = 0L
+            val end = t0 + 4_000_000_000L
+            while (System.nanoTime() < end) { val n = src.read(buf); if (n < 0) break; total += n }
+            client.connectionPool.evictAll()
+            if (total < DPI_BYTES) 0 else (total * 8 * 1_000_000 / ((System.nanoTime() - t0) / 1000).coerceAtLeast(1) / 1000).toInt()
+        }
+    }.getOrDefault(0)
+
     const val DPI_URL = "https://www.youtube.com/"
     const val DPI_BYTES = 48_000
 

@@ -104,6 +104,10 @@ data class Settings(
     val country: String = "",
     /** «Избранное»: server ids Auto always includes when they work. */
     val favorites: List<String> = emptyList(),
+    /** «Умный YouTube» (Авто): YouTube through the DPI bypass straight to Google when that measured faster than the servers. */
+    val smartYoutube: Boolean = true,
+    /** network → YouTube through the DPI bypass there (measured; false = servers were faster or it broke). */
+    val ytDpi: Map<String, Boolean> = emptyMap(),
     /** Connect by itself after the phone restarts. */
     val autoStart: Boolean = false,
     /** Settings revision: older ones get the full masking switched on once (Store.migrate). */
@@ -128,7 +132,8 @@ data class Settings(
         .put("ruAppsDirect", ruAppsDirect).put("randomTun", randomTun).put("coverTraffic", coverTraffic).put("rev", rev).put("turbo", turbo).put("autoStart", autoStart)
         .put("alwaysVpn", JSONArray(alwaysVpn)).put("alwaysDirect", JSONArray(alwaysDirect))
         .put("traffic", JSONObject().apply { traffic.forEach { (k, v) -> put(k, v) } }).put("monthLimitGb", monthLimitGb)
-        .put("country", country).put("favorites", JSONArray(favorites))
+        .put("country", country).put("favorites", JSONArray(favorites)).put("smartYoutube", smartYoutube)
+        .put("ytDpi", JSONObject().apply { ytDpi.forEach { (k, v) -> put(k, v) } })
         .put("netServers", JSONObject().apply { netServers.forEach { (k, v) -> put(k, JSONArray(v)) } })
         .put("subInfo", JSONObject().apply { subInfo.forEach { (k, v) -> put(k, v.toJson()) } })
 
@@ -137,6 +142,8 @@ data class Settings(
         fun host(input: String): String? = input.trim().lowercase().substringAfter("://").substringBefore('/').substringBefore('?')
             .substringBefore(':').removePrefix("www.").trim('.').takeIf { Regex("^[a-z0-9а-яё-]+(\\.[a-z0-9а-яё-]+)+$").matches(it) }
         const val REV = 72
+        /** YouTube video, pictures and player — what «Умный YouTube» sends through the DPI bypass. */
+        val YT_DOMAINS = listOf("geosite:youtube", "domain:googlevideo.com", "domain:ytimg.com", "domain:ggpht.com", "domain:youtu.be", "domain:youtube.com")
         /**
          * Once per update, step by step (a later choice of the user is kept): 71 — all masking on (hidden proxy, QUIC off,
          * rotating masks, evolution, behaviour layers, signature masks in the search); 72 — phone speed-up and ad blocking.
@@ -188,6 +195,7 @@ data class Settings(
                 alwaysVpn = list("alwaysVpn", emptyList()), alwaysDirect = list("alwaysDirect", emptyList()),
                 traffic = o.optJSONObject("traffic")?.let { m -> m.keys().asSequence().associateWith { m.optLong(it) } } ?: emptyMap(),
                 monthLimitGb = o.optInt("monthLimitGb", 0), country = o.optString("country", ""), favorites = list("favorites", emptyList()),
+                smartYoutube = o.optBoolean("smartYoutube", true), ytDpi = o.optJSONObject("ytDpi")?.let { m -> m.keys().asSequence().associateWith { m.optBoolean(it) } } ?: emptyMap(),
                 netServers = o.optJSONObject("netServers")?.let { m -> m.keys().asSequence().associateWith { k -> m.optJSONArray(k)?.let { a -> (0 until a.length()).map { a.getString(it) } }.orEmpty() } } ?: emptyMap(),
                 subInfo = o.optJSONObject("subInfo")?.let { m -> m.keys().asSequence().mapNotNull { k -> m.optJSONObject(k)?.let { k to SubInfo.fromJson(it) } }.toMap() } ?: emptyMap(),
             )

@@ -185,6 +185,11 @@ class TunnelService : VpnService() {
                 settings = settings.copy(mode = if (selected.isEmpty() || autoDpiOnly) Mode.BYEDPI else Mode.SERVERS)
                 if (settings.mode == Mode.BYEDPI) selected = emptyList()
             }
+            // «Умный YouTube»: measured faster here through the DPI bypass straight to Google → only YouTube goes that way
+            val ytDpi = st.settings.mode == Mode.AUTO && settings.mode == Mode.SERVERS && settings.smartYoutube && settings.services.isEmpty() &&
+                !settings.proxyOnly && settings.ytDpi[network] == true
+            if (ytDpi) settings = settings.copy(mode = Mode.HYBRID, hybridDomains = Settings.YT_DOMAINS)
+            Tunnel.ytViaDpi = ytDpi
             if (settings.mode != Mode.BYEDPI && selected.isEmpty())
                 error("Нет выбранных серверов. Откройте «Серверы», нажмите «Проверить» и отметьте рабочие.")
             selected = Actions.pinCertificates(selected)
@@ -193,7 +198,10 @@ class TunnelService : VpnService() {
             val withMasks = selected.map { srv ->
                 val ss = st.state(srv)
                 val mine = ss.maskFor(network)
-                val id = if (rotate && ss.goodMasks.isNotEmpty()) (ss.goodMasks + mine).filter { it.isNotEmpty() }.random() else mine
+                // rotate only among masks no heavier than the measured one (a tiny-packet mask would slow YouTube down)
+                val limit = Masks.byId(mine)?.let { Masks.cost(it) } ?: 0
+                val pool = (ss.goodMasks + mine).filter { it.isNotEmpty() && (Masks.byId(it)?.let { m -> Masks.cost(m) } ?: 0) <= limit }
+                val id = if (rotate && pool.isNotEmpty()) pool.random() else mine
                 srv to if (safeMasks) null else Masks.byId(id)
             }
             val needCurrent = settings.mode != Mode.SERVERS || withMasks.any { it.second?.dpi == Masks.CURRENT_DPI }
@@ -219,7 +227,8 @@ class TunnelService : VpnService() {
             val auto = st.settings.mode == Mode.AUTO
             var route = when (settings.mode) {
                 Mode.BYEDPI -> "Без сервера · $dpiLabel"
-                Mode.HYBRID -> "${selected.size} серв. + $dpiLabel для YouTube/Discord"
+                Mode.HYBRID -> if (ytDpi) (if (selected.size == 1) selected[0].name else "${selected.size} серверов") + " · YouTube напрямую через обход DPI"
+                    else "${selected.size} серв. + $dpiLabel для YouTube/Discord"
                 else -> if (selected.size == 1) selected[0].name else "${selected.size} серверов · ${settings.balance.title.lowercase()}"
             }
             if (auto) route = "Авто · $route"
@@ -298,6 +307,13 @@ class TunnelService : VpnService() {
             Tunnel.status.value = cur.copy(check = text, checkOk = p.works)
             Log.i("E2E", "check ok=${p.works} ms=${p.realMs} big=${p.bigOk} yt=${p.ytOk} tg=${p.tgOk} err=${p.error} warp=$warp")
             if (p.works && st.mode == Mode.AUTO) Actions.rememberNet(Net.key(this@TunnelService))
+            // «Умный YouTube» broke YouTube here (the bypass stopped working): back to the servers for YouTube
+            if (p.realMs > 0 && p.ytOk == false && Tunnel.ytViaDpi) {
+                val net = Net.key(this@TunnelService)
+                Store.update { a -> a.copy(settings = a.settings.copy(ytDpi = a.settings.ytDpi + (net to false))) }
+                scope.launch { lock.withLock { connect(soft = true) } }
+                return@launch
+            }
             if (p.works) { healStep = 0; dpiHeals = 0; connectFails = 0; scheduleOptimize(if (com.vlesscardvpn.core.Actions.deepPending) 40_000 else 120_000); watchdog(); coverTraffic(); if (serverless()) rescueLater() } else heal()
         }
     }
