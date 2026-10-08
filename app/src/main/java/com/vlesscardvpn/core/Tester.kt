@@ -134,8 +134,8 @@ object Tester {
         return SpeedResult(0.0, ping, 0)
     }
 
-    /** One site check: "ok" (any HTTP answer with a body start), "timeout" (connects, then hangs — DPI), "reset", "dns", "tls", "fail". */
-    data class SiteProbe(val result: String, val ms: Int = 0, val code: Int = 0) { val ok get() = result == "ok" }
+    /** One site check: "ok" (any HTTP answer with a body start), "denied" (403/451: refuses this country/IP), "timeout" (connects, then hangs — DPI), "reset", "dns", "tls", "fail". */
+    data class SiteProbe(val result: String, val ms: Int = 0, val code: Int = 0) { val ok get() = result == "ok"; val answers get() = ok || result == "denied" }
     fun site(url: String, socksPort: Int?): SiteProbe {
         val b = fast.newBuilder().followRedirects(true)
         if (socksPort != null) b.proxy(Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", socksPort)))
@@ -144,7 +144,7 @@ object Tester {
             client.newCall(Request.Builder().url(url).header("User-Agent", UA).build()).execute().use { r ->
                 // a page that starts loading: DPI "16 KB freeze" shows up as a read timeout here
                 r.body?.byteStream()?.let { src -> val buf = ByteArray(16384); var t = 0; while (t < 40_000) { val n = src.read(buf); if (n < 0) break; t += n } }
-                SiteProbe("ok", ((System.nanoTime() - t0) / 1_000_000).toInt(), r.code)
+                SiteProbe(if (r.code == 403 || r.code == 451) "denied" else "ok", ((System.nanoTime() - t0) / 1_000_000).toInt(), r.code)
             }
         } catch (e: Exception) {
             SiteProbe(when (e) {

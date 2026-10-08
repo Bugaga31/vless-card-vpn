@@ -93,6 +93,11 @@ data class Settings(
     /** «Сайт не открывается?»: these sites always through the VPN / always directly (domains). */
     val alwaysVpn: List<String> = emptyList(),
     val alwaysDirect: List<String> = emptyList(),
+    /** Traffic through the VPN per month ("2025-10" → bytes), the last 3 months; warning above [monthLimitGb] (0 = off). */
+    val traffic: Map<String, Long> = emptyMap(),
+    val monthLimitGb: Int = 0,
+    /** subscription url → what its server reports (subscription-userinfo / profile-title headers). */
+    val subInfo: Map<String, SubInfo> = emptyMap(),
     /** Connect by itself after the phone restarts. */
     val autoStart: Boolean = false,
     /** Settings revision: older ones get the full masking switched on once (Store.migrate). */
@@ -116,6 +121,8 @@ data class Settings(
         .put("dpiRanking", JSONObject().apply { dpiRanking.forEach { (k, v) -> put(k, JSONArray(v)) } })
         .put("ruAppsDirect", ruAppsDirect).put("randomTun", randomTun).put("coverTraffic", coverTraffic).put("rev", rev).put("turbo", turbo).put("autoStart", autoStart)
         .put("alwaysVpn", JSONArray(alwaysVpn)).put("alwaysDirect", JSONArray(alwaysDirect))
+        .put("traffic", JSONObject().apply { traffic.forEach { (k, v) -> put(k, v) } }).put("monthLimitGb", monthLimitGb)
+        .put("subInfo", JSONObject().apply { subInfo.forEach { (k, v) -> put(k, v.toJson()) } })
 
     companion object {
         /** "https://www.Site.com/path" → "site.com"; null when it is not a domain. */
@@ -171,7 +178,29 @@ data class Settings(
                 dpiRanking = o.optJSONObject("dpiRanking")?.let { m -> m.keys().asSequence().associateWith { k -> m.optJSONArray(k)?.let { a -> (0 until a.length()).map { a.getString(it) } }.orEmpty() } } ?: emptyMap(),
                 ruAppsDirect = o.optBoolean("ruAppsDirect", true), randomTun = o.optBoolean("randomTun", true), coverTraffic = o.optBoolean("coverTraffic", true), rev = o.optInt("rev", 0), turbo = o.optBoolean("turbo", true), autoStart = o.optBoolean("autoStart", false),
                 alwaysVpn = list("alwaysVpn", emptyList()), alwaysDirect = list("alwaysDirect", emptyList()),
+                traffic = o.optJSONObject("traffic")?.let { m -> m.keys().asSequence().associateWith { m.optLong(it) } } ?: emptyMap(),
+                monthLimitGb = o.optInt("monthLimitGb", 0),
+                subInfo = o.optJSONObject("subInfo")?.let { m -> m.keys().asSequence().mapNotNull { k -> m.optJSONObject(k)?.let { k to SubInfo.fromJson(it) } }.toMap() } ?: emptyMap(),
             )
+        }
+    }
+}
+
+/** What a paid subscription says about itself: used/total bytes, expiry (unix s), its own name. 0 = unknown. */
+data class SubInfo(val used: Long = 0, val total: Long = 0, val expire: Long = 0, val title: String = "", val at: Long = 0) {
+    val left: Long get() = (total - used).coerceAtLeast(0)
+    fun toJson(): JSONObject = JSONObject().put("used", used).put("total", total).put("expire", expire).put("title", title).put("at", at)
+    /** Close to the end: under 10 % of the traffic left or under 3 days. */
+    fun ending(nowSec: Long): Boolean = total > 0 && left < total / 10 || expire > 0 && expire - nowSec < 3 * 86400
+    companion object {
+        fun fromJson(o: JSONObject) = SubInfo(o.optLong("used"), o.optLong("total"), o.optLong("expire"), o.optString("title"), o.optLong("at"))
+        /** "upload=1; download=2; total=3; expire=4" + "profile-title" (plain or base64:…). Null when the server says nothing. */
+        fun parse(userInfo: String?, title: String?, now: Long = System.currentTimeMillis()): SubInfo? {
+            val kv = userInfo.orEmpty().split(';').mapNotNull { p -> p.split('=', limit = 2).takeIf { it.size == 2 }?.let { it[0].trim().lowercase() to it[1].trim() } }.toMap()
+            val t = title?.trim().orEmpty().let { if (it.startsWith("base64:")) Base64.decodeToString(it.removePrefix("base64:")).orEmpty() else it }.take(60)
+            if (kv.isEmpty() && t.isEmpty()) return null
+            fun n(k: String) = kv[k]?.toDoubleOrNull()?.toLong() ?: 0L
+            return SubInfo(n("upload") + n("download"), n("total"), n("expire"), t, now)
         }
     }
 }

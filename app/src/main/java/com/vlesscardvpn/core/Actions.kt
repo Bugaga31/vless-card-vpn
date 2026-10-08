@@ -71,7 +71,8 @@ object Actions {
     // ---------- subscriptions ----------
     private val http by lazy { OkHttpClient.Builder().connectTimeout(10, TimeUnit.SECONDS).readTimeout(20, TimeUnit.SECONDS).build() }
 
-    private fun fetch(url: String): String? {
+    /** Body + what the subscription says about itself (headers). */
+    private fun fetchFull(url: String): Pair<String, com.vlesscardvpn.model.SubInfo?>? {
         val clients = buildList {
             add(http)
             val socks = Tunnel.socks
@@ -79,10 +80,14 @@ object Actions {
                 add(http.newBuilder().proxy(Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", socks.port))).build())
         }
         for (c in clients) for (u in Settings.mirrors(url)) {
+            var info: com.vlesscardvpn.model.SubInfo? = null
             val body = runCatching {
-                c.newCall(Request.Builder().url(u).header("User-Agent", "v2rayNG/1.10").build()).execute().use { r -> if (r.isSuccessful) r.body?.string() else null }
+                c.newCall(Request.Builder().url(u).header("User-Agent", "v2rayNG/1.10").build()).execute().use { r ->
+                    info = com.vlesscardvpn.model.SubInfo.parse(r.header("subscription-userinfo"), r.header("profile-title"))
+                    if (r.isSuccessful) r.body?.string() else null
+                }
             }.getOrNull()
-            if (!body.isNullOrBlank() && LinkParser.parseMany(body).isNotEmpty()) return body
+            if (!body.isNullOrBlank() && LinkParser.parseMany(body).isNotEmpty()) return body to info
         }
         return null
     }
@@ -98,7 +103,8 @@ object Actions {
             subs.map { url ->
                 async(Bg.io) {
                     sem.withPermit {
-                        val body = fetch(url)
+                        val got = fetchFull(url); val body = got?.first
+                        got?.second?.let { inf -> Store.update { it.copy(settings = it.settings.copy(subInfo = it.settings.subInfo + (url to inf))) } }
                         if (body != null) {
                             val list = LinkParser.parseMany(body, url).take(MAX_PER_SUB)
                             Store.replaceSource(url, list); ok.incrementAndGet(); total.addAndGet(list.size)
@@ -185,13 +191,19 @@ object Actions {
 
     private fun word(p: Tester.SiteProbe?) = when (p?.result) {
         null -> "—"; "ok" -> "открывается (${p.ms} мс)"; "timeout" -> "зависает"; "reset" -> "соединение сбрасывают"
-        "dns" -> "адрес не находится"; "tls" -> "подмена/ошибка шифрования"; else -> "не открывается"
+        "dns" -> "адрес не находится"; "tls" -> "подмена/ошибка шифрования"; "denied" -> "отказ в доступе (${p.code})"; else -> "не открывается"
     }
 
     fun siteVerdict(host: String, direct: Tester.SiteProbe, vpn: Tester.SiteProbe?, dpi: Tester.SiteProbe?): SiteCheck {
         val details = "Напрямую: ${word(direct)} · через VPN: ${if (vpn == null) "VPN выключен" else word(vpn)}" + (dpi?.let { " · через обход DPI: ${word(it)}" } ?: "")
         val s = Store.state.value.settings
         return when {
+            vpn != null && vpn.result == "denied" && direct.ok -> SiteCheck(host = host, verdict = "Через VPN сайт отказывает (не любит страну или IP сервера) — откройте напрямую", details = details,
+                suggest = if (host in s.alwaysDirect) "" else "direct")
+            vpn != null && direct.result == "denied" && vpn.ok -> SiteCheck(host = host, verdict = "Сайт закрыт для России, через VPN работает", details = details, good = true,
+                suggest = if (host in s.alwaysVpn) "" else "vpn")
+            direct.result == "denied" && (vpn == null || vpn.result == "denied") -> SiteCheck(host = host,
+                verdict = "Сайт отвечает, но отказывает" + (if (vpn == null) " — подключитесь и проверьте ещё раз" else " и напрямую, и через VPN (страна сервера тоже закрыта или он не пускает проверку) — попробуйте сервер другой страны"), details = details)
             vpn == null && direct.ok -> SiteCheck(host = host, verdict = "Сайт открывается и без VPN", details = details, good = true)
             vpn == null -> SiteCheck(host = host, verdict = "Без VPN сайт не открывается — подключитесь и проверьте ещё раз", details = details)
             vpn.ok && direct.ok -> SiteCheck(host = host, verdict = "Сайт работает. Если в приложении не грузится — проблема в нём, не в сети", details = details, good = true,
@@ -203,6 +215,42 @@ object Actions {
             dpi?.ok == true -> SiteCheck(host = host, verdict = "Работает через обход DPI, но не через сервер — смените сервер или режим «Гибрид»", details = details)
             direct.result == "dns" && vpn.result == "dns" -> SiteCheck(host = host, verdict = "Такого сайта нет или он выключен (адрес не находится нигде)", details = details)
             else -> SiteCheck(host = host, verdict = "Сайт не открывается ни напрямую, ни через VPN — скорее всего он сам лежит", details = details)
+        }
+    }
+
+    /** "осталось 4.2 ГБ из 50 ГБ · до 15.10.2025" */
+    fun subLine(i: com.vlesscardvpn.model.SubInfo, nowSec: Long = System.currentTimeMillis() / 1000): String = listOfNotNull(
+        if (i.total > 0) "осталось ${bytes(i.left)} из ${bytes(i.total)}" else if (i.used > 0) "использовано ${bytes(i.used)}" else null,
+        if (i.expire > 0) (if (i.expire < nowSec) "истекла " else "до ") + java.text.SimpleDateFormat("dd.MM.yyyy", java.util.Locale.US).format(java.util.Date(i.expire * 1000)) else null,
+    ).joinToString(" · ")
+
+    /** «Проверить популярные»: the usual suspects at once, directly and through the VPN. */
+    val POPULAR = listOf("YouTube" to "youtube.com", "Instagram" to "instagram.com", "Telegram" to "web.telegram.org", "WhatsApp" to "web.whatsapp.com",
+        "Discord" to "discord.com", "ChatGPT" to "chatgpt.com", "X (Twitter)" to "x.com", "Facebook" to "facebook.com", "Spotify" to "open.spotify.com",
+        "LinkedIn" to "linkedin.com", "Rutracker" to "rutracker.org", "Gemini" to "gemini.google.com")
+    data class Popular(val running: Boolean = false, val rows: List<Pair<String, SiteCheck>> = emptyList(), val summary: String = "")
+    val popular = MutableStateFlow(Popular())
+    fun checkPopular() {
+        if (popular.value.running) return
+        val vpn = Tunnel.socks?.port
+        popular.value = Popular(running = true, summary = "Проверяю ${POPULAR.size} сервисов…")
+        scope.launch(Bg.io) {
+            val rows = coroutineScope {
+                POPULAR.map { (title, host) -> async {
+                    val d = async { Tester.site("https://$host/", null) }; val v = vpn?.let { p -> async { Tester.site("https://$host/", p) } }
+                    title to siteVerdict(host, d.await(), v?.await(), null)
+                } }.awaitAll()
+            }
+            popular.value = Popular(rows = rows, summary = popularSummary(rows, vpn != null))
+        }
+    }
+
+    fun popularSummary(rows: List<Pair<String, SiteCheck>>, vpnOn: Boolean): String {
+        val bad = rows.filter { !it.second.good }.map { it.first }
+        return when {
+            !vpnOn -> "Без VPN: открывается ${rows.count { it.second.good }} из ${rows.size}. Подключитесь, чтобы сравнить"
+            bad.isEmpty() -> "Через VPN работает всё (${rows.size} из ${rows.size})"
+            else -> "Не работает: " + bad.joinToString(", ") + if (bad.size > rows.size / 2) ". Похоже, сервер плохой — «Не работает? Починить»" else ""
         }
     }
 

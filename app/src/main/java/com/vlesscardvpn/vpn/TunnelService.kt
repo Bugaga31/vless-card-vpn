@@ -152,6 +152,7 @@ class TunnelService : VpnService() {
 
     override fun onDestroy() {
         screenReceiver?.let { runCatching { unregisterReceiver(it) } }; screenReceiver = null
+        if (Tunnel.status.value.state == Tunnel.State.CONNECTED) runCatching { com.vlesscardvpn.core.Traffic.tick() }
         // Never block the main thread on a long connect/heal holding the lock (that was an ANR): wait 1.5 s at most.
         runCatching { kotlinx.coroutines.runBlocking { kotlinx.coroutines.withTimeoutOrNull(1500) { lock.withLock { teardown(null) } } ?: teardown(null) } }
         scope.cancel()
@@ -224,7 +225,7 @@ class TunnelService : VpnService() {
             if (settings.services.isNotEmpty()) route += " · через VPN только " + com.vlesscardvpn.core.Services.label(settings.services)
             if (proxy) route = "Прокси SOCKS5 :${socks.port} · HTTP :${settings.httpPort}" + (if (settings.lanShare) " (для всей сети: ${lanIp() ?: "IP телефона"})" else "") + " · $route"
             val since = if (keepTun && prev.since > 0) prev.since else System.currentTimeMillis()
-            if (!keepTun) { Tunnel.rx0 = android.net.TrafficStats.getUidRxBytes(android.os.Process.myUid()); Tunnel.tx0 = android.net.TrafficStats.getUidTxBytes(android.os.Process.myUid()) }
+            if (!keepTun) { com.vlesscardvpn.core.Traffic.start(); Tunnel.rx0 = android.net.TrafficStats.getUidRxBytes(android.os.Process.myUid()); Tunnel.tx0 = android.net.TrafficStats.getUidTxBytes(android.os.Process.myUid()) }
             Tunnel.status.value = Tunnel.Status(Tunnel.State.CONNECTED, "Подключено", route, "Проверяю интернет…", null, since)
             watchScreen()
             foreground(if (settings.quietNotification) "Активно" else "Подключено · $route")
@@ -365,6 +366,7 @@ class TunnelService : VpnService() {
             var offline = false
             while (Tunnel.status.value.state == Tunnel.State.CONNECTED) {
                 delay(if (offline) 10_000 else 45_000)
+                com.vlesscardvpn.core.Traffic.tick()
                 if (healJob?.isActive == true || asleep()) continue
                 val port = Tunnel.socks?.port ?: break
                 val ok = Tester.probeSocks(port, Store.state.value.settings.testUrl, big = false, youtube = false, attempts = 1).realMs > 0
@@ -505,6 +507,7 @@ class TunnelService : VpnService() {
     }
 
     private fun teardown(error: String?, keepTun: Boolean = false) {
+        if (!keepTun) runCatching { com.vlesscardvpn.core.Traffic.tick() }
         checkJob?.cancel(); watchJob?.cancel(); coverJob?.cancel(); if (error != null) netJob?.cancel()
         if (error != null) { healJob?.cancel(); rescueJob?.cancel() }
         if (error != null) optJob?.cancel()

@@ -119,6 +119,8 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
             val min = remember(tick) { ((System.currentTimeMillis() - status.since) / 60_000).coerceAtLeast(0) }
             Text("Сессия: ${if (min >= 60) "${min / 60} ч ${min % 60} мин" else "$min мин"} · ↓ ${Actions.bytes(rx)} ↑ ${Actions.bytes(tx)}" +
                 if (cfg.turbo) " · ускорение вкл." else "", fontSize = 12.sp, color = Color.Gray, textAlign = TextAlign.Center)
+            val (month, over) = com.vlesscardvpn.core.Traffic.line(cfg)
+            if (month.isNotEmpty()) Text(month, fontSize = 12.sp, color = if (over) Warn else Color.Gray, textAlign = TextAlign.Center)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 TextButton(onClick = { com.vlesscardvpn.vpn.TunnelService.pause(ctx) }) { Text("Пауза 5 мин") }
                 TextButton(onClick = { Actions.fixAll { onConnect() } }, enabled = !working) { Text("Не работает? Починить") }
@@ -155,6 +157,12 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
         if (mode != Mode.SERVERS) {
             Spacer(Modifier.height(10.dp))
             OutlinedButton(onClick = { Actions.findDpi() }, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text("Подобрать обход DPI для этой сети") }
+        }
+        val nowSec = System.currentTimeMillis() / 1000
+        cfg.subInfo.filter { (u, i) -> u in cfg.subscriptions && i.ending(nowSec) }.forEach { (u, i) ->
+            Spacer(Modifier.height(8.dp))
+            Text("Подписка «${i.title.ifEmpty { com.vlesscardvpn.model.Subs.title(u) }}» заканчивается: " + Actions.subLine(i, nowSec) + ". Продлите у продавца",
+                fontSize = 13.sp, color = Warn, textAlign = TextAlign.Center)
         }
         Spacer(Modifier.height(12.dp))
         NetCard(on = status.state == Tunnel.State.CONNECTED, cfgKey = cfg.hashCode() + status.check.hashCode())
@@ -205,6 +213,13 @@ private fun SiteCard(on: Boolean, reconnect: () -> Unit) {
             }
             if (!r.running && r.suggest.isNotEmpty()) Button(onClick = { Actions.routeSite(r.host, r.suggest); reconnect() }) {
                 Text(if (r.suggest == "vpn") "Всегда через VPN" else "Всегда напрямую")
+            }
+            val pop by Actions.popular.collectAsState()
+            OutlinedButton(onClick = { Actions.checkPopular() }, enabled = !pop.running) { Text("Проверить популярные (YouTube, Instagram, ChatGPT…)") }
+            if (pop.summary.isNotEmpty()) Text(pop.summary, fontSize = 13.sp, color = when { pop.running -> Color.Gray; pop.rows.all { it.second.good } -> Good; else -> Warn })
+            pop.rows.forEach { (title, c) ->
+                Text((if (c.good) "✓ " else "✗ ") + title + " — " + c.verdict, fontSize = 12.sp, color = if (c.good) Color.Gray else Warn,
+                    modifier = Modifier.clickable { Actions.siteCheck.value = c })
             }
         }
     }
