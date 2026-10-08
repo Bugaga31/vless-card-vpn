@@ -444,7 +444,9 @@ class TunnelService : VpnService() {
                 healStatus("Нет интернета у самой сети — жду, когда появится…")
                 healStep--; delay(20_000); verifySoon(0); return@launch
             }
-            if (healStep == 1 && Actions.nextMasks(servers)) {
+            // another mask helps only if the servers answer at all (TCP); dead servers → straight to the search
+            val reachable = healStep == 1 && servers.take(5).any { Tester.tcpOne(it.address, it.port, 1500) > 0 }
+            if (healStep == 1 && reachable && Actions.nextMasks(servers)) {
                 healStatus("Маскировку, похоже, распознали — переключаюсь на другую…")
             } else if (!auto) {
                 if (healStep > 2) return@launch
