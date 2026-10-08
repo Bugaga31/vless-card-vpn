@@ -793,9 +793,19 @@ object Actions {
         if (working.isNotEmpty() || st.servers.isEmpty() && Net.key(app).let { k -> st.settings.dpiRemembered[k] ?: st.settings.dpiRemembered[Net.family(k)] } != null) {
             if (busy?.isActive == true && progress.value.title == "Фоновая подготовка") cancel()
             val now = System.currentTimeMillis()
-            if (working.none { now - st.state(it).checkedAt < 6 * 3600_000L }) deepPending = true
-            if (st.selected.none { st.state(it).works }) selectBest(5, close = true, among = working)
-            onReady(); return
+            val net = Net.key(app)
+            recallNet(net)
+            // Results older than 30 min (or from another network) may be dead: a 2–4 s check of the 12 best first,
+            // otherwise the tunnel would connect to a dead server and lose much more time healing.
+            val stale = working.isNotEmpty() && working.none { now - st.state(it).checkedAt < 30 * 60_000L } || st.settings.netServers[net] == null && working.isNotEmpty() && st.settings.netServers.isNotEmpty()
+            if (!stale || job?.isActive == true) {
+                if (working.none { now - st.state(it).checkedAt < 6 * 3600_000L }) deepPending = true
+                if (Store.state.value.let { s -> s.selected.none { s.state(it).works } }) selectBest(5, close = true, among = working)
+                onReady(); return
+            }
+            Tunnel.status.value = Tunnel.Status(Tunnel.State.CONNECTING, "Проверяю серверы…", check = "Проверяю, какие серверы работают сейчас, — пара секунд")
+            launch("Авто: быстрая проверка") { preflight(onReady) }
+            return
         }
         Tunnel.status.value = Tunnel.Status(Tunnel.State.CONNECTING, "Готовлю серверы…", check = "Первый запуск в этой сети: ищу самые быстрые серверы, обычно 10–20 секунд")
         if (busy?.isActive == true) { scope.launch { busy.join(); autoPrepare(onReady) }; return }
@@ -821,6 +831,10 @@ object Actions {
         val ids = failed.map { it.id }.toHashSet()
         if (ids.isNotEmpty()) Store.setStates(failed.associate { s -> s.id to { x: com.vlesscardvpn.model.ServerState -> x.copy(realMs = 0, checkedAt = now) } })
         fun working() = Store.state.value.let { st -> st.servers.filter { it.id !in ids && st.state(it).works } }
+        // re-check the spares first (2–4 s, outside the tunnel): old «works» marks must not send us to a dead server
+        working().let { w -> Store.state.value.let { st -> preferred(st, w).sortedBy { st.state(it).score }.take(12) } }.takeIf { it.isNotEmpty() }?.let {
+            onStep("проверяю запасные серверы"); realTest(it, "Авто: проверяю запасные", big = false, attempts = 1)
+        }
         working().takeIf { it.isNotEmpty() }?.let { return selectBest(5, close = true, among = it) }
         if (level < 2) return 0
         onStep("подбираю маскировку для доступных серверов")
@@ -840,7 +854,27 @@ object Actions {
         return Store.state.value.let { s5 -> s5.servers.filter { s5.state(it).works } }.let { if (it.isEmpty()) 0 else selectBest(5, close = true, among = it) }
     }
 
-    private fun autoPrepare(onReady: () -> Unit) = launch("Авто-настройка") {
+    /** Instant start on old results: the selected + best known servers checked once (no big download), then connect. */
+    private suspend fun preflight(onReady: () -> Unit): String {
+        val st = Store.state.value
+        val cand = (st.selected.filter { st.state(it).works } + preferred(st, st.servers.filter { st.state(it).works }).sortedBy { st.state(it).score })
+            .distinctBy { it.id }.take(12)
+        realTest(cand, "Авто: проверяю серверы", big = false, attempts = 1)
+        val now = Store.state.value
+        val ok = cand.filter { now.state(it).works }
+        if (ok.isNotEmpty()) {
+            deepPending = true
+            selectBest(5, close = true, among = ok)
+            withContext(Dispatchers.Main) { onReady() }
+            return "Авто: работают ${ok.size} из ${cand.size} — подключаюсь"
+        }
+        Tunnel.status.value = Tunnel.Status(Tunnel.State.CONNECTING, "Готовлю серверы…", check = "Прежние серверы здесь не работают: ищу другие, обычно 10–20 секунд")
+        return doAutoPrepare(onReady)
+    }
+
+    private fun autoPrepare(onReady: () -> Unit) = launch("Авто-настройка") { doAutoPrepare(onReady) }
+
+    private suspend fun doAutoPrepare(onReady: () -> Unit): String {
         val now = System.currentTimeMillis()
         val st0 = Store.state.value
         val notes = mutableListOf<String>()
@@ -872,7 +906,7 @@ object Actions {
         }
         val n = selectBest(5, close = true, among = working)
         withContext(Dispatchers.Main) { onReady() }
-        if (n > 0) "Авто: выбрано $n лучших серверов — подключаюсь" else "Авто: рабочих серверов нет — подключаюсь через обход DPI без сервера"
+        return if (n > 0) "Авто: выбрано $n лучших серверов — подключаюсь" else "Авто: рабочих серверов нет — подключаюсь через обход DPI без сервера"
     }
 
     /** «Авто», first time on a network: all servers pinged at once (1.5 s), the 30 nearest really tested (speed + YouTube). */
