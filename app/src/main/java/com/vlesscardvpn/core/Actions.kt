@@ -274,6 +274,30 @@ object Actions {
         return "Восстановлено: настройки, серверов $added"
     }
 
+    /** Everything that can be pasted: backup, network setup, servers, masks. Returns what happened (for a toast). */
+    fun importAny(text: String): String {
+        importBackup(text)?.let { return it }
+        importNetProfile(text)?.let { return it }
+        val n = importText(text); val nm = importMasks(text)
+        return when {
+            n == 0 && nm == 0 -> "Ссылки не найдены или уже есть"
+            nm == 0 -> "Добавлено серверов: $n"
+            n == 0 -> "Добавлено маскировок: $nm (Настройки → Мои маскировки)"
+            else -> "Добавлено серверов: $n, маскировок: $nm"
+        }
+    }
+
+    /** «В буфере ссылка — добавить?»: what a copied text would add ("" = nothing new). */
+    fun clipSummary(text: String): String {
+        if (Backup.find(text) != null) return "резервная копия"
+        if (text.contains(NetProfile.SCHEME)) return "настройка сети"
+        if (text.contains("vcmask://")) return "маскировка"
+        val known = Store.state.value.servers.map { it.id }.toHashSet()
+        val n = runCatching { LinkParser.parseMany(text, "manual").count { it.id !in known } }.getOrDefault(0)
+        return if (n == 0) "" else if (n == 1) "сервер" else "серверов: $n"
+    }
+    val clipOffer = MutableStateFlow<Pair<String, String>?>(null) // text to what
+
     fun importText(text: String): Int {
         val list = LinkParser.parseMany(text, "manual")
         return Store.addServers(list)
@@ -840,6 +864,20 @@ object Actions {
         if (st.autoUpdateSubs && System.currentTimeMillis() - st.lastSubRefresh > 12 * 3600_000L) refreshSubscriptions()
     }
 
+    /** «Страна»: only servers of the chosen country when at least one of them works, otherwise all. */
+    fun preferred(st: AppState, list: List<Server>): List<Server> {
+        val c = st.settings.country
+        if (c.isEmpty()) return list
+        return list.filter { Countries.of(it.name) == c }.ifEmpty { list }
+    }
+
+    /** Countries of the working servers, most servers first: (ISO, count). */
+    fun countries(st: AppState): List<Pair<String, Int>> = st.servers.filter { st.state(it).works }.groupingBy { Countries.of(it.name) }.eachCount()
+        .filterKeys { it.isNotEmpty() }.entries.sortedByDescending { it.value }.map { it.key to it.value }
+
+    fun toggleFavorite(id: String) = Store.update { st -> val f = st.settings.favorites
+        st.copy(settings = st.settings.copy(favorites = if (id in f) f - id else f + id)) }
+
     /**
      * [close]: only servers about as good as the best one. The balancer («Самый быстрый») picks by ping alone, so a
      * slow server with a lower ping in the set would steal the traffic — YouTube on 1 Mbit/s. One spare stays for
@@ -858,9 +896,11 @@ object Actions {
         val ids = among?.map { it.id }?.toHashSet()
         Store.update { st ->
             // one WireGuard tunnel per key (WARP accounts): two with the same key would steal the session from each other
-            val sorted = st.servers.filter { (ids == null || it.id in ids) && st.state(it).works }.sortedBy { st.state(it).score }
+            val all = st.servers.filter { (ids == null || it.id in ids) && st.state(it).works }
+            val sorted = preferred(st, all).sortedBy { st.state(it).score }
                 .distinctBy { if (it.protocol == "wireguard") "wg:" + it.secret else it.id }.take(n)
-            val best = (if (close) closeOnes(sorted.map { st.state(it).score }).let { k -> sorted.take(k) } else sorted).map { it.id }.toSet()
+            val favs = if (close) all.filter { it.id in st.settings.favorites } else emptyList()
+            val best = ((if (close) closeOnes(sorted.map { st.state(it).score }).let { k -> sorted.take(k) } else sorted) + favs).map { it.id }.toSet()
             c = best.size
             st.copy(states = st.servers.associate { s -> s.id to st.state(s).copy(selected = s.id in best) } )
         }

@@ -178,7 +178,7 @@ class TunnelService : VpnService() {
             var selected = st.selected
             if (settings.mode != Mode.BYEDPI && selected.isEmpty()) {
                 // Nothing chosen: take the best servers that passed the last test.
-                selected = st.servers.filter { st.state(it).works }.sortedBy { st.state(it).score }.take(5)
+                selected = Actions.preferred(st, st.servers.filter { st.state(it).works }).sortedBy { st.state(it).score }.take(5)
                     .let { l -> l.take(Actions.closeOnes(l.map { st.state(it).score })) }
             }
             if (settings.mode == Mode.AUTO) {
@@ -230,6 +230,7 @@ class TunnelService : VpnService() {
             Tunnel.status.value = Tunnel.Status(Tunnel.State.CONNECTED, "Подключено", route, "Проверяю интернет…", null, since)
             watchScreen()
             foreground(if (settings.quietNotification) "Активно" else "Подключено · $route")
+            liveNotification(route)
             watchNetwork()
             verifySoon(0)
         } catch (e: Throwable) {
@@ -511,6 +512,7 @@ class TunnelService : VpnService() {
 
     private fun teardown(error: String?, keepTun: Boolean = false) {
         if (!keepTun) runCatching { com.vlesscardvpn.core.Traffic.tick() }
+        liveJob?.cancel()
         checkJob?.cancel(); watchJob?.cancel(); coverJob?.cancel(); if (error != null) netJob?.cancel()
         if (error != null) { healJob?.cancel(); rescueJob?.cancel() }
         if (error != null) optJob?.cancel()
@@ -541,6 +543,27 @@ class TunnelService : VpnService() {
         return String(CharArray(20) { abc[rnd.nextInt(abc.length)] })
     }
 
+    private var liveJob: Job? = null
+
+    /** Speed right in the notification (every 10 s, only with the screen on — nothing runs while the phone sleeps). */
+    private fun liveNotification(route: String) {
+        liveJob?.cancel()
+        if (Store.state.value.settings.quietNotification) return
+        liveJob = scope.launch {
+            val uid = android.os.Process.myUid()
+            var rx = android.net.TrafficStats.getUidRxBytes(uid); var tx = android.net.TrafficStats.getUidTxBytes(uid); var t = System.nanoTime()
+            while (Tunnel.status.value.state == Tunnel.State.CONNECTED) {
+                delay(10_000)
+                if (asleep() || Tunnel.pausedUntil.value > 0) { rx = android.net.TrafficStats.getUidRxBytes(uid); tx = android.net.TrafficStats.getUidTxBytes(uid); t = System.nanoTime(); continue }
+                val r2 = android.net.TrafficStats.getUidRxBytes(uid); val t2x = android.net.TrafficStats.getUidTxBytes(uid); val now = System.nanoTime()
+                val ms = ((now - t) / 1_000_000).coerceAtLeast(1)
+                val down = ((r2 - rx) * 8 / ms).toInt().coerceAtLeast(0); val up = ((t2x - tx) * 8 / ms).toInt().coerceAtLeast(0)
+                rx = r2; tx = t2x; t = now
+                runCatching { foreground("↓ ${Actions.mbps(down)} ↑ ${Actions.mbps(up)} · $route") }
+            }
+        }
+    }
+
     private fun foreground(text: String, paused: Boolean = false) {
         val quiet = Store.state.value.settings.quietNotification
         val nm = getSystemService(NotificationManager::class.java)
@@ -550,7 +573,7 @@ class TunnelService : VpnService() {
         val n = (if (Build.VERSION.SDK_INT >= 26) Notification.Builder(this, CHANNEL) else @Suppress("DEPRECATION") Notification.Builder(this))
             .setSmallIcon(if (quiet) android.R.drawable.stat_notify_sync_noanim else android.R.drawable.ic_lock_lock)
             .setContentTitle(if (quiet) "Синхронизация" else "VLESS Card").setContentText(if (quiet) "Активно" else text)
-            .setContentIntent(open).setOngoing(true)
+            .setContentIntent(open).setOngoing(true).setOnlyAlertOnce(true)
             .apply {
                 if (paused) addAction(Notification.Action.Builder(null, "Включить сейчас",
                     PendingIntent.getService(this@TunnelService, 3, Intent(this@TunnelService, TunnelService::class.java).setAction(ACTION_START), PendingIntent.FLAG_IMMUTABLE)).build())

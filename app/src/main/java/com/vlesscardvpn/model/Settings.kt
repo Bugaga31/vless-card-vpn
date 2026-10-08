@@ -100,6 +100,10 @@ data class Settings(
     val subInfo: Map<String, SubInfo> = emptyMap(),
     /** Network → servers that worked there last time (picked again when the phone comes back to that network). */
     val netServers: Map<String, List<String>> = emptyMap(),
+    /** «Страна»: ISO code — Auto takes servers of this country when some work ("" = any). */
+    val country: String = "",
+    /** «Избранное»: server ids Auto always includes when they work. */
+    val favorites: List<String> = emptyList(),
     /** Connect by itself after the phone restarts. */
     val autoStart: Boolean = false,
     /** Settings revision: older ones get the full masking switched on once (Store.migrate). */
@@ -124,6 +128,7 @@ data class Settings(
         .put("ruAppsDirect", ruAppsDirect).put("randomTun", randomTun).put("coverTraffic", coverTraffic).put("rev", rev).put("turbo", turbo).put("autoStart", autoStart)
         .put("alwaysVpn", JSONArray(alwaysVpn)).put("alwaysDirect", JSONArray(alwaysDirect))
         .put("traffic", JSONObject().apply { traffic.forEach { (k, v) -> put(k, v) } }).put("monthLimitGb", monthLimitGb)
+        .put("country", country).put("favorites", JSONArray(favorites))
         .put("netServers", JSONObject().apply { netServers.forEach { (k, v) -> put(k, JSONArray(v)) } })
         .put("subInfo", JSONObject().apply { subInfo.forEach { (k, v) -> put(k, v.toJson()) } })
 
@@ -182,7 +187,7 @@ data class Settings(
                 ruAppsDirect = o.optBoolean("ruAppsDirect", true), randomTun = o.optBoolean("randomTun", true), coverTraffic = o.optBoolean("coverTraffic", true), rev = o.optInt("rev", 0), turbo = o.optBoolean("turbo", true), autoStart = o.optBoolean("autoStart", false),
                 alwaysVpn = list("alwaysVpn", emptyList()), alwaysDirect = list("alwaysDirect", emptyList()),
                 traffic = o.optJSONObject("traffic")?.let { m -> m.keys().asSequence().associateWith { m.optLong(it) } } ?: emptyMap(),
-                monthLimitGb = o.optInt("monthLimitGb", 0),
+                monthLimitGb = o.optInt("monthLimitGb", 0), country = o.optString("country", ""), favorites = list("favorites", emptyList()),
                 netServers = o.optJSONObject("netServers")?.let { m -> m.keys().asSequence().associateWith { k -> m.optJSONArray(k)?.let { a -> (0 until a.length()).map { a.getString(it) } }.orEmpty() } } ?: emptyMap(),
                 subInfo = o.optJSONObject("subInfo")?.let { m -> m.keys().asSequence().mapNotNull { k -> m.optJSONObject(k)?.let { k to SubInfo.fromJson(it) } }.toMap() } ?: emptyMap(),
             )
