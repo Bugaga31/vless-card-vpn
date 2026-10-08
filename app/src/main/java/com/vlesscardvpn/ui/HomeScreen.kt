@@ -179,7 +179,34 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
                 }
             }
         }
+        Spacer(Modifier.height(12.dp))
+        SiteCard(on = status.state == Tunnel.State.CONNECTED, reconnect = { reconnect() })
         Spacer(Modifier.height(12.dp)); LiveProgress(stop = true)
+    }
+}
+
+/** «Сайт не открывается?»: directly vs through the VPN vs through the DPI bypass, then route it the way that works. */
+@Composable
+private fun SiteCard(on: Boolean, reconnect: () -> Unit) {
+    val r by Actions.siteCheck.collectAsState()
+    var input by remember { mutableStateOf("") }
+    Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text("Сайт не открывается?", fontWeight = FontWeight.SemiBold)
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                androidx.compose.material3.OutlinedTextField(input, { input = it }, singleLine = true, modifier = Modifier.weight(1f),
+                    placeholder = { Text("адрес, например rutracker.org", fontSize = 13.sp) })
+                OutlinedButton(onClick = { Actions.checkSite(input) }, enabled = !r.running) { Text("Проверить") }
+            }
+            if (r.verdict.isEmpty()) Text("Сравню: напрямую, через VPN и через обход DPI — и скажу, кто виноват" + if (!on) " (лучше с включённым VPN)" else "", fontSize = 12.sp, color = Color.Gray)
+            else {
+                Text(r.verdict, fontSize = 14.sp, color = when { r.running -> Color.Gray; r.good -> Good; else -> Warn })
+                if (r.details.isNotEmpty()) Text(r.details, fontSize = 12.sp, color = Color.Gray)
+            }
+            if (!r.running && r.suggest.isNotEmpty()) Button(onClick = { Actions.routeSite(r.host, r.suggest); reconnect() }) {
+                Text(if (r.suggest == "vpn") "Всегда через VPN" else "Всегда напрямую")
+            }
+        }
     }
 }
 

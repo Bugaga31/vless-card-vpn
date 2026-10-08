@@ -134,6 +134,29 @@ object Tester {
         return SpeedResult(0.0, ping, 0)
     }
 
+    /** One site check: "ok" (any HTTP answer with a body start), "timeout" (connects, then hangs — DPI), "reset", "dns", "tls", "fail". */
+    data class SiteProbe(val result: String, val ms: Int = 0, val code: Int = 0) { val ok get() = result == "ok" }
+    fun site(url: String, socksPort: Int?): SiteProbe {
+        val b = fast.newBuilder().followRedirects(true)
+        if (socksPort != null) b.proxy(Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", socksPort)))
+        val client = b.build(); val t0 = System.nanoTime()
+        return try {
+            client.newCall(Request.Builder().url(url).header("User-Agent", UA).build()).execute().use { r ->
+                // a page that starts loading: DPI "16 KB freeze" shows up as a read timeout here
+                r.body?.byteStream()?.let { src -> val buf = ByteArray(16384); var t = 0; while (t < 40_000) { val n = src.read(buf); if (n < 0) break; t += n } }
+                SiteProbe("ok", ((System.nanoTime() - t0) / 1_000_000).toInt(), r.code)
+            }
+        } catch (e: Exception) {
+            SiteProbe(when (e) {
+                is java.net.UnknownHostException -> "dns"
+                is java.net.SocketTimeoutException, is java.io.InterruptedIOException -> "timeout"
+                is javax.net.ssl.SSLException -> if ((e.message ?: "").contains("reset", true)) "reset" else "tls"
+                is java.net.SocketException -> if ((e.message ?: "").contains("reset", true)) "reset" else "fail"
+                else -> "fail"
+            })
+        } finally { client.connectionPool.evictAll() }
+    }
+
     private fun download(client: OkHttpClient, url: String): Int =
         client.newCall(Request.Builder().url(url).header("User-Agent", UA).build()).execute().use { r ->
             check(r.isSuccessful); val src = r.body!!.byteStream(); val buf = ByteArray(16384); var total = 0

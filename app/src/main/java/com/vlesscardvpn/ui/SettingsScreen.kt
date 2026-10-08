@@ -108,6 +108,18 @@ fun SettingsScreen() {
             runCatching { ctx.startActivity(Intent(AndroidSettings.ACTION_VPN_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
         }, modifier = Modifier.fillMaxWidth()) { Text("Kill switch: «Постоянная VPN» + «Блокировать без VPN»") }
         Hint("В системных настройках VPN нажмите ⚙ у VLESS Card и включите оба переключателя: при обрыве интернет не пойдёт мимо VPN.")
+        if (s.alwaysVpn.isNotEmpty() || s.alwaysDirect.isNotEmpty()) {
+            Section("Сайты: всегда через VPN / напрямую")
+            Hint("Добавляются кнопкой на главном экране «Сайт не открывается?». Нажмите, чтобы убрать (действует со следующего подключения).")
+            (s.alwaysVpn.map { it to "через VPN" } + s.alwaysDirect.map { it to "напрямую" }).forEach { (h, w) ->
+                TextButton(onClick = { Actions.routeSite(h, "") }) { Text("✕  $h — $w", fontSize = 13.sp) }
+            }
+        }
+        OutlinedButton(onClick = {
+            ctx.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT,
+                "Резервная копия VLESS Card (вставьте в приложении: Серверы → Добавить). Внутри ключи серверов — не пересылайте чужим:\n" + Actions.backup()), "Сохранить резервную копию"))
+        }, modifier = Modifier.fillMaxWidth()) { Text("Резервная копия (в Избранное / заметки)") }
+        Hint("Настройки, свои серверы и WARP, выученные маскировки и обходы — одной ссылкой. Для нового телефона или после переустановки.")
         OutlinedButton(onClick = { wipeDialog = true }, colors = ButtonDefaults.outlinedButtonColors(contentColor = Bad), modifier = Modifier.fillMaxWidth()) { Text("Стереть все данные") }
 
         // ---------------- servers
