@@ -540,6 +540,32 @@ object Actions {
      * the tunnel. If a selected server died or others are clearly faster, switches to the fastest and reconnects;
      * if nothing works, searches new masks. Returns true when the service should reconnect.
      */
+    private suspend fun realSpeed(servers: List<Server>) {
+        if (servers.isEmpty()) return
+        val net = Net.key(app); val st = Store.state.value
+        val variants = pinCertificates(servers).map { it to Masks.byId(st.state(it).maskFor(net)) }
+        val (own, port) = dpiForTests(variants.map { it.second })
+        try {
+            val r = Tester.speedMany(variants, port, own.ports)
+            Store.setStates(variants.indices.filter { r[it] > 0 }.associate { i -> variants[i].first.id to { x: com.vlesscardvpn.model.ServerState -> x.copy(kbps = r[i]) } })
+        } finally { own.close() }
+    }
+
+    /** «Эта сеть → эти серверы»: what worked here last time is picked again at once when the phone comes back to it. */
+    fun rememberNet(net: String) {
+        val ids = Store.state.value.selected.map { it.id }
+        if (ids.isNotEmpty()) Store.update { it.copy(settings = it.settings.copy(netServers = (it.settings.netServers - net + (net to ids)).entries.toList().takeLast(12).associate { e -> e.key to e.value })) }
+    }
+
+    /** Returns true when the remembered servers of [net] were selected. */
+    fun recallNet(net: String): Boolean {
+        val st = Store.state.value
+        val ids = (st.settings.netServers[net] ?: return false).toSet()
+        val ok = st.servers.filter { it.id in ids && st.state(it).works }
+        if (ok.isEmpty() || ok.map { it.id }.toSet() == st.selected.map { it.id }.toSet()) return false
+        selectBest(ok.size, ok); return true
+    }
+
     /** Connected after the quick check (or on old results): the first background pass tests the rest and re-ranks. */
     @Volatile var deepPending = false
 
@@ -584,6 +610,8 @@ object Actions {
                 .sortedBy { s0.state(it).tcpMs }.take(if (wifi) 60 else 24)
             if (rest.isNotEmpty()) realTest(rest, "Фоновая проверка", big = true, attempts = 1)
             lightenMasks(wifi)
+            // Wi-Fi: a real 3-second download through the 5 best (≈ what YouTube gets), not a 256 KB guess
+            if (wifi) Store.state.value.let { s1 -> realSpeed(s1.servers.filter { s1.state(it).works }.sortedBy { s1.state(it).score }.take(5)) }
             progress.value = prev0
         }
         // Auto with nothing selected connects to the 5 best: compare against those.
@@ -601,7 +629,7 @@ object Actions {
             val alive = now.servers.filter { now.state(it).tcpMs > 0 }.sortedBy { now.state(it).tcpMs }.take(8)
             if (alive.isNotEmpty()) doFindMasks(alive, 24)
             val after = Store.state.value
-            return if (alive.any { after.state(it).works }) { selectBest(5, alive.filter { after.state(it).works }); true } else false
+            return if (alive.any { after.state(it).works }) { selectBest(5, close = true, among = alive.filter { after.state(it).works }); true } else false
         }
         val median = selOk.map { now.state(it).score }.sorted().let { if (it.isEmpty()) Int.MAX_VALUE else it[it.size / 2] }
         val bestMs = now.state(best.first()).score
@@ -611,7 +639,7 @@ object Actions {
         lastOptimizeSwitched = switch
         android.util.Log.i("E2E", "optimize sel=${sel.size} ok=${selOk.size} median=$median best=$bestMs switch=$switch")
         val pick = if (selBroken) best.filter { now.state(it).bigOk == true } else best
-        if (switch) selectBest(minOf(5, pick.size), pick)
+        if (switch) selectBest(minOf(5, pick.size), close = true, among = pick)
         return switch && sel.map { it.id }.toSet() != Store.state.value.selected.map { it.id }.toSet()
     }
 
@@ -710,7 +738,7 @@ object Actions {
             if (busy?.isActive == true && progress.value.title == "Фоновая подготовка") cancel()
             val now = System.currentTimeMillis()
             if (working.none { now - st.state(it).checkedAt < 6 * 3600_000L }) deepPending = true
-            if (st.selected.none { st.state(it).works }) selectBest(5, working)
+            if (st.selected.none { st.state(it).works }) selectBest(5, close = true, among = working)
             onReady(); return
         }
         Tunnel.status.value = Tunnel.Status(Tunnel.State.CONNECTING, "Готовлю серверы…", check = "Первый запуск в этой сети: ищу самые быстрые серверы, обычно 10–20 секунд")
@@ -737,23 +765,23 @@ object Actions {
         val ids = failed.map { it.id }.toHashSet()
         if (ids.isNotEmpty()) Store.setStates(failed.associate { s -> s.id to { x: com.vlesscardvpn.model.ServerState -> x.copy(realMs = 0, checkedAt = now) } })
         fun working() = Store.state.value.let { st -> st.servers.filter { it.id !in ids && st.state(it).works } }
-        working().takeIf { it.isNotEmpty() }?.let { return selectBest(5, it) }
+        working().takeIf { it.isNotEmpty() }?.let { return selectBest(5, close = true, among = it) }
         if (level < 2) return 0
         onStep("подбираю маскировку для доступных серверов")
         val st = Store.state.value
         val cand = (failed + st.servers.filter { st.state(it).tcpMs > 0 && it.id !in ids }.sortedBy { st.state(it).tcpMs }.take(10)).distinctBy { it.id }
         if (cand.isNotEmpty()) doFindMasks(cand, 24, budgetMs = 120_000)
-        Store.state.value.let { s2 -> s2.servers.filter { s2.state(it).works } }.takeIf { it.isNotEmpty() }?.let { return selectBest(5, it) }
+        Store.state.value.let { s2 -> s2.servers.filter { s2.state(it).works } }.takeIf { it.isNotEmpty() }?.let { return selectBest(5, close = true, among = it) }
         if (level < 3) return 0
         onStep("обновляю подписки и перепроверяю все серверы")
         if (now - st.settings.lastSubRefresh > 3600_000L || st.servers.size < 20) doRefresh()
         doTestAll(Store.state.value.servers, 80)
-        Store.state.value.let { s3 -> s3.servers.filter { s3.state(it).works } }.takeIf { it.isNotEmpty() }?.let { return selectBest(5, it) }
+        Store.state.value.let { s3 -> s3.servers.filter { s3.state(it).works } }.takeIf { it.isNotEmpty() }?.let { return selectBest(5, close = true, among = it) }
         val s4 = Store.state.value
         val c2 = s4.servers.filter { s4.state(it).tcpMs > 0 }.sortedBy { s4.state(it).tcpMs }.take(10)
         if (c2.isNotEmpty()) doFindMasks(c2, 24, budgetMs = 120_000)
         if (Store.state.value.servers.none { Masks.isWarp(it) && Store.state.value.state(it).works }) { onStep("настраиваю WARP"); runCatching { doSetupWarp(2, null) } }
-        return Store.state.value.let { s5 -> s5.servers.filter { s5.state(it).works } }.let { if (it.isEmpty()) 0 else selectBest(5, it) }
+        return Store.state.value.let { s5 -> s5.servers.filter { s5.state(it).works } }.let { if (it.isEmpty()) 0 else selectBest(5, close = true, among = it) }
     }
 
     private fun autoPrepare(onReady: () -> Unit) = launch("Авто-настройка") {
@@ -786,7 +814,7 @@ object Actions {
             val st = Store.state.value.settings
             if (Net.key(app).let { k -> st.dpiRemembered[k] ?: st.dpiRemembered[Net.family(k)] } == null) { progress.value = progress.value.copy(title = "Авто: подбираю обход DPI"); notes += doFindDpi() }
         }
-        val n = selectBest(5, working)
+        val n = selectBest(5, close = true, among = working)
         withContext(Dispatchers.Main) { onReady() }
         if (n > 0) "Авто: выбрано $n лучших серверов — подключаюсь" else "Авто: рабочих серверов нет — подключаюсь через обход DPI без сервера"
     }
@@ -812,14 +840,27 @@ object Actions {
         if (st.autoUpdateSubs && System.currentTimeMillis() - st.lastSubRefresh > 12 * 3600_000L) refreshSubscriptions()
     }
 
+    /**
+     * [close]: only servers about as good as the best one. The balancer («Самый быстрый») picks by ping alone, so a
+     * slow server with a lower ping in the set would steal the traffic — YouTube on 1 Mbit/s. One spare stays for
+     * failover if it is not hopeless (≤ 3× the best).
+     */
+    fun closeOnes(scores: List<Int>): Int {
+        if (scores.isEmpty()) return 0
+        val b = scores.first()
+        val k = scores.count { it <= b * 1.6 + 150 }
+        return if (k >= 2 || scores.size < 2) k else if (scores[1] <= b * 3 + 300) 2 else 1
+    }
+
     /** Selects the [n] fastest working servers (deselects others). */
-    fun selectBest(n: Int = 5, among: Collection<Server>? = null): Int {
+    fun selectBest(n: Int = 5, among: Collection<Server>? = null, close: Boolean = false): Int {
         var c = 0
         val ids = among?.map { it.id }?.toHashSet()
         Store.update { st ->
             // one WireGuard tunnel per key (WARP accounts): two with the same key would steal the session from each other
-            val best = st.servers.filter { (ids == null || it.id in ids) && st.state(it).works }.sortedBy { st.state(it).score }
-                .distinctBy { if (it.protocol == "wireguard") "wg:" + it.secret else it.id }.take(n).map { it.id }.toSet()
+            val sorted = st.servers.filter { (ids == null || it.id in ids) && st.state(it).works }.sortedBy { st.state(it).score }
+                .distinctBy { if (it.protocol == "wireguard") "wg:" + it.secret else it.id }.take(n)
+            val best = (if (close) closeOnes(sorted.map { st.state(it).score }).let { k -> sorted.take(k) } else sorted).map { it.id }.toSet()
             c = best.size
             st.copy(states = st.servers.associate { s -> s.id to st.state(s).copy(selected = s.id in best) } )
         }
