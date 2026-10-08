@@ -45,7 +45,7 @@ fun ServersScreen() {
         val rank = { s: Server -> val st = app.state(s)
             when { st.selected -> 0; st.works -> 1; st.tcpMs > 0 && st.realMs < 0 -> 2; st.realMs < 0 && st.tcpMs < 0 -> 3; else -> 4 } }
         app.servers.filter { when (filter) { Filter.ALL -> true; Filter.WORKING -> app.state(it).works; Filter.SELECTED -> app.state(it).selected } }
-            .sortedWith(compareBy<Server>(rank).thenBy { app.state(it).realMs.let { ms -> if (ms > 0) ms else Int.MAX_VALUE } }
+            .sortedWith(compareBy<Server>(rank).thenBy { app.state(it).let { st -> if (st.works) st.score else if (st.realMs > 0) st.realMs + 5000 else Int.MAX_VALUE } }
                 .thenBy { app.state(it).tcpMs.let { ms -> if (ms > 0) ms else Int.MAX_VALUE } })
     } }
 
@@ -122,7 +122,7 @@ private fun ServerRow(s: Server, st: ServerState, onToggle: () -> Unit, onLong: 
                 Text(when { real > 0 -> "$real мс"; real == 0 -> "не работает"; st.tcpMs == 0 -> "недоступен"; st.tcpMs > 0 -> "TCP ${st.tcpMs} мс"; else -> "—" },
                     color = when { real > 0 && st.bigOk != false -> Good; real > 0 -> Warn; real == 0 || st.tcpMs == 0 -> Bad; else -> Color.Gray }, fontSize = 13.sp)
                 if (real > 0) Text(buildString {
-                    append(when (st.bigOk) { true -> "256К ✓"; false -> "256К ✗ (обрыв)"; null -> "" })
+                    append(when (st.bigOk) { true -> if (st.kbps > 0) Actions.mbps(st.kbps) else "256К ✓"; false -> "256К ✗ (обрыв)"; null -> "" })
                     st.ytOk?.let { append(if (it) " · YT ✓" else " · YT ✗") }
                     st.tgOk?.let { append(if (it) " · TG ✓" else " · TG ✗") }
                 }, fontSize = 11.sp, color = if (st.bigOk == false) Warn else Color.Gray)

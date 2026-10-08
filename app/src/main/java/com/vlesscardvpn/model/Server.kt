@@ -94,14 +94,21 @@ data class ServerState(
     /** Network ("Wi-Fi", "Моб.: Beeline") → mask found on that network: switching networks switches masks. */
     val netMasks: Map<String, String> = emptyMap(),
     val tgOk: Boolean? = null,
+    /** Download speed of the 256 KB test file through the server (kbit/s), 0 = not measured. */
+    val kbps: Int = 0,
 ) {
+    /**
+     * Rank for «самый быстрый»: lower is better. Not ping alone — a server that answers in 60 ms but downloads at
+     * 1 Mbit/s makes YouTube stall: slow downloads and failed YouTube cost extra milliseconds.
+     */
+    val score: Int get() = if (!works) Int.MAX_VALUE else realMs + speedPenalty(kbps) + (if (ytOk == false) 700 else 0)
     fun maskFor(network: String): String = netMasks[network] ?: netMasks[network.substringBefore(" · ")] ?: maskId
     val works: Boolean get() = realMs > 0 && bigOk != false
     fun toJson(): JSONObject = JSONObject().apply {
         if (selected) put("sel", true); put("tcp", tcpMs); put("real", realMs); bigOk?.let { put("big", it) }; ytOk?.let { put("yt", it) }
         if (maskId.isNotEmpty()) put("mask", maskId); put("at", checkedAt); put("ok", okCount); put("fail", failCount)
         if (goodMasks.isNotEmpty()) put("good", org.json.JSONArray(goodMasks))
-        if (netMasks.isNotEmpty()) put("net", JSONObject(netMasks as Map<*, *>)); tgOk?.let { put("tg", it) }
+        if (netMasks.isNotEmpty()) put("net", JSONObject(netMasks as Map<*, *>)); tgOk?.let { put("tg", it) }; if (kbps > 0) put("kbps", kbps)
     }
     companion object {
         fun fromJson(o: JSONObject) = ServerState(
@@ -110,7 +117,9 @@ data class ServerState(
             maskId = o.optString("mask"), checkedAt = o.optLong("at"), okCount = o.optInt("ok"), failCount = o.optInt("fail"),
             goodMasks = o.optJSONArray("good")?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: emptyList(),
             netMasks = o.optJSONObject("net")?.let { m -> m.keys().asSequence().associateWith { m.getString(it) } } ?: emptyMap(),
-            tgOk = if (o.has("tg")) o.optBoolean("tg") else null,
+            tgOk = if (o.has("tg")) o.optBoolean("tg") else null, kbps = o.optInt("kbps"),
         )
+        /** 20 Mbit/s ≈ +100 ms, 5 ≈ +400, 1 ≈ +1500 (capped); unknown = a middle guess so measured fast servers win. */
+        fun speedPenalty(kbps: Int): Int = if (kbps <= 0) 300 else minOf(1500, 2_000_000 / kbps)
     }
 }
