@@ -19,7 +19,7 @@ data class Settings(
     val balance: Balance = Balance.LEAST_PING,
     val socksPort: Int = 10808,
     val ruDirect: Boolean = true,
-    val blockAds: Boolean = false,
+    val blockAds: Boolean = true,
     val byeDpiArgs: String = DEFAULT_BYEDPI,
     val byeDpiSni: String = "ya.ru",
     /** Domains that go through ByeDPI in hybrid mode (geosite tags or domains). */
@@ -88,6 +88,10 @@ data class Settings(
     val randomTun: Boolean = true,
     /** Now and then open an ordinary Russian site directly while connected (looks like a usual user). */
     val coverTraffic: Boolean = true,
+    /** «Ускорение телефона»: big TUN MTU (fewer packets = less CPU), stale DNS answers at once, deep sleep with the screen off. */
+    val turbo: Boolean = true,
+    /** Connect by itself after the phone restarts. */
+    val autoStart: Boolean = false,
     /** Settings revision: older ones get the full masking switched on once (Store.migrate). */
     val rev: Int = REV,
 ) {
@@ -107,14 +111,22 @@ data class Settings(
         .put("warpKeyOff", JSONArray(warpKeyOff)).put("warpKeyStatus", JSONObject(warpKeyStatus as Map<*, *>)).put("myMasks", JSONArray(myMasks))
         .put("maskEvolution", maskEvolution).put("autoMasks", JSONArray(autoMasks))
         .put("dpiRanking", JSONObject().apply { dpiRanking.forEach { (k, v) -> put(k, JSONArray(v)) } })
-        .put("ruAppsDirect", ruAppsDirect).put("randomTun", randomTun).put("coverTraffic", coverTraffic).put("rev", rev)
+        .put("ruAppsDirect", ruAppsDirect).put("randomTun", randomTun).put("coverTraffic", coverTraffic).put("rev", rev).put("turbo", turbo).put("autoStart", autoStart)
 
     companion object {
-        const val REV = 71
-        /** Once per update: all masking on (hidden proxy, QUIC off, rotating masks, evolution, behaviour layers, signature masks in the search). */
-        fun migrate(s: Settings): Settings = if (s.rev >= REV) s else s.copy(rev = REV, stealthSocks = true, blockQuic = true, rotateMasks = true,
-            maskEvolution = true, autoHeal = true, ruAppsDirect = true, randomTun = true, coverTraffic = true,
-            maskFamilies = if (s.maskFamilies.isEmpty()) s.maskFamilies else (s.maskFamilies + "brand" + "auto").distinct())
+        const val REV = 72
+        /**
+         * Once per update, step by step (a later choice of the user is kept): 71 — all masking on (hidden proxy, QUIC off,
+         * rotating masks, evolution, behaviour layers, signature masks in the search); 72 — phone speed-up and ad blocking.
+         */
+        fun migrate(s0: Settings): Settings {
+            var s = s0
+            if (s.rev < 71) s = s.copy(stealthSocks = true, blockQuic = true, rotateMasks = true,
+                maskEvolution = true, autoHeal = true, ruAppsDirect = true, randomTun = true, coverTraffic = true,
+                maskFamilies = if (s.maskFamilies.isEmpty()) s.maskFamilies else (s.maskFamilies + "brand" + "auto").distinct())
+            if (s.rev < 72) s = s.copy(turbo = true, blockAds = true)
+            return if (s.rev >= REV) s else s.copy(rev = REV)
+        }
         const val DPI_AUTO = "auto"
         const val ANY_NETWORK = "*"
         val DNS_PRESETS = listOf("Cloudflare" to "https://1.1.1.1/dns-query", "Google" to "https://8.8.8.8/dns-query",
@@ -150,7 +162,7 @@ data class Settings(
                 myMasks = list("myMasks", emptyList()),
                 maskEvolution = o.optBoolean("maskEvolution", true), autoMasks = list("autoMasks", emptyList()),
                 dpiRanking = o.optJSONObject("dpiRanking")?.let { m -> m.keys().asSequence().associateWith { k -> m.optJSONArray(k)?.let { a -> (0 until a.length()).map { a.getString(it) } }.orEmpty() } } ?: emptyMap(),
-                ruAppsDirect = o.optBoolean("ruAppsDirect", true), randomTun = o.optBoolean("randomTun", true), coverTraffic = o.optBoolean("coverTraffic", true), rev = o.optInt("rev", 0),
+                ruAppsDirect = o.optBoolean("ruAppsDirect", true), randomTun = o.optBoolean("randomTun", true), coverTraffic = o.optBoolean("coverTraffic", true), rev = o.optInt("rev", 0), turbo = o.optBoolean("turbo", true), autoStart = o.optBoolean("autoStart", false),
             )
         }
     }
