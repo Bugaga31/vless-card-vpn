@@ -143,7 +143,12 @@ object XrayConfigBuilder {
         if (fm.length() > 0) st.put("finalmask", fm)
         val sock = JSONObject().put("tcpKeepAliveInterval", 15)
         if (mask?.viaByeDpi == true && s.isTcpBased) sock.put("dialerProxy", dpiTag(mask.dpi))
-        else if (mask != null && mask.mss > 0 && s.isTcpBased) sock.put("tcpMaxSeg", mask.mss)
+        else if (mask != null) {
+            if (mask.mss > 0 && s.isTcpBased) sock.put("tcpMaxSeg", mask.mss)
+            if (mask.tfo && s.isTcpBased) sock.put("tcpFastOpen", true)
+            if (mask.ipv6) sock.put("domainStrategy", "UseIPv6v4").put("happyEyeballs", JSONObject().put("tryDelayMs", 250)
+                .put("prioritizeIPv6", true).put("interleave", 2).put("maxConcurrentTry", 4))
+        }
         st.put("sockopt", sock)
         return st
     }

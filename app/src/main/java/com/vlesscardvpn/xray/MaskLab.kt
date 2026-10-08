@@ -97,7 +97,9 @@ object MaskLab {
             if (rnd.nextInt(4) == 0) { val v = (Masks.MSS_VALUES + 0)[rnd.nextInt(Masks.MSS_VALUES.size + 1)]; if (v == 0) o.remove("mss") else o.put("mss", v) }
             if (rnd.nextInt(7) == 0) { if (p.mux) o.remove("mux") else o.put("mux", true) }
             if (rnd.nextInt(8) == 0) { if (p.alpn.isNotEmpty()) o.remove("alpn") else o.put("alpn", Masks.ALPNS[rnd.nextInt(Masks.ALPNS.size)]) }
-            if (o.has("dpi")) o.remove("mss") // through a local DPI engine the MSS of 127.0.0.1 means nothing
+            if (rnd.nextInt(8) == 0) { if (p.tfo) o.remove("tfo") else o.put("tfo", true) }
+            if (rnd.nextInt(10) == 0) { if (p.ipv6) o.remove("v6") else o.put("v6", true) }
+            if (o.has("dpi")) { o.remove("mss"); o.remove("tfo"); o.remove("v6") } // through a local DPI engine the MSS of 127.0.0.1 means nothing
         }
         val gen = p.title.substringAfter("поколение ", "").substringBefore(')').toIntOrNull() ?: 0
         o.put("t", "Авто: " + kind(o) + " (поколение ${gen + 1})")
@@ -119,7 +121,7 @@ object MaskLab {
         o.has("p") -> "дробление ${o.optString("l")}"
         else -> "отпечаток"
     } + (if (o.has("mss")) " + MSS ${o.optInt("mss")}" else "") + (if (o.optBoolean("mux")) " + один поток" else "") + (if (o.has("alpn")) " + ALPN" else "") +
-        (if (o.has("sni")) " + SNI ${o.optString("sni")}" else "")
+        (if (o.has("sni")) " + SNI ${o.optString("sni")}" else "") + (if (o.optBoolean("tfo")) " + быстрый старт" else "") + (if (o.optBoolean("v6")) " + IPv6" else "")
 
     /** Validated (same rules as «Мои маскировки»), id from the parameters: the same shape bred twice is one mask. */
     fun make(o: JSONObject): Mask { val m = MyMasks.fromJson(o); return m.copy(id = PREFIX + MyMasks.idOf(m.copy(custom = false)), custom = false, auto = true) }
