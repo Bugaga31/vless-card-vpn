@@ -219,7 +219,9 @@ object XrayConfigBuilder {
         // a chain, not one server: if Cloudflare DoH is slowed down here, Google, Quad9 and plain DNS through the tunnel answer
         (listOf(settings.dnsUrl) + DNS_FALLBACKS).distinct().forEach { dnsServers.put(it) }
         c.put("dns", JSONObject().put("servers", dnsServers).put("queryStrategy", "UseIPv4").put("tag", "dns-module")
-            .put("hosts", JSONObject(DNS_HOSTS as Map<*, *>)))
+            .put("hosts", JSONObject(DNS_HOSTS as Map<*, *>))
+            // «Ускорение»: an expired answer is served at once and refreshed in the background (no wait on every open)
+            .apply { if (settings.turbo) put("serveStale", true) })
 
         val rules = JSONArray()
         rules.put(JSONObject().put("inboundTag", arr("socks")).put("port", "53").put("outboundTag", "dns-out"))

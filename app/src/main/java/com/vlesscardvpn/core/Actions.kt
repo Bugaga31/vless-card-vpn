@@ -668,6 +668,25 @@ object Actions {
     fun findDpi() = launch("Подбор обхода DPI") { doFindDpi() }
 
     /**
+     * «Не работает? Починить»: one button for the user — check the network itself, fresh subscriptions + full re-test +
+     * mask search (with evolution) + WARP, a DPI bypass for this network, then reconnect. [then] runs on the main thread.
+     */
+    fun fixAll(then: () -> Unit) = launch("Чиню всё сам") {
+        if (!online()) return@launch "У самой сети нет интернета (ни ya.ru, ни 1.1.1.1 не открываются). Проверьте Wi-Fi/мобильные данные — VPN тут ни при чём."
+        val n = runCatching { autoRescue(emptyList(), 3) { step -> progress.value = progress.value.copy(title = "Чиню: $step") } }.getOrDefault(0)
+        val dpi = if (n == 0 || Store.state.value.settings.mode != com.vlesscardvpn.model.Mode.SERVERS) { progress.value = progress.value.copy(title = "Чиню: обход DPI"); doFindDpi() } else ""
+        android.os.Handler(android.os.Looper.getMainLooper()).post(then)
+        (if (n > 0) "Готово: рабочих серверов выбрано $n. " else "Серверы не нашлись — работаю через обход DPI. ") + dpi.take(160) + " Переподключаюсь…"
+    }
+
+    /** "1,2 ГБ" / "35 МБ" for the session traffic line. */
+    fun bytes(b: Long): String = when {
+        b >= 1L shl 30 -> "%.1f ГБ".format(b / (1L shl 30).toDouble())
+        b >= 1L shl 20 -> "${b shr 20} МБ"
+        else -> "${b shr 10} КБ"
+    }
+
+    /**
      * Smart DPI search: 1) every strategy against the YouTube page (fast); 2) the 8 fastest that passed plus mutants
      * of the 3 best ByeDPI ones («эволюция стратегий») — two rounds against YouTube, its image CDN and Discord.
      * The winner opens the most sites most reliably, then is the fastest. The top 5 are remembered for this network:

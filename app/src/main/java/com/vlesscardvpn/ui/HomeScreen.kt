@@ -31,6 +31,7 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
     val cfg by Store.settings.collectAsState()
     val sum by Store.summary.collectAsState()
     val busy by Actions.running.collectAsState()
+    val working = busy
     val mode = cfg.mode
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
         Text("VLESS Card", fontSize = 26.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onBackground)
@@ -106,6 +107,27 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
         if (status.message.isNotEmpty()) Text(status.message, color = if (status.state == Tunnel.State.ERROR) Bad else MaterialTheme.colorScheme.onBackground,
             textAlign = TextAlign.Center, fontWeight = FontWeight.Medium)
         if (status.route.isNotEmpty()) Text(status.route, color = Color.Gray, fontSize = 13.sp, textAlign = TextAlign.Center)
+        val pausedUntil by Tunnel.pausedUntil.collectAsState()
+        val ctx = androidx.compose.ui.platform.LocalContext.current
+        if (status.state == Tunnel.State.CONNECTED) {
+            // session: time and traffic through the VPN, refreshed every 5 s only while this screen is open
+            var tick by remember { mutableStateOf(0) }
+            LaunchedEffect(status.since) { while (true) { kotlinx.coroutines.delay(5000); tick++ } }
+            val uid = android.os.Process.myUid()
+            val rx = remember(tick) { (android.net.TrafficStats.getUidRxBytes(uid) - Tunnel.rx0).coerceAtLeast(0) }
+            val tx = remember(tick) { (android.net.TrafficStats.getUidTxBytes(uid) - Tunnel.tx0).coerceAtLeast(0) }
+            val min = remember(tick) { ((System.currentTimeMillis() - status.since) / 60_000).coerceAtLeast(0) }
+            Text("Сессия: ${if (min >= 60) "${min / 60} ч ${min % 60} мин" else "$min мин"} · ↓ ${Actions.bytes(rx)} ↑ ${Actions.bytes(tx)}" +
+                if (cfg.turbo) " · ускорение вкл." else "", fontSize = 12.sp, color = Color.Gray, textAlign = TextAlign.Center)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton(onClick = { com.vlesscardvpn.vpn.TunnelService.pause(ctx) }) { Text("Пауза 5 мин") }
+                TextButton(onClick = { Actions.fixAll { onConnect() } }, enabled = !working) { Text("Не работает? Починить") }
+            }
+        } else if (pausedUntil > 0) {
+            TextButton(onClick = { onConnect() }) { Text("Включить сейчас") }
+        } else if (status.state == Tunnel.State.ERROR) {
+            TextButton(onClick = { Actions.fixAll { onConnect() } }, enabled = !working) { Text("Починить и подключить") }
+        }
         if (status.check.isNotEmpty()) Text(status.check, color = when (status.checkOk) { true -> Good; false -> Bad; null -> Color.Gray },
             fontSize = 14.sp, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 6.dp))
         Spacer(Modifier.height(20.dp))

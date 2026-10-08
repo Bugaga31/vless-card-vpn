@@ -51,6 +51,10 @@ class TunnelService : VpnService() {
     companion object {
         const val ACTION_START = "com.vlesscardvpn.START"
         const val ACTION_STOP = "com.vlesscardvpn.STOP"
+        const val ACTION_PAUSE = "com.vlesscardvpn.PAUSE"
+        const val PAUSE_MS = 5 * 60_000L
+        /** «Ускорение»: a big TUN MTU — 5-6 times fewer packets for the phone to move for the same traffic (less CPU, less battery). */
+        const val TURBO_MTU = 8500
         private const val CHANNEL = "vpn"
         private const val TAG = "TunnelService"
         const val MTU = 1500
@@ -61,6 +65,7 @@ class TunnelService : VpnService() {
             val i = Intent(context, TunnelService::class.java).setAction(ACTION_START)
             if (Build.VERSION.SDK_INT >= 26) context.startForegroundService(i) else context.startService(i)
         }
+        fun pause(context: Context) { context.startService(Intent(context, TunnelService::class.java).setAction(ACTION_PAUSE)) }
         fun stop(context: Context) {
             context.startService(Intent(context, TunnelService::class.java).setAction(ACTION_STOP))
         }
@@ -88,7 +93,9 @@ class TunnelService : VpnService() {
     private var safeMasks = false
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action != ACTION_PAUSE) { pauseJob?.cancel(); Tunnel.pausedUntil.value = 0 }
         when (intent?.action) {
+            ACTION_PAUSE -> scope.launch { lock.withLock { pause() } }
             ACTION_STOP -> { scope.launch { lock.withLock { teardown("") } ; stopSelf() } }
             else -> { // ACTION_START or always-on restart (null intent)
                 foreground("Подключение…")
@@ -101,7 +108,50 @@ class TunnelService : VpnService() {
 
     override fun onRevoke() { scope.launch { lock.withLock { teardown("VPN отключён системой или другим VPN") }; stopSelf() } }
 
+    private var pauseJob: Job? = null
+    /** «Пауза 5 минут» (for a bank or a game that hates VPNs): VPN off, the service waits and switches it back on by itself. */
+    private fun pause() {
+        teardown(null)
+        val until = System.currentTimeMillis() + PAUSE_MS
+        Tunnel.pausedUntil.value = until
+        val at = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(java.util.Date(until))
+        Tunnel.status.value = Tunnel.Status(Tunnel.State.IDLE, "Пауза — VPN включится сам в $at")
+        foreground("Пауза до $at", paused = true)
+        pauseJob?.cancel()
+        pauseJob = scope.launch {
+            delay(PAUSE_MS)
+            if (Tunnel.pausedUntil.value != 0L) { Tunnel.pausedUntil.value = 0; lock.withLock { connect() } }
+        }
+    }
+
+    /** Screen off or battery saver (with «Ускорение»): no background probes — they wake the radio and drain the battery. */
+    private fun asleep(): Boolean {
+        if (!Store.state.value.settings.turbo) return false
+        val pm = getSystemService(android.os.PowerManager::class.java) ?: return false
+        return !pm.isInteractive || pm.isPowerSaveMode
+    }
+
+    private var screenReceiver: android.content.BroadcastReceiver? = null
+    /** Phone unlocked after sleeping: one light check, so a connection that died at night is fixed before the user notices. */
+    private fun watchScreen() {
+        if (screenReceiver != null) return
+        val r = object : android.content.BroadcastReceiver() {
+            override fun onReceive(c: Context?, i: Intent?) {
+                if (Tunnel.status.value.state != Tunnel.State.CONNECTED || healJob?.isActive == true) return
+                scope.launch {
+                    delay(1500)
+                    val port = Tunnel.socks?.port ?: return@launch
+                    val ok = Tester.probeSocks(port, Store.state.value.settings.testUrl, big = false, youtube = false, attempts = 1).realMs > 0
+                    Log.i("E2E", "screen on: check ok=$ok")
+                    if (!ok) verifySoon(0) else { watchdog(); coverTraffic() }
+                }
+            }
+        }
+        runCatching { registerReceiver(r, android.content.IntentFilter(Intent.ACTION_USER_PRESENT)); screenReceiver = r }
+    }
+
     override fun onDestroy() {
+        screenReceiver?.let { runCatching { unregisterReceiver(it) } }; screenReceiver = null
         // Never block the main thread on a long connect/heal holding the lock (that was an ANR): wait 1.5 s at most.
         runCatching { kotlinx.coroutines.runBlocking { kotlinx.coroutines.withTimeoutOrNull(1500) { lock.withLock { teardown(null) } } ?: teardown(null) } }
         scope.cancel()
@@ -173,7 +223,10 @@ class TunnelService : VpnService() {
             if (auto) route = "Авто · $route"
             if (settings.services.isNotEmpty()) route += " · через VPN только " + com.vlesscardvpn.core.Services.label(settings.services)
             if (proxy) route = "Прокси SOCKS5 :${socks.port} · HTTP :${settings.httpPort}" + (if (settings.lanShare) " (для всей сети: ${lanIp() ?: "IP телефона"})" else "") + " · $route"
-            Tunnel.status.value = Tunnel.Status(Tunnel.State.CONNECTED, "Подключено", route, "Проверяю интернет…", null, System.currentTimeMillis())
+            val since = if (keepTun && prev.since > 0) prev.since else System.currentTimeMillis()
+            if (!keepTun) { Tunnel.rx0 = android.net.TrafficStats.getUidRxBytes(android.os.Process.myUid()); Tunnel.tx0 = android.net.TrafficStats.getUidTxBytes(android.os.Process.myUid()) }
+            Tunnel.status.value = Tunnel.Status(Tunnel.State.CONNECTED, "Подключено", route, "Проверяю интернет…", null, since)
+            watchScreen()
             foreground(if (settings.quietNotification) "Активно" else "Подключено · $route")
             watchNetwork()
             verifySoon(0)
@@ -198,7 +251,8 @@ class TunnelService : VpnService() {
     private fun startTun(settings: com.vlesscardvpn.model.Settings, socks: SocksAuth) {
         val v4 = if (settings.randomTun) com.vlesscardvpn.core.Disguise.tunV4() else IPV4
         val v6 = if (settings.randomTun) com.vlesscardvpn.core.Disguise.tunV6() else IPV6
-        val b = Builder().setSession(if (settings.randomTun || settings.quietNotification) "Sync" else "VLESS Card").setMtu(MTU)
+        val mtu = if (settings.turbo) TURBO_MTU else MTU
+        val b = Builder().setSession(if (settings.randomTun || settings.quietNotification) "Sync" else "VLESS Card").setMtu(mtu)
             .addAddress(v4, 30).addRoute("0.0.0.0", 0)
             .addAddress(v6, 126).addRoute("::", 0)
             .addDnsServer("1.1.1.1").addDnsServer("8.8.8.8")
@@ -214,7 +268,7 @@ class TunnelService : VpnService() {
         if (Build.VERSION.SDK_INT >= 29) b.setMetered(false)
         val fd = b.establish() ?: error("Система не дала создать VPN (нет разрешения)")
         tun = fd
-        TProxyService.start(filesDir, fd, socks.port, MTU, v4, v6, socks.user, socks.pass)
+        TProxyService.start(filesDir, fd, socks.port, mtu, v4, v6, socks.user, socks.pass)
     }
 
     private fun lanIp(): String? = runCatching {
@@ -252,7 +306,7 @@ class TunnelService : VpnService() {
             while (true) {
                 delay(com.vlesscardvpn.core.Disguise.nextDelaySec() * 1000L)
                 if (Tunnel.status.value.state != Tunnel.State.CONNECTED || !Store.state.value.settings.coverTraffic) break
-                com.vlesscardvpn.core.Disguise.cover()
+                if (!asleep()) com.vlesscardvpn.core.Disguise.cover()
             }
         }
     }
@@ -269,6 +323,7 @@ class TunnelService : VpnService() {
             delay(firstDelay)
             var calm = 0
             while (Tunnel.status.value.state == Tunnel.State.CONNECTED) {
+                while (asleep() && Tunnel.status.value.state == Tunnel.State.CONNECTED) delay(60_000) // no re-tests while the phone sleeps
                 val reconnect = runCatching { Store.busy { Actions.optimize() } }.getOrDefault(false)
                 // the user is in a call / watching video: wait a minute; still busy → skip, the next pass decides again
                 val busyNow = reconnect && userActive() && run { Log.i("E2E", "optimize: user is busy — switch postponed"); delay(60_000); userActive() }
@@ -310,7 +365,7 @@ class TunnelService : VpnService() {
             var offline = false
             while (Tunnel.status.value.state == Tunnel.State.CONNECTED) {
                 delay(if (offline) 10_000 else 45_000)
-                if (healJob?.isActive == true) continue
+                if (healJob?.isActive == true || asleep()) continue
                 val port = Tunnel.socks?.port ?: break
                 val ok = Tester.probeSocks(port, Store.state.value.settings.testUrl, big = false, youtube = false, attempts = 1).realMs > 0
                 if (!ok && !Actions.online()) {
@@ -480,7 +535,7 @@ class TunnelService : VpnService() {
         return String(CharArray(20) { abc[rnd.nextInt(abc.length)] })
     }
 
-    private fun foreground(text: String) {
+    private fun foreground(text: String, paused: Boolean = false) {
         val quiet = Store.state.value.settings.quietNotification
         val nm = getSystemService(NotificationManager::class.java)
         if (Build.VERSION.SDK_INT >= 26) nm.createNotificationChannel(NotificationChannel(CHANNEL, "VPN", NotificationManager.IMPORTANCE_LOW))
@@ -490,6 +545,12 @@ class TunnelService : VpnService() {
             .setSmallIcon(if (quiet) android.R.drawable.stat_notify_sync_noanim else android.R.drawable.ic_lock_lock)
             .setContentTitle(if (quiet) "Синхронизация" else "VLESS Card").setContentText(if (quiet) "Активно" else text)
             .setContentIntent(open).setOngoing(true)
+            .apply {
+                if (paused) addAction(Notification.Action.Builder(null, "Включить сейчас",
+                    PendingIntent.getService(this@TunnelService, 3, Intent(this@TunnelService, TunnelService::class.java).setAction(ACTION_START), PendingIntent.FLAG_IMMUTABLE)).build())
+                else addAction(Notification.Action.Builder(null, "Пауза 5 мин",
+                    PendingIntent.getService(this@TunnelService, 2, Intent(this@TunnelService, TunnelService::class.java).setAction(ACTION_PAUSE), PendingIntent.FLAG_IMMUTABLE)).build())
+            }
             .addAction(Notification.Action.Builder(null, "Отключить", stop).build()).build()
         if (Build.VERSION.SDK_INT >= 34) startForeground(1, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
         else startForeground(1, n)
