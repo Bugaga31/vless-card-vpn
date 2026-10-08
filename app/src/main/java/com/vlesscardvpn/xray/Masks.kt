@@ -256,6 +256,27 @@ object Masks {
         else -> "plain"
     }
 
+    /**
+     * How much a mask slows the connection itself: 0 none … 4. A tiny MSS cuts EVERY packet of the connection to ~100
+     * bytes (not only the handshake) — pages still open fast, but video crawls. Such masks are tried later and lose
+     * to a lighter one that also passes.
+     */
+    fun cost(m: Mask): Int = (when { m.mss in 1..200 -> 3; m.mss in 201..400 -> 2; m.mss > 0 -> 1; else -> 0 }) + (if (m.mux) 1 else 0) + (if (m.viaByeDpi) 1 else 0)
+
+    /** Finer than [family]: what kind of trick it is (the mask search tries one of every kind first). */
+    fun kind(m: Mask): String = family(m).let { f ->
+        if (f != "brand") f else when { m.sni.isNotEmpty() -> "sni"; m.mss > 0 -> "mss"; m.mux -> "mux"; m.alpn.isNotEmpty() -> "alpn"; m.tfo -> "tfo"; else -> "v6" }
+    }
+
+    /** Round-robin over kinds keeping the order inside each: the first dozen tries cover every trick, not 12 variants of one. */
+    fun diverse(list: List<Mask>): List<Mask> {
+        val groups = LinkedHashMap<String, ArrayDeque<Mask>>()
+        list.forEach { groups.getOrPut(kind(it)) { ArrayDeque() }.addLast(it) }
+        val out = ArrayList<Mask>(list.size)
+        while (groups.values.any { it.isNotEmpty() }) groups.values.forEach { q -> q.removeFirstOrNull()?.let(out::add) }
+        return out
+    }
+
     /** [searchOrder] limited to the families / fingerprints chosen in Settings (empty = all). Plain chrome stays as a baseline. */
     fun searchOrder(byeDpiAvailable: Boolean, server: com.vlesscardvpn.model.Server?, families: Collection<String>, fps: Collection<String>): List<Mask> =
         searchOrder(byeDpiAvailable, server).filter { m ->
@@ -271,7 +292,8 @@ object Masks {
             "chrome.d:BYEDPI#VCARD_RECVER", "chrome.d:TPWS#SPLIT_DISORDER", "firefox.d:TPWS#TLSREC", "chrome.d:BYEDPI#OOB_THEN_DISORDER",
             "safari.d:TPWS#HOST_DISORDER", "chrome.d:BYEDPI#MULTI_DISORDER", "chrome.d:TPWS#TLSREC_OOB", "firefox.d:BYEDPI#MASK_AUTO_FAKE")
         // own masks right after the plain baseline: the user made them for this network
-        val ordered = (listOfNotNull(byId["chrome.n"]) + custom + first.mapNotNull { byId[it] } + ALL).distinct()
+        // light masks first (stable: the curated order stays inside each weight); own masks keep their place up front
+        val ordered = (listOfNotNull(byId["chrome.n"]) + custom + (first.mapNotNull { byId[it] } + ALL).distinct().filter { !it.custom }.sortedBy { cost(it) }).distinct()
         return ordered.filter { (byeDpiAvailable || !it.viaByeDpi) && (server == null || compatible(it, server)) }
     }
 }

@@ -132,6 +132,7 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
         }
         if (status.check.isNotEmpty()) Text(status.check, color = when (status.checkOk) { true -> Good; false -> Bad; null -> Color.Gray },
             fontSize = 14.sp, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 6.dp))
+        if (status.state == Tunnel.State.CONNECTING) Box(Modifier.fillMaxWidth().padding(top = 8.dp)) { LiveProgress(stop = false) { it.running } }
         Spacer(Modifier.height(20.dp))
 
         if (mode != Mode.BYEDPI) {
@@ -149,8 +150,12 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
                         sum.selectedCount == 0 -> "Всего ${sum.total}. Нажмите «Подключить» — проверю и выберу сам."
                         else -> sum.selectedNames.joinToString() + if (sum.selectedCount > 3) " и ещё ${sum.selectedCount - 3}" else ""
                     }, fontSize = 13.sp, color = Color.Gray)
+                    if (sum.bestMs > 0) Text("Лучший: ${sum.bestMs} мс" + (if (sum.bestKbps > 0) " · ${Actions.mbps(sum.bestKbps)}" else "") +
+                        when (sum.bestYt) { true -> " · YouTube ✓"; false -> " · YouTube ✗"; null -> "" },
+                        fontSize = 13.sp, color = if (sum.bestKbps in 1..2999 || sum.bestYt == false) Warn else Good)
                     Text("Маскировка: авто" + (if (sum.mask.isNotEmpty()) " — ${sum.mask}" else " (подбирается сама под сеть)"), fontSize = 12.sp, color = Color.Gray,
                         maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                    if (sum.heavyMask) Text("Маскировка «тяжёлая» (мелкие пакеты) — видео может тормозить. После подключения сам поищу лёгкую", fontSize = 11.sp, color = Warn)
                 }
             }
         }
@@ -164,6 +169,12 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
             Text("Подписка «${i.title.ifEmpty { com.vlesscardvpn.model.Subs.title(u) }}» заканчивается: " + Actions.subLine(i, nowSec) + ". Продлите у продавца",
                 fontSize = 13.sp, color = Warn, textAlign = TextAlign.Center)
         }
+        Spacer(Modifier.height(12.dp))
+        var tools by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
+        OutlinedButton(onClick = { tools = !tools }, modifier = Modifier.fillMaxWidth()) {
+            Text(if (tools) "Скрыть инструменты ▴" else "Инструменты: скорость, сайты, сеть ▾")
+        }
+        if (tools) {
         Spacer(Modifier.height(12.dp))
         NetCard(on = status.state == Tunnel.State.CONNECTED, cfgKey = cfg.hashCode() + status.check.hashCode())
         Spacer(Modifier.height(12.dp))
@@ -189,6 +200,7 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
         }
         Spacer(Modifier.height(12.dp))
         SiteCard(on = status.state == Tunnel.State.CONNECTED, reconnect = { reconnect() })
+        }
         Spacer(Modifier.height(12.dp)); LiveProgress(stop = true)
     }
 }

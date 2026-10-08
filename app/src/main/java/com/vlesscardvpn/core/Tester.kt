@@ -23,7 +23,7 @@ import java.net.ServerSocket
 import java.net.Socket
 import java.util.concurrent.TimeUnit
 
-data class Probe(val realMs: Int, val bigOk: Boolean?, val ytOk: Boolean?, val error: String = "", val tgOk: Boolean? = null) {
+data class Probe(val realMs: Int, val bigOk: Boolean?, val ytOk: Boolean?, val error: String = "", val tgOk: Boolean? = null, val kbps: Int = 0) {
     val works: Boolean get() = realMs > 0 && bigOk != false
 }
 
@@ -51,9 +51,9 @@ object Tester {
     const val TG_URL = "https://api.telegram.org/"
     const val BIG_BYTES = 200_000
 
-    suspend fun tcp(servers: List<Server>, parallel: Int = 96, onEach: (Server, Int) -> Unit) = coroutineScope {
+    suspend fun tcp(servers: List<Server>, parallel: Int = 96, timeoutMs: Int = 2500, onEach: (Server, Int) -> Unit) = coroutineScope {
         val sem = Semaphore(parallel)
-        servers.map { s -> async(Bg.io) { sem.withPermit { onEach(s, if (s.isTcpBased) tcpOne(s.address, s.port) else resolves(s.address)) } } }.awaitAll()
+        servers.map { s -> async(Bg.io) { sem.withPermit { onEach(s, if (s.isTcpBased) tcpOne(s.address, s.port, timeoutMs) else resolves(s.address)) } } }.awaitAll()
     }
 
     /** ms (≥1) or 0 when unreachable. UDP-only protocols (Hysteria2) return 1 if the name resolves. */
@@ -86,15 +86,31 @@ object Tester {
             }.onFailure { err = it.message ?: it.javaClass.simpleName }
         }
         if (best == Long.MAX_VALUE) return Probe(0, null, null, err)
-        val bigOk = if (!big) null else BIG_URLS.any { url -> runCatching { download(client, url) >= BIG_BYTES }.getOrDefault(false) }
-        val ytOk = if (!youtube) null else runCatching {
-            client.newCall(Request.Builder().url(YT_URL).header("User-Agent", UA).build()).execute().use { it.code in 200..399 }
-        }.getOrDefault(false)
-        val tgOk = if (!youtube) null else runCatching {
-            client.newCall(Request.Builder().url(TG_URL).header("User-Agent", UA).build()).execute().use { it.code in 200..499 }
-        }.getOrDefault(false)
+        // big file, YouTube and Telegram at the same time (they used to run one after another: up to 4× longer per server)
+        val bigF = if (big) pool.submit<Pair<Boolean, Int>> { bigDownload(client) } else null
+        val ytF = if (youtube) pool.submit<Boolean> { runCatching {
+            client.newCall(Request.Builder().url(YT_URL).header("User-Agent", UA).build()).execute().use { it.code in 200..399 } }.getOrDefault(false) } else null
+        val tgF = if (youtube) pool.submit<Boolean> { runCatching {
+            client.newCall(Request.Builder().url(TG_URL).header("User-Agent", UA).build()).execute().use { it.code in 200..499 } }.getOrDefault(false) } else null
+        val (bigOk, kbps) = bigF?.let { f -> runCatching { f.get(40, TimeUnit.SECONDS) }.getOrDefault(false to 0) }?.let { it.first to it.second } ?: (null to 0)
+        val ytOk = ytF?.let { f -> runCatching { f.get(40, TimeUnit.SECONDS) }.getOrDefault(false) }
+        val tgOk = tgF?.let { f -> runCatching { f.get(40, TimeUnit.SECONDS) }.getOrDefault(false) }
         client.connectionPool.evictAll()
-        return Probe(best.toInt().coerceAtLeast(1), bigOk, ytOk, tgOk = tgOk)
+        return Probe(best.toInt().coerceAtLeast(1), bigOk, ytOk, tgOk = tgOk, kbps = kbps)
+    }
+
+    private val pool = java.util.concurrent.Executors.newCachedThreadPool { r -> Thread(r, "probe").apply { isDaemon = true } }
+
+    /** 256 KB through the server: (passed, kbit/s). A freeze (read timeout — the TSPU "16 KB" cut) fails at once, no second mirror. */
+    private fun bigDownload(client: OkHttpClient): Pair<Boolean, Int> {
+        for (url in BIG_URLS) {
+            val t0 = System.nanoTime()
+            try {
+                val n = download(client, url)
+                if (n >= BIG_BYTES) return true to (n * 8L * 1_000_000 / ((System.nanoTime() - t0) / 1000).coerceAtLeast(1) / 1000).toInt().coerceAtLeast(1)
+            } catch (e: java.io.InterruptedIOException) { return false to 0 } catch (e: Exception) { /* mirror down: next */ }
+        }
+        return false to 0
     }
 
     /** Cloudflare trace through the running tunnel: "on" / "plus" when traffic really goes through WARP, "off" otherwise, null = no answer. */

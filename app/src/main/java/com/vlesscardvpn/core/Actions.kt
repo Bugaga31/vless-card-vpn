@@ -333,7 +333,7 @@ object Actions {
         return "Работают: $working из ${alive.size} доступных по TCP (всего ${list.size})"
     }
 
-    private suspend fun realTest(servers: List<Server>, title: String, big: Boolean = true): Int {
+    private suspend fun realTest(servers: List<Server>, title: String, big: Boolean = true, attempts: Int = 2, parallel: Int = 32): Int {
         if (servers.isEmpty()) return 0
         progress.value = progress.value.copy(title = title, done = 0, total = servers.size)
         val pinned = pinCertificates(servers)
@@ -344,11 +344,11 @@ object Actions {
         val done = AtomicInteger(); val ok = AtomicInteger()
         val states = StateBatch(200)
         try {
-            Tester.real(variants, st.settings.testUrl, port, own.ports, batch = 48, parallel = 16, big = big) { i, p ->
+            Tester.real(variants, st.settings.testUrl, port, own.ports, batch = 64, parallel = parallel, big = big, attempts = attempts) { i, p ->
                 val s = variants[i].first
                 if (p.works) ok.incrementAndGet()
                 states.put(s.id) {
-                    it.copy(realMs = p.realMs, bigOk = p.bigOk, ytOk = p.ytOk, tgOk = p.tgOk, checkedAt = System.currentTimeMillis(),
+                    it.copy(realMs = p.realMs, bigOk = p.bigOk, ytOk = p.ytOk, tgOk = p.tgOk, checkedAt = System.currentTimeMillis(), kbps = if (p.kbps > 0) p.kbps else it.kbps,
                         okCount = it.okCount + if (p.works) 1 else 0, failCount = it.failCount + if (p.works) 0 else 1)
                 }
                 step(done.incrementAndGet(), variants.size)
@@ -387,8 +387,10 @@ object Actions {
             val fresh = evoCand.filter(ok).shuffled().take(slots)
             val base = (Masks.searchOrder(dpiOk, s, cfg.maskFamilies, cfg.maskFps) + kept.filter(ok)).distinctBy { it.id }
                 .filter { (tpwsOk || !it.dpi.startsWith("TPWS#")) && it !in fresh }
-                .sortedWith(compareBy<Mask>({ bucket(it) }, { -(stats[it.id]?.takeIf { s -> s.ok > 0 }?.score ?: 0.0) })).take((perServer - fresh.size).coerceAtLeast(1))
-            base.take(3) + fresh + base.drop(3)
+                .sortedWith(compareBy<Mask>({ bucket(it) }, { Masks.cost(it) }, { -(stats[it.id]?.takeIf { s -> s.ok > 0 }?.score ?: 0.0) })).take((perServer - fresh.size).coerceAtLeast(1))
+            // proven ones first, then one of every kind of trick (not a dozen variants of the same one)
+            val proven = base.filter { bucket(it) == 0 }.take(3).ifEmpty { base.take(1) }
+            proven + fresh + Masks.diverse(base - proven.toSet())
         }
         // Interleaved (1st mask of every server, then the 2nd…): parallel probes hit different servers, and a server
         // that already has [enough] working masks stops early instead of trying all of them.
@@ -400,14 +402,20 @@ object Actions {
         val found = HashMap<String, Int>()
         val tried = mutableListOf<Triple<String, String, Boolean>>()
         val done = AtomicInteger()
+        // Learning during the run: a kind of trick that failed everywhere while another kind already passes is dropped.
+        val kindOk = HashMap<String, Int>(); val kindFail = HashMap<String, Int>()
+        val dropAfter = maxOf(6, pinned.size * 2)
+        fun dead(m: Mask?): Boolean = m != null && synchronized(best) { val k = Masks.kind(m); (kindOk[k] ?: 0) == 0 && (kindFail[k] ?: 0) >= dropAfter && kindOk.values.any { it > 0 } }
+        fun eff(m: Mask, p: Probe) = p.realMs + Masks.cost(m) * 150 + (if (p.kbps > 0) com.vlesscardvpn.model.ServerState.speedPenalty(p.kbps) else 0)
         progress.value = progress.value.copy(title = "Подбор маскировки")
         try {
             Tester.real(variants, cfg.testUrl, port, own.ports, youtube = false, batch = 64, parallel = 12, attempts = 1,
-                skip = { i -> System.currentTimeMillis() > deadline || synchronized(best) { (found[group(variants[i].first)] ?: 0) >= enough } }) { i, p ->
+                skip = { i -> System.currentTimeMillis() > deadline || synchronized(best) { (found[group(variants[i].first)] ?: 0) >= enough } || dead(variants[i].second) }) { i, p ->
                 val (s, m) = variants[i]
                 synchronized(best) {
                     val cur = best[s.id]
-                    if (p.works && m != null && (cur == null || p.realMs < cur.second.realMs)) best[s.id] = m to p
+                    if (m != null && p !== Tester.SKIPPED) (if (p.works) kindOk else kindFail).merge(Masks.kind(m), 1, Int::plus)
+                    if (p.works && m != null && (cur == null || eff(m, p) < eff(cur.first, cur.second))) best[s.id] = m to p
                     if (p.works && m != null) { good.getOrPut(s.id) { mutableListOf() } += m to p.realMs; found.merge(group(s), 1, Int::plus) }
                     if (m != null && p !== Tester.SKIPPED) tried += Triple(s.id, m.id, p.works)
                 }
@@ -416,17 +424,20 @@ object Actions {
         } finally { own.close() }
         // Double check: a mask that passed once can be a fluke (the TSPU sometimes lets the first connection through).
         // The 2 fastest of every server are probed again, now with YouTube; the one that passes again wins.
-        val confirm = pinned.flatMap { s -> good[s.id].orEmpty().sortedBy { it.second }.take(2).map { s to it.first } }
+        val confirm = pinned.flatMap { s -> good[s.id].orEmpty().let { g -> (g.sortedBy { it.second }.take(2) + g.sortedWith(compareBy({ Masks.cost(it.first) }, { it.second })).take(1)) }
+            .distinctBy { it.first.id }.map { s to it.first } }
         if (confirm.size > pinned.size / 2 && System.currentTimeMillis() < deadline) {
             val res = java.util.concurrent.ConcurrentHashMap<Int, Probe>()
             progress.value = progress.value.copy(title = "Двойная проверка маскировок")
             val (own2, port2) = dpiForTests(confirm.map { it.second })
             try {
-                Tester.real(confirm, cfg.testUrl, port2, own2.ports, youtube = true, batch = 64, parallel = 12, attempts = 1) { i, p -> res[i] = p; step(i + 1, confirm.size) }
+                Tester.real(confirm, cfg.testUrl, port2, own2.ports, youtube = true, batch = 64, parallel = 24, attempts = 1, big = true) { i, p -> res[i] = p; step(i + 1, confirm.size) }
             } finally { own2.close() }
             pinned.forEach { s ->
                 val mine = confirm.indices.filter { confirm[it].first.id == s.id }
-                val pick = mine.firstOrNull { res[it]?.works == true && res[it]?.ytOk == true } ?: mine.firstOrNull { res[it]?.works == true }
+                // passed again (with YouTube) and the fastest in real use: ping + download speed + how heavy the mask is
+                val pick = mine.filter { res[it]?.works == true && res[it]?.ytOk == true }.minByOrNull { eff(confirm[it].second, res.getValue(it)) }
+                    ?: mine.filter { res[it]?.works == true }.minByOrNull { eff(confirm[it].second, res.getValue(it)) }
                 if (pick != null) best[s.id] = confirm[pick].second to res.getValue(pick)
                 mine.forEach { i -> if (res[i]?.works == false) synchronized(best) { tried += Triple(s.id, confirm[i].second.id, false) } }
             }
@@ -446,6 +457,7 @@ object Actions {
             Store.setState(s.id) {
                 if (b == null) it.copy(realMs = 0, checkedAt = System.currentTimeMillis())
                 else it.copy(maskId = b.first.id, netMasks = it.netMasks + (net to b.first.id), realMs = b.second.realMs, bigOk = b.second.bigOk,
+                    kbps = if (b.second.kbps > 0) b.second.kbps else it.kbps, ytOk = b.second.ytOk ?: it.ytOk,
                     checkedAt = System.currentTimeMillis(),
                     goodMasks = good[s.id].orEmpty().sortedBy { g -> g.second }.map { g -> g.first.id }.filter { g -> g != b.first.id }.take(8))
             }
@@ -528,6 +540,32 @@ object Actions {
      * the tunnel. If a selected server died or others are clearly faster, switches to the fastest and reconnects;
      * if nothing works, searches new masks. Returns true when the service should reconnect.
      */
+    /** Connected after the quick check (or on old results): the first background pass tests the rest and re-ranks. */
+    @Volatile var deepPending = false
+
+    /**
+     * Selected servers that pass only with a heavy mask (tiny packets / one stream — YouTube crawls): try the light
+     * masks again on this network, with a download-speed test; a light one that passes wins.
+     */
+    private suspend fun lightenMasks(wifi: Boolean) {
+        val st = Store.state.value; val net = Net.key(app)
+        val heavy = st.selected.filter { s -> Masks.byId(st.state(s).maskFor(net))?.let { Masks.cost(it) >= 2 } == true }
+        if (heavy.isEmpty()) return
+        val variants = heavy.flatMap { s -> Masks.searchOrder(false, s).filter { Masks.cost(it) == 0 }.take(if (wifi) 10 else 5).map { s to it } }
+        val res = java.util.concurrent.ConcurrentHashMap<Int, Probe>()
+        val pinned = pinCertificates(heavy).associateBy { it.id }
+        val v2 = variants.map { (s, m) -> (pinned[s.id] ?: s) to m }
+        Tester.real(v2, st.settings.testUrl, null, emptyMap(), youtube = true, batch = 64, parallel = 24, attempts = 1, big = true) { i, p -> res[i] = p }
+        heavy.forEach { s ->
+            val cur = Store.state.value.state(s)
+            val win = v2.indices.filter { v2[it].first.id == s.id && res[it]?.works == true && res[it]?.ytOk != false }.minByOrNull { res.getValue(it).realMs } ?: return@forEach
+            val m = v2[win].second!!; val p = res.getValue(win)
+            if (cur.kbps > 0 && p.kbps in 1 until cur.kbps) return@forEach // the heavy one is still faster here: keep it
+            Store.setState(s.id) { it.copy(maskId = m.id, netMasks = it.netMasks + (net to m.id), realMs = p.realMs, bigOk = p.bigOk, kbps = p.kbps, checkedAt = System.currentTimeMillis()) }
+            Store.recordMasks(net, listOf(m.id to true))
+        }
+    }
+
     /** Whether the last [optimize] pass switched servers (TunnelService checks again sooner then). */
     @Volatile var lastOptimizeSwitched = false
 
@@ -537,9 +575,20 @@ object Actions {
         if (!st.settings.autoOptimize || job?.isActive == true) return false
         if (st.settings.mode == com.vlesscardvpn.model.Mode.BYEDPI) return false
         val wifi = unmetered()
+        if (deepPending) {
+            // connected right after the quick check: now test the rest calmly (outside the tunnel) and lighten heavy masks
+            deepPending = false
+            val prev0 = progress.value
+            val s0 = Store.state.value
+            val rest = s0.servers.filter { s0.state(it).tcpMs > 0 && (s0.state(it).realMs < 0 || System.currentTimeMillis() - s0.state(it).checkedAt > 6 * 3600_000L) }
+                .sortedBy { s0.state(it).tcpMs }.take(if (wifi) 60 else 24)
+            if (rest.isNotEmpty()) realTest(rest, "Фоновая проверка", big = true, attempts = 1)
+            lightenMasks(wifi)
+            progress.value = prev0
+        }
         // Auto with nothing selected connects to the 5 best: compare against those.
-        val sel = st.selected.ifEmpty { st.servers.filter { st.state(it).works }.sortedBy { st.state(it).realMs }.take(5) }
-        val others = st.servers.filter { it !in sel && st.state(it).works }.sortedBy { st.state(it).realMs }.take(if (wifi) 12 else 6)
+        val sel = st.selected.ifEmpty { st.servers.filter { st.state(it).works }.sortedBy { st.state(it).score }.take(5) }
+        val others = st.servers.filter { it !in sel && st.state(it).works }.sortedBy { st.state(it).score }.take(if (wifi) 12 else 6)
         val cand = (sel + others).distinctBy { it.id }
         if (cand.isEmpty()) return false
         val prev = progress.value
@@ -547,15 +596,15 @@ object Actions {
         progress.value = prev
         val now = Store.state.value
         val selOk = sel.filter { now.state(it).works }
-        val best = cand.filter { now.state(it).works }.sortedBy { now.state(it).realMs }
+        val best = cand.filter { now.state(it).works }.sortedBy { now.state(it).score }
         if (best.isEmpty()) {
             val alive = now.servers.filter { now.state(it).tcpMs > 0 }.sortedBy { now.state(it).tcpMs }.take(8)
             if (alive.isNotEmpty()) doFindMasks(alive, 24)
             val after = Store.state.value
             return if (alive.any { after.state(it).works }) { selectBest(5, alive.filter { after.state(it).works }); true } else false
         }
-        val median = selOk.map { now.state(it).realMs }.sorted().let { if (it.isEmpty()) Int.MAX_VALUE else it[it.size / 2] }
-        val bestMs = now.state(best.first()).realMs
+        val median = selOk.map { now.state(it).score }.sorted().let { if (it.isEmpty()) Int.MAX_VALUE else it[it.size / 2] }
+        val bestMs = now.state(best.first()).score
         // Ping is not everything: a server that answers fast but breaks big downloads (256 KB) feels slow — video stalls.
         val selBroken = wifi && selOk.isNotEmpty() && selOk.all { now.state(it).bigOk == false } && best.any { now.state(it).bigOk == true }
         val switch = selOk.size < sel.size || selBroken || (median > bestMs * 1.6 && median - bestMs > 150)
@@ -640,7 +689,7 @@ object Actions {
         val ok = list.filter { st.state(it).works }
         android.util.Log.i("E2E", "warp servers=${list.size} working=${ok.size} masks=${ok.map { st.state(it).maskId }}")
         // one endpoint per account: two tunnels with the same key at once would roam and stall
-        if (ok.isNotEmpty()) selectBest(3, ok.sortedBy { st.state(it).realMs }.distinctBy { it.secret })
+        if (ok.isNotEmpty()) selectBest(3, ok.sortedBy { st.state(it).score }.distinctBy { it.secret })
         return if (ok.isEmpty()) "WARP: аккаунтов ${accs.size}, но ни одна точка входа не ответила ($res). WireGuard в этой сети, похоже, режут."
         else "WARP готов: рабочих точек входа ${ok.size} (по одной на аккаунт, всего ${list.size}), выбраны. " +
             (if (plus > 0) "WARP+: $plus из ${accs.size} аккаунтов. " else if (plusErr.isNotEmpty()) "WARP+ не подключился ($plusErr) — обычный WARP. " else "") +
@@ -659,10 +708,12 @@ object Actions {
         // Instant start: something worked before → connect now; the tunnel itself re-checks, heals and keeps searching.
         if (working.isNotEmpty() || st.servers.isEmpty() && Net.key(app).let { k -> st.settings.dpiRemembered[k] ?: st.settings.dpiRemembered[Net.family(k)] } != null) {
             if (busy?.isActive == true && progress.value.title == "Фоновая подготовка") cancel()
+            val now = System.currentTimeMillis()
+            if (working.none { now - st.state(it).checkedAt < 6 * 3600_000L }) deepPending = true
             if (st.selected.none { st.state(it).works }) selectBest(5, working)
             onReady(); return
         }
-        Tunnel.status.value = Tunnel.Status(Tunnel.State.CONNECTING, "Готовлю серверы…", check = "Первый запуск в этой сети: проверяю серверы и маскировку, обычно до минуты")
+        Tunnel.status.value = Tunnel.Status(Tunnel.State.CONNECTING, "Готовлю серверы…", check = "Первый запуск в этой сети: ищу самые быстрые серверы, обычно 10–20 секунд")
         if (busy?.isActive == true) { scope.launch { busy.join(); autoPrepare(onReady) }; return }
         autoPrepare(onReady)
     }
@@ -714,13 +765,21 @@ object Actions {
         }
         fun fresh() = Store.state.value.let { st -> st.servers.filter { st.state(it).works && now - st.state(it).checkedAt < 6 * 3600_000L } }
         if (fresh().size < 3 && Store.state.value.servers.isNotEmpty()) {
-            progress.value = progress.value.copy(title = "Авто: проверяю серверы")
-            notes += doTestAll(Store.state.value.servers, 80)
+            // Quick start: ping everything in a few seconds, test only the 30 nearest — connect to the best of them.
+            // The rest is tested in the background after connecting (optimize → deepPending) and switched to if faster.
+            notes += quickTest(Store.state.value.servers)
+            if (fresh().isEmpty()) {
+                progress.value = progress.value.copy(title = "Авто: проверяю ещё серверы")
+                val st = Store.state.value
+                realTest(st.servers.filter { st.state(it).tcpMs > 0 && st.state(it).realMs < 0 }.sortedBy { st.state(it).tcpMs }.take(60), "Авто: проверяю ещё серверы", big = true, attempts = 1)
+            }
+            deepPending = true
         }
-        if (fresh().size < 3) {
+        if (fresh().isEmpty()) {
             val st = Store.state.value
             val candidates = st.servers.filter { st.state(it).tcpMs > 0 && !st.state(it).works }.sortedBy { st.state(it).tcpMs }.take(10)
-            if (candidates.isNotEmpty()) notes += doFindMasks(candidates, 24)
+            progress.value = progress.value.copy(title = "Авто: подбираю маскировку")
+            if (candidates.isNotEmpty()) notes += doFindMasks(candidates, 24, enough = 1, budgetMs = 60_000)
         }
         val working = fresh()
         if (working.isEmpty()) {
@@ -730,6 +789,21 @@ object Actions {
         val n = selectBest(5, working)
         withContext(Dispatchers.Main) { onReady() }
         if (n > 0) "Авто: выбрано $n лучших серверов — подключаюсь" else "Авто: рабочих серверов нет — подключаюсь через обход DPI без сервера"
+    }
+
+    /** «Авто», first time on a network: all servers pinged at once (1.5 s), the 30 nearest really tested (speed + YouTube). */
+    suspend fun quickTest(list: List<Server>): String {
+        progress.value = progress.value.copy(title = "Авто: пинг ${list.size} серверов", done = 0, total = list.size)
+        val done = AtomicInteger(); val batch = StateBatch(); val tcp = java.util.concurrent.ConcurrentHashMap<String, Int>()
+        Tester.tcp(list, parallel = 192, timeoutMs = 1500) { s, ms ->
+            tcp[s.id] = ms
+            batch.put(s.id) { it.copy(tcpMs = ms, realMs = if (ms == 0) 0 else it.realMs, checkedAt = System.currentTimeMillis()) }
+            step(done.incrementAndGet(), list.size)
+        }
+        batch.flush()
+        val near = list.filter { (tcp[it.id] ?: 0) > 0 }.sortedBy { tcp[it.id] }.take(30)
+        val ok = realTest(near, "Авто: проверяю 30 ближайших", big = true, attempts = 1)
+        return "Быстрая проверка: работают $ok из ${near.size} ближайших (всего ${list.size})"
     }
 
     /** Subscriptions older than 12 h are refreshed in the background on app start. */
@@ -744,7 +818,7 @@ object Actions {
         val ids = among?.map { it.id }?.toHashSet()
         Store.update { st ->
             // one WireGuard tunnel per key (WARP accounts): two with the same key would steal the session from each other
-            val best = st.servers.filter { (ids == null || it.id in ids) && st.state(it).works }.sortedBy { st.state(it).realMs }
+            val best = st.servers.filter { (ids == null || it.id in ids) && st.state(it).works }.sortedBy { st.state(it).score }
                 .distinctBy { if (it.protocol == "wireguard") "wg:" + it.secret else it.id }.take(n).map { it.id }.toSet()
             c = best.size
             st.copy(states = st.servers.associate { s -> s.id to st.state(s).copy(selected = s.id in best) } )
@@ -789,6 +863,9 @@ object Actions {
     }
 
     /** "1,2 ГБ" / "35 МБ" for the session traffic line. */
+    /** 23400 kbit/s → "23 Мбит/с", 800 → "0.8 Мбит/с" */
+    fun mbps(kbps: Int): String = if (kbps >= 10_000) "${kbps / 1000} Мбит/с" else "%.1f Мбит/с".format(java.util.Locale.US, kbps / 1000.0)
+
     fun bytes(b: Long): String = when {
         b >= 1L shl 30 -> "%.1f ГБ".format(b / (1L shl 30).toDouble())
         b >= 1L shl 20 -> "${b shr 20} МБ"

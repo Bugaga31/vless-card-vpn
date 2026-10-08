@@ -58,11 +58,16 @@ object Store {
         .stateIn(scope, SharingStarted.Eagerly, _state.value.settings)
 
     /** What the home screen shows about servers (counted in the background, not on the UI thread). */
-    data class Summary(val total: Int = 0, val working: Int = 0, val selectedCount: Int = 0, val selectedNames: List<String> = emptyList(), val mask: String = "")
+    data class Summary(val total: Int = 0, val working: Int = 0, val selectedCount: Int = 0, val selectedNames: List<String> = emptyList(), val mask: String = "",
+        /** the best selected server: ping, download speed, YouTube */
+        val bestMs: Int = 0, val bestKbps: Int = 0, val bestYt: Boolean? = null, val heavyMask: Boolean = false)
     val summary: StateFlow<Summary> = ui.map { st ->
         val sel = st.selected
         val mask = sel.firstNotNullOfOrNull { com.vlesscardvpn.xray.Masks.byId(st.state(it).maskId)?.takeIf { m -> m.id != com.vlesscardvpn.xray.Masks.DEFAULT.id } }?.title.orEmpty()
-        Summary(st.servers.size, st.servers.count { st.state(it).works }, sel.size, sel.take(3).map { it.name }, mask)
+        val top = sel.filter { st.state(it).works }.minByOrNull { st.state(it).score }?.let { st.state(it) }
+        Summary(st.servers.size, st.servers.count { st.state(it).works }, sel.size, sel.take(3).map { it.name }, mask,
+            top?.realMs ?: 0, top?.kbps ?: 0, top?.ytOk,
+            sel.any { com.vlesscardvpn.xray.Masks.byId(st.state(it).maskId)?.let { m -> com.vlesscardvpn.xray.Masks.cost(m) >= 2 } == true })
     }.distinctUntilChanged().stateIn(scope, SharingStarted.Eagerly, Summary())
     private var file: File? = null
     private var saveJob: Job? = null
