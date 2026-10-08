@@ -98,6 +98,8 @@ data class Settings(
     val monthLimitGb: Int = 0,
     /** subscription url → what its server reports (subscription-userinfo / profile-title headers). */
     val subInfo: Map<String, SubInfo> = emptyMap(),
+    /** Network → servers that worked there last time (picked again when the phone comes back to that network). */
+    val netServers: Map<String, List<String>> = emptyMap(),
     /** Connect by itself after the phone restarts. */
     val autoStart: Boolean = false,
     /** Settings revision: older ones get the full masking switched on once (Store.migrate). */
@@ -122,6 +124,7 @@ data class Settings(
         .put("ruAppsDirect", ruAppsDirect).put("randomTun", randomTun).put("coverTraffic", coverTraffic).put("rev", rev).put("turbo", turbo).put("autoStart", autoStart)
         .put("alwaysVpn", JSONArray(alwaysVpn)).put("alwaysDirect", JSONArray(alwaysDirect))
         .put("traffic", JSONObject().apply { traffic.forEach { (k, v) -> put(k, v) } }).put("monthLimitGb", monthLimitGb)
+        .put("netServers", JSONObject().apply { netServers.forEach { (k, v) -> put(k, JSONArray(v)) } })
         .put("subInfo", JSONObject().apply { subInfo.forEach { (k, v) -> put(k, v.toJson()) } })
 
     companion object {
@@ -180,6 +183,7 @@ data class Settings(
                 alwaysVpn = list("alwaysVpn", emptyList()), alwaysDirect = list("alwaysDirect", emptyList()),
                 traffic = o.optJSONObject("traffic")?.let { m -> m.keys().asSequence().associateWith { m.optLong(it) } } ?: emptyMap(),
                 monthLimitGb = o.optInt("monthLimitGb", 0),
+                netServers = o.optJSONObject("netServers")?.let { m -> m.keys().asSequence().associateWith { k -> m.optJSONArray(k)?.let { a -> (0 until a.length()).map { a.getString(it) } }.orEmpty() } } ?: emptyMap(),
                 subInfo = o.optJSONObject("subInfo")?.let { m -> m.keys().asSequence().mapNotNull { k -> m.optJSONObject(k)?.let { k to SubInfo.fromJson(it) } }.toMap() } ?: emptyMap(),
             )
         }

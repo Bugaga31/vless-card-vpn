@@ -173,6 +173,19 @@ object Tester {
         } finally { client.connectionPool.evictAll() }
     }
 
+    /** Real download speed (kbit/s, 0 = failed) of several variants, one after another so they don't share the line. */
+    suspend fun speedMany(variants: List<Pair<Server, Mask?>>, byeDpiPort: Int?, dpiPorts: Map<String, Int>, seconds: Int = 3): List<Int> = mutex.withLock {
+        withContext(Bg.io) {
+            val ports = freePorts(variants.size)
+            val core = XrayCore.Instance("speed")
+            try {
+                runCatching { core.start(XrayConfigBuilder.testConfig(variants, ports, byeDpiPort, dpiPorts)) }
+                if (!core.running) return@withContext variants.map { 0 }
+                ports.map { p -> runCatching { (speed(p, seconds).mbps * 1000).toInt() }.getOrDefault(0) }
+            } finally { core.stop() }
+        }
+    }
+
     private fun download(client: OkHttpClient, url: String): Int =
         client.newCall(Request.Builder().url(url).header("User-Agent", UA).build()).execute().use { r ->
             check(r.isSuccessful); val src = r.body!!.byteStream(); val buf = ByteArray(16384); var total = 0

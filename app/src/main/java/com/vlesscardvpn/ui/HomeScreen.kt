@@ -117,6 +117,11 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
             val rx = remember(tick) { (android.net.TrafficStats.getUidRxBytes(uid) - Tunnel.rx0).coerceAtLeast(0) }
             val tx = remember(tick) { (android.net.TrafficStats.getUidTxBytes(uid) - Tunnel.tx0).coerceAtLeast(0) }
             val min = remember(tick) { ((System.currentTimeMillis() - status.since) / 60_000).coerceAtLeast(0) }
+            // speed right now: bytes since the previous tick (5 s)
+            val prev = remember { longArrayOf(rx, tx) }
+            val now = remember(tick) { val r = ((rx - prev[0]) * 8 / 5000).coerceAtLeast(0) to ((tx - prev[1]) * 8 / 5000).coerceAtLeast(0); prev[0] = rx; prev[1] = tx; r }
+            if (tick > 0 && (now.first > 0 || now.second > 0)) Text("Сейчас: ↓ ${Actions.mbps(now.first.toInt())} ↑ ${Actions.mbps(now.second.toInt())}",
+                fontSize = 13.sp, color = MaterialTheme.colorScheme.onBackground, textAlign = TextAlign.Center)
             Text("Сессия: ${if (min >= 60) "${min / 60} ч ${min % 60} мин" else "$min мин"} · ↓ ${Actions.bytes(rx)} ↑ ${Actions.bytes(tx)}" +
                 if (cfg.turbo) " · ускорение вкл." else "", fontSize = 12.sp, color = Color.Gray, textAlign = TextAlign.Center)
             val (month, over) = com.vlesscardvpn.core.Traffic.line(cfg)

@@ -179,6 +179,7 @@ class TunnelService : VpnService() {
             if (settings.mode != Mode.BYEDPI && selected.isEmpty()) {
                 // Nothing chosen: take the best servers that passed the last test.
                 selected = st.servers.filter { st.state(it).works }.sortedBy { st.state(it).score }.take(5)
+                    .let { l -> l.take(Actions.closeOnes(l.map { st.state(it).score })) }
             }
             if (settings.mode == Mode.AUTO) {
                 settings = settings.copy(mode = if (selected.isEmpty() || autoDpiOnly) Mode.BYEDPI else Mode.SERVERS)
@@ -295,6 +296,7 @@ class TunnelService : VpnService() {
                 else "Нет ответа через выбранный маршрут (${p.error}). " + if (st.mode == Mode.AUTO && st.autoHeal) "Ищу рабочий вариант сам…" else "Проверьте серверы или включите маскировку."
             Tunnel.status.value = cur.copy(check = text, checkOk = p.works)
             Log.i("E2E", "check ok=${p.works} ms=${p.realMs} big=${p.bigOk} yt=${p.ytOk} tg=${p.tgOk} err=${p.error} warp=$warp")
+            if (p.works && st.mode == Mode.AUTO) Actions.rememberNet(Net.key(this@TunnelService))
             if (p.works) { healStep = 0; dpiHeals = 0; connectFails = 0; scheduleOptimize(if (com.vlesscardvpn.core.Actions.deepPending) 40_000 else 120_000); watchdog(); coverTraffic(); if (serverless()) rescueLater() } else heal()
         }
     }
@@ -490,6 +492,7 @@ class TunnelService : VpnService() {
                 netJob = scope.launch {
                     delay(1500)
                     Log.i("E2E", "network changed → soft restart")
+                    if (Store.state.value.settings.mode == Mode.AUTO && Actions.recallNet(Net.key(this@TunnelService))) Log.i("E2E", "network changed → remembered servers")
                     lock.withLock { connect(soft = true) }
                 }
                 if (Store.state.value.settings.autoOptimize) optimizeSoon()
