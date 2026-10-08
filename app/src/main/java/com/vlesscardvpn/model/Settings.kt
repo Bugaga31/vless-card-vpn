@@ -35,10 +35,10 @@ data class Settings(
     /** Random local SOCKS port + random login/password on every connect (apps can't find the proxy by scanning 10808). */
     val stealthSocks: Boolean = true,
     val blockStun: Boolean = false,
-    val blockQuic: Boolean = false,
+    val blockQuic: Boolean = true,
     val mux: Boolean = false,
     /** Each connect picks a random mask among the ones that passed the last search for that server. */
-    val rotateMasks: Boolean = false,
+    val rotateMasks: Boolean = true,
     /** Russian domains resolved by Yandex DNS directly (with RU direct): RU sites see a normal Russian user. */
     val ruDns: Boolean = true,
     /** Package names: excluded from VPN, or (if [onlyApps]) the only ones that use it. */
@@ -88,6 +88,8 @@ data class Settings(
     val randomTun: Boolean = true,
     /** Now and then open an ordinary Russian site directly while connected (looks like a usual user). */
     val coverTraffic: Boolean = true,
+    /** Settings revision: older ones get the full masking switched on once (Store.migrate). */
+    val rev: Int = REV,
 ) {
     val httpPort: Int get() = if (socksPort < 65535) socksPort + 1 else socksPort - 1
     fun toJson(): JSONObject = JSONObject().put("mode", mode.name).put("balance", balance.name).put("socksPort", socksPort)
@@ -105,9 +107,14 @@ data class Settings(
         .put("warpKeyOff", JSONArray(warpKeyOff)).put("warpKeyStatus", JSONObject(warpKeyStatus as Map<*, *>)).put("myMasks", JSONArray(myMasks))
         .put("maskEvolution", maskEvolution).put("autoMasks", JSONArray(autoMasks))
         .put("dpiRanking", JSONObject().apply { dpiRanking.forEach { (k, v) -> put(k, JSONArray(v)) } })
-        .put("ruAppsDirect", ruAppsDirect).put("randomTun", randomTun).put("coverTraffic", coverTraffic)
+        .put("ruAppsDirect", ruAppsDirect).put("randomTun", randomTun).put("coverTraffic", coverTraffic).put("rev", rev)
 
     companion object {
+        const val REV = 71
+        /** Once per update: all masking on (hidden proxy, QUIC off, rotating masks, evolution, behaviour layers, signature masks in the search). */
+        fun migrate(s: Settings): Settings = if (s.rev >= REV) s else s.copy(rev = REV, stealthSocks = true, blockQuic = true, rotateMasks = true,
+            maskEvolution = true, autoHeal = true, ruAppsDirect = true, randomTun = true, coverTraffic = true,
+            maskFamilies = if (s.maskFamilies.isEmpty()) s.maskFamilies else (s.maskFamilies + "brand" + "auto").distinct())
         const val DPI_AUTO = "auto"
         const val ANY_NETWORK = "*"
         val DNS_PRESETS = listOf("Cloudflare" to "https://1.1.1.1/dns-query", "Google" to "https://8.8.8.8/dns-query",
@@ -143,7 +150,7 @@ data class Settings(
                 myMasks = list("myMasks", emptyList()),
                 maskEvolution = o.optBoolean("maskEvolution", true), autoMasks = list("autoMasks", emptyList()),
                 dpiRanking = o.optJSONObject("dpiRanking")?.let { m -> m.keys().asSequence().associateWith { k -> m.optJSONArray(k)?.let { a -> (0 until a.length()).map { a.getString(it) } }.orEmpty() } } ?: emptyMap(),
-                ruAppsDirect = o.optBoolean("ruAppsDirect", true), randomTun = o.optBoolean("randomTun", true), coverTraffic = o.optBoolean("coverTraffic", true),
+                ruAppsDirect = o.optBoolean("ruAppsDirect", true), randomTun = o.optBoolean("randomTun", true), coverTraffic = o.optBoolean("coverTraffic", true), rev = o.optInt("rev", 0),
             )
         }
     }

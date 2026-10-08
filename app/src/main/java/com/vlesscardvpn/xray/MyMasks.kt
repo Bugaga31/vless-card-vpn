@@ -32,6 +32,8 @@ object MyMasks {
             if (m.alpn.isNotEmpty()) put("alpn", m.alpn)
             if (m.mss > 0) put("mss", m.mss)
             if (m.mux) put("mux", true)
+            if (m.tfo) put("tfo", true)
+            if (m.ipv6) put("v6", true)
         }
 
     /** Parses and validates; throws IllegalArgumentException with a user-readable message. */
@@ -78,13 +80,14 @@ object MyMasks {
         val mss = o.optInt("mss", 0)
         require(mss == 0 || mss in 88..1460) { "MSS: от 88 до 1460" }
         val mux = o.optBoolean("mux", false)
-        require(!((mss > 0 || mux || sni.isNotEmpty()) && (noise.isNotEmpty() || nj.isNotEmpty() || hop.isNotEmpty()))) {
+        val tfo = o.optBoolean("tfo", false); val v6 = o.optBoolean("v6", false)
+        require(!((mss > 0 || mux || tfo || sni.isNotEmpty()) && (noise.isNotEmpty() || nj.isNotEmpty() || hop.isNotEmpty()))) {
             "SNI, MSS и «один поток» — для TCP-серверов, шум — для UDP: сделайте две маскировки"
         }
         val norm0 = Mask("", title, fp, packets, if (lengths.isEmpty()) length else "", if (lengths.isEmpty()) delay else "",
             maxSplit.ifEmpty { "0" }, dpi, lengths.replace(" ", ""), delays.replace(" ", ""), noise, hop,
             if (nj.isEmpty()) "" else JSONArray(nj).toString(), custom = true)
-        val norm = norm0.copy(sni = sni, alpn = alpn, mss = mss, mux = mux)
+        val norm = norm0.copy(sni = sni, alpn = alpn, mss = mss, mux = mux, tfo = tfo, ipv6 = v6)
         return norm.copy(id = "my:" + idOf(norm))
     }
 

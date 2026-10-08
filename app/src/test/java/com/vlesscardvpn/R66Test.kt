@@ -110,7 +110,7 @@ class R66Test {
             assertEquals(m.id, Masks.family(m), "auto")
             if (m.lengths.isNotEmpty()) assertEquals(m.id, m.lengths.split(',').size, m.delays.split(',').size)
             // every mutant must build a valid outbound for some server type
-            val s = if (m.hop == Masks.HOP_WARP) wg.copy(source = "warp") else if (m.hasNoise || m.hop.isNotEmpty()) wg else tls
+            val s = if (m.hop == Masks.HOP_WARP) wg.copy(source = "warp") else if (m.hasNoise || m.hop.isNotEmpty()) wg else if (m.ipv6) tls.copy(address = "srv.example.com") else tls
             assertTrue(m.id, Masks.compatible(m, s))
             XrayConfigBuilder.outbound(s, "t", m).toString()
         }

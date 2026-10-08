@@ -157,7 +157,7 @@ object Store {
         val servers = (0 until arr.length()).mapNotNull { runCatching { Server.fromJson(arr.getJSONObject(it)) }.getOrNull() }
         val so = o.optJSONObject("states") ?: JSONObject()
         val states = so.keys().asSequence().associateWith { ServerState.fromJson(so.getJSONObject(it)) }
-        val settings = o.optJSONObject("settings")?.let { Settings.fromJson(it) } ?: Settings()
+        val settings = o.optJSONObject("settings")?.let { Settings.migrate(Settings.fromJson(it)) } ?: Settings()
         val ms = o.optJSONObject("maskStats") ?: JSONObject()
         val maskStats = ms.keys().asSequence().associateWith { net ->
             val m = ms.getJSONObject(net); m.keys().asSequence().associateWith { id -> m.getJSONArray(id).let { MaskStat(it.optInt(0), it.optInt(1)) } }

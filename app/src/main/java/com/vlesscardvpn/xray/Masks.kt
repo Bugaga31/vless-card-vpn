@@ -44,8 +44,12 @@ data class Mask(
     val mss: Int = 0,
     /** «Один поток»: multiplexing — dozens of app connections become one TLS stream (no burst of handshakes to a foreign IP). */
     val mux: Boolean = false,
+    /** «Быстрый старт»: TCP Fast Open — the first data rides in the SYN, the DPI that waits for a handshake sees an odd start (falls back by itself). */
+    val tfo: Boolean = false,
+    /** «Путь через IPv6»: server name resolved to IPv6 first (many TSPU filter IPv6 weaker), IPv4 as a race fallback. */
+    val ipv6: Boolean = false,
 ) {
-    val signature: Boolean get() = sni.isNotEmpty() || alpn.isNotEmpty() || mss > 0 || mux
+    val signature: Boolean get() = sni.isNotEmpty() || alpn.isNotEmpty() || mss > 0 || mux || tfo || ipv6
     val viaByeDpi: Boolean get() = dpi.isNotEmpty()
     val hasNoise: Boolean get() = noise.isNotEmpty() || noiseJson.isNotEmpty()
 }
@@ -82,6 +86,8 @@ object Masks {
         }
         if (m.mss > 0 && (!s.isTcpBased || m.viaByeDpi)) return false
         if (m.mux && !XrayConfigBuilder.muxable(s)) return false
+        if (m.tfo && (!s.isTcpBased || m.viaByeDpi)) return false
+        if (m.ipv6 && (m.viaByeDpi || s.address.all { it.isDigit() || it == '.' } || ':' in s.address)) return false
         return true
     }
 
@@ -158,7 +164,7 @@ object Masks {
 
     /**
      * 7 fingerprints × 22 fragment modes × (direct | via the current DPI strategy) = 308, 4 UDP + 8 WireGuard noise masks, 18 port-hopping,
-     * plus 7 fingerprints × 21 fixed strategies (5 own VLESS Card, 7 zapret, 9 ByeDPI) = 147. Total 485 + 18 signature (SNI, MSS, ALPN, one stream) = 503 (+ «Мои маскировки» and auto masks of MaskLab).
+     * plus 7 fingerprints × 21 fixed strategies (5 own VLESS Card, 7 zapret, 9 ByeDPI) = 147. Total 485 + 33 signature (SNI, MSS, ALPN, one stream, TFO, IPv6) = 518 (+ «Мои маскировки» and auto masks of MaskLab).
      */
     val ALL: List<Mask> = buildList {
         for (via in listOf(false, true)) for (f in FRAGMENTS) for (fp in FINGERPRINTS) {
@@ -191,6 +197,20 @@ object Masks {
         add(Mask("vc.ghost.sni", "Фирменная «Невидимка+»: белый SNI vk.com, MSS 120, один поток", "chrome", sni = "vk.com", mss = 120, mux = true))
         add(Mask("vc.ghost.l1", "Фирменная «Невидимка»: лесенка + MSS 300 + ALPN браузера", "chrome", "tlshello", "", "", "0",
             lengths = "1-1,2-4,5-10,20-60", delays = "1-2,2-4,3-6,5-10", alpn = "h2,http/1.1", mss = 300))
+        // 1.0.71: more signature masks — fast open, IPv6 path, combinations
+        add(Mask("vc.tfo", "Фирменная: быстрый старт (TCP Fast Open)", "chrome", tfo = true))
+        add(Mask("vc.tfo.mss300", "Фирменная: быстрый старт + узкий канал", "firefox", mss = 300, tfo = true))
+        add(Mask("vc.v6", "Фирменная: путь через IPv6", "chrome", ipv6 = true))
+        add(Mask("vc.v6.l1", "Фирменная: IPv6 + лесенка", "chrome", "tlshello", "", "", "0", lengths = "1-1,2-4,5-10,20-60", delays = "1-2,2-4,3-6,5-10", ipv6 = true))
+        add(Mask("vc.v6.mss300", "Фирменная: IPv6 + узкий канал", "safari", mss = 300, ipv6 = true))
+        for (d in WHITE_SNI) add(Mask("vc.sni.$d.mss120", "Фирменная: белый SNI $d + MSS 120", "chrome", sni = d, mss = 120))
+        add(Mask("vc.alpn.br.h1", "Фирменная: ALPN браузера + дробление Hello 1-3", "chrome", "tlshello", "1-3", "1-3", "0", alpn = "h2,http/1.1"))
+        add(Mask("vc.alpn.br.p1", "Фирменная: iPhone, ALPN браузера + 1-й пакет 1-5", "ios", "1-1", "1-5", "1-3", "0", alpn = "h2,http/1.1"))
+        add(Mask("vc.mux.l5", "Фирменная: один поток + рваный ритм", "safari", "tlshello", "", "", "0",
+            lengths = "1-2,30-60,1-2,30-60,1-2,100-200", delays = "5-10,1-2,5-10,1-2,5-10,1-2", mux = true))
+        add(Mask("vc.mux.b", "Фирменная: один поток через обход DPI", "chrome", dpi = CURRENT_DPI, mux = true))
+        add(Mask("vc.ghost.v6", "Фирменная «Невидимка-6»: IPv6, Safari, ALPN браузера, MSS 300, один поток", "safari", alpn = "h2,http/1.1", mss = 300, mux = true, ipv6 = true))
+        add(Mask("vc.ghost.tfo", "Фирменная «Невидимка-турбо»: быстрый старт, MSS 120, один поток", "chrome", mss = 120, mux = true, tfo = true))
         // Xray-engine strategies duplicate the outbound's own fragment masks, so they are not offered in front of servers.
         for (st in com.vlesscardvpn.core.DpiStrategies.BUILT_IN.filter { it.engine != com.vlesscardvpn.core.DpiEngine.XRAY }) for (fp in FINGERPRINTS)
             add(Mask("$fp.d:${st.id}", FP_TITLES.getValue(fp) + " + " + st.label, fp, dpi = st.id))
@@ -219,7 +239,7 @@ object Masks {
     fun strategies(masks: Collection<Mask?>): Set<String> = masks.mapNotNull { it?.dpi }.filter { it.isNotEmpty() }.toSet()
 
     /** Families the user can switch on/off for the mask search (Settings.maskFamilies). */
-    val FAMILIES = listOf("my" to "Мои маскировки", "brand" to "Фирменные VLESS Card (SNI, MSS, ALPN, один поток)", "plain" to "Без дробления", "frag" to "Дробление", "ladder" to "Лесенки (свои)", "viadpi" to "Через обход DPI",
+    val FAMILIES = listOf("my" to "Мои маскировки", "brand" to "Фирменные VLESS Card (SNI, MSS, ALPN, один поток, IPv6, быстрый старт)", "plain" to "Без дробления", "frag" to "Дробление", "ladder" to "Лесенки (свои)", "viadpi" to "Через обход DPI",
         "own" to "Свои VLESS Card", "zapret" to "zapret", "byedpi" to "ByeDPI", "noise" to "UDP-шум", "auto" to "Авто-маски (эволюция)")
 
     fun family(m: Mask): String = when {
@@ -243,7 +263,7 @@ object Masks {
         }
 
     fun searchOrder(byeDpiAvailable: Boolean, server: com.vlesscardvpn.model.Server? = null): List<Mask> {
-        val first = listOf("chrome.n", "vc.sni.vk.com", "vc.mss300", "vc.ghost", "vc.sni.ya.ru.l2", "vc.mss120", "vc.alpn.br", "vc.mux", "vc.ghost.sni", "vc.mss120.l6", "chrome.z5", "chrome.z10", "chrome.z1", "chrome.z5.hw", "chrome.z6.hw", "chrome.z9", "chrome.z1.hl", "chrome.z11.hw", "chrome.z12", "chrome.z7", "chrome.hw", "chrome.z2", "chrome.z3", "chrome.z4", "chrome.h4", "chrome.l1", "firefox.l2", "chrome.l4", "safari.l5", "firefox.l6", "chrome.p6", "firefox.l7", "chrome.h7", "safari.p7", "chrome.p2", "firefox.h2", "safari.p3", "edge.h5", "chrome.h1", "ios.p1", "safari.l3", "chrome.l2.b",
+        val first = listOf("chrome.n", "vc.sni.vk.com", "vc.mss300", "vc.ghost", "vc.sni.ya.ru.l2", "vc.mss120", "vc.alpn.br", "vc.mux", "vc.ghost.sni", "vc.mss120.l6", "vc.ghost.v6", "vc.sni.vk.com.mss120", "vc.tfo", "vc.v6", "vc.ghost.tfo", "vc.alpn.br.h1", "vc.mux.l5", "chrome.z5", "chrome.z10", "chrome.z1", "chrome.z5.hw", "chrome.z6.hw", "chrome.z9", "chrome.z1.hl", "chrome.z11.hw", "chrome.z12", "chrome.z7", "chrome.hw", "chrome.z2", "chrome.z3", "chrome.z4", "chrome.h4", "chrome.l1", "firefox.l2", "chrome.l4", "safari.l5", "firefox.l6", "chrome.p6", "firefox.l7", "chrome.h7", "safari.p7", "chrome.p2", "firefox.h2", "safari.p3", "edge.h5", "chrome.h1", "ios.p1", "safari.l3", "chrome.l2.b",
             "android.h3", "firefox.h4", "chrome.n.b", "chrome.h4.b", "firefox.p4", "chrome.p5", "chrome.h6", "qq.h2",
             "safari.n", "firefox.n", "edge.p2", "ios.h4", "android.p3", "safari.h1", "chrome.p1.b", "firefox.h3.b",
             // own VLESS Card masking and zapret in front of the server connection
