@@ -165,6 +165,67 @@ object Actions {
         }
     }
 
+    // ---------- «Сайт не открывается?» ----------
+    data class SiteCheck(val running: Boolean = false, val host: String = "", val verdict: String = "", val details: String = "", val good: Boolean = false, val suggest: String = "")
+    val siteCheck = MutableStateFlow(SiteCheck())
+    /** Opens [input] three ways at once: directly (the app itself is outside the VPN), through the VPN, through the DPI bypass. */
+    fun checkSite(input: String) {
+        if (siteCheck.value.running) return
+        val host = Settings.host(input) ?: run { siteCheck.value = SiteCheck(verdict = "Введите адрес сайта, например rutracker.org"); return }
+        siteCheck.value = SiteCheck(running = true, host = host, verdict = "Проверяю $host…")
+        val vpn = Tunnel.socks?.port; val dpi = Tunnel.byeDpiPort
+        scope.launch(Bg.io) {
+            val url = "https://$host/"
+            val d = async { Tester.site(url, null) }
+            val v = vpn?.let { p -> async { Tester.site(url, p) } }
+            val b = dpi?.takeIf { it != vpn }?.let { p -> async { Tester.site(url, p) } }
+            siteCheck.value = siteVerdict(host, d.await(), v?.await(), b?.await())
+        }
+    }
+
+    private fun word(p: Tester.SiteProbe?) = when (p?.result) {
+        null -> "—"; "ok" -> "открывается (${p.ms} мс)"; "timeout" -> "зависает"; "reset" -> "соединение сбрасывают"
+        "dns" -> "адрес не находится"; "tls" -> "подмена/ошибка шифрования"; else -> "не открывается"
+    }
+
+    fun siteVerdict(host: String, direct: Tester.SiteProbe, vpn: Tester.SiteProbe?, dpi: Tester.SiteProbe?): SiteCheck {
+        val details = "Напрямую: ${word(direct)} · через VPN: ${if (vpn == null) "VPN выключен" else word(vpn)}" + (dpi?.let { " · через обход DPI: ${word(it)}" } ?: "")
+        val s = Store.state.value.settings
+        return when {
+            vpn == null && direct.ok -> SiteCheck(host = host, verdict = "Сайт открывается и без VPN", details = details, good = true)
+            vpn == null -> SiteCheck(host = host, verdict = "Без VPN сайт не открывается — подключитесь и проверьте ещё раз", details = details)
+            vpn.ok && direct.ok -> SiteCheck(host = host, verdict = "Сайт работает. Если в приложении не грузится — проблема в нём, не в сети", details = details, good = true,
+                suggest = if (host in s.alwaysDirect || host in s.alwaysVpn) "" else "direct")
+            vpn.ok -> SiteCheck(host = host, verdict = "Провайдер блокирует сайт, через VPN он работает", details = details, good = true,
+                suggest = if (host in s.alwaysVpn) "" else "vpn")
+            direct.ok -> SiteCheck(host = host, verdict = "Сайт не пускает через VPN (блокирует иностранные IP) — откройте его напрямую", details = details,
+                suggest = if (host in s.alwaysDirect) "" else "direct")
+            dpi?.ok == true -> SiteCheck(host = host, verdict = "Работает через обход DPI, но не через сервер — смените сервер или режим «Гибрид»", details = details)
+            direct.result == "dns" && vpn.result == "dns" -> SiteCheck(host = host, verdict = "Такого сайта нет или он выключен (адрес не находится нигде)", details = details)
+            else -> SiteCheck(host = host, verdict = "Сайт не открывается ни напрямую, ни через VPN — скорее всего он сам лежит", details = details)
+        }
+    }
+
+    /** «Всегда через VPN» / «Всегда напрямую» (or [where] = "" to forget). Returns true when the tunnel should reconnect. */
+    fun routeSite(host: String, where: String) {
+        Store.update { st -> val s = st.settings
+            st.copy(settings = s.copy(alwaysVpn = (s.alwaysVpn - host).let { if (where == "vpn") it + host else it },
+                alwaysDirect = (s.alwaysDirect - host).let { if (where == "direct") it + host else it }))
+        }
+        siteCheck.value = siteCheck.value.copy(suggest = "")
+    }
+
+    // ---------- backup (Backup.kt) ----------
+    fun backup(): String = Backup.pack(Store.state.value)
+    /** Restores a vcbackup:// link. Null = no backup in [text]. */
+    fun importBackup(text: String): String? {
+        val b = Backup.find(text) ?: return null
+        val st = Backup.unpack(b) ?: return "Копия повреждена (скопирована не целиком?)"
+        var added = 0
+        Store.update { cur -> val (m, n) = Backup.merge(cur, st); added = n; m }
+        return "Восстановлено: настройки, серверов $added"
+    }
+
     fun importText(text: String): Int {
         val list = LinkParser.parseMany(text, "manual")
         return Store.addServers(list)

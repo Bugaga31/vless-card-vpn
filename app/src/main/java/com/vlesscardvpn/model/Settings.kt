@@ -90,6 +90,9 @@ data class Settings(
     val coverTraffic: Boolean = true,
     /** «Ускорение телефона»: big TUN MTU (fewer packets = less CPU), stale DNS answers at once, deep sleep with the screen off. */
     val turbo: Boolean = true,
+    /** «Сайт не открывается?»: these sites always through the VPN / always directly (domains). */
+    val alwaysVpn: List<String> = emptyList(),
+    val alwaysDirect: List<String> = emptyList(),
     /** Connect by itself after the phone restarts. */
     val autoStart: Boolean = false,
     /** Settings revision: older ones get the full masking switched on once (Store.migrate). */
@@ -112,8 +115,12 @@ data class Settings(
         .put("maskEvolution", maskEvolution).put("autoMasks", JSONArray(autoMasks))
         .put("dpiRanking", JSONObject().apply { dpiRanking.forEach { (k, v) -> put(k, JSONArray(v)) } })
         .put("ruAppsDirect", ruAppsDirect).put("randomTun", randomTun).put("coverTraffic", coverTraffic).put("rev", rev).put("turbo", turbo).put("autoStart", autoStart)
+        .put("alwaysVpn", JSONArray(alwaysVpn)).put("alwaysDirect", JSONArray(alwaysDirect))
 
     companion object {
+        /** "https://www.Site.com/path" → "site.com"; null when it is not a domain. */
+        fun host(input: String): String? = input.trim().lowercase().substringAfter("://").substringBefore('/').substringBefore('?')
+            .substringBefore(':').removePrefix("www.").trim('.').takeIf { Regex("^[a-z0-9а-яё-]+(\\.[a-z0-9а-яё-]+)+$").matches(it) }
         const val REV = 72
         /**
          * Once per update, step by step (a later choice of the user is kept): 71 — all masking on (hidden proxy, QUIC off,
@@ -163,6 +170,7 @@ data class Settings(
                 maskEvolution = o.optBoolean("maskEvolution", true), autoMasks = list("autoMasks", emptyList()),
                 dpiRanking = o.optJSONObject("dpiRanking")?.let { m -> m.keys().asSequence().associateWith { k -> m.optJSONArray(k)?.let { a -> (0 until a.length()).map { a.getString(it) } }.orEmpty() } } ?: emptyMap(),
                 ruAppsDirect = o.optBoolean("ruAppsDirect", true), randomTun = o.optBoolean("randomTun", true), coverTraffic = o.optBoolean("coverTraffic", true), rev = o.optInt("rev", 0), turbo = o.optBoolean("turbo", true), autoStart = o.optBoolean("autoStart", false),
+                alwaysVpn = list("alwaysVpn", emptyList()), alwaysDirect = list("alwaysDirect", emptyList()),
             )
         }
     }
