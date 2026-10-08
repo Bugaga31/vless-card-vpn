@@ -132,6 +132,10 @@ fun SettingsScreen() {
         Toggle("Менять маскировку при каждом подключении", "Случайная из рабочих, найденных «Подобрать маскировку», — у трафика нет постоянного отпечатка", s.rotateMasks) { v -> set { it.copy(rotateMasks = v) } }
         Toggle("Блокировать рекламу и трекеры", "Страницы грузятся быстрее, меньше трафика и батареи. Если какой-то сайт сломается — выключите", s.blockAds) { v -> set { it.copy(blockAds = v) } }
         Toggle("Ускорение телефона", "Крупные пакеты внутри VPN (в 5-6 раз меньше работы процессору), мгновенные ответы DNS из кэша, а с выключенным экраном и в режиме экономии — никаких фоновых проверок. VPN не сажает батарею", s.turbo) { v -> set { it.copy(turbo = v) } }
+        var lim by remember(s.monthLimitGb) { mutableStateOf(if (s.monthLimitGb > 0) s.monthLimitGb.toString() else "") }
+        OutlinedTextField(lim, { v -> lim = v.filter { it.isDigit() }.take(5); set { it.copy(monthLimitGb = lim.toIntOrNull() ?: 0) } }, singleLine = true,
+            label = { Text("Лимит трафика в месяц, ГБ (пусто — без лимита)") }, modifier = Modifier.fillMaxWidth(),
+            supportingText = { Text(com.vlesscardvpn.core.Traffic.line(s).first.ifEmpty { "На главном экране покажу, сколько ушло через VPN за месяц, и предупрежу у лимита" }) })
         Toggle("Подключаться после перезагрузки", "Телефон включился — VPN включится сам (если разрешение уже дано)", s.autoStart) { v -> set { it.copy(autoStart = v) } }
         Toggle("Фоновое ускорение", "Само готовит серверы и маски при запуске, а при подключении раз в 20 минут проверяет и переходит на более быстрые. На мобильном — экономно", s.autoOptimize) { v -> set { it.copy(autoOptimize = v) } }
         Toggle("Самовосстановление", "Если проверка после подключения не прошла: другая рабочая маскировка → новый подбор → (Авто) обход DPI без сервера", s.autoHeal) { v -> set { it.copy(autoHeal = v) } }
@@ -210,6 +214,10 @@ fun SettingsScreen() {
             }
         }
         val catalog = remember { com.vlesscardvpn.model.Subs.CATALOG.map { it.url }.toSet() }
+        s.subInfo.filter { it.key in s.subscriptions }.forEach { (u, i) ->
+            val line = Actions.subLine(i)
+            if (line.isNotEmpty()) Hint("«${i.title.ifEmpty { com.vlesscardvpn.model.Subs.title(u) }}»: $line")
+        }
         var subs by remember(s.subscriptions) { mutableStateOf(s.subscriptions.filter { it !in catalog }.joinToString("\n")) }
         OutlinedTextField(subs, { v -> subs = v; set { it.copy(subscriptions = it.subscriptions.filter { u -> u in catalog } + v.lines().map { l -> l.trim() }.filter { l -> l.startsWith("http") }) } },
             label = { Text("Свои ссылки подписок, по одной в строке") }, modifier = Modifier.fillMaxWidth().heightIn(min = 90.dp))
