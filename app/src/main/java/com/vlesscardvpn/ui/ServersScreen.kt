@@ -91,8 +91,9 @@ fun ServersScreen() {
     }
 
     if (addOpen) AddDialog(onDismiss = { addOpen = false }, onAdd = { text ->
-        val n = Actions.importText(text); val nm = Actions.importMasks(text); addOpen = false
-        Toast.makeText(ctx, when {
+        val n = Actions.importText(text); val nm = Actions.importMasks(text); val np = Actions.importNetProfile(text); addOpen = false
+        if (np != null) Toast.makeText(ctx, np, Toast.LENGTH_LONG).show()
+        else Toast.makeText(ctx, when {
             n == 0 && nm == 0 -> "Ссылки не найдены или уже есть"
             nm == 0 -> "Добавлено: $n"
             n == 0 -> "Добавлено маскировок: $nm (Настройки → Мои маскировки)"
@@ -138,7 +139,7 @@ private fun AddDialog(onDismiss: () -> Unit, onAdd: (String) -> Unit) {
         text = {
             Column {
                 OutlinedTextField(value = text, onValueChange = { text = it }, modifier = Modifier.fillMaxWidth().heightIn(min = 120.dp, max = 260.dp),
-                    placeholder = { Text("Ссылки vless:// vmess:// trojan:// ss:// hysteria2:// wireguard:// socks://, WireGuard .conf (WARP), Xray JSON, текст подписки или маскировки vcmask://") })
+                    placeholder = { Text("Ссылки vless:// vmess:// trojan:// ss:// hysteria2:// wireguard:// socks://, WireGuard .conf (WARP), Xray JSON, текст подписки, маскировки vcmask:// или настройка сети vcnet://") })
                 TextButton(onClick = {
                     val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                     text = cm.primaryClip?.getItemAt(0)?.coerceToText(ctx)?.toString().orEmpty()

@@ -123,15 +123,15 @@ object DpiStrategies {
     /** Strategy for this network: fixed choice, or (auto) the one found for this network, then any found, then the custom line. */
     fun resolve(s: Settings, network: String): DpiStrategy {
         byId(s.dpiStrategy, s)?.let { return it }
-        return byId(s.dpiRemembered[network], s) ?: byId(s.dpiRemembered[Settings.ANY_NETWORK], s)
+        return byId(s.dpiRemembered[network], s) ?: byId(s.dpiRemembered[Net.family(network)], s) ?: byId(s.dpiRemembered[Settings.ANY_NETWORK], s)
             ?: custom(s.byeDpiArgs, s.byeDpiSni) ?: BUILT_IN.first()
     }
 
     /** Search order: custom line, the remembered ones of this network (best first), then all built-ins (zapret only if the binary exists). */
     fun plan(s: Settings, network: String, tpwsAvailable: Boolean): List<DpiStrategy> = buildList {
         custom(s.byeDpiArgs, s.byeDpiSni)?.let { add(it) }
-        byId(s.dpiRemembered[network], s)?.let { add(it) }
-        s.dpiRanking[network].orEmpty().forEach { id -> byId(id, s)?.let { add(it) } }
+        (byId(s.dpiRemembered[network], s) ?: byId(s.dpiRemembered[Net.family(network)], s))?.let { add(it) }
+        (s.dpiRanking[network] ?: s.dpiRanking[Net.family(network)]).orEmpty().forEach { id -> byId(id, s)?.let { add(it) } }
         addAll(BUILT_IN)
     }.filter { tpwsAvailable || it.engine != DpiEngine.TPWS }.distinctBy { it.id }
 

@@ -95,7 +95,7 @@ data class ServerState(
     val netMasks: Map<String, String> = emptyMap(),
     val tgOk: Boolean? = null,
 ) {
-    fun maskFor(network: String): String = netMasks[network] ?: maskId
+    fun maskFor(network: String): String = netMasks[network] ?: netMasks[network.substringBefore(" · ")] ?: maskId
     val works: Boolean get() = realMs > 0 && bigOk != false
     fun toJson(): JSONObject = JSONObject().apply {
         if (selected) put("sel", true); put("tcp", tcpMs); put("real", realMs); bigOk?.let { put("big", it) }; ytOk?.let { put("yt", it) }

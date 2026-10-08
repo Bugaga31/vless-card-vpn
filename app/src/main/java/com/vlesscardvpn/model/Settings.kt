@@ -81,6 +81,13 @@ data class Settings(
     val autoMasks: List<String> = emptyList(),
     /** DPI strategies of each network, best first (top 5 of the last search incl. evolved "EVO#" ones): fast fallback. */
     val dpiRanking: Map<String, List<String>> = emptyMap(),
+    // ---- masking beyond packets (core/Disguise)
+    /** Russian apps (banks, Госуслуги, маркетплейсы…) go around the VPN (VPN mode, unless «Только выбранные»). */
+    val ruAppsDirect: Boolean = true,
+    /** Random TUN address on every connect and a neutral VPN session name. */
+    val randomTun: Boolean = true,
+    /** Now and then open an ordinary Russian site directly while connected (looks like a usual user). */
+    val coverTraffic: Boolean = true,
 ) {
     val httpPort: Int get() = if (socksPort < 65535) socksPort + 1 else socksPort - 1
     fun toJson(): JSONObject = JSONObject().put("mode", mode.name).put("balance", balance.name).put("socksPort", socksPort)
@@ -98,6 +105,7 @@ data class Settings(
         .put("warpKeyOff", JSONArray(warpKeyOff)).put("warpKeyStatus", JSONObject(warpKeyStatus as Map<*, *>)).put("myMasks", JSONArray(myMasks))
         .put("maskEvolution", maskEvolution).put("autoMasks", JSONArray(autoMasks))
         .put("dpiRanking", JSONObject().apply { dpiRanking.forEach { (k, v) -> put(k, JSONArray(v)) } })
+        .put("ruAppsDirect", ruAppsDirect).put("randomTun", randomTun).put("coverTraffic", coverTraffic)
 
     companion object {
         const val DPI_AUTO = "auto"
@@ -135,6 +143,7 @@ data class Settings(
                 myMasks = list("myMasks", emptyList()),
                 maskEvolution = o.optBoolean("maskEvolution", true), autoMasks = list("autoMasks", emptyList()),
                 dpiRanking = o.optJSONObject("dpiRanking")?.let { m -> m.keys().asSequence().associateWith { k -> m.optJSONArray(k)?.let { a -> (0 until a.length()).map { a.getString(it) } }.orEmpty() } } ?: emptyMap(),
+                ruAppsDirect = o.optBoolean("ruAppsDirect", true), randomTun = o.optBoolean("randomTun", true), coverTraffic = o.optBoolean("coverTraffic", true),
             )
         }
     }

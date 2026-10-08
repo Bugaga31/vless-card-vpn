@@ -105,6 +105,35 @@ object Tester {
         }
     }.getOrNull()
 
+    data class SpeedResult(val mbps: Double, val pingMs: Int, val bytes: Long)
+    val SPEED_URLS = listOf("https://speed.cloudflare.com/__down?bytes=25000000", "https://cachefly.cachefly.net/10mb.test")
+
+    /** Download speed through the running tunnel: up to [seconds] s of one big file (first mirror that answers), plus ping. */
+    fun speed(port: Int, seconds: Int = 8): SpeedResult {
+        val client = base.newBuilder().proxy(Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", port)))
+            .callTimeout(seconds + 10L, TimeUnit.SECONDS).build()
+        val ping = runCatching {
+            val t0 = System.nanoTime()
+            client.newCall(Request.Builder().url("https://www.gstatic.com/generate_204").header("User-Agent", UA).build()).execute().use { }
+            ((System.nanoTime() - t0) / 1_000_000).toInt()
+        }.getOrDefault(0)
+        for (url in SPEED_URLS) {
+            val r = runCatching {
+                client.newCall(Request.Builder().url(url).header("User-Agent", UA).build()).execute().use { resp ->
+                    check(resp.isSuccessful)
+                    val src = resp.body!!.byteStream(); val buf = ByteArray(65536); var total = 0L
+                    val t0 = System.nanoTime(); val end = t0 + seconds * 1_000_000_000L
+                    while (System.nanoTime() < end) { val n = src.read(buf); if (n < 0) break; total += n }
+                    val sec = (System.nanoTime() - t0) / 1e9
+                    SpeedResult(if (sec > 0) total * 8 / sec / 1e6 else 0.0, ping, total)
+                }
+            }.getOrNull()
+            if (r != null && r.bytes > 100_000) { client.connectionPool.evictAll(); return r }
+        }
+        client.connectionPool.evictAll()
+        return SpeedResult(0.0, ping, 0)
+    }
+
     private fun download(client: OkHttpClient, url: String): Int =
         client.newCall(Request.Builder().url(url).header("User-Agent", UA).build()).execute().use { r ->
             check(r.isSuccessful); val src = r.body!!.byteStream(); val buf = ByteArray(16384); var total = 0
