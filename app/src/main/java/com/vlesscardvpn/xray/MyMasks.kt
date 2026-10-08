@@ -13,6 +13,7 @@ object MyMasks {
     const val SCHEME = "vcmask://"
     private val RANGE = Regex("^\\d{1,4}(-\\d{1,4})?$")
     private val LINK = Regex("vcmask://[A-Za-z0-9_\\-=]+(#[^\\s]*)?")
+    private val SNI = Regex("^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$")
     private val NOISE_KEYS = setOf("rand", "type", "packet", "delay")
 
     fun toJson(m: Mask): JSONObject = JSONObject().put("t", m.title).put("fp", m.fingerprint)
@@ -27,6 +28,10 @@ object MyMasks {
             if (m.noiseJson.isNotEmpty()) put("nj", m.noiseJson)
             if (m.hop.isNotEmpty()) put("h", m.hop)
             if (m.dpi == Masks.CURRENT_DPI) put("dpi", m.dpi)
+            if (m.sni.isNotEmpty()) put("sni", m.sni)
+            if (m.alpn.isNotEmpty()) put("alpn", m.alpn)
+            if (m.mss > 0) put("mss", m.mss)
+            if (m.mux) put("mux", true)
         }
 
     /** Parses and validates; throws IllegalArgumentException with a user-readable message. */
@@ -66,9 +71,20 @@ object MyMasks {
         require(!(packets.isNotEmpty() && (noise.isNotEmpty() || nj.isNotEmpty() || hop.isNotEmpty()))) {
             "Дробление (TCP) и шум/порты (UDP) — для разных серверов: сделайте две маскировки"
         }
-        val norm = Mask("", title, fp, packets, if (lengths.isEmpty()) length else "", if (lengths.isEmpty()) delay else "",
+        val sni = o.optString("sni").trim().lowercase()
+        require(sni.isEmpty() || SNI.matches(sni)) { "SNI: домен вида vk.com" }
+        val alpn = o.optString("alpn").replace(" ", "")
+        require(alpn.isEmpty() || alpn in Masks.ALPNS) { "ALPN: h2,http/1.1 или http/1.1" }
+        val mss = o.optInt("mss", 0)
+        require(mss == 0 || mss in 88..1460) { "MSS: от 88 до 1460" }
+        val mux = o.optBoolean("mux", false)
+        require(!((mss > 0 || mux || sni.isNotEmpty()) && (noise.isNotEmpty() || nj.isNotEmpty() || hop.isNotEmpty()))) {
+            "SNI, MSS и «один поток» — для TCP-серверов, шум — для UDP: сделайте две маскировки"
+        }
+        val norm0 = Mask("", title, fp, packets, if (lengths.isEmpty()) length else "", if (lengths.isEmpty()) delay else "",
             maxSplit.ifEmpty { "0" }, dpi, lengths.replace(" ", ""), delays.replace(" ", ""), noise, hop,
             if (nj.isEmpty()) "" else JSONArray(nj).toString(), custom = true)
+        val norm = norm0.copy(sni = sni, alpn = alpn, mss = mss, mux = mux)
         return norm.copy(id = "my:" + idOf(norm))
     }
 
