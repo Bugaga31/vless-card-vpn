@@ -135,6 +135,8 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
             OutlinedButton(onClick = { Actions.findDpi() }, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text("Подобрать обход DPI для этой сети") }
         }
         Spacer(Modifier.height(12.dp))
+        NetCard(on = status.state == Tunnel.State.CONNECTED, cfgKey = cfg.hashCode() + status.check.hashCode())
+        Spacer(Modifier.height(12.dp))
         val report by Actions.netReport.collectAsState()
         Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
             Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -156,6 +158,34 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
             }
         }
         Spacer(Modifier.height(12.dp)); LiveProgress(stop = true)
+    }
+}
+
+/** «Эта сеть»: what was learned here, share it as a vcnet:// link, speed test through the VPN. */
+@Composable
+private fun NetCard(on: Boolean, cfgKey: Int) {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val working by Actions.running.collectAsState()
+    val info = remember(cfgKey, working) { Actions.netInfo() }
+    val speed by Actions.speed.collectAsState()
+    Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text("Эта сеть: ${info.net}", fontWeight = FontWeight.SemiBold)
+            Text(if (info.dpi.isEmpty()) "Обход DPI ещё не подобран" else "Обход DPI: ${info.dpi}" + if (info.dpiCount > 1) " (запасных: ${info.dpiCount - 1})" else "",
+                fontSize = 12.sp, color = Color.Gray)
+            Text(if (info.masks == 0) "Рабочие маскировки здесь ещё не найдены" else "Маскировок, прошедших здесь: ${info.masks}", fontSize = 12.sp, color = Color.Gray)
+            if (speed.text.isNotEmpty()) Text(speed.text, fontSize = 13.sp, color = when { speed.running -> Color.Gray; speed.mbps >= 2 -> Good; else -> Warn })
+            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = { Actions.speedTest() }, enabled = on && !speed.running) { Text("Тест скорости") }
+                OutlinedButton(onClick = {
+                    val link = Actions.shareNetProfile()
+                    if (link == null) android.widget.Toast.makeText(ctx, "Пока нечего передать: сначала подключитесь или подберите обход", android.widget.Toast.LENGTH_SHORT).show()
+                    else ctx.startActivity(android.content.Intent.createChooser(android.content.Intent(android.content.Intent.ACTION_SEND).setType("text/plain")
+                        .putExtra(android.content.Intent.EXTRA_TEXT, "Настройка VLESS Card для сети «${info.net.substringBefore(" · ")}» (вставьте в приложении: Серверы → Добавить):\n$link"), "Поделиться настройкой сети"))
+                }) { Text("Поделиться настройкой") }
+            }
+            Text("Друг на том же провайдере вставит ссылку и сразу получит рабочий обход и маскировки — без серверов и ключей.", fontSize = 11.sp, color = Color.Gray)
+        }
     }
 }
 

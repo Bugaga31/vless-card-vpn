@@ -127,6 +127,44 @@ object Actions {
         return added
     }
 
+    /** vcnet:// links («Настройка сети» from a friend) → applied to the current network. Null = no such link in [text]. */
+    fun importNetProfile(text: String): String? {
+        val found = NetProfile.parseLinks(text).filter { !it.isEmpty }
+        if (found.isEmpty()) return null
+        val net = Net.key(app)
+        var dpi = 0; var masks = 0
+        found.forEach { p -> var got = NetProfile.Applied(0, 0); Store.update { st -> NetProfile.apply(st, p, net).let { (out, a) -> got = a; out } }; dpi += got.dpi; masks += got.masks }
+        Store.saveNow()
+        return "Настройка сети «${found.first().net}» применена к «$net»: обход DPI — $dpi, маскировок — $masks. Они пробуются первыми"
+    }
+
+    /** «Поделиться настройкой сети»: a vcnet:// link of the current network, null when nothing was learned yet. */
+    fun shareNetProfile(): String? = NetProfile.build(Store.state.value, Net.key(app)).takeIf { !it.isEmpty }?.let { NetProfile.encode(it) }
+
+    /** What the app knows about the current network (home screen card). */
+    data class NetInfo(val net: String = "", val dpi: String = "", val dpiCount: Int = 0, val masks: Int = 0)
+    fun netInfo(): NetInfo {
+        val st = Store.state.value; val s = st.settings; val net = Net.key(app); val fam = Net.family(net)
+        val known = s.dpiRemembered[net] ?: s.dpiRemembered[fam]
+        return NetInfo(net, if (known != null || s.dpiStrategy != Settings.DPI_AUTO) DpiStrategies.resolve(s, net).label else "",
+            (s.dpiRanking[net] ?: s.dpiRanking[fam]).orEmpty().size,
+            (st.maskStats[net] ?: st.maskStats[fam]).orEmpty().count { it.value.ok > 0 })
+    }
+
+    // ---------- speed test through the running VPN ----------
+    data class Speed(val running: Boolean = false, val text: String = "", val mbps: Double = 0.0)
+    val speed = MutableStateFlow(Speed())
+    fun speedTest() {
+        if (speed.value.running) return
+        val port = Tunnel.socks?.port ?: run { speed.value = Speed(text = "Сначала подключитесь"); return }
+        speed.value = Speed(running = true, text = "Измеряю скорость…")
+        scope.launch(Bg.io) {
+            val r = runCatching { Tester.speed(port) }.getOrNull()
+            speed.value = if (r == null || r.mbps <= 0) Speed(text = "Не удалось измерить: загрузка не идёт")
+                else Speed(text = "Скорость: " + "%.1f".format(r.mbps) + " Мбит/с · пинг ${r.pingMs} мс" + (if (r.mbps < 2) " — медленно, попробуйте «Обновить и проверить»" else ""), mbps = r.mbps)
+        }
+    }
+
     fun importText(text: String): Int {
         val list = LinkParser.parseMany(text, "manual")
         return Store.addServers(list)
@@ -222,7 +260,7 @@ object Actions {
         val tpwsOk = probe.available(DpiEngine.TPWS)
         val cfg = Store.state.value.settings
         val net0 = Net.key(app)
-        val stats = Store.state.value.maskStats[net0].orEmpty()
+        val stats = Store.state.value.maskStats.let { it[net0] ?: it[Net.family(net0)] }.orEmpty()
         // Learned order: masks that passed on this network (on any server) first, untested next, proven failures last.
         fun bucket(m: Mask): Int { val st = stats[m.id] ?: return 1; return if (st.ok > 0) 0 else if (st.fail >= 4) 2 else 1 }
         // «Эволюция масок»: kept auto masks + fresh mutants of what passed here; a few slots per server right after the proven masks.
@@ -510,7 +548,7 @@ object Actions {
         val working = st.servers.filter { st.state(it).works }
         val busy = job
         // Instant start: something worked before → connect now; the tunnel itself re-checks, heals and keeps searching.
-        if (working.isNotEmpty() || st.servers.isEmpty() && st.settings.dpiRemembered[Net.key(app)] != null) {
+        if (working.isNotEmpty() || st.servers.isEmpty() && Net.key(app).let { k -> st.settings.dpiRemembered[k] ?: st.settings.dpiRemembered[Net.family(k)] } != null) {
             if (busy?.isActive == true && progress.value.title == "Фоновая подготовка") cancel()
             if (st.selected.none { st.state(it).works }) selectBest(5, working)
             onReady(); return
@@ -578,7 +616,7 @@ object Actions {
         val working = fresh()
         if (working.isEmpty()) {
             val st = Store.state.value.settings
-            if (st.dpiRemembered[Net.key(app)] == null) { progress.value = progress.value.copy(title = "Авто: подбираю обход DPI"); notes += doFindDpi() }
+            if (Net.key(app).let { k -> st.dpiRemembered[k] ?: st.dpiRemembered[Net.family(k)] } == null) { progress.value = progress.value.copy(title = "Авто: подбираю обход DPI"); notes += doFindDpi() }
         }
         val n = selectBest(5, working)
         withContext(Dispatchers.Main) { onReady() }
@@ -702,7 +740,7 @@ object Actions {
     fun nextDpi(): Boolean {
         val st = Store.state.value.settings
         val net = Net.key(app)
-        val rank = st.dpiRanking[net].orEmpty()
+        val rank = (st.dpiRanking[net] ?: st.dpiRanking[Net.family(net)]).orEmpty()
         val cur = DpiStrategies.resolve(st, net).id
         if (st.dpiStrategy != Settings.DPI_AUTO || rank.size < 2) return false
         val next = rank[(rank.indexOf(cur) + 1) % rank.size].takeIf { it != cur } ?: return false

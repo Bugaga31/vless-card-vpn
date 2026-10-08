@@ -188,19 +188,25 @@ class TunnelService : VpnService() {
     }
 
     private fun startTun(settings: com.vlesscardvpn.model.Settings, socks: SocksAuth) {
-        val b = Builder().setSession("VLESS Card").setMtu(MTU)
-            .addAddress(IPV4, 30).addRoute("0.0.0.0", 0)
-            .addAddress(IPV6, 126).addRoute("::", 0)
+        val v4 = if (settings.randomTun) com.vlesscardvpn.core.Disguise.tunV4() else IPV4
+        val v6 = if (settings.randomTun) com.vlesscardvpn.core.Disguise.tunV6() else IPV6
+        val b = Builder().setSession(if (settings.randomTun || settings.quietNotification) "Sync" else "VLESS Card").setMtu(MTU)
+            .addAddress(v4, 30).addRoute("0.0.0.0", 0)
+            .addAddress(v6, 126).addRoute("::", 0)
             .addDnsServer("1.1.1.1")
             .setConfigureIntent(PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE))
         val apps = settings.apps.filter { it != packageName }
         if (!settings.perApp) b.addDisallowedApplication(packageName)
         else if (settings.onlyApps && apps.isNotEmpty()) apps.forEach { runCatching { b.addAllowedApplication(it) } }
-        else { b.addDisallowedApplication(packageName); apps.forEach { runCatching { b.addDisallowedApplication(it) } } }
+        else {
+            b.addDisallowedApplication(packageName); apps.forEach { runCatching { b.addDisallowedApplication(it) } }
+            // banks, Госуслуги, маркетплейсы: around the VPN — they see a normal Russian user (skipped if not installed)
+            if (settings.ruAppsDirect) (com.vlesscardvpn.core.Disguise.RU_APPS - apps.toSet()).forEach { runCatching { b.addDisallowedApplication(it) } }
+        }
         if (Build.VERSION.SDK_INT >= 29) b.setMetered(false)
         val fd = b.establish() ?: error("Система не дала создать VPN (нет разрешения)")
         tun = fd
-        TProxyService.start(filesDir, fd, socks.port, MTU, IPV4, IPV6, socks.user, socks.pass)
+        TProxyService.start(filesDir, fd, socks.port, MTU, v4, v6, socks.user, socks.pass)
     }
 
     private fun lanIp(): String? = runCatching {
@@ -226,7 +232,20 @@ class TunnelService : VpnService() {
                 else "Нет ответа через выбранный маршрут (${p.error}). " + if (st.mode == Mode.AUTO && st.autoHeal) "Ищу рабочий вариант сам…" else "Проверьте серверы или включите маскировку."
             Tunnel.status.value = cur.copy(check = text, checkOk = p.works)
             Log.i("E2E", "check ok=${p.works} ms=${p.realMs} big=${p.bigOk} yt=${p.ytOk} tg=${p.tgOk} err=${p.error} warp=$warp")
-            if (p.works) { healStep = 0; dpiHeals = 0; connectFails = 0; scheduleOptimize(); watchdog(); if (serverless()) rescueLater() } else heal()
+            if (p.works) { healStep = 0; dpiHeals = 0; connectFails = 0; scheduleOptimize(); watchdog(); coverTraffic(); if (serverless()) rescueLater() } else heal()
+        }
+    }
+
+    private var coverJob: Job? = null
+    /** «Фон обычного пользователя»: an ordinary Russian site directly every 40 s…3 min while connected (core/Disguise). */
+    private fun coverTraffic() {
+        if (coverJob?.isActive == true || !Store.state.value.settings.coverTraffic) return
+        coverJob = scope.launch {
+            while (true) {
+                delay(com.vlesscardvpn.core.Disguise.nextDelaySec() * 1000L)
+                if (Tunnel.status.value.state != Tunnel.State.CONNECTED || !Store.state.value.settings.coverTraffic) break
+                com.vlesscardvpn.core.Disguise.cover()
+            }
         }
     }
 
@@ -393,7 +412,7 @@ class TunnelService : VpnService() {
     }
 
     private fun teardown(error: String?) {
-        checkJob?.cancel(); watchJob?.cancel()
+        checkJob?.cancel(); watchJob?.cancel(); coverJob?.cancel()
         if (error != null) { healJob?.cancel(); rescueJob?.cancel() }
         if (error != null) optJob?.cancel()
         netCallback?.let { cb -> runCatching { getSystemService(ConnectivityManager::class.java)?.unregisterNetworkCallback(cb) } }

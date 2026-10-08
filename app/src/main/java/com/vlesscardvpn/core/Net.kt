@@ -12,7 +12,9 @@ object Net {
         val caps = cm.getNetworkCapabilities(cm.activeNetwork)
         when {
             caps == null -> "Нет сети"
-            caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> "Wi-Fi"
+            // Each Wi-Fi has its own DPI (home provider ≠ café ≠ work): told apart by the router address (no location permission needed).
+            caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> cm.getLinkProperties(cm.activeNetwork)?.routes
+                ?.firstOrNull { it.isDefaultRoute && it.gateway != null }?.gateway?.hostAddress?.let { "Wi-Fi · $it" } ?: "Wi-Fi"
             caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> {
                 val tm = context.getSystemService(TelephonyManager::class.java)
                 "Моб.: " + (tm?.networkOperatorName?.takeIf { it.isNotBlank() } ?: tm?.simOperatorName?.takeIf { it.isNotBlank() } ?: "оператор")
@@ -21,4 +23,7 @@ object Net {
             else -> "Другая сеть"
         }
     }.getOrDefault("Сеть")
+
+    /** "Wi-Fi · 192.168.1.1" → "Wi-Fi": what was learned before 1.0.69 (all Wi-Fi as one) is still used as a start. */
+    fun family(key: String): String = key.substringBefore(" · ")
 }

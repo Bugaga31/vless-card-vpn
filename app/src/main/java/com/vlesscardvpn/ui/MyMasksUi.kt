@@ -82,7 +82,8 @@ fun MyMasksSection() {
         OutlinedButton(onClick = {
             val text = (ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).primaryClip?.getItemAt(0)?.coerceToText(ctx)?.toString().orEmpty()
             val n = Actions.importMasks(text)
-            Toast.makeText(ctx, when {
+            val np = Actions.importNetProfile(text)
+            if (np != null) Toast.makeText(ctx, np, Toast.LENGTH_LONG).show() else Toast.makeText(ctx, when {
                 n > 0 -> "Добавлено маскировок: $n"
                 MyMasks.parseLinks(text).isNotEmpty() -> "Эти маскировки уже есть"
                 else -> "В буфере нет ссылки vcmask://"
