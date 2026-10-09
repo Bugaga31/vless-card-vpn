@@ -76,6 +76,8 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
             if (tick > 0 && (now.first > 0 || now.second > 0)) Text("Сейчас: ↓ ${Actions.mbps(now.first.toInt())} ↑ ${Actions.mbps(now.second.toInt())}",
                 fontSize = 13.sp, color = MaterialTheme.colorScheme.onBackground, textAlign = TextAlign.Center)
             SessionStats(min, rx, tx, cfg.turbo)
+            val aw by com.vlesscardvpn.core.AppWatch.status.collectAsState()
+            if (aw.isNotEmpty()) Text(aw, fontSize = 12.sp, color = Accent, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 4.dp))
             val (month, over) = com.vlesscardvpn.core.Traffic.line(cfg)
             if (month.isNotEmpty()) Text(month, fontSize = 12.sp, color = if (over) Warn else Color.Gray, textAlign = TextAlign.Center)
             Row(Modifier.horizontalScroll(rememberScrollState()).padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
