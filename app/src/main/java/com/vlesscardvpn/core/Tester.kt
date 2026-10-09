@@ -166,6 +166,15 @@ object Tester {
         }
     }.getOrNull()
 
+    /** Country (ISO) the internet sees through the tunnel — Cloudflare trace «loc=». null = no answer. */
+    fun exitCountry(port: Int): String? = runCatching {
+        val client = fast.newBuilder().proxy(Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", port))).build()
+        client.newCall(Request.Builder().url("https://www.cloudflare.com/cdn-cgi/trace").header("User-Agent", UA).build()).execute().use { r ->
+            traceLoc(r.body?.string().orEmpty())
+        }
+    }.getOrNull()
+    fun traceLoc(body: String): String? = body.lineSequence().firstOrNull { it.startsWith("loc=") }?.substringAfter('=')?.trim()?.uppercase()?.takeIf { it.length == 2 }
+
     data class SpeedResult(val mbps: Double, val pingMs: Int, val bytes: Long)
     val SPEED_URLS = listOf("https://speed.cloudflare.com/__down?bytes=25000000", "https://cachefly.cachefly.net/10mb.test")
 

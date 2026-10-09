@@ -14,10 +14,19 @@ object AppWatch {
 
     val AI_BAD = setOf("RU", "BY", "CN", "HK", "MO", "IR", "KP", "SY", "CU", "VE")
     private val MEDIA_BAD = setOf("RU", "BY", "CN", "IR", "KP", "SY", "CU")
+    /** AI services: always through the servers (never direct / DPI bypass), even with «Через VPN только…». */
+    val AI_DOMAINS = listOf("domain:gemini.google.com", "domain:gemini.google", "domain:bard.google.com", "domain:aistudio.google.com",
+        "domain:ai.google.dev", "domain:generativelanguage.googleapis.com", "domain:alkalimakersuite-pa.clients6.google.com",
+        "domain:proactivebackend-pa.googleapis.com", "domain:robinfrontend-pa.googleapis.com", "domain:geller-pa.googleapis.com",
+        "domain:assistant-s3-pa.googleapis.com", "domain:notebooklm.google", "domain:notebooklm.google.com", "domain:labs.google",
+        "domain:deepmind.google", "domain:openai.com", "domain:chatgpt.com", "domain:oaistatic.com", "domain:oaiusercontent.com",
+        "domain:anthropic.com", "domain:claude.ai", "domain:perplexity.ai", "domain:copilot.microsoft.com", "domain:x.ai", "domain:grok.com")
     val PREFER = listOf("US", "NL", "DE", "FI", "GB", "FR", "SE", "PL", "CA", "JP", "SG")
 
     val PROFILES: Map<String, Need> = mapOf(
         "com.google.android.apps.bard" to Need("Gemini", AI_BAD),
+        "com.google.android.googlequicksearchbox" to Need("Gemini (Google)", AI_BAD),
+        "ai.x.grok" to Need("Grok", AI_BAD),
         "com.openai.chatgpt" to Need("ChatGPT", AI_BAD),
         "com.anthropic.claude" to Need("Claude", AI_BAD),
         "com.microsoft.copilot" to Need("Copilot", AI_BAD),
@@ -58,7 +67,7 @@ object AppWatch {
     val journal = MutableStateFlow<List<Pair<Long, String>>>(emptyList())
 
     private suspend fun autopilot(reconnect: () -> Unit) {
-        if (++tick % 24 != 0) return // once a minute
+        if (++tick % 40 != 0) return // once a minute
         val s = Tunnel.status.value
         fails = if (s.checkOk == false) fails + 1 else 0
         val now = System.currentTimeMillis()
@@ -117,7 +126,7 @@ object AppWatch {
                     val pkg = if (st.appAware && hasAccess(app)) foreground(app) else null
                     if (pkg != null && pkg != last) { last = pkg; PROFILES[pkg]?.let { handle(app, it, reconnect) } }
                     if (st.autopilot) autopilot(reconnect)
-                    delay(2500)
+                    delay(1500)
                 }
             } finally { GpsMock.stop(app); status.value = "" }
         }
@@ -133,7 +142,12 @@ object AppWatch {
             }
             return
         }
-        val target = decide(need, countries(), Actions.countries(Store.state.value)) ?: return
+        // what the internet really sees (Cloudflare trace through the tunnel) beats what the server names say
+        val exit = Tunnel.socks?.port?.let { p -> withContext(Dispatchers.IO) { Tester.exitCountry(p) } }
+        val cur = if (exit != null) listOf(exit) else countries()
+        if (exit != null && exit !in need.avoid) { status.value = "${need.title}: выход в ${Countries.title(exit)} — подходит"; return }
+        val target = decide(need, cur, Actions.countries(Store.state.value).filter { it.first != exit })
+        if (target == null) { say("Открыт ${need.title}: выход ${exit?.let { Countries.title(it) } ?: "в неизвестной стране"}, а серверов нужной страны нет — добавьте серверы США/Европы"); return }
         Store.update { it.copy(settings = it.settings.copy(country = target)) }
         val n = Actions.selectBest(5, close = true)
         if (n > 0) { reconnect(); say("Открыт ${need.title}: переключил на серверы ${Countries.title(target)}" + if (Store.state.value.settings.gpsSpoof) ", GPS тоже там" else "") }

@@ -109,3 +109,16 @@ class R88Test {
         org.junit.Assert.assertNull(W.pilot(0, false, true, 0, 0, 9 * 3600_000L))
     }
 }
+
+class R89Test {
+    @org.junit.Test fun traceCountry() {
+        org.junit.Assert.assertEquals("NL", com.vlesscardvpn.core.Tester.traceLoc("fl=1\nip=1.2.3.4\nloc=nl\ntls=TLSv1.3"))
+        org.junit.Assert.assertNull(com.vlesscardvpn.core.Tester.traceLoc("ip=1.2.3.4"))
+    }
+    @org.junit.Test fun geminiDomainsAlwaysThroughServers() {
+        val st = com.vlesscardvpn.model.Settings(services = listOf("youtube"))
+        org.junit.Assert.assertTrue(com.vlesscardvpn.core.AppWatch.AI_DOMAINS.contains("domain:gemini.google.com"))
+        org.junit.Assert.assertTrue(com.vlesscardvpn.core.Services.domains(listOf("ai")).contains("domain:generativelanguage.googleapis.com"))
+        org.junit.Assert.assertEquals(listOf("youtube"), st.services)
+    }
+}

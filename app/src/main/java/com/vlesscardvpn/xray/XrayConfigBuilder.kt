@@ -237,6 +237,8 @@ object XrayConfigBuilder {
         // «Сайт не открывается?» — the user's own choice wins over everything below (RU direct, services, hybrid)
         if (settings.alwaysDirect.isNotEmpty()) rules.put(JSONObject().put("domain", JSONArray(settings.alwaysDirect.map { "domain:$it" })).put("outboundTag", "direct"))
         if (settings.alwaysVpn.isNotEmpty()) rules.put(toMain(JSONObject().put("domain", JSONArray(settings.alwaysVpn.map { "domain:$it" }))))
+        // AI services (Gemini, ChatGPT, Claude…) refuse Russian addresses: always through the servers, never direct or via the DPI bypass
+        if (useServers) rules.put(toMain(JSONObject().put("domain", JSONArray(com.vlesscardvpn.core.AppWatch.AI_DOMAINS))))
         if (settings.blockAds) rules.put(JSONObject().put("domain", arr("geosite:category-ads-all")).put("outboundTag", "block"))
         if (settings.mode == Mode.HYBRID && settings.hybridDomains.isNotEmpty())
             rules.put(JSONObject().put("domain", JSONArray(settings.hybridDomains)).put("outboundTag", BYEDPI_TAG))
