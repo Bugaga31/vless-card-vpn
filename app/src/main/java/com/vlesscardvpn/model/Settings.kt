@@ -67,6 +67,8 @@ data class Settings(
     val warpKeys: String = "",
     /** Try the built-in public WARP+ keys when there is no own key (or it is used up). */
     val warpBuiltinKeys: Boolean = true,
+    /** «WARP через сервер»: phone → masked server → Cloudflare WARP → internet (works where WireGuard to Cloudflare is blocked). */
+    val warpChain: Boolean = false,
     /** Background: get ready on app start, re-test and switch to faster servers while connected. */
     val autoOptimize: Boolean = true,
     /** WARP+ keys switched off in «Ключи WARP+» (own or built-in): never tried. */
@@ -131,7 +133,7 @@ data class Settings(
         .put("services", JSONArray(services)).put("autoHeal", autoHeal).put("autoUpdateSubs", autoUpdateSubs).put("lastSubRefresh", lastSubRefresh)
         .put("proxyOnly", proxyOnly).put("lanShare", lanShare).put("perApp", perApp)
         .put("maskFamilies", JSONArray(maskFamilies)).put("maskFps", JSONArray(maskFps))
-        .put("warpKeys", warpKeys).put("warpBuiltinKeys", warpBuiltinKeys).put("autoOptimize", autoOptimize)
+        .put("warpKeys", warpKeys).put("warpBuiltinKeys", warpBuiltinKeys).put("warpChain", warpChain).put("autoOptimize", autoOptimize)
         .put("warpKeyOff", JSONArray(warpKeyOff)).put("warpKeyStatus", JSONObject(warpKeyStatus as Map<*, *>)).put("myMasks", JSONArray(myMasks))
         .put("maskEvolution", maskEvolution).put("autoMasks", JSONArray(autoMasks))
         .put("dpiRanking", JSONObject().apply { dpiRanking.forEach { (k, v) -> put(k, JSONArray(v)) } })
@@ -191,7 +193,7 @@ data class Settings(
                 autoUpdateSubs = o.optBoolean("autoUpdateSubs", d.autoUpdateSubs), lastSubRefresh = o.optLong("lastSubRefresh", 0),
                 proxyOnly = o.optBoolean("proxyOnly", false), lanShare = o.optBoolean("lanShare", false), perApp = o.optBoolean("perApp", true),
                 maskFamilies = list("maskFamilies", emptyList()), maskFps = list("maskFps", emptyList()),
-                warpKeys = o.optString("warpKeys", ""), warpBuiltinKeys = o.optBoolean("warpBuiltinKeys", true), autoOptimize = o.optBoolean("autoOptimize", true),
+                warpKeys = o.optString("warpKeys", ""), warpBuiltinKeys = o.optBoolean("warpBuiltinKeys", true), warpChain = o.optBoolean("warpChain", false), autoOptimize = o.optBoolean("autoOptimize", true),
                 warpKeyOff = list("warpKeyOff", emptyList()),
                 warpKeyStatus = o.optJSONObject("warpKeyStatus")?.let { m -> m.keys().asSequence().associateWith { m.getString(it) } } ?: emptyMap(),
                 myMasks = list("myMasks", emptyList()),

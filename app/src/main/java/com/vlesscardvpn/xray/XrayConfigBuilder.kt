@@ -14,6 +14,7 @@ data class SocksAuth(val port: Int, val user: String = "", val pass: String = ""
 object XrayConfigBuilder {
     const val BYEDPI_TAG = "byedpi"
     const val PROXY_PREFIX = "proxy-"
+    const val WARP_CHAIN = "warp-chain"
     const val RU_DNS = "77.88.8.8"
     val DNS_FALLBACKS = listOf("https://8.8.8.8/dns-query", "https://9.9.9.9/dns-query", "8.8.8.8", "1.1.1.1")
     /** DoH/DoT names resolved without asking anyone (Private DNS and «свой DNS» by name work even when DNS is broken). */
@@ -180,7 +181,7 @@ object XrayConfigBuilder {
      * one outbound per selected server, balancer + observatory across them, DNS via DoH through the tunnel.
      */
     fun vpnConfig(servers: List<Pair<Server, Mask?>>, settings0: Settings, byeDpiPort: Int?, socks: SocksAuth = SocksAuth(settings0.socksPort),
-                  dpiPorts: Map<String, Int> = emptyMap(), listen: String = "127.0.0.1", httpPort: Int? = null): String {
+                  dpiPorts: Map<String, Int> = emptyMap(), listen: String = "127.0.0.1", httpPort: Int? = null, warpHop: Server? = null): String {
         // Auto: servers when there are working ones, otherwise the DPI engine alone.
         val settings = if (settings0.mode == Mode.AUTO) settings0.copy(mode = if (servers.isEmpty()) Mode.BYEDPI else Mode.SERVERS) else settings0
         require(settings.mode == Mode.BYEDPI || servers.isNotEmpty()) { "Не выбран ни один сервер" }
@@ -204,11 +205,21 @@ object XrayConfigBuilder {
         // MX/TXT/SRV/HTTPS records are passed on instead of dropped (apps used to hang waiting for them)
         outs.put(JSONObject().put("tag", "dns-out").put("protocol", "dns").put("settings", JSONObject().put("nonIPQuery", "skip")))
         dpiOutbounds(outs, byeDpiPort, if (useServers) dpiPorts else emptyMap())
+        // «WARP через сервер»: WireGuard to Cloudflare is dialed through the first ordinary server (DPI sees only that server's mask)
+        val hopIdx = if (useServers && warpHop != null) servers.indexOfFirst { it.first.protocol != "wireguard" } else -1
+        if (hopIdx >= 0) {
+            val w = outbound(warpHop!!, WARP_CHAIN, null)
+            val ss = w.optJSONObject("streamSettings") ?: JSONObject().also { w.put("streamSettings", it) }
+            (ss.optJSONObject("sockopt") ?: JSONObject().also { ss.put("sockopt", it) }).put("dialerProxy", "$PROXY_PREFIX$hopIdx")
+            ss.remove("finalmask")
+            outs.put(w)
+        }
         c.put("outbounds", outs)
 
         val many = useServers && servers.size > 1
         fun toMain(rule: JSONObject): JSONObject = when {
             !useServers -> rule.put("outboundTag", BYEDPI_TAG)
+            hopIdx >= 0 -> rule.put("outboundTag", WARP_CHAIN)
             many -> rule.put("balancerTag", "balancer")
             else -> rule.put("outboundTag", "${PROXY_PREFIX}0")
         }

@@ -59,6 +59,16 @@ object Assistant {
             }
             has(q, "улучши соедин", "улучши связь", "улучши интернет", "сделай лучше", "улучши всё", "улучши все", "оптимизируй всё", "оптимизируй все") ->
                 Msg(false, "Улучшаю всё: проверяю серверы и маски, облегчаю тяжёлые, ускоряю YouTube и выбираю самые быстрые.", listOf(Btn("Улучшить", "!yt")), auto = true)
+            has(q, "варп", "warp", "клаудфлер", "cloudflare") -> {
+                val st = Store.state.value
+                val acc = st.servers.any { Masks.isWarp(it) }
+                val off = has(q, "выключи", "отключи", "не надо")
+                when {
+                    off -> Msg(false, "Выключаю «WARP через сервер».", listOf(Btn("Применить", "!set warpChain off")), auto = true)
+                    !acc -> Msg(false, "Аккаунта WARP ещё нет — создам (если Cloudflare закрыт, регистрирую через обход DPI или VPN), потом включу «WARP через сервер»: так WARP работает, даже когда оператор режет его напрямую.", listOf(Btn("Создать WARP", "!warp")), auto = true)
+                    else -> Msg(false, "Включаю «WARP через сервер»: трафик идёт на ваш сервер с маскировкой, а оттуда в Cloudflare WARP. Оператор видит только маску, сайты — адрес Cloudflare.", listOf(Btn("Применить", "!set warpChain on")), auto = true)
+                }
+            }
             has(q, "gps", "геолок", "местополож", "локаци", "геопоз", "жпс") -> {
                 val off = has(q, "выключи", "отключи", "убери", "верни")
                 Msg(false, if (off) "Выключаю подмену GPS — вернётся настоящее местоположение." else "Включаю GPS под страну сервера. Если Android не даст — подскажу, где разрешить.",
@@ -252,14 +262,15 @@ object Assistant {
             cmd == "!disconnect" -> { com.vlesscardvpn.vpn.TunnelService.stop(app); post(Msg(false, "VPN отключён.")) }
             cmd.startsWith("!set ") -> {
                 val (key, v) = cmd.removePrefix("!set ").split(" ").let { it[0] to (it.getOrNull(1) == "on") }
-                Store.update { s -> s.copy(settings = when (key) { "blockAds" -> s.settings.copy(blockAds = v); "blockQuic" -> s.settings.copy(blockQuic = v); "gps" -> s.settings.copy(gpsSpoof = v); "autopilot" -> s.settings.copy(autopilot = v); "appAware" -> s.settings.copy(appAware = v); else -> s.settings.copy(turbo = v) }) }
+                Store.update { s -> s.copy(settings = when (key) { "blockAds" -> s.settings.copy(blockAds = v); "blockQuic" -> s.settings.copy(blockQuic = v); "gps" -> s.settings.copy(gpsSpoof = v); "warpChain" -> s.settings.copy(warpChain = v); "autopilot" -> s.settings.copy(autopilot = v); "appAware" -> s.settings.copy(appAware = v); else -> s.settings.copy(turbo = v) }) }
                 reconnect(app)
-                post(Msg(false, (when (key) { "blockAds" -> "Блокировка рекламы"; "blockQuic" -> "Блокировка QUIC"; "gps" -> "Подмена GPS"; "autopilot" -> "Автопилот"; "appAware" -> "Подстройка под приложения"; else -> "Ускорение телефона" }) + if (v) " включена." else " выключена."))
+                post(Msg(false, (when (key) { "blockAds" -> "Блокировка рекламы"; "blockQuic" -> "Блокировка QUIC"; "gps" -> "Подмена GPS"; "warpChain" -> "WARP через сервер"; "autopilot" -> "Автопилот"; "appAware" -> "Подстройка под приложения"; else -> "Ускорение телефона" }) + if (v) " включена." else " выключена."))
                 if (v && key == "autopilot") { Actions.boostYoutube(); post(Msg(false, "Начал улучшать соединение — результат напишу здесь.")) }
                 if (v && key == "gps") post(Msg(false, "Подмена GPS работает, пока включён VPN: телефон «окажется» в столице страны сервера. Нужно один раз разрешить: Параметры разработчика → «Приложение для фиктивных местоположений» → VLESS Card." +
                     GpsMock.state.value.let { if (it.isNotEmpty()) "\nСейчас: $it" else "" }, listOf(Btn("Открыть параметры разработчика", "!devsettings"))))
                 if (v && key == "appAware" && !AppWatch.hasAccess(app)) post(Msg(false, "Чтобы видеть, какое приложение открыто, нужен «Доступ к истории использования» для VLESS Card.", listOf(Btn("Разрешить доступ", "!usage"))))
             }
+            cmd == "!warp" -> { Store.update { it.copy(settings = it.settings.copy(warpChain = true)) }; job(app, null) { Actions.setupWarp() } }
             cmd == "!devsettings" -> { GpsMock.openDevSettings(app); post(Msg(false, "Если пункта нет — включите режим разработчика: О телефоне → 7 раз нажать «Номер сборки».")) }
             cmd == "!usage" -> { AppWatch.openAccess(app); post(Msg(false, "Найдите VLESS Card и включите доступ.")) }
             cmd == "!battery" -> runCatching {
