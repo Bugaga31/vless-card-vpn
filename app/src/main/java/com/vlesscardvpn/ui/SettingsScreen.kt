@@ -171,6 +171,7 @@ fun SettingsScreen() {
         }, modifier = Modifier.fillMaxWidth()) { Text("Добавить прокси в Telegram") }
 
         Section("WARP")
+        Toggle("WARP через сервер", "Телефон → ваш сервер (с маскировкой) → Cloudflare WARP → интернет. Работает, даже когда оператор режет WARP напрямую. Сайты видят адрес Cloudflare — меньше капч и блокировок по IP сервера. Нужны аккаунт WARP (Серверы → «WARP») и хотя бы один обычный сервер", s.warpChain) { v -> set { it.copy(warpChain = v) } }
         Hint("Серверы → «WARP» создаёт аккаунты и подбирает точки входа. Ключ WARP+ ускоряет WARP (вставьте один или целый пост с ключами).")
         var wk by remember(s.warpKeys) { mutableStateOf(s.warpKeys) }
         OutlinedTextField(wk, { v -> wk = v; set { it.copy(warpKeys = v) } }, label = { Text("Свой ключ WARP+ (xxxxxxxx-xxxxxxxx-xxxxxxxx)") },

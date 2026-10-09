@@ -85,6 +85,7 @@ class TunnelService : VpnService() {
     private var autoDpiOnly = false
     /** Servers of the running connection (selected or the best ones taken automatically). */
     @Volatile private var usedServers: List<com.vlesscardvpn.model.Server> = emptyList()
+    @Volatile private var warpChained = false
     /** DPI-strategy repairs in a row (reset by a good check). */
     private var dpiHeals = 0
     /** Connect attempts that failed to start (Auto mode retries with safer settings). */
@@ -215,8 +216,12 @@ class TunnelService : VpnService() {
             val proxy = settings.proxyOnly
             // Proxy mode: other apps must find the proxy, so the fixed port without a password (only on 127.0.0.1 unless shared).
             val socks = if (keepTun && prevSocks != null) prevSocks else if (settings.stealthSocks && !proxy) SocksAuth(randomPort(), randomToken(), randomToken()) else SocksAuth(settings.socksPort)
-            val config = XrayConfigBuilder.vpnConfig(withMasks, settings, bdPort, socks, set.ports,
-                listen = if (proxy && settings.lanShare) "0.0.0.0" else "127.0.0.1", httpPort = if (proxy) settings.httpPort else null)
+            // «WARP через сервер»: WARP account from the list, the ordinary servers carry it
+            val warpHop = if (settings.warpChain && withMasks.any { it.first.protocol != "wireguard" }) st.servers.firstOrNull { Masks.isWarp(it) } else null
+            warpChained = warpHop != null
+            val used = if (warpHop != null) withMasks.filter { it.first.protocol != "wireguard" } else withMasks
+            val config = XrayConfigBuilder.vpnConfig(used, settings, bdPort, socks, set.ports,
+                listen = if (proxy && settings.lanShare) "0.0.0.0" else "127.0.0.1", httpPort = if (proxy) settings.httpPort else null, warpHop = warpHop)
             val c = XrayCore.Instance("vpn"); core = c
             c.start(config)
             check(c.running) { "Xray не запустился: ${c.lastStatus}" }
@@ -299,7 +304,7 @@ class TunnelService : VpnService() {
             val cur = Tunnel.status.value
             if (cur.state != Tunnel.State.CONNECTED) return@launch
             // WARP: ask Cloudflare itself whether the traffic comes through WARP (warp=on / plus), so it's clear it works.
-            val warp = if (p.realMs > 0 && usedServers.any { Masks.isWarp(it) }) when (Tester.warpTrace(port)) {
+            val warp = if (p.realMs > 0 && (warpChained || usedServers.any { Masks.isWarp(it) })) when (Tester.warpTrace(port)) {
                 "plus" -> " · WARP+: включён ✓"; "on" -> " · WARP: включён ✓"; "off" -> " · WARP: не через Cloudflare ✗"; else -> " · WARP: Cloudflare не ответил"
             } else ""
             val text = if (p.realMs > 0) "Интернет работает · ${p.realMs} мс · 256 КБ: ${Actions.yn(p.bigOk)} · YouTube: ${Actions.yn(p.ytOk)} · Telegram: ${Actions.yn(p.tgOk)}$warp"

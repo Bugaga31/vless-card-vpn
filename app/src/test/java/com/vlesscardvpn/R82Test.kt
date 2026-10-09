@@ -140,3 +140,22 @@ class R90Test {
         org.junit.Assert.assertEquals("Подключено · нет интернета", com.vlesscardvpn.vpn.VpnWidget.look(com.vlesscardvpn.core.Tunnel.State.CONNECTED, false, "", "").second)
     }
 }
+
+class R91Test {
+    private fun srv(link: String) = com.vlesscardvpn.model.LinkParser.parse(link)!!
+    @org.junit.Test fun warpGoesThroughTheServer() {
+        val vless = srv("vless://11111111-2222-3333-4444-555555555555@1.2.3.4:443?security=tls&type=tcp&sni=a.com#NL")
+        val warp = srv("wireguard://cHJpdmF0ZWtleXByaXZhdGVrZXlwcml2YXRla2V5MTI=@162.159.192.1:2408?publickey=bmXOC%2BF1FxEMF9dyiK2H5%2F1SUtzH0JuVo51h2wPfgyo%3D&address=172.16.0.2%2F32#WARP")
+        val st = com.vlesscardvpn.model.Settings(mode = com.vlesscardvpn.model.Mode.SERVERS, warpChain = true)
+        val c = org.json.JSONObject(com.vlesscardvpn.xray.XrayConfigBuilder.vpnConfig(listOf(vless to null), st, null, warpHop = warp))
+        val outs = c.getJSONArray("outbounds"); var w: org.json.JSONObject? = null
+        for (i in 0 until outs.length()) if (outs.getJSONObject(i).optString("tag") == "warp-chain") w = outs.getJSONObject(i)
+        org.junit.Assert.assertNotNull(w)
+        org.junit.Assert.assertEquals("proxy-0", w!!.getJSONObject("streamSettings").getJSONObject("sockopt").getString("dialerProxy"))
+        val rules = c.getJSONObject("routing").getJSONArray("rules")
+        org.junit.Assert.assertEquals("warp-chain", rules.getJSONObject(rules.length() - 1).optString("outboundTag"))
+        // without the account: the plain config
+        val plain = com.vlesscardvpn.xray.XrayConfigBuilder.vpnConfig(listOf(vless to null), st, null)
+        org.junit.Assert.assertFalse(plain.contains("warp-chain"))
+    }
+}

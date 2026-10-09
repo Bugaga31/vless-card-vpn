@@ -66,6 +66,7 @@ object AppWatch {
     private var fails = 0; private var lastFix = 0L; private var lastLight = 0L; private var tick = 0
     private var lastSpeedup = 0L; private var lastSpeedCheck = System.currentTimeMillis() - 35 * 60_000L
     @Volatile var lastMbps = 0.0
+    private var evolveNet = ""
     private var lastEvolve = System.currentTimeMillis() - 100 * 60_000L // first evolution ~20 min after start
     /** What the autopilot did (newest first): time + text, shown in «Помощник». */
     val journal = MutableStateFlow<List<Pair<Long, String>>>(emptyList())
@@ -75,6 +76,9 @@ object AppWatch {
         val s = Tunnel.status.value
         fails = if (s.checkOk == false) fails + 1 else 0
         val now = System.currentTimeMillis()
+        // new network: masks that passed elsewhere may not pass here — evolve here ~15 min later instead of waiting 2 h
+        val net = appCtx?.let { runCatching { Net.key(it) }.getOrNull() }.orEmpty()
+        if (net.isNotEmpty() && net != evolveNet) { evolveNet = net; lastEvolve = minOf(lastEvolve, now - 105 * 60_000L) }
         // light speed check (4 s) every 45 min, only on unmetered networks (Wi-Fi) — mobile data is not spent on it
         var slow = false
         if (now - lastSpeedCheck > 45 * 60_000L && fails == 0 && !Actions.progress.value.running && unmetered()) {
