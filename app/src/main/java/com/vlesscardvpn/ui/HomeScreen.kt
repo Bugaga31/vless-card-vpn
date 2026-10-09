@@ -13,6 +13,10 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -34,7 +38,7 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
     val working = busy
     val mode = cfg.mode
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-        Text("VLESS Card", fontSize = 26.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onBackground)
+        Text("VLESS Card", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onBackground)
         Text("${BuildConfig.VERSION_NAME} · Xray · " + if (cfg.stealthSocks) "прокси скрыт (случайный порт + пароль)" else "SOCKS 127.0.0.1:${cfg.socksPort}",
             fontSize = 12.sp, color = Color.Gray)
         val clip by Actions.clipOffer.collectAsState()
@@ -48,73 +52,11 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
                 }
             }
         }
-        Spacer(Modifier.height(16.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Mode.values().forEach { m ->
-                FilterChip(selected = mode == m, onClick = {
-                    Store.update { it.copy(settings = it.settings.copy(mode = m)) }
-                    if (m != mode && status.state == Tunnel.State.CONNECTED) onConnect() // reconnect with the new mode
-                },
-                    label = { Text(when (m) { Mode.AUTO -> "Авто"; Mode.SERVERS -> "Серверы"; Mode.BYEDPI -> "ByeDPI"; Mode.HYBRID -> "Гибрид" }) })
-            }
-        }
-        Text(when (mode) {
-            Mode.AUTO -> "Сам обновит подписки, проверит серверы, подберёт маскировку и обход DPI. Если маскировку распознают — сменит её сам"
-            Mode.SERVERS -> "Весь трафик через выбранные серверы (запросы распределяются между ними)"
-            Mode.BYEDPI -> "Без сервера: обход DPI встроенными ByeDPI/zapret (YouTube, Discord и т.п.). Не помогает от блокировки по IP"
-            Mode.HYBRID -> "YouTube/Discord/Telegram — через обход DPI, остальное — через серверы"
-        }, fontSize = 13.sp, color = Color.Gray, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 6.dp))
-        Spacer(Modifier.height(10.dp))
-        val st = cfg
         fun reconnect() { if (status.state == Tunnel.State.CONNECTED) onConnect() }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("Тип:", fontSize = 13.sp)
-            FilterChip(selected = !st.proxyOnly, onClick = { if (st.proxyOnly) { onDisconnect(); Store.update { it.copy(settings = it.settings.copy(proxyOnly = false)) } } }, label = { Text("VPN") })
-            FilterChip(selected = st.proxyOnly, onClick = { if (!st.proxyOnly) { onDisconnect(); Store.update { it.copy(settings = it.settings.copy(proxyOnly = true)) } } }, label = { Text("Прокси") })
-        }
-        if (st.proxyOnly) Text("Без VPN: SOCKS5 127.0.0.1:${st.socksPort}, HTTP :${st.httpPort}" + (if (st.lanShare) " — раздаётся в Wi-Fi" else "") + ". Telegram — кнопка в Настройках",
-            fontSize = 11.sp, color = Color.Gray, textAlign = TextAlign.Center)
-        else {
-            var appsDialog by remember { mutableStateOf(false) }
-            val n = st.apps.size
-            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                FilterChip(selected = !st.perApp || n == 0, onClick = { Store.update { it.copy(settings = it.settings.copy(perApp = false)) }; reconnect() }, label = { Text("Все приложения") })
-                FilterChip(selected = st.perApp && n > 0 && st.onlyApps, onClick = {
-                    if (n == 0) appsDialog = true else { Store.update { it.copy(settings = it.settings.copy(perApp = true, onlyApps = true)) }; reconnect() }
-                }, label = { Text(if (n > 0) "Только выбранные ($n)" else "Только выбранные") })
-                FilterChip(selected = st.perApp && n > 0 && !st.onlyApps, onClick = {
-                    if (n == 0) appsDialog = true else { Store.update { it.copy(settings = it.settings.copy(perApp = true, onlyApps = false)) }; reconnect() }
-                }, label = { Text("Все, кроме выбранных") })
-                TextButton(onClick = { appsDialog = true }) { Text("Выбрать…") }
-            }
-            if (appsDialog) AppsDialog(st, onDismiss = { appsDialog = false }) { apps, only ->
-                Store.update { it.copy(settings = it.settings.copy(apps = apps, onlyApps = only, perApp = true)) }; reconnect()
-            }
-        }
-        // «Только YouTube и Telegram»: отмеченные сервисы идут через VPN, остальное — напрямую.
-        val services = cfg.services
-        fun toggleService(id: String, v: Boolean) {
-            Store.update { it.copy(settings = it.settings.copy(services = if (v) (it.settings.services + id).distinct() else it.settings.services - id)) }
-            if (status.state == Tunnel.State.CONNECTED) onConnect()
-        }
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Через VPN только:", fontSize = 13.sp)
-            Checkbox("youtube" in services, { toggleService("youtube", it) }); Text("YouTube", fontSize = 13.sp)
-            Checkbox("telegram" in services, { toggleService("telegram", it) }); Text("Telegram", fontSize = 13.sp)
-        }
-        Text(if (services.isEmpty()) "Ничего не отмечено — через VPN идёт весь трафик"
-            else "Через VPN: " + com.vlesscardvpn.core.Services.label(services) + ", остальное напрямую (другие сервисы — в Настройках)",
-            fontSize = 11.sp, color = Color.Gray, textAlign = TextAlign.Center)
-        Spacer(Modifier.height(18.dp))
-
         val on = status.state == Tunnel.State.CONNECTED
         val busy = status.state == Tunnel.State.CONNECTING
         val color = when { on && status.checkOk == false -> Warn; on -> Good; busy -> Accent; else -> Color(0xFF2A2F3A) }
-        Box(Modifier.size(200.dp).clip(CircleShape).background(color).clickable { if (on || busy) onDisconnect() else onConnect() },
-            contentAlignment = Alignment.Center) {
-            Text(when { on -> "Отключить"; busy -> "Подключение…"; else -> "Подключить" }, color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
-        }
-        Spacer(Modifier.height(20.dp))
+        PowerButton(on, busy, color) { if (on || busy) onDisconnect() else onConnect() }
         if (status.message.isNotEmpty()) Text(status.message, color = if (status.state == Tunnel.State.ERROR) Bad else MaterialTheme.colorScheme.onBackground,
             textAlign = TextAlign.Center, fontWeight = FontWeight.Medium)
         if (status.route.isNotEmpty()) Text(status.route, color = Color.Gray, fontSize = 13.sp, textAlign = TextAlign.Center)
@@ -133,13 +75,14 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
             val now = remember(tick) { val r = ((rx - prev[0]) * 8 / 5000).coerceAtLeast(0) to ((tx - prev[1]) * 8 / 5000).coerceAtLeast(0); prev[0] = rx; prev[1] = tx; r }
             if (tick > 0 && (now.first > 0 || now.second > 0)) Text("Сейчас: ↓ ${Actions.mbps(now.first.toInt())} ↑ ${Actions.mbps(now.second.toInt())}",
                 fontSize = 13.sp, color = MaterialTheme.colorScheme.onBackground, textAlign = TextAlign.Center)
-            Text("Сессия: ${if (min >= 60) "${min / 60} ч ${min % 60} мин" else "$min мин"} · ↓ ${Actions.bytes(rx)} ↑ ${Actions.bytes(tx)}" +
-                if (cfg.turbo) " · ускорение вкл." else "", fontSize = 12.sp, color = Color.Gray, textAlign = TextAlign.Center)
+            SessionStats(min, rx, tx, cfg.turbo)
             val (month, over) = com.vlesscardvpn.core.Traffic.line(cfg)
             if (month.isNotEmpty()) Text(month, fontSize = 12.sp, color = if (over) Warn else Color.Gray, textAlign = TextAlign.Center)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TextButton(onClick = { com.vlesscardvpn.vpn.TunnelService.pause(ctx) }) { Text("Пауза 5 мин") }
-                TextButton(onClick = { Actions.fixAll { onConnect() } }, enabled = !working) { Text("Не работает? Починить") }
+            Row(Modifier.horizontalScroll(rememberScrollState()).padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                AssistChip(onClick = { Actions.fixAll { onConnect() } }, enabled = !working, label = { Text("🛠 Починить") })
+                AssistChip(onClick = { Actions.boostYoutube() }, enabled = !working, label = { Text("▶ Ускорить YouTube") })
+                AssistChip(onClick = { Actions.lighten() }, enabled = !working, label = { Text("🪶 Облегчить маски") })
+                AssistChip(onClick = { com.vlesscardvpn.vpn.TunnelService.pause(ctx) }, label = { Text("⏸ Пауза 5 мин") })
             }
         } else if (pausedUntil > 0) {
             TextButton(onClick = { onConnect() }) { Text("Включить сейчас") }
@@ -150,6 +93,82 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
             fontSize = 14.sp, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 6.dp))
         if (status.state == Tunnel.State.CONNECTING) Box(Modifier.fillMaxWidth().padding(top = 8.dp)) { LiveProgress(stop = false) { it.running } }
         Spacer(Modifier.height(20.dp))
+        Spacer(Modifier.height(16.dp))
+        var opts by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
+        Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+            Column(Modifier.padding(14.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Row(Modifier.fillMaxWidth().clickable { opts = !opts }, verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Как подключаться", fontWeight = FontWeight.SemiBold)
+                        Text(listOf(when (mode) { Mode.AUTO -> "Авто"; Mode.SERVERS -> "Серверы"; Mode.BYEDPI -> "ByeDPI"; Mode.HYBRID -> "Гибрид" },
+                            if (cfg.proxyOnly) "Прокси" else "VPN",
+                            if (!cfg.perApp || cfg.apps.isEmpty()) "все приложения" else if (cfg.onlyApps) "только ${cfg.apps.size} прил." else "кроме ${cfg.apps.size} прил.",
+                            if (cfg.services.isEmpty()) "весь трафик" else com.vlesscardvpn.core.Services.label(cfg.services)).joinToString(" · "),
+                            fontSize = 12.sp, color = Color.Gray, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                    }
+                    Text(if (opts) "▴" else "▾", fontSize = 18.sp, color = Accent)
+                }
+                if (opts) {
+                    Spacer(Modifier.height(10.dp))
+                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Mode.values().forEach { m ->
+                        FilterChip(selected = mode == m, onClick = {
+                            Store.update { it.copy(settings = it.settings.copy(mode = m)) }
+                            if (m != mode && status.state == Tunnel.State.CONNECTED) onConnect() // reconnect with the new mode
+                        },
+                            label = { Text(when (m) { Mode.AUTO -> "Авто"; Mode.SERVERS -> "Серверы"; Mode.BYEDPI -> "ByeDPI"; Mode.HYBRID -> "Гибрид" }) })
+                    }
+                }
+                Text(when (mode) {
+                    Mode.AUTO -> "Сам обновит подписки, проверит серверы, подберёт маскировку и обход DPI. Если маскировку распознают — сменит её сам"
+                    Mode.SERVERS -> "Весь трафик через выбранные серверы (запросы распределяются между ними)"
+                    Mode.BYEDPI -> "Без сервера: обход DPI встроенными ByeDPI/zapret (YouTube, Discord и т.п.). Не помогает от блокировки по IP"
+                    Mode.HYBRID -> "YouTube/Discord/Telegram — через обход DPI, остальное — через серверы"
+                }, fontSize = 13.sp, color = Color.Gray, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 6.dp))
+                Spacer(Modifier.height(10.dp))
+                val st = cfg
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text("Тип:", fontSize = 13.sp)
+                    FilterChip(selected = !st.proxyOnly, onClick = { if (st.proxyOnly) { onDisconnect(); Store.update { it.copy(settings = it.settings.copy(proxyOnly = false)) } } }, label = { Text("VPN") })
+                    FilterChip(selected = st.proxyOnly, onClick = { if (!st.proxyOnly) { onDisconnect(); Store.update { it.copy(settings = it.settings.copy(proxyOnly = true)) } } }, label = { Text("Прокси") })
+                }
+                if (st.proxyOnly) Text("Без VPN: SOCKS5 127.0.0.1:${st.socksPort}, HTTP :${st.httpPort}" + (if (st.lanShare) " — раздаётся в Wi-Fi" else "") + ". Telegram — кнопка в Настройках",
+                    fontSize = 11.sp, color = Color.Gray, textAlign = TextAlign.Center)
+                else {
+                    var appsDialog by remember { mutableStateOf(false) }
+                    val n = st.apps.size
+                    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                        FilterChip(selected = !st.perApp || n == 0, onClick = { Store.update { it.copy(settings = it.settings.copy(perApp = false)) }; reconnect() }, label = { Text("Все приложения") })
+                        FilterChip(selected = st.perApp && n > 0 && st.onlyApps, onClick = {
+                            if (n == 0) appsDialog = true else { Store.update { it.copy(settings = it.settings.copy(perApp = true, onlyApps = true)) }; reconnect() }
+                        }, label = { Text(if (n > 0) "Только выбранные ($n)" else "Только выбранные") })
+                        FilterChip(selected = st.perApp && n > 0 && !st.onlyApps, onClick = {
+                            if (n == 0) appsDialog = true else { Store.update { it.copy(settings = it.settings.copy(perApp = true, onlyApps = false)) }; reconnect() }
+                        }, label = { Text("Все, кроме выбранных") })
+                        TextButton(onClick = { appsDialog = true }) { Text("Выбрать…") }
+                    }
+                    if (appsDialog) AppsDialog(st, onDismiss = { appsDialog = false }) { apps, only ->
+                        Store.update { it.copy(settings = it.settings.copy(apps = apps, onlyApps = only, perApp = true)) }; reconnect()
+                    }
+                }
+                // «Только YouTube и Telegram»: отмеченные сервисы идут через VPN, остальное — напрямую.
+                val services = cfg.services
+                fun toggleService(id: String, v: Boolean) {
+                    Store.update { it.copy(settings = it.settings.copy(services = if (v) (it.settings.services + id).distinct() else it.settings.services - id)) }
+                    if (status.state == Tunnel.State.CONNECTED) onConnect()
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Через VPN только:", fontSize = 13.sp)
+                    Checkbox("youtube" in services, { toggleService("youtube", it) }); Text("YouTube", fontSize = 13.sp)
+                    Checkbox("telegram" in services, { toggleService("telegram", it) }); Text("Telegram", fontSize = 13.sp)
+                }
+                Text(if (services.isEmpty()) "Ничего не отмечено — через VPN идёт весь трафик"
+                    else "Через VPN: " + com.vlesscardvpn.core.Services.label(services) + ", остальное напрямую (другие сервисы — в Настройках)",
+                    fontSize = 11.sp, color = Color.Gray, textAlign = TextAlign.Center)
+                }
+            }
+        }
+        Spacer(Modifier.height(12.dp))
 
         if (mode != Mode.BYEDPI) {
             Card(Modifier.fillMaxWidth().clickable { openServers() }, shape = RoundedCornerShape(14.dp),
@@ -326,4 +345,41 @@ private fun pick(c: String, onChange: () -> Unit) {
     Store.update { it.copy(settings = it.settings.copy(country = c)) }
     if (Store.state.value.settings.mode == Mode.AUTO) Actions.selectBest(5, close = true)
     onChange()
+}
+
+/** Big round button: soft glow ring, power icon, gentle pulse while connecting. */
+@Composable
+private fun PowerButton(on: Boolean, busy: Boolean, color: Color, onClick: () -> Unit) {
+    val c by androidx.compose.animation.animateColorAsState(color, androidx.compose.animation.core.tween(400), label = "c")
+    val inf = androidx.compose.animation.core.rememberInfiniteTransition(label = "p")
+    val pulse by inf.animateFloat(1f, 1.07f, androidx.compose.animation.core.infiniteRepeatable(androidx.compose.animation.core.tween(800),
+        androidx.compose.animation.core.RepeatMode.Reverse), label = "s")
+    val k = if (busy) pulse else 1f
+    Spacer(Modifier.height(18.dp))
+    Box(Modifier.size(220.dp), contentAlignment = Alignment.Center) {
+        Box(Modifier.size(220.dp).scale(k).clip(CircleShape).background(androidx.compose.ui.graphics.Brush.radialGradient(listOf(c.copy(alpha = 0.35f), Color.Transparent))))
+        Box(Modifier.size(170.dp).clip(CircleShape).background(androidx.compose.ui.graphics.Brush.verticalGradient(listOf(c, c.copy(alpha = 0.7f)))).clickable(onClick = onClick),
+            contentAlignment = Alignment.Center) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Icon(Icons.Filled.PowerSettingsNew, null, tint = Color.White, modifier = Modifier.size(56.dp))
+                Text(when { on -> "Отключить"; busy -> "Подключение…"; else -> "Подключить" }, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+            }
+        }
+    }
+    Spacer(Modifier.height(6.dp))
+}
+
+/** Session: time and traffic as three tiles. */
+@Composable
+private fun SessionStats(min: Long, rx: Long, tx: Long, turbo: Boolean) {
+    Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        listOf("Время" to (if (min >= 60) "${min / 60} ч ${min % 60} м" else "$min мин"), "Скачано" to Actions.bytes(rx), "Отправлено" to Actions.bytes(tx)).forEach { (t, v) ->
+            Column(Modifier.weight(1f).clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surface).padding(vertical = 8.dp),
+                horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(v, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                Text(t, fontSize = 11.sp, color = Color.Gray)
+            }
+        }
+    }
+    if (turbo) Text("Ускорение включено", fontSize = 11.sp, color = Color.Gray, modifier = Modifier.padding(top = 4.dp))
 }

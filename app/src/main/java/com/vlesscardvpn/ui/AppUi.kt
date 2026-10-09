@@ -35,12 +35,12 @@ fun AppUi(onConnect: () -> Unit, onDisconnect: () -> Unit) {
             }
         ) { pad ->
             Box(Modifier.padding(pad).fillMaxSize().background(scheme.background)) {
-                when (tab) {
+                androidx.compose.animation.Crossfade(tab, label = "tab") { t -> when (t) {
                     0 -> HomeScreen(onConnect, onDisconnect, openServers = { tab = 1 })
                     1 -> ServersScreen()
                     3 -> ChatScreen()
                     else -> SettingsScreen()
-                }
+                } }
             }
         }
     }
