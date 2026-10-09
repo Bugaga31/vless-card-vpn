@@ -42,7 +42,7 @@ object Actions {
     private var job: Job? = null
     private lateinit var app: Context
 
-    fun init(context: Context) { app = context.applicationContext }
+    fun init(context: Context) { app = context.applicationContext; com.vlesscardvpn.xray.MaskBrain.init(app.filesDir) }
 
     fun cancel() { job?.cancel(); progress.value = progress.value.copy(running = false, message = "Остановлено") }
 
@@ -406,7 +406,15 @@ object Actions {
         val parents = if (!evo) emptyList() else (stats.entries.filter { it.value.ok > 0 }.sortedByDescending { it.value.score }.mapNotNull { Masks.byId(it.key) } +
             servers.mapNotNull { Masks.byId(st0.state(it).maskFor(net0)) }).filter { it.id != Masks.DEFAULT.id || stats.isEmpty() }.distinctBy { it.id }.take(12)
         val slots = if (evo) (perServer / 5).coerceAtLeast(1) else 0
-        val pool = if (evo) MaskLab.breed(parents, (slots * 4).coerceIn(6, 40), known = kept.map { it.id }.toSet()) else emptyList()
+        // «Нейросеть масок»: once trained, it orders the search and picks which mutants are worth a probe here
+        val brain = com.vlesscardvpn.xray.MaskBrain.shared.takeIf { cfg.maskBrain && it.trained }
+        val want = (slots * 4).coerceIn(6, 40)
+        val pool = if (!evo) emptyList() else if (brain == null) MaskLab.breed(parents, want, known = kept.map { it.id }.toSet())
+            else MaskLab.breed(parents, want * 3, known = kept.map { it.id }.toSet()).let { big ->
+                // 70 % the most promising by the network, 30 % random: it keeps exploring instead of only confirming itself
+                val top = big.sortedByDescending { brain.predict(it, net0, null) }.take(want * 7 / 10)
+                top + (big - top.toSet()).shuffled().take(want - top.size)
+            }
         val untried = kept.filter { stats[it.id] == null }
         val evoCand = (0 until maxOf(untried.size, pool.size)).flatMap { i -> listOfNotNull(untried.getOrNull(i), pool.getOrNull(i)) }
         val order = { s: Server ->
@@ -414,7 +422,8 @@ object Actions {
             val fresh = evoCand.filter(ok).shuffled().take(slots)
             val base = (Masks.searchOrder(dpiOk, s, cfg.maskFamilies, cfg.maskFps) + kept.filter(ok)).distinctBy { it.id }
                 .filter { (tpwsOk || !it.dpi.startsWith("TPWS#")) && it !in fresh }
-                .sortedWith(compareBy<Mask>({ bucket(it) }, { Masks.cost(it) }, { -(stats[it.id]?.takeIf { s -> s.ok > 0 }?.score ?: 0.0) })).take((perServer - fresh.size).coerceAtLeast(1))
+                .sortedWith(compareBy<Mask>({ bucket(it) }, { if (brain == null) Masks.cost(it).toDouble() else Masks.cost(it) * 0.5 - 4 * brain.predict(it, net0, s) },
+                    { -(stats[it.id]?.takeIf { s -> s.ok > 0 }?.score ?: 0.0) })).take((perServer - fresh.size).coerceAtLeast(1))
             // proven ones first, then one of every kind of trick (not a dozen variants of the same one)
             val proven = base.filter { bucket(it) == 0 }.take(3).ifEmpty { base.take(1) }
             proven + fresh + Masks.diverse(base - proven.toSet())
@@ -489,8 +498,14 @@ object Actions {
                     goodMasks = good[s.id].orEmpty().sortedBy { g -> g.second }.map { g -> g.first.id }.filter { g -> g != b.first.id }.take(8))
             }
         }
+        // the network learns from every probe of this search (also failed mutants), except servers where nothing passed
+        val byId = pinned.associateBy { it.id }
+        val lessons = tried.filter { (sid, _, ok) -> ok || good.containsKey(sid) }.mapNotNull { (sid, mid, ok) ->
+            (Masks.byId(mid) ?: pool.firstOrNull { it.id == mid })?.let { Triple(it, byId[sid], ok) } }
+        if (cfg.maskBrain && lessons.isNotEmpty()) { com.vlesscardvpn.xray.MaskBrain.shared.learn(lessons, net); com.vlesscardvpn.xray.MaskBrain.save() }
         val bred = if (evo) ", новых авто-масок: ${winIds.count { it !in keptIds }}" else ""
-        return "Маскировка найдена для ${best.size} из ${pinned.size} серверов (перебрано ${variants.size} вариантов$bred, сеть «$net»)"
+        val nn = if (cfg.maskBrain) "; нейросеть масок " + com.vlesscardvpn.xray.MaskBrain.summary() else ""
+        return "Маскировка найдена для ${best.size} из ${pinned.size} серверов (перебрано ${variants.size} вариантов$bred, сеть «$net»)$nn"
     }
 
     /**
@@ -609,6 +624,9 @@ object Actions {
         val pinned = pinCertificates(heavy).associateBy { it.id }
         val v2 = variants.map { (s, m) -> (pinned[s.id] ?: s) to m }
         Tester.real(v2, st.settings.testUrl, null, emptyMap(), youtube = true, batch = 64, parallel = 24, attempts = 1, big = true) { i, p -> res[i] = p }
+        if (st.settings.maskBrain) v2.indices.filter { res[it] != null && res[it] !== Tester.SKIPPED && v2[it].second != null }
+            .map { Triple(v2[it].second!!, v2[it].first, res.getValue(it).works) }.takeIf { it.isNotEmpty() }
+            ?.let { com.vlesscardvpn.xray.MaskBrain.shared.learn(it, net); com.vlesscardvpn.xray.MaskBrain.save() }
         heavy.forEach { s ->
             val cur = Store.state.value.state(s)
             val win = v2.indices.filter { v2[it].first.id == s.id && res[it]?.works == true && res[it]?.ytOk != false }.minByOrNull { res.getValue(it).realMs } ?: return@forEach

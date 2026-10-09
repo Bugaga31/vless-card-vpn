@@ -109,6 +109,15 @@ fun MaskEvolutionSection() {
         }
         Switch(cfg.maskEvolution, { v -> Store.update { st -> st.copy(settings = st.settings.copy(maskEvolution = v)) } })
     }
+    Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text("Нейросеть масок", fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
+            Text("Небольшая нейросеть прямо на телефоне учится на каждой проверке: какие приёмы проходят в какой сети и на каком сервере. " +
+                "Сначала пробует то, что вероятнее пройдёт, и выбирает самых перспективных мутантов. Данные не покидают телефон. " +
+                "Сейчас: " + remember(cfg.autoMasks, cfg.maskBrain) { com.vlesscardvpn.xray.MaskBrain.summary() } + ".", fontSize = 12.sp, color = Color.Gray)
+        }
+        Switch(cfg.maskBrain, { v -> Store.update { st -> st.copy(settings = st.settings.copy(maskBrain = v)) } })
+    }
     if (auto.isEmpty()) { Text("Авто-масок пока нет — появятся после «Подобрать маскировку».", fontSize = 12.sp, color = Color.Gray); return }
     Text("Выведено авто-масок: ${auto.size}", fontSize = 12.sp)
     (if (all) auto else auto.take(5)).forEach { m ->
