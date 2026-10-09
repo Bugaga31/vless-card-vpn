@@ -314,7 +314,7 @@ class TunnelService : VpnService() {
                 scope.launch { lock.withLock { connect(soft = true) } }
                 return@launch
             }
-            if (p.works) { healStep = 0; dpiHeals = 0; connectFails = 0; scheduleOptimize(if (com.vlesscardvpn.core.Actions.deepPending) 40_000 else 120_000); watchdog(); coverTraffic(); if (serverless()) rescueLater() } else heal()
+            if (p.works) { healStep = 0; dpiHeals = 0; connectFails = 0; scheduleOptimize(if (com.vlesscardvpn.core.Actions.deepPending) 40_000 else 120_000); com.vlesscardvpn.core.AppWatch.start(this@TunnelService) { scope.launch { lock.withLock { connect(soft = true) } } }; watchdog(); coverTraffic(); if (serverless()) rescueLater() } else heal()
         }
     }
 

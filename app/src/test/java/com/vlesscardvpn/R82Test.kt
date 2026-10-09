@@ -62,3 +62,40 @@ class R85Test {
         assertTrue(com.vlesscardvpn.core.Assistant.answer("что режут", f(emptyMap())).text.contains("мало знаю"))
     }
 }
+
+class R86Test {
+    private val gem = com.vlesscardvpn.core.AppWatch.PROFILES.getValue("com.google.android.apps.bard")
+    @org.junit.Test fun geminiLeavesRussia() {
+        org.junit.Assert.assertEquals("NL", com.vlesscardvpn.core.AppWatch.decide(gem, listOf("RU"), listOf("RU" to 3, "NL" to 2, "TR" to 5)))
+    }
+    @org.junit.Test fun geminiKeepsGoodServers() {
+        org.junit.Assert.assertNull(com.vlesscardvpn.core.AppWatch.decide(gem, listOf("DE", "FI"), listOf("US" to 1)))
+    }
+    @org.junit.Test fun unknownCountryMovesToKnown() {
+        org.junit.Assert.assertEquals("US", com.vlesscardvpn.core.AppWatch.decide(gem, listOf(""), listOf("US" to 1, "DE" to 9)))
+        org.junit.Assert.assertNull(com.vlesscardvpn.core.AppWatch.decide(gem, listOf("HK"), listOf("RU" to 2, "" to 4)))
+    }
+    @org.junit.Test fun youtubeNeedsNoCountry() {
+        val yt = com.vlesscardvpn.core.AppWatch.PROFILES.getValue("com.google.android.youtube")
+        org.junit.Assert.assertTrue(yt.youtube)
+        org.junit.Assert.assertNull(com.vlesscardvpn.core.AppWatch.decide(yt, listOf("RU"), listOf("US" to 1)))
+    }
+    @org.junit.Test fun gpsHasEveryPreferredCountry() {
+        com.vlesscardvpn.core.AppWatch.PREFER.forEach { org.junit.Assert.assertTrue(it, it in com.vlesscardvpn.core.GpsMock.COORDS) }
+        org.junit.Assert.assertEquals("DE", com.vlesscardvpn.core.AppWatch.gpsCountry("", listOf("", "DE")))
+        org.junit.Assert.assertEquals("US", com.vlesscardvpn.core.AppWatch.gpsCountry("US", listOf("DE")))
+    }
+}
+
+class R87Test {
+    private val W = com.vlesscardvpn.core.AppWatch
+    @org.junit.Test fun pilotFixesAfterTwoFails() {
+        org.junit.Assert.assertNull(W.pilot(1, false, false, 1_000_000, 1_000_000))
+        org.junit.Assert.assertEquals("fix", W.pilot(2, false, false, 1_000_000, 1_000_000))
+        org.junit.Assert.assertNull(W.pilot(3, false, false, 60_000, 1_000_000))
+    }
+    @org.junit.Test fun pilotLightensAndWaitsWhenBusy() {
+        org.junit.Assert.assertEquals("lighten", W.pilot(0, true, false, 0, 4_000_000))
+        org.junit.Assert.assertNull(W.pilot(5, true, true, 9_000_000, 9_000_000))
+    }
+}

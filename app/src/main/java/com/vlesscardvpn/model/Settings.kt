@@ -106,6 +106,12 @@ data class Settings(
     val favorites: List<String> = emptyList(),
     /** «Умный YouTube» (Авто): YouTube through the DPI bypass straight to Google when that measured faster than the servers. */
     val smartYoutube: Boolean = true,
+    /** «Под приложение»: Gemini/ChatGPT → servers of a country where they work, YouTube → speed-up (needs usage access). */
+    val appAware: Boolean = true,
+    /** «Автопилот помощника»: repairs and lightens the connection by itself while the VPN is on. */
+    val autopilot: Boolean = true,
+    /** «GPS под страну сервера» (mock location, needs Developer options). */
+    val gpsSpoof: Boolean = false,
     /** network → YouTube through the DPI bypass there (measured; false = servers were faster or it broke). */
     val ytDpi: Map<String, Boolean> = emptyMap(),
     /** Connect by itself after the phone restarts. */
@@ -132,7 +138,7 @@ data class Settings(
         .put("ruAppsDirect", ruAppsDirect).put("randomTun", randomTun).put("coverTraffic", coverTraffic).put("rev", rev).put("turbo", turbo).put("autoStart", autoStart)
         .put("alwaysVpn", JSONArray(alwaysVpn)).put("alwaysDirect", JSONArray(alwaysDirect))
         .put("traffic", JSONObject().apply { traffic.forEach { (k, v) -> put(k, v) } }).put("monthLimitGb", monthLimitGb)
-        .put("country", country).put("favorites", JSONArray(favorites)).put("smartYoutube", smartYoutube)
+        .put("country", country).put("favorites", JSONArray(favorites)).put("smartYoutube", smartYoutube).put("appAware", appAware).put("autopilot", autopilot).put("gpsSpoof", gpsSpoof)
         .put("ytDpi", JSONObject().apply { ytDpi.forEach { (k, v) -> put(k, v) } })
         .put("netServers", JSONObject().apply { netServers.forEach { (k, v) -> put(k, JSONArray(v)) } })
         .put("subInfo", JSONObject().apply { subInfo.forEach { (k, v) -> put(k, v.toJson()) } })
@@ -195,7 +201,7 @@ data class Settings(
                 alwaysVpn = list("alwaysVpn", emptyList()), alwaysDirect = list("alwaysDirect", emptyList()),
                 traffic = o.optJSONObject("traffic")?.let { m -> m.keys().asSequence().associateWith { m.optLong(it) } } ?: emptyMap(),
                 monthLimitGb = o.optInt("monthLimitGb", 0), country = o.optString("country", ""), favorites = list("favorites", emptyList()),
-                smartYoutube = o.optBoolean("smartYoutube", true), ytDpi = o.optJSONObject("ytDpi")?.let { m -> m.keys().asSequence().associateWith { m.optBoolean(it) } } ?: emptyMap(),
+                smartYoutube = o.optBoolean("smartYoutube", true), appAware = o.optBoolean("appAware", true), autopilot = o.optBoolean("autopilot", true), gpsSpoof = o.optBoolean("gpsSpoof", false), ytDpi = o.optJSONObject("ytDpi")?.let { m -> m.keys().asSequence().associateWith { m.optBoolean(it) } } ?: emptyMap(),
                 netServers = o.optJSONObject("netServers")?.let { m -> m.keys().asSequence().associateWith { k -> m.optJSONArray(k)?.let { a -> (0 until a.length()).map { a.getString(it) } }.orEmpty() } } ?: emptyMap(),
                 subInfo = o.optJSONObject("subInfo")?.let { m -> m.keys().asSequence().mapNotNull { k -> m.optJSONObject(k)?.let { k to SubInfo.fromJson(it) } }.toMap() } ?: emptyMap(),
             )

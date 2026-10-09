@@ -52,6 +52,23 @@ object Assistant {
             has(q, "включи авто", "режим авто", "на авто", "авто режим", "поставь авто") -> Msg(false, "Включаю режим «Авто».", listOf(Btn("Режим «Авто»", "!auto")), auto = true)
             has(q, "отключи впн", "выключи впн", "отключи vpn", "выключи vpn", "отключись") -> Msg(false, "Отключаю VPN.", listOf(Btn("Отключить", "!disconnect")), auto = true)
             has(q, "подключи", "включи впн", "включи vpn", "подключись", "запусти впн") -> Msg(false, "Подключаю VPN.", listOf(Btn("Подключить", "!connect")), auto = true)
+            has(q, "автопилот", "сам улучша", "сам чини", "следи за", "сам следи", "улучшай сам") -> {
+                val off = has(q, "выключи", "отключи", "не надо")
+                Msg(false, if (off) "Выключаю автопилот." else "Включаю автопилот: пока VPN включён, сам чиню связь и облегчаю маски, а заодно прямо сейчас улучшаю соединение.",
+                    listOf(Btn("Применить", "!set autopilot ${if (off) "off" else "on"}")), auto = true)
+            }
+            has(q, "улучши соедин", "улучши связь", "улучши интернет", "сделай лучше", "улучши всё", "улучши все", "оптимизируй всё", "оптимизируй все") ->
+                Msg(false, "Улучшаю всё: проверяю серверы и маски, облегчаю тяжёлые, ускоряю YouTube и выбираю самые быстрые.", listOf(Btn("Улучшить", "!yt")), auto = true)
+            has(q, "gps", "геолок", "местополож", "локаци", "геопоз", "жпс") -> {
+                val off = has(q, "выключи", "отключи", "убери", "верни")
+                Msg(false, if (off) "Выключаю подмену GPS — вернётся настоящее местоположение." else "Включаю GPS под страну сервера. Если Android не даст — подскажу, где разрешить.",
+                    listOf(Btn("Применить", "!set gps ${if (off) "off" else "on"}")), auto = true)
+            }
+            has(q, "под приложени", "подстраива", "gemini", "джемини", "гемини", "chatgpt", "чатгпт") -> {
+                val off = has(q, "выключи", "отключи", "не надо")
+                Msg(false, if (off) "Выключаю подстройку под приложения." else "Включаю подстройку: открыли Gemini/ChatGPT — переключу на серверы страны, где они работают (США, Нидерланды…), YouTube — ускорю.",
+                    listOf(Btn("Применить", "!set appAware ${if (off) "off" else "on"}")), auto = true)
+            }
             has(q, "турбо", "ускорение телефона", "реклам", "quic") && has(q, "включи", "выключи", "отключи", "убери", "блокир") -> {
                 val off = has(q, "выключи", "отключи") && !has(q, "реклам") || has(q, "реклам") && has(q, "не блокир", "покажи рекламу", "выключи блок", "отключи блок")
                 val key = when { has(q, "реклам") -> "blockAds"; has(q, "quic") -> "blockQuic"; else -> "turbo" }
@@ -193,6 +210,9 @@ object Assistant {
     }
 
     private val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Main)
+    /** Messages from the app itself (AppWatch). */
+    fun note(t: String) { scope.launch { post(Msg(false, t)) } }
+
     private fun post(m: Msg) { messages.value = (messages.value + m).takeLast(80) }
 
     fun send(app: android.content.Context, text: String) {
@@ -232,10 +252,16 @@ object Assistant {
             cmd == "!disconnect" -> { com.vlesscardvpn.vpn.TunnelService.stop(app); post(Msg(false, "VPN отключён.")) }
             cmd.startsWith("!set ") -> {
                 val (key, v) = cmd.removePrefix("!set ").split(" ").let { it[0] to (it.getOrNull(1) == "on") }
-                Store.update { s -> s.copy(settings = when (key) { "blockAds" -> s.settings.copy(blockAds = v); "blockQuic" -> s.settings.copy(blockQuic = v); else -> s.settings.copy(turbo = v) }) }
+                Store.update { s -> s.copy(settings = when (key) { "blockAds" -> s.settings.copy(blockAds = v); "blockQuic" -> s.settings.copy(blockQuic = v); "gps" -> s.settings.copy(gpsSpoof = v); "autopilot" -> s.settings.copy(autopilot = v); "appAware" -> s.settings.copy(appAware = v); else -> s.settings.copy(turbo = v) }) }
                 reconnect(app)
-                post(Msg(false, (when (key) { "blockAds" -> "Блокировка рекламы"; "blockQuic" -> "Блокировка QUIC"; else -> "Ускорение телефона" }) + if (v) " включена." else " выключена."))
+                post(Msg(false, (when (key) { "blockAds" -> "Блокировка рекламы"; "blockQuic" -> "Блокировка QUIC"; "gps" -> "Подмена GPS"; "autopilot" -> "Автопилот"; "appAware" -> "Подстройка под приложения"; else -> "Ускорение телефона" }) + if (v) " включена." else " выключена."))
+                if (v && key == "autopilot") { Actions.boostYoutube(); post(Msg(false, "Начал улучшать соединение — результат напишу здесь.")) }
+                if (v && key == "gps") post(Msg(false, "Подмена GPS работает, пока включён VPN: телефон «окажется» в столице страны сервера. Нужно один раз разрешить: Параметры разработчика → «Приложение для фиктивных местоположений» → VLESS Card." +
+                    GpsMock.state.value.let { if (it.isNotEmpty()) "\nСейчас: $it" else "" }, listOf(Btn("Открыть параметры разработчика", "!devsettings"))))
+                if (v && key == "appAware" && !AppWatch.hasAccess(app)) post(Msg(false, "Чтобы видеть, какое приложение открыто, нужен «Доступ к истории использования» для VLESS Card.", listOf(Btn("Разрешить доступ", "!usage"))))
             }
+            cmd == "!devsettings" -> { GpsMock.openDevSettings(app); post(Msg(false, "Если пункта нет — включите режим разработчика: О телефоне → 7 раз нажать «Номер сборки».")) }
+            cmd == "!usage" -> { AppWatch.openAccess(app); post(Msg(false, "Найдите VLESS Card и включите доступ.")) }
             cmd == "!battery" -> runCatching {
                 app.startActivity(android.content.Intent(android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
                 post(Msg(false, "Открыл настройки: найдите VLESS Card → «Не оптимизировать» / «Без ограничений»."))

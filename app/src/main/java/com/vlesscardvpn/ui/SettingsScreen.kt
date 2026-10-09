@@ -138,6 +138,15 @@ fun SettingsScreen() {
             supportingText = { Text(com.vlesscardvpn.core.Traffic.line(s).first.ifEmpty { "На главном экране покажу, сколько ушло через VPN за месяц, и предупрежу у лимита" }) })
         Toggle("Подключаться после перезагрузки", "Телефон включился — VPN включится сам (если разрешение уже дано)", s.autoStart) { v -> set { it.copy(autoStart = v) } }
         Toggle("Умный YouTube", "Авто: в каждой сети сам сравнивает скорость YouTube через серверы и через обход DPI напрямую к Google. Если обход заметно быстрее — YouTube идёт им, остальное через серверы. Сломается — сам вернёт серверы", s.smartYoutube) { v -> set { it.copy(smartYoutube = v, ytDpi = emptyMap()) } }
+        Toggle("Автопилот помощника", "Пока VPN включён, помощник сам следит за связью: пропал интернет — чинит (серверы, маски, обход DPI), маска тяжёлая — ищет лёгкую. Обо всём пишет во вкладке «Помощник»", s.autopilot) { v -> set { it.copy(autopilot = v) } }
+        Toggle("Под приложение", "Видит, что открыто: Gemini, ChatGPT, Claude, Spotify, Netflix — сам переключит на серверы страны, где они работают (США, Нидерланды…); YouTube — ускорит видео для этой сети", s.appAware) { v -> set { it.copy(appAware = v) } }
+        if (s.appAware && !com.vlesscardvpn.core.AppWatch.hasAccess(ctx)) TextButton(onClick = { com.vlesscardvpn.core.AppWatch.openAccess(ctx) }) { Text("Разрешить «Доступ к истории использования»") }
+        Toggle("GPS под страну сервера", "Пока включён VPN, телефон «окажется» в столице страны сервера (подмена местоположения Android). Нужно выбрать VLESS Card в Параметрах разработчика → «Приложение для фиктивных местоположений»", s.gpsSpoof) { v -> set { it.copy(gpsSpoof = v) }; if (!v) com.vlesscardvpn.core.GpsMock.stop(ctx) }
+        if (s.gpsSpoof) {
+            val g by com.vlesscardvpn.core.GpsMock.state.collectAsState()
+            if (g.isNotEmpty()) Text(g, fontSize = 12.sp, color = Color.Gray)
+            TextButton(onClick = { com.vlesscardvpn.core.GpsMock.openDevSettings(ctx) }) { Text("Открыть параметры разработчика") }
+        }
         Toggle("Фоновое ускорение", "Само готовит серверы и маски при запуске, а при подключении раз в 20 минут проверяет и переходит на более быстрые. На мобильном — экономно", s.autoOptimize) { v -> set { it.copy(autoOptimize = v) } }
         Toggle("Самовосстановление", "Если проверка после подключения не прошла: другая рабочая маскировка → новый подбор → (Авто) обход DPI без сервера", s.autoHeal) { v -> set { it.copy(autoHeal = v) } }
 
