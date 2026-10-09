@@ -261,7 +261,7 @@ object XrayConfigBuilder {
                     .put("destination", probe).put("interval", "1m").put("connectivity", "").put("timeout", "10s").put("sampling", 3)))
             } else {
                 c.put("observatory", JSONObject().put("subjectSelector", arr(PROXY_PREFIX)).put("probeUrl", probe)
-                    .put("probeInterval", "1m").put("enableConcurrency", true))
+                    .put("probeInterval", "30s").put("enableConcurrency", true))
             }
         }
         c.put("routing", routing)

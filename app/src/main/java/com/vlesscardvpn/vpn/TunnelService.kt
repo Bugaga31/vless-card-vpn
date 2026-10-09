@@ -455,12 +455,16 @@ class TunnelService : VpnService() {
                 runCatching { Store.busy { Actions.doFindMasks(servers, 24) } }
             } else if (healStep <= 4) {
                 var n = 0
+                val k = Net.key(this@TunnelService)
+                // a DPI bypass known for this network: after the spares fail, connect through it at once and search in the background
+                val dpiKnown = (st.settings.dpiRemembered[k] ?: st.settings.dpiRemembered[Net.family(k)]) != null
                 for (level in 1..3) {
                     healStatus("Авто-поиск, шаг $level из 3: " + when (level) { 1 -> "переключаюсь на другие рабочие серверы"; 2 -> "подбираю маскировку"; else -> "перепроверяю всё" } + "…")
                     n = runCatching { Store.busy { Actions.autoRescue(servers, level) { step -> healStatus("Авто-поиск, шаг $level из 3: $step…") } } }.getOrDefault(0)
                     if (n > 0) break
+                    if (level == 1 && dpiKnown) break
                 }
-                if (n == 0) { autoDpiOnly = true; healStatus("Серверы пока не нашлись — включаю обход DPI без сервера и ищу дальше в фоне…") }
+                if (n == 0) { autoDpiOnly = true; fastRescue = true; healStatus("Серверы пока не нашлись — включаю обход DPI без сервера и ищу дальше в фоне…") }
             } else {
                 autoDpiOnly = true
                 healStatus("Серверы раз за разом отваливаются — пока обход DPI без сервера, поиск идёт в фоне…")
@@ -476,11 +480,13 @@ class TunnelService : VpnService() {
     /** Auto mode running without servers (none worked, or none known yet). */
     private fun serverless() = Store.state.value.settings.mode == Mode.AUTO && (autoDpiOnly || usedServers.isEmpty())
     /** Auto mode on ByeDPI only: every 3 min look for servers again; as soon as some work, switch back to them. */
+    /** The heal fell back to the DPI bypass early (servers not searched yet): the first background search starts soon. */
+    @Volatile private var fastRescue = false
     private fun rescueLater() {
         if (rescueJob?.isActive == true) return
         rescueJob = scope.launch {
             while (serverless() && Tunnel.status.value.state == Tunnel.State.CONNECTED) {
-                delay(180_000)
+                delay(if (fastRescue) { fastRescue = false; 10_000 } else 180_000)
                 if (healJob?.isActive == true) continue
                 val n = runCatching { Store.busy { Actions.autoRescue(emptyList(), 3) } }.getOrDefault(0)
                 if (n > 0 && serverless()) {
@@ -512,6 +518,11 @@ class TunnelService : VpnService() {
                     delay(1500)
                     Log.i("E2E", "network changed → soft restart")
                     if (Store.state.value.settings.mode == Mode.AUTO && Actions.recallNet(Net.key(this@TunnelService))) Log.i("E2E", "network changed → remembered servers")
+                    // check the servers in the new network before reconnecting: a dead one would cost a whole heal cycle
+                    if (Store.state.value.settings.mode == Mode.AUTO && !autoDpiOnly && usedServers.isNotEmpty()) {
+                        healStatus("Новая сеть — проверяю серверы…")
+                        Log.i("E2E", "network changed → recheck ok=${runCatching { Actions.quickRecheck() }.getOrDefault(false)}")
+                    }
                     lock.withLock { connect(soft = true) }
                 }
                 if (Store.state.value.settings.autoOptimize) optimizeSoon()
