@@ -12,7 +12,7 @@ object Services {
         Service("whatsapp", "WhatsApp", listOf("geosite:whatsapp")),
         Service("discord", "Discord", listOf("geosite:discord")),
         Service("x", "X (Twitter)", listOf("geosite:twitter")),
-        Service("ai", "ChatGPT и др. ИИ", listOf("geosite:openai", "domain:anthropic.com", "domain:claude.ai", "domain:gemini.google.com")),
+        Service("ai", "ChatGPT, Gemini и др. ИИ", listOf("geosite:openai") + AppWatch.AI_DOMAINS),
         Service("tiktok", "TikTok", listOf("geosite:tiktok")),
     )
     private val byId = ALL.associateBy { it.id }
