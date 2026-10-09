@@ -39,11 +39,12 @@ object AppWatch {
     )
 
     /** Country to switch to for this app, or null when the current servers already fit (or nothing better works). */
-    fun decide(need: Need, current: List<String>, available: List<Pair<String, Int>>): String? {
+    fun decide(need: Need, current: List<String>, available: List<Pair<String, Int>>, remembered: String? = null): String? {
         if (need.avoid.isEmpty()) return null
         val bad = current.isEmpty() || current.any { it in need.avoid } || current.all { it.isEmpty() }
         if (!bad) return null
         val ok = available.filter { it.first.isNotEmpty() && it.first !in need.avoid && it.second > 0 }
+        if (remembered != null && ok.any { it.first == remembered }) return remembered
         return PREFER.firstOrNull { p -> ok.any { it.first == p } } ?: ok.maxByOrNull { it.second }?.first
     }
 
@@ -54,14 +55,17 @@ object AppWatch {
      * «Автопилот помощника»: what to do now. fails = checks in a row that said «no internet»; heavy = slow mask in use.
      * "fix" → «Починить» (servers, masks, DPI), "lighten" → light masks; rate-limited so it never fights the user.
      */
-    fun pilot(fails: Int, heavy: Boolean, busy: Boolean, sinceFix: Long, sinceLight: Long, sinceEvolve: Long = 0): String? = when {
+    fun pilot(fails: Int, heavy: Boolean, busy: Boolean, sinceFix: Long, sinceLight: Long, sinceEvolve: Long = 0, slow: Boolean = false, sinceSpeedup: Long = 0): String? = when {
         busy -> null
         fails >= 2 && sinceFix > 3 * 60_000L -> "fix"
         heavy && sinceLight > 3600_000L -> "lighten"
+        slow && sinceSpeedup > 90 * 60_000L -> "speedup"
         fails == 0 && sinceEvolve > 2 * 3600_000L -> "evolve"
         else -> null
     }
     private var fails = 0; private var lastFix = 0L; private var lastLight = 0L; private var tick = 0
+    private var lastSpeedup = 0L; private var lastSpeedCheck = System.currentTimeMillis() - 35 * 60_000L
+    @Volatile var lastMbps = 0.0
     private var lastEvolve = System.currentTimeMillis() - 100 * 60_000L // first evolution ~20 min after start
     /** What the autopilot did (newest first): time + text, shown in «Помощник». */
     val journal = MutableStateFlow<List<Pair<Long, String>>>(emptyList())
@@ -71,7 +75,15 @@ object AppWatch {
         val s = Tunnel.status.value
         fails = if (s.checkOk == false) fails + 1 else 0
         val now = System.currentTimeMillis()
-        when (pilot(fails, Store.summary.value.heavyMask, Actions.progress.value.running, now - lastFix, now - lastLight, now - lastEvolve)) {
+        // light speed check (4 s) every 45 min, only on unmetered networks (Wi-Fi) — mobile data is not spent on it
+        var slow = false
+        if (now - lastSpeedCheck > 45 * 60_000L && fails == 0 && !Actions.progress.value.running && unmetered()) {
+            lastSpeedCheck = now
+            val port = Tunnel.socks?.port
+            if (port != null) { lastMbps = withContext(Dispatchers.IO) { runCatching { Tester.speed(port, 4).mbps }.getOrDefault(0.0) }; slow = lastMbps in 0.01..3.0 }
+        }
+        when (pilot(fails, Store.summary.value.heavyMask, Actions.progress.value.running, now - lastFix, now - lastLight, now - lastEvolve, slow, now - lastSpeedup)) {
+            "speedup" -> { lastSpeedup = now; say("Автопилот: скорость всего %.1f Мбит/с — ищу серверы и маски быстрее".format(lastMbps)); withContext(Dispatchers.Main) { Actions.boostYoutube() } }
             "evolve" -> {
                 lastEvolve = now
                 val sel = Store.state.value.selected
@@ -90,6 +102,8 @@ object AppWatch {
     val status = MutableStateFlow("")
     private var job: Job? = null
     private val ytDone = HashMap<String, Long>()
+    /** app → exit country that worked for it (picked first next time). */
+    private val goodFor = java.util.concurrent.ConcurrentHashMap<String, String>()
 
     fun hasAccess(ctx: Context): Boolean = runCatching {
         val ops = ctx.getSystemService(Context.APP_OPS_SERVICE) as android.app.AppOpsManager
@@ -116,7 +130,7 @@ object AppWatch {
     /** Runs while the VPN is on. reconnect() re-applies the servers without dropping the tunnel. */
     fun start(ctx: Context, reconnect: () -> Unit) {
         if (job?.isActive == true) return
-        val app = ctx.applicationContext
+        val app = ctx.applicationContext; appCtx = app
         job = CoroutineScope(SupervisorJob() + Dispatchers.Default).launch {
             var last = ""
             try {
@@ -145,13 +159,20 @@ object AppWatch {
         // what the internet really sees (Cloudflare trace through the tunnel) beats what the server names say
         val exit = Tunnel.socks?.port?.let { p -> withContext(Dispatchers.IO) { Tester.exitCountry(p) } }
         val cur = if (exit != null) listOf(exit) else countries()
-        if (exit != null && exit !in need.avoid) { status.value = "${need.title}: выход в ${Countries.title(exit)} — подходит"; return }
-        val target = decide(need, cur, Actions.countries(Store.state.value).filter { it.first != exit })
+        if (exit != null && exit !in need.avoid) { goodFor[need.title] = exit; status.value = "${need.title}: выход в ${Countries.title(exit)} — подходит"; return }
+        val target = decide(need, cur, Actions.countries(Store.state.value).filter { it.first != exit }, goodFor[need.title])
         if (target == null) { say("Открыт ${need.title}: выход ${exit?.let { Countries.title(it) } ?: "в неизвестной стране"}, а серверов нужной страны нет — добавьте серверы США/Европы"); return }
         Store.update { it.copy(settings = it.settings.copy(country = target)) }
         val n = Actions.selectBest(5, close = true)
         if (n > 0) { reconnect(); say("Открыт ${need.title}: переключил на серверы ${Countries.title(target)}" + if (Store.state.value.settings.gpsSpoof) ", GPS тоже там" else "") }
     }
+
+    private var appCtx: Context? = null
+    private fun unmetered(): Boolean = runCatching {
+        val cm = appCtx!!.getSystemService(Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
+        val n = cm.allNetworks.mapNotNull { cm.getNetworkCapabilities(it) }.firstOrNull { !it.hasTransport(android.net.NetworkCapabilities.TRANSPORT_VPN) && it.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET) }
+        n?.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_NOT_METERED) == true
+    }.getOrDefault(false)
 
     private fun say(t: String) { status.value = t; journal.value = (listOf(System.currentTimeMillis() to t) + journal.value).take(20); Assistant.note(t) }
 }

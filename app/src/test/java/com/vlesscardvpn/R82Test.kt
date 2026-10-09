@@ -122,3 +122,21 @@ class R89Test {
         org.junit.Assert.assertEquals(listOf("youtube"), st.services)
     }
 }
+
+class R90Test {
+    private val W = com.vlesscardvpn.core.AppWatch
+    @org.junit.Test fun slowTriggersSpeedup() {
+        org.junit.Assert.assertEquals("speedup", W.pilot(0, false, false, 0, 0, 0, slow = true, sinceSpeedup = 2 * 3600_000L))
+        org.junit.Assert.assertNull(W.pilot(0, false, false, 0, 0, 0, slow = true, sinceSpeedup = 60_000L))
+    }
+    @org.junit.Test fun remembersCountryPerApp() {
+        val gem = W.PROFILES.getValue("com.google.android.apps.bard")
+        org.junit.Assert.assertEquals("DE", W.decide(gem, listOf("RU"), listOf("US" to 1, "DE" to 1), remembered = "DE"))
+        org.junit.Assert.assertEquals("US", W.decide(gem, listOf("RU"), listOf("US" to 1, "DE" to 1), remembered = "JP"))
+    }
+    @org.junit.Test fun widgetLook() {
+        val on = com.vlesscardvpn.vpn.VpnWidget.look(com.vlesscardvpn.core.Tunnel.State.CONNECTED, true, "NL-1", "")
+        org.junit.Assert.assertEquals("Подключено", on.second); org.junit.Assert.assertEquals("NL-1", on.third)
+        org.junit.Assert.assertEquals("Подключено · нет интернета", com.vlesscardvpn.vpn.VpnWidget.look(com.vlesscardvpn.core.Tunnel.State.CONNECTED, false, "", "").second)
+    }
+}
