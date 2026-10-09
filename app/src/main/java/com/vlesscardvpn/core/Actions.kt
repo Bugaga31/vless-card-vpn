@@ -854,6 +854,31 @@ object Actions {
         return Store.state.value.let { s5 -> s5.servers.filter { s5.state(it).works } }.let { if (it.isEmpty()) 0 else selectBest(5, close = true, among = it) }
     }
 
+    /**
+     * Network changed (Auto): the selected servers checked once in the new network (1–3 s, outside the tunnel); the dead
+     * ones are dropped, and if none passes, the 12 best known are checked. True = something working is selected.
+     */
+    suspend fun quickRecheck(): Boolean {
+        val st = Store.state.value
+        val sel = st.selected
+        if (sel.isEmpty() || job?.isActive == true) return false
+        val prev = progress.value
+        try {
+            realTest(sel, "Проверка после смены сети", big = false, attempts = 1)
+            var now = Store.state.value
+            val okSel = sel.filter { now.state(it).works }
+            if (okSel.isNotEmpty()) { if (okSel.size < sel.size) selectBest(okSel.size, close = true, among = okSel); return true }
+            val ids = sel.map { it.id }.toSet()
+            val cand = preferred(now, now.servers.filter { it.id !in ids && now.state(it).works }).sortedBy { now.state(it).score }.take(12)
+            if (cand.isEmpty()) return false
+            realTest(cand, "Проверка после смены сети", big = false, attempts = 1)
+            now = Store.state.value
+            val ok = cand.filter { now.state(it).works }
+            if (ok.isEmpty()) return false
+            selectBest(5, close = true, among = ok); return true
+        } finally { progress.value = prev }
+    }
+
     /** Instant start on old results: the selected + best known servers checked once (no big download), then connect. */
     private suspend fun preflight(onReady: () -> Unit): String {
         val st = Store.state.value
