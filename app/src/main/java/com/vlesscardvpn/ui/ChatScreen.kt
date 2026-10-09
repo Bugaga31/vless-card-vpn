@@ -30,23 +30,7 @@ fun ChatScreen() {
     LaunchedEffect(msgs.size) { if (msgs.isNotEmpty()) list.animateScrollToItem(msgs.size - 1) }
     fun send() { val t = input; input = ""; Assistant.send(ctx, t) }
     Column(Modifier.fillMaxSize().imePadding()) {
-        val dl by com.vlesscardvpn.core.LocalLlm.download.collectAsState()
-        val cfg by com.vlesscardvpn.core.Store.settings.collectAsState()
-        val model = remember(cfg.llmModel, dl.running) { Assistant.llm(ctx) }
-        Row(Modifier.fillMaxWidth().padding(16.dp, 12.dp, 8.dp, 4.dp), verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text("Помощник", fontSize = 20.sp)
-                Text(if (model != null) "ИИ на телефоне: ${model.title} ✓" else "Ответы по шаблонам · можно скачать ИИ-модель", fontSize = 12.sp, color = Color.Gray)
-            }
-            if (!dl.running) TextButton(onClick = { Assistant.send(ctx, "скачай модель") }) { Text(if (model != null) "Модель" else "Скачать ИИ") }
-        }
-        if (dl.running && dl.total > 0) Column(Modifier.padding(horizontal = 16.dp)) {
-            LinearProgressIndicator(progress = { dl.done.toFloat() / dl.total }, modifier = Modifier.fillMaxWidth())
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Скачиваю модель: ${dl.done * 100 / dl.total}% (${"%.2f".format(dl.done / 1e9)} из ${"%.2f".format(dl.total / 1e9)} ГБ)", fontSize = 12.sp, modifier = Modifier.weight(1f))
-                TextButton(onClick = { Assistant.run(ctx, "!dlstop") }) { Text("Стоп") }
-            }
-        }
+        Text("Помощник", fontSize = 20.sp, modifier = Modifier.padding(16.dp, 12.dp, 16.dp, 4.dp))
         LazyColumn(Modifier.weight(1f).fillMaxWidth().padding(horizontal = 12.dp), state = list, verticalArrangement = Arrangement.spacedBy(8.dp)) {
             items(msgs) { m ->
                 Column(Modifier.fillMaxWidth(), horizontalAlignment = if (m.mine) Alignment.End else Alignment.Start) {

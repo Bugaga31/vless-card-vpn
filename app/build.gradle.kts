@@ -91,7 +91,6 @@ dependencies {
     implementation("androidx.compose.material:material-icons-extended")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
-    implementation("com.google.mediapipe:tasks-genai:0.10.24") // on-phone LLM (DeepSeek R1 distill / Qwen) for «Помощник»
     implementation("com.google.zxing:core:3.5.3") // QR codes of server links (no camera, no Play services)
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20240303")

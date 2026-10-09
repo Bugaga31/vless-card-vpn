@@ -51,9 +51,54 @@ object Tester {
     const val TG_URL = "https://api.telegram.org/"
     const val BIG_BYTES = 200_000
 
+    /**
+     * TCP ping of all servers at once: non-blocking sockets in one selector (no thread per server — the 96-thread pool
+     * used to cap it), names resolved in parallel first (each distinct name once). Results arrive as they come.
+     */
     suspend fun tcp(servers: List<Server>, parallel: Int = 96, timeoutMs: Int = 2500, onEach: (Server, Int) -> Unit) = coroutineScope {
-        val sem = Semaphore(parallel)
-        servers.map { s -> async(Bg.io) { sem.withPermit { onEach(s, if (s.isTcpBased) tcpOne(s.address, s.port, timeoutMs) else resolves(s.address)) } } }.awaitAll()
+        val names = servers.map { it.address }.distinct()
+        val sem = Semaphore(64)
+        val ips = names.map { h -> async(Bg.io) { sem.withPermit { h to runCatching { InetAddress.getByName(h) }.getOrNull() } } }.awaitAll().toMap()
+        servers.filter { !it.isTcpBased }.forEach { onEach(it, if (ips[it.address] != null) 1 else 0) }
+        val tcpList = servers.filter { it.isTcpBased }
+        tcpList.filter { ips[it.address] == null }.forEach { onEach(it, 0) }
+        val ok = tcpList.filter { ips[it.address] != null }
+        kotlinx.coroutines.withContext(Bg.io) { nioPing(ok.map { InetSocketAddress(ips.getValue(it.address), it.port) }, timeoutMs, maxOf(parallel, 512)) { i, ms -> onEach(ok[i], ms) } }
+    }
+
+    /** Connects to all [targets] with up to [window] sockets open at once; [onEach] (index, ms or 0). Blocking. */
+    fun nioPing(targets: List<InetSocketAddress>, timeoutMs: Int, window: Int = 512, onEach: (Int, Int) -> Unit) {
+        if (targets.isEmpty()) return
+        val sel = java.nio.channels.Selector.open()
+        val start = LongArray(targets.size); val open = HashMap<Int, java.nio.channels.SocketChannel>()
+        var next = 0
+        fun finish(i: Int, ms: Int) { open.remove(i)?.let { ch -> runCatching { ch.close() } }; runCatching { onEach(i, ms) } }
+        try {
+            while (next < targets.size || open.isNotEmpty()) {
+                while (next < targets.size && open.size < window) {
+                    val i = next++
+                    val ch = runCatching { java.nio.channels.SocketChannel.open().apply { configureBlocking(false) } }.getOrNull()
+                    if (ch == null) { onEach(i, 0); continue }
+                    start[i] = System.nanoTime(); open[i] = ch
+                    val now = runCatching { ch.connect(targets[i]) }
+                    when {
+                        now.isFailure -> finish(i, 0)
+                        now.getOrDefault(false) -> finish(i, 1)
+                        else -> ch.register(sel, java.nio.channels.SelectionKey.OP_CONNECT, i)
+                    }
+                }
+                sel.select(20)
+                val it = sel.selectedKeys().iterator()
+                while (it.hasNext()) {
+                    val k = it.next(); it.remove()
+                    val i = k.attachment() as Int; k.cancel()
+                    val done = runCatching { (k.channel() as java.nio.channels.SocketChannel).finishConnect() }.getOrDefault(false)
+                    finish(i, if (done) ((System.nanoTime() - start[i]) / 1_000_000).toInt().coerceAtLeast(1) else 0)
+                }
+                val limit = System.nanoTime() - timeoutMs * 1_000_000L
+                open.keys.filter { start[it] < limit }.forEach { finish(it, 0) }
+            }
+        } finally { open.values.forEach { runCatching { it.close() } }; runCatching { sel.close() } }
     }
 
     /** ms (≥1) or 0 when unreachable. UDP-only protocols (Hysteria2) return 1 if the name resolves. */
