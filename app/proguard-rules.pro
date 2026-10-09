@@ -24,3 +24,12 @@
 # Readable stack traces in crash reports.
 -keepattributes SourceFile,LineNumberTable
 -renamesourcefileattribute SourceFile
+
+# MediaPipe LLM Inference («Помощник»): JNI looks classes up by name; protobuf lite messages are reflected.
+-keep class com.google.mediapipe.** { *; }
+-dontwarn com.google.mediapipe.**
+-keep class com.google.protobuf.** { *; }
+-dontwarn com.google.protobuf.**
+-dontwarn com.google.auto.value.**
+-dontwarn javax.lang.model.**
+-dontwarn com.google.errorprone.annotations.**
