@@ -2,24 +2,25 @@ package com.vlesscardvpn.core
 
 import com.vlesscardvpn.model.Mode
 import com.vlesscardvpn.xray.Mask
-import com.vlesscardvpn.xray.MaskBrain
 import com.vlesscardvpn.xray.Masks
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 
 /**
- * «Помощник»: a chat with the app's on-phone mask network ([MaskBrain]) and everything the app has measured.
+ * «Помощник»: a chat about everything the app has measured (mask statistics per network, servers, speed, the phone),
+ * and it runs the app for you: masks, Auto, YouTube speed-up, settings.
  * Not a large language model: it understands questions by key words (in Russian, typos tolerated by stems) and
  * answers from real data — what the network learned about this provider, the best masks, servers, speed, YouTube.
  * Buttons under an answer start the matching action; its result comes back into the chat.
  */
 object Assistant {
     data class Btn(val label: String, val cmd: String)
-    data class Msg(val mine: Boolean, val text: String, val buttons: List<Btn> = emptyList())
+    /** [auto]: an order («ускорь YouTube») — the first button runs right away. */
+    data class Msg(val mine: Boolean, val text: String, val buttons: List<Btn> = emptyList(), val auto: Boolean = false)
 
-    const val HELLO = "Привет! Я помощник VLESS Card и нейросеть масок на этом телефоне. Спросите, что режут в вашей сети, " +
-        "какая маска лучше, почему медленно или не открывается сайт — отвечу по реальным замерам и могу сам запустить нужное."
+    const val HELLO = "Привет! Я помощник VLESS Card. Спросите, что режут в вашей сети, какая маска лучше, почему медленно, " +
+        "что с телефоном — или скажите, что сделать: «ускорь YouTube», «смени маску», «облегчи маску», «включи авто», «включи турбо»."
     val START = listOf(Btn("Что режут в моей сети?", "что режут в моей сети"), Btn("Лучшие маски", "какие маски лучше"),
         Btn("Почему медленно?", "почему медленно"), Btn("Что ты умеешь?", "помощь"))
 
@@ -27,9 +28,10 @@ object Assistant {
 
     /** Facts the answer is built from (filled from the store in the app, by hand in tests). */
     data class Facts(
-        val net: String, val brain: MaskBrain, val connected: Boolean, val route: String, val check: String,
+        val net: String, val stats: Map<String, MaskStat>, val connected: Boolean, val route: String, val check: String,
         val servers: Int, val working: Int, val best: List<Triple<String, Int, Int>>,   // name, ms, kbps
         val mode: Mode, val ytDpi: Boolean?, val dpiKnown: Boolean, val selectedMask: Mask?,
+        val phone: PhoneInfo? = null,
     )
 
     private fun has(q: String, vararg stems: String) = stems.any { q.contains(it) }
@@ -42,19 +44,26 @@ object Assistant {
             q.isEmpty() -> Msg(false, "Напишите вопрос 🙂", START)
             host != null && has(q, "сайт", "открыва", "провер", "работает", "не грузит", "http") || host != null && q == host ->
                 Msg(false, "Проверяю $host тремя путями: напрямую, через VPN и через обход DPI…", listOf(Btn("Проверить $host", "!site $host")))
-            has(q, "дипсик", "deepseek", "qwen", "квен", "языков", "llm", "скачай модел", "ии-модел", "ии модел", "умнее", "чатгпт", "chatgpt", "gpt") ->
-                Msg(false, "Могу скачать настоящую языковую модель — она будет работать прямо на телефоне, без интернета. Тогда я начну отвечать " +
-                    "своими словами, а не по шаблонам (цифры всё равно беру из замеров).\n" + LocalLlm.MODELS.joinToString("\n") { m ->
-                        "• ${m.title} — ${"%.1f".format(m.size / 1e9)} ГБ, нужно от ${m.ramGb} ГБ ОЗУ: ${m.note}" },
-                    LocalLlm.MODELS.map { Btn("Скачать ${it.title}", "!dl ${it.id}") } + Btn("Отключить ИИ", "!llmoff"))
+            // ---- orders: done right away
+            has(q, "ускор", "быстрее", "разгон", "оптимиз", "тормоз") && has(q, "ютуб", "youtube", "видео", "ютьюб") || has(q, "ускорь", "оптимизируй", "разгони") ->
+                Msg(false, "Ускоряю YouTube: включаю «Умный YouTube» и ускорение телефона, облегчаю тяжёлые маски, меряю реальную скорость лучших серверов и выбираю самые быстрые.", listOf(Btn("Ускорить YouTube", "!yt")), auto = true)
+            has(q, "облегч", "легкую маск", "легче маск") -> Msg(false, "Пробую лёгкие маски вместо тяжёлых (мелкие пакеты, один поток) — они быстрее.", listOf(Btn("Облегчить маски", "!lighten")), auto = true)
+            has(q, "смени маск", "другую маск", "поменяй маск", "следующую маск", "переключи маск") -> Msg(false, "Переключаю серверы на следующую проверенную маску.", listOf(Btn("Сменить маску", "!nextmask")), auto = true)
+            has(q, "включи авто", "режим авто", "на авто", "авто режим", "поставь авто") -> Msg(false, "Включаю режим «Авто».", listOf(Btn("Режим «Авто»", "!auto")), auto = true)
+            has(q, "отключи впн", "выключи впн", "отключи vpn", "выключи vpn", "отключись") -> Msg(false, "Отключаю VPN.", listOf(Btn("Отключить", "!disconnect")), auto = true)
+            has(q, "подключи", "включи впн", "включи vpn", "подключись", "запусти впн") -> Msg(false, "Подключаю VPN.", listOf(Btn("Подключить", "!connect")), auto = true)
+            has(q, "турбо", "ускорение телефона", "реклам", "quic") && has(q, "включи", "выключи", "отключи", "убери", "блокир") -> {
+                val off = has(q, "выключи", "отключи") && !has(q, "реклам") || has(q, "реклам") && has(q, "не блокир", "покажи рекламу", "выключи блок", "отключи блок")
+                val key = when { has(q, "реклам") -> "blockAds"; has(q, "quic") -> "blockQuic"; else -> "turbo" }
+                Msg(false, "Меняю настройку.", listOf(Btn("Применить", "!set $key ${if (off) "off" else "on"}")), auto = true)
+            }
+            has(q, "телефон", "устройств", "батаре", "памят", "андроид", "android", "смартфон", "заряд", "озу") -> Msg(false, phone(f),
+                (if (f.phone?.batteryOptimized == true) listOf(Btn("Разрешить работу в фоне", "!battery")) else emptyList()) + Btn("Ускорить YouTube", "!yt"))
             has(q, "привет", "здравств", "кто ты", "ты кто") -> Msg(false, HELLO, START)
             has(q, "умеешь", "помощь", "help", "команд", "что можешь") -> Msg(false, HELP, START)
-            has(q, "сброс", "забудь", "обнули", "переобуч") ->
-                Msg(false, "Могу стереть всё, чему нейросеть научилась (${f.brain.samples} проверок). Обычно это не нужно — старые сети она не путает с новыми.",
-                    listOf(Btn("Да, стереть обучение", "!reset")))
-            has(q, "обуч", "точност", "угадыв", "нейрос", "нейрон", "модел") -> Msg(false, "Нейросеть масок " + MaskBrain.summary() + ". " + brainNote(f), listOf(Btn("Что режут в моей сети?", "что режут")))
+            has(q, "обуч", "статист", "сколько провер") -> Msg(false, "Знаю результаты ${f.stats.values.sumOf { it.ok + it.fail }} проверок масок в сети «${f.net}» (${f.stats.size} разных масок). Каждый подбор маскировки добавляет новые.", listOf(Btn("Что режут в моей сети?", "что режут")))
             has(q, "режут", "блокир", "провайдер", "оператор", "тспу", "dpi", "что в сети", "моей сети", "сеть") -> Msg(false, insights(f), listOf(Btn("Подобрать маскировку", "!masks"), Btn("Лучшие маски", "лучшие маски")))
-            has(q, "подбер", "найди маск", "подобр", "новую маск") -> Msg(false, "Запускаю подбор маскировки для выбранных серверов — нейросеть поставит вероятные маски первыми.", listOf(Btn("Подобрать маскировку", "!masks")))
+            has(q, "подбер", "найди маск", "подобр", "новую маск") -> Msg(false, "Запускаю подбор маскировки для выбранных серверов — сначала пробую те, что уже проходили в этой сети.", listOf(Btn("Подобрать маскировку", "!masks")))
             has(q, "маск", "маскир") -> Msg(false, topMasks(f), listOf(Btn("Подобрать маскировку", "!masks")))
             has(q, "ютуб", "youtube", "видео") -> Msg(false, youtube(f), listOf(Btn("Измерить скорость", "!speed")))
             has(q, "медлен", "тормоз", "скорост", "лагает", "долго") -> Msg(false, slow(f), listOf(Btn("Измерить скорость", "!speed"), Btn("Проверить серверы", "!test")))
@@ -65,55 +74,73 @@ object Assistant {
         }
     }
 
-    const val HELP = "Я понимаю вопросы вроде: «что режут в моей сети», «какие маски лучше», «подбери маску», «почему медленно», " +
+    private fun phone(f: Facts): String {
+        val p = f.phone ?: return "Не удалось прочитать данные телефона."
+        val pr = p.problems()
+        return p.text() + "\n" + if (pr.isEmpty()) "Ничего не мешает VPN ✓" else "Что мешает VPN:\n" + pr.joinToString("\n") { "• $it" }
+    }
+
+    const val HELP = "Я понимаю и выполняю: «ускорь YouTube», «облегчи маску», «смени маску», «включи авто», «подключи / отключи VPN», " +
+        "«включи турбо», «блокируй рекламу», «что с телефоном». Отвечаю на вопросы вроде: «что режут в моей сети», «какие маски лучше», «подбери маску», «почему медленно», " +
         "«как YouTube», «не работает», «лучшие серверы», «проверь rutracker.org», «как ты обучена», «сбрось обучение»."
 
     private fun pct(p: Double) = "${(p * 100).toInt()}%"
-    private fun brainNote(f: Facts) = if (f.brain.trained) "" else "Пока мало данных — после первого «Подобрать маскировку» начну подсказывать."
+    private fun total(f: Facts) = f.stats.values.sumOf { it.ok + it.fail }
+    private fun know(f: Facts) = total(f) >= 20
+    private fun brainNote(f: Facts) = if (know(f)) "" else "Пока мало данных — после первого «Подобрать маскировку» начну подсказывать."
 
-    /** What each trick changes for this network, from the network's own predictions (vs the plain mask). */
-    fun effects(brain: MaskBrain, net: String): List<Pair<String, Double>> {
-        val base = Masks.DEFAULT
-        val tricks = listOf(
-            "дробление TLS hello" to base.copy(packets = "tlshello", length = "50-100", delay = "10-20"),
-            "«ступеньки» кусков" to base.copy(packets = "tlshello", lengths = "1-1,2-4,5-10", delays = "1-2,5-10,10-20"),
-            "обход DPI под Xray" to base.copy(dpi = Masks.CURRENT_DPI),
-            "белый SNI" to base.copy(sni = "vk.com"),
-            "узкий канал (MSS)" to base.copy(mss = 300),
-            "один поток (mux)" to base.copy(mux = true),
-            "отпечаток Firefox" to base.copy(fingerprint = "firefox"),
-            "отпечаток Safari" to base.copy(fingerprint = "safari"),
-            "ALPN http/1.1" to base.copy(alpn = "http/1.1"),
-            "быстрый старт (TFO)" to base.copy(tfo = true),
-            "путь через IPv6" to base.copy(ipv6 = true),
-        )
-        val p0 = brain.predict(base, net, null)
-        return tricks.map { (n, m) -> n to brain.predict(m, net, null) - p0 }.sortedByDescending { it.second }
+    /** Tricks: how to recognize each in a mask. */
+    private val TRICKS: List<Pair<String, (Mask) -> Boolean>> = listOf(
+        "дробление TLS hello" to { m -> m.packets.isNotEmpty() },
+        "«ступеньки» кусков" to { m -> m.lengths.isNotEmpty() },
+        "обход DPI под Xray" to { m -> m.dpi.isNotEmpty() },
+        "белый SNI" to { m -> m.sni.isNotEmpty() },
+        "узкий канал (MSS)" to { m -> m.mss > 0 },
+        "один поток (mux)" to { m -> m.mux },
+        "отпечаток Firefox" to { m -> m.fingerprint == "firefox" },
+        "отпечаток Safari" to { m -> m.fingerprint == "safari" },
+        "ALPN http/1.1" to { m -> m.alpn == "http/1.1" },
+        "быстрый старт (TFO)" to { m -> m.tfo },
+        "путь через IPv6" to { m -> m.ipv6 },
+    )
+
+    /** Per trick: success share of masks with it minus without it, on this network (only tricks tried ≥ 3 times both ways). */
+    fun effects(stats: Map<String, MaskStat>): List<Pair<String, Double>> {
+        val rows = stats.mapNotNull { (id, st) -> Masks.byId(id)?.let { it to st } }
+        fun rate(l: List<Pair<Mask, MaskStat>>): Double? { val ok = l.sumOf { it.second.ok }; val n = l.sumOf { it.second.ok + it.second.fail }; return if (n < 3) null else ok.toDouble() / n }
+        return TRICKS.mapNotNull { (name, has) ->
+            val (y, n) = rows.partition { has(it.first) }
+            val a = rate(y); val b = rate(n)
+            if (a == null || b == null) null else name to a - b
+        }.sortedByDescending { it.second }
     }
 
+    /** Share of plain connections (no tricks at all) that passed here; null = not tried enough. */
+    private fun plainRate(f: Facts): Double? = f.stats.mapNotNull { (id, st) -> Masks.byId(id)?.takeIf { m -> TRICKS.none { it.second(m) } }?.let { st } }
+        .let { l -> val n = l.sumOf { it.ok + it.fail }; if (n < 3) null else l.sumOf { it.ok }.toDouble() / n }
+
     private fun insights(f: Facts): String {
-        if (!f.brain.trained) return "Про сеть «${f.net}» я пока мало знаю (${f.brain.samples} проверок). " + brainNote(f)
-        val e = effects(f.brain, f.net)
-        val p0 = f.brain.predict(Masks.DEFAULT, f.net, null)
+        if (!know(f)) return "Про сеть «${f.net}» я пока мало знаю (${total(f)} проверок). " + brainNote(f)
+        val e = effects(f.stats)
+        val p0 = plainRate(f)
         val up = e.filter { it.second > 0.05 }.take(4); val down = e.filter { it.second < -0.05 }.takeLast(3).reversed()
         return buildString {
-            append("Сеть «${f.net}». Обычное соединение без маски, по моей оценке, проходит в ${pct(p0)} случаев")
-            append(if (p0 < 0.4) " — здесь явно режут." else if (p0 < 0.75) " — режут частично." else " — почти не режут.")
+            append("Сеть «${f.net}», по ${total(f)} проверкам масок.")
+            if (p0 != null) append(" Обычное соединение без хитростей прошло в ${pct(p0)} случаев" + if (p0 < 0.4) " — здесь явно режут." else if (p0 < 0.75) " — режут частично." else " — почти не режут.")
             if (up.isNotEmpty()) append("\nПомогает: " + up.joinToString(", ") { "${it.first} (+${pct(it.second)})" } + ".")
             if (down.isNotEmpty()) append("\nМешает: " + down.joinToString(", ") { "${it.first} (−${pct(-it.second)})" } + ".")
-            if (up.isEmpty() && down.isEmpty()) append("\nЗаметной разницы между приёмами не вижу — выбирайте по скорости.")
+            if (up.isEmpty() && down.isEmpty()) append("\nЗаметной разницы между приёмами нет — выбирайте по скорости.")
             if (f.dpiKnown) append("\nДля этой сети уже подобран обход DPI без сервера.")
-            if (f.brain.accuracy >= 0) append("\n(угадываю ${pct(f.brain.accuracy)} новых результатов)")
         }
     }
 
     private fun topMasks(f: Facts): String {
-        val cur = f.selectedMask?.let { "Сейчас у лучшего сервера: ${it.title}" + if (f.brain.trained) " (шанс ${pct(f.brain.predict(it, f.net, null))})." else "." } ?: ""
-        if (!f.brain.trained) return listOf(cur, "Рейтинг масок появится после первого подбора. " + brainNote(f)).filter { it.isNotEmpty() }.joinToString("\n")
-        val list = (Masks.ALL + Masks.auto).distinctBy { it.id }.filter { !it.hasNoise && it.hop.isEmpty() }
-            .map { it to f.brain.predict(it, f.net, null) - Masks.cost(it) * 0.02 }.sortedByDescending { it.second }.take(5)
-        return (if (cur.isNotEmpty()) cur + "\n" else "") + "Самые вероятные для «${f.net}»:\n" +
-            list.mapIndexed { i, (m, _) -> "${i + 1}. ${m.title} — ${pct(f.brain.predict(m, f.net, null))}" + if (Masks.cost(m) >= 2) " (тяжёлая, медленнее)" else "" }.joinToString("\n")
+        val cur = f.selectedMask?.let { m -> "Сейчас у лучшего сервера: ${m.title}" + (f.stats[m.id]?.let { " (прошла ${it.ok} из ${it.ok + it.fail})" } ?: "") + "." } ?: ""
+        val list = f.stats.entries.filter { it.value.ok > 0 }.mapNotNull { (id, st) -> Masks.byId(id)?.let { it to st } }
+            .sortedWith(compareByDescending<Pair<Mask, MaskStat>> { it.second.score - Masks.cost(it.first) * 0.03 }).take(5)
+        if (list.isEmpty()) return listOf(cur, "Рейтинг масок появится после первого подбора маскировки.").filter { it.isNotEmpty() }.joinToString("\n")
+        return (if (cur.isNotEmpty()) cur + "\n" else "") + "Лучшие в «${f.net}» по проверкам:\n" +
+            list.mapIndexed { i, (m, st) -> "${i + 1}. ${m.title} — прошла ${st.ok} из ${st.ok + st.fail}" + if (Masks.cost(m) >= 2) " (тяжёлая, медленнее)" else "" }.joinToString("\n")
     }
 
     private fun youtube(f: Facts) = when {
@@ -136,7 +163,7 @@ object Assistant {
         append(if (f.connected) "VPN подключён: ${f.check.ifEmpty { "проверяю…" }}" else "VPN выключен.")
         append("\nРаботают ${f.working} из ${f.servers} серверов.")
         if (f.working == 0) append(if (f.dpiKnown) " Пока можно без сервера — через обход DPI (Авто включит сам)." else " Нужна проверка и подбор маскировки.")
-        if (f.brain.trained && f.brain.predict(Masks.DEFAULT, f.net, null) < 0.4) append("\nВ сети «${f.net}» сильно режут — без маскировки почти ничего не пройдёт.")
+        if ((plainRate(f) ?: 1.0) < 0.4) append("\nВ сети «${f.net}» сильно режут — без маскировки почти ничего не пройдёт.")
     }
 
     private fun servers(f: Facts) = if (f.best.isEmpty()) "Рабочих серверов пока нет — нажмите «Проверить серверы»." else
@@ -148,9 +175,11 @@ object Assistant {
         val ok = st.servers.filter { st.state(it).works }.sortedBy { st.state(it).score }
         val sel = st.selected.firstOrNull() ?: ok.firstOrNull()
         val s = Tunnel.status.value
-        return Facts(net, MaskBrain.shared, s.state == Tunnel.State.CONNECTED, s.route, s.check, st.servers.size, ok.size,
+        val stats = (st.maskStats[net] ?: st.maskStats[Net.family(net)]).orEmpty()
+        return Facts(net, stats, s.state == Tunnel.State.CONNECTED, s.route, s.check, st.servers.size, ok.size,
             ok.take(5).map { Triple(it.name, st.state(it).realMs, st.state(it).kbps) }, st.settings.mode, st.settings.ytDpi[net],
-            (st.settings.dpiRemembered[net] ?: st.settings.dpiRemembered[Net.family(net)]) != null, sel?.let { Masks.byId(st.state(it).maskFor(net)) })
+            (st.settings.dpiRemembered[net] ?: st.settings.dpiRemembered[Net.family(net)]) != null, sel?.let { Masks.byId(st.state(it).maskFor(net)) },
+            runCatching { PhoneInfo.collect(app) }.getOrNull())
     }
 
     /** Everything measured, as text for the language model. */
@@ -160,40 +189,19 @@ object Assistant {
         append(insights(f)).append('\n')
         append("YouTube: ").append(youtube(f)).append('\n')
         f.selectedMask?.let { append("Маска лучшего сервера: ${it.title}" + if (Masks.cost(it) >= 2) " (тяжёлая)\n" else "\n") }
-        append("Нейросеть масок: ").append(MaskBrain.summary())
+        f.phone?.let { append('\n').append(it.text()); it.problems().takeIf { p -> p.isNotEmpty() }?.let { p -> append(" Мешает: ").append(p.joinToString(" ")) } }
     }
 
     private val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Main)
-    @Volatile var thinking = false; private set
-
     private fun post(m: Msg) { messages.value = (messages.value + m).takeLast(80) }
-    private fun replaceLast(m: Msg) { val l = messages.value; if (l.isNotEmpty()) messages.value = l.dropLast(1) + m }
-
-    /** The language model chosen and downloaded (null = rule answers only). */
-    fun llm(app: android.content.Context): LocalLlm.Model? = LocalLlm.model(Store.state.value.settings.llmModel)?.takeIf { LocalLlm.installed(app, it) }
 
     fun send(app: android.content.Context, text: String) {
-        val t = text.trim(); if (t.isEmpty() || thinking) return
+        val t = text.trim(); if (t.isEmpty()) return
         if (t.startsWith("!")) { run(app, t); return }
-        val history = messages.value.map { it.mine to it.text }
         post(Msg(true, t))
-        val f = facts(app)
-        val a = answer(t, f)
-        val m = llm(app)
-        val modelTalk = m != null && a.buttons.none { it.cmd.startsWith("!dl ") || it.cmd == "!reset" }
-        if (!modelTalk) post(a)
-        else {
-            // the model words it, the buttons (actions) stay from the rules; on any failure — the rule answer
-            post(Msg(false, "…", a.buttons)); thinking = true
-            scope.launch(kotlinx.coroutines.Dispatchers.IO) {
-                val out = runCatching {
-                    LocalLlm.ask(app, m!!, LocalLlm.prompt(t, factsText(f), if (a.text.startsWith("Не понял")) "" else a.text, history)) { part ->
-                        if (part.isNotEmpty()) replaceLast(Msg(false, part, a.buttons)) }
-                }.getOrElse { e -> "" .also { android.util.Log.w("Assistant", "llm failed", e) } }
-                replaceLast(if (out.isBlank() || out.startsWith("Ошибка модели")) a.copy(text = a.text + if (out.isNotBlank()) "\n($out)" else "") else Msg(false, out, a.buttons))
-                thinking = false
-            }
-        }
+        val a = answer(t, facts(app))
+        post(a)
+        if (a.auto) { run(app, a.buttons.first().cmd, quiet = true); return }
         // a site in the question: check right away (one tap less)
         a.buttons.firstOrNull { it.cmd.startsWith("!site ") }?.let { run(app, it.cmd, quiet = true) }
     }
@@ -201,23 +209,6 @@ object Assistant {
     /** Commands of the buttons; results come back as messages. */
     fun run(app: android.content.Context, cmd: String, quiet: Boolean = false) {
         when {
-            cmd.startsWith("!dl ") -> {
-                val m = LocalLlm.model(cmd.removePrefix("!dl ")) ?: return
-                if (LocalLlm.installed(app, m)) { use(m); post(Msg(false, "${m.title} уже скачана — теперь отвечаю ею.")); return }
-                if (LocalLlm.download.value.running) { post(Msg(false, "Уже скачиваю модель — прогресс вверху чата.")); return }
-                val ram = LocalLlm.ramGb(app)
-                post(Msg(true, "Скачай ${m.title}"))
-                post(Msg(false, "Скачиваю ${m.title} (${"%.1f".format(m.size / 1e9)} ГБ)" + (if (Tunnel.socks != null) " через VPN" else " — если не пойдёт, подключите VPN и нажмите ещё раз") +
-                    ". Можно уйти с экрана, прогресс вверху чата." + if (ram in 0.5..(m.ramGb - 0.5)) "\n⚠️ У телефона ${"%.1f".format(ram)} ГБ ОЗУ, а модели нужно от ${m.ramGb} — может не запуститься, лучше «Qwen 2.5 0.5B»." else ""))
-                scope.launch(kotlinx.coroutines.Dispatchers.IO) {
-                    val err = LocalLlm.fetch(app, m)
-                    if (err.isNotEmpty()) post(Msg(false, err, listOf(Btn("Продолжить загрузку", cmd))))
-                    else { use(m); post(Msg(false, "Готово! ${m.title} на телефоне — теперь отвечаю своими словами. Первый ответ дольше: модель загружается в память.", START)) }
-                }
-            }
-            cmd == "!dlstop" -> LocalLlm.cancel()
-            cmd == "!llmoff" -> { use(null); post(Msg(false, "ИИ-модель выключена — отвечаю по шаблонам. Файл модели остался, включить: «скачай модель».")) }
-            cmd.startsWith("!llmdel ") -> LocalLlm.model(cmd.removePrefix("!llmdel "))?.let { LocalLlm.delete(app, it); if (Store.state.value.settings.llmModel == it.id) use(null); post(Msg(false, "${it.title} удалена, место освобождено.")) }
             cmd.startsWith("!site ") -> {
                 val host = cmd.removePrefix("!site ")
                 if (!quiet) post(Msg(true, "Проверь $host"))
@@ -225,7 +216,30 @@ object Assistant {
                 scope.launch { delay(300); while (Actions.siteCheck.value.running) delay(300); Actions.siteCheck.value.let { r ->
                     post(Msg(false, r.verdict + if (r.details.isNotEmpty()) "\n" + r.details else "")) } }
             }
-            cmd == "!reset" -> { MaskBrain.reset(); post(Msg(false, "Обучение стёрто — начну заново со следующего подбора.")) }
+            cmd == "!yt" -> job(app, if (quiet) null else "Ускорь YouTube") { Actions.boostYoutube() }
+            cmd == "!lighten" -> job(app, if (quiet) null else "Облегчи маски") { Actions.lighten() }
+            cmd == "!nextmask" -> {
+                if (!quiet) post(Msg(true, "Смени маску"))
+                val sel = Store.state.value.selected
+                if (sel.isNotEmpty() && Actions.nextMasks(sel)) { reconnect(app); post(Msg(false, "Маска сменена" + if (Tunnel.socks != null) " — переподключаюсь." else ".")) }
+                else post(Msg(false, "Запасных масок нет — подберу новые.", listOf(Btn("Подобрать маскировку", "!masks"))))
+            }
+            cmd == "!auto" -> { Store.update { it.copy(settings = it.settings.copy(mode = Mode.AUTO)) }; reconnect(app); post(Msg(false, "Режим «Авто» включён" + if (Tunnel.socks != null) " — переподключаюсь." else ". Нажмите «Подключить».")) }
+            cmd == "!connect" -> {
+                if (Store.state.value.settings.proxyOnly || android.net.VpnService.prepare(app) == null) { com.vlesscardvpn.vpn.TunnelService.start(app); post(Msg(false, "Подключаюсь…")) }
+                else post(Msg(false, "Нажмите «Подключить» на главной один раз — Android спросит разрешение на VPN, дальше смогу сам."))
+            }
+            cmd == "!disconnect" -> { com.vlesscardvpn.vpn.TunnelService.stop(app); post(Msg(false, "VPN отключён.")) }
+            cmd.startsWith("!set ") -> {
+                val (key, v) = cmd.removePrefix("!set ").split(" ").let { it[0] to (it.getOrNull(1) == "on") }
+                Store.update { s -> s.copy(settings = when (key) { "blockAds" -> s.settings.copy(blockAds = v); "blockQuic" -> s.settings.copy(blockQuic = v); else -> s.settings.copy(turbo = v) }) }
+                reconnect(app)
+                post(Msg(false, (when (key) { "blockAds" -> "Блокировка рекламы"; "blockQuic" -> "Блокировка QUIC"; else -> "Ускорение телефона" }) + if (v) " включена." else " выключена."))
+            }
+            cmd == "!battery" -> runCatching {
+                app.startActivity(android.content.Intent(android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+                post(Msg(false, "Открыл настройки: найдите VLESS Card → «Не оптимизировать» / «Без ограничений»."))
+            }
             cmd == "!speed" -> {
                 post(Msg(true, "Измерь скорость")); Actions.speedTest()
                 scope.launch { delay(300); while (Actions.speed.value.running) delay(300); post(Msg(false, Actions.speed.value.text)) }
@@ -245,5 +259,14 @@ object Assistant {
         }
     }
 
-    private fun use(m: LocalLlm.Model?) { if (m == null) LocalLlm.close(); Store.update { it.copy(settings = it.settings.copy(llmModel = m?.id ?: "")) } }
+    private fun reconnect(app: android.content.Context) { if (Tunnel.socks != null) com.vlesscardvpn.vpn.TunnelService.start(app) }
+
+    /** Starts a long action and posts its result into the chat when it ends. */
+    private fun job(app: android.content.Context, userText: String?, start: () -> Unit) {
+        if (Actions.progress.value.running) { post(Msg(false, "Сейчас уже идёт «${Actions.progress.value.title}» — дождитесь, и я покажу результат.")); return }
+        if (userText != null) post(Msg(true, userText))
+        start()
+        scope.launch { delay(500); while (Actions.progress.value.running) delay(500); post(Msg(false, Actions.progress.value.message.ifEmpty { "Готово." })) }
+    }
+
 }
