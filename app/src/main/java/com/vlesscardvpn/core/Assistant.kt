@@ -42,6 +42,11 @@ object Assistant {
             q.isEmpty() -> Msg(false, "Напишите вопрос 🙂", START)
             host != null && has(q, "сайт", "открыва", "провер", "работает", "не грузит", "http") || host != null && q == host ->
                 Msg(false, "Проверяю $host тремя путями: напрямую, через VPN и через обход DPI…", listOf(Btn("Проверить $host", "!site $host")))
+            has(q, "дипсик", "deepseek", "qwen", "квен", "языков", "llm", "скачай модел", "ии-модел", "ии модел", "умнее", "чатгпт", "chatgpt", "gpt") ->
+                Msg(false, "Могу скачать настоящую языковую модель — она будет работать прямо на телефоне, без интернета. Тогда я начну отвечать " +
+                    "своими словами, а не по шаблонам (цифры всё равно беру из замеров).\n" + LocalLlm.MODELS.joinToString("\n") { m ->
+                        "• ${m.title} — ${"%.1f".format(m.size / 1e9)} ГБ, нужно от ${m.ramGb} ГБ ОЗУ: ${m.note}" },
+                    LocalLlm.MODELS.map { Btn("Скачать ${it.title}", "!dl ${it.id}") } + Btn("Отключить ИИ", "!llmoff"))
             has(q, "привет", "здравств", "кто ты", "ты кто") -> Msg(false, HELLO, START)
             has(q, "умеешь", "помощь", "help", "команд", "что можешь") -> Msg(false, HELP, START)
             has(q, "сброс", "забудь", "обнули", "переобуч") ->
@@ -148,22 +153,71 @@ object Assistant {
             (st.settings.dpiRemembered[net] ?: st.settings.dpiRemembered[Net.family(net)]) != null, sel?.let { Masks.byId(st.state(it).maskFor(net)) })
     }
 
+    /** Everything measured, as text for the language model. */
+    fun factsText(f: Facts): String = buildString {
+        append("Сеть: ${f.net}. Режим: ${f.mode.name}. VPN: ").append(if (f.connected) "подключён, маршрут «${f.route}», проверка: ${f.check}" else "выключен").append('\n')
+        append(servers(f)).append('\n')
+        append(insights(f)).append('\n')
+        append("YouTube: ").append(youtube(f)).append('\n')
+        f.selectedMask?.let { append("Маска лучшего сервера: ${it.title}" + if (Masks.cost(it) >= 2) " (тяжёлая)\n" else "\n") }
+        append("Нейросеть масок: ").append(MaskBrain.summary())
+    }
+
+    private val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Main)
+    @Volatile var thinking = false; private set
+
     private fun post(m: Msg) { messages.value = (messages.value + m).takeLast(80) }
+    private fun replaceLast(m: Msg) { val l = messages.value; if (l.isNotEmpty()) messages.value = l.dropLast(1) + m }
+
+    /** The language model chosen and downloaded (null = rule answers only). */
+    fun llm(app: android.content.Context): LocalLlm.Model? = LocalLlm.model(Store.state.value.settings.llmModel)?.takeIf { LocalLlm.installed(app, it) }
 
     fun send(app: android.content.Context, text: String) {
-        val t = text.trim(); if (t.isEmpty()) return
+        val t = text.trim(); if (t.isEmpty() || thinking) return
         if (t.startsWith("!")) { run(app, t); return }
+        val history = messages.value.map { it.mine to it.text }
         post(Msg(true, t))
-        val a = answer(t, facts(app))
-        post(a)
+        val f = facts(app)
+        val a = answer(t, f)
+        val m = llm(app)
+        val modelTalk = m != null && a.buttons.none { it.cmd.startsWith("!dl ") || it.cmd == "!reset" }
+        if (!modelTalk) post(a)
+        else {
+            // the model words it, the buttons (actions) stay from the rules; on any failure — the rule answer
+            post(Msg(false, "…", a.buttons)); thinking = true
+            scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                val out = runCatching {
+                    LocalLlm.ask(app, m!!, LocalLlm.prompt(t, factsText(f), if (a.text.startsWith("Не понял")) "" else a.text, history)) { part ->
+                        if (part.isNotEmpty()) replaceLast(Msg(false, part, a.buttons)) }
+                }.getOrElse { e -> "" .also { android.util.Log.w("Assistant", "llm failed", e) } }
+                replaceLast(if (out.isBlank() || out.startsWith("Ошибка модели")) a.copy(text = a.text + if (out.isNotBlank()) "\n($out)" else "") else Msg(false, out, a.buttons))
+                thinking = false
+            }
+        }
         // a site in the question: check right away (one tap less)
         a.buttons.firstOrNull { it.cmd.startsWith("!site ") }?.let { run(app, it.cmd, quiet = true) }
     }
 
     /** Commands of the buttons; results come back as messages. */
     fun run(app: android.content.Context, cmd: String, quiet: Boolean = false) {
-        val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main)
         when {
+            cmd.startsWith("!dl ") -> {
+                val m = LocalLlm.model(cmd.removePrefix("!dl ")) ?: return
+                if (LocalLlm.installed(app, m)) { use(m); post(Msg(false, "${m.title} уже скачана — теперь отвечаю ею.")); return }
+                if (LocalLlm.download.value.running) { post(Msg(false, "Уже скачиваю модель — прогресс вверху чата.")); return }
+                val ram = LocalLlm.ramGb(app)
+                post(Msg(true, "Скачай ${m.title}"))
+                post(Msg(false, "Скачиваю ${m.title} (${"%.1f".format(m.size / 1e9)} ГБ)" + (if (Tunnel.socks != null) " через VPN" else " — если не пойдёт, подключите VPN и нажмите ещё раз") +
+                    ". Можно уйти с экрана, прогресс вверху чата." + if (ram in 0.5..(m.ramGb - 0.5)) "\n⚠️ У телефона ${"%.1f".format(ram)} ГБ ОЗУ, а модели нужно от ${m.ramGb} — может не запуститься, лучше «Qwen 2.5 0.5B»." else ""))
+                scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                    val err = LocalLlm.fetch(app, m)
+                    if (err.isNotEmpty()) post(Msg(false, err, listOf(Btn("Продолжить загрузку", cmd))))
+                    else { use(m); post(Msg(false, "Готово! ${m.title} на телефоне — теперь отвечаю своими словами. Первый ответ дольше: модель загружается в память.", START)) }
+                }
+            }
+            cmd == "!dlstop" -> LocalLlm.cancel()
+            cmd == "!llmoff" -> { use(null); post(Msg(false, "ИИ-модель выключена — отвечаю по шаблонам. Файл модели остался, включить: «скачай модель».")) }
+            cmd.startsWith("!llmdel ") -> LocalLlm.model(cmd.removePrefix("!llmdel "))?.let { LocalLlm.delete(app, it); if (Store.state.value.settings.llmModel == it.id) use(null); post(Msg(false, "${it.title} удалена, место освобождено.")) }
             cmd.startsWith("!site ") -> {
                 val host = cmd.removePrefix("!site ")
                 if (!quiet) post(Msg(true, "Проверь $host"))
@@ -190,4 +244,6 @@ object Assistant {
             else -> send(app, cmd.removePrefix("!"))
         }
     }
+
+    private fun use(m: LocalLlm.Model?) { if (m == null) LocalLlm.close(); Store.update { it.copy(settings = it.settings.copy(llmModel = m?.id ?: "")) } }
 }
