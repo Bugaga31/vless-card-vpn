@@ -45,20 +45,34 @@ object AppWatch {
      * «Автопилот помощника»: what to do now. fails = checks in a row that said «no internet»; heavy = slow mask in use.
      * "fix" → «Починить» (servers, masks, DPI), "lighten" → light masks; rate-limited so it never fights the user.
      */
-    fun pilot(fails: Int, heavy: Boolean, busy: Boolean, sinceFix: Long, sinceLight: Long): String? = when {
+    fun pilot(fails: Int, heavy: Boolean, busy: Boolean, sinceFix: Long, sinceLight: Long, sinceEvolve: Long = 0): String? = when {
         busy -> null
         fails >= 2 && sinceFix > 3 * 60_000L -> "fix"
         heavy && sinceLight > 3600_000L -> "lighten"
+        fails == 0 && sinceEvolve > 2 * 3600_000L -> "evolve"
         else -> null
     }
     private var fails = 0; private var lastFix = 0L; private var lastLight = 0L; private var tick = 0
+    private var lastEvolve = System.currentTimeMillis() - 100 * 60_000L // first evolution ~20 min after start
+    /** What the autopilot did (newest first): time + text, shown in «Помощник». */
+    val journal = MutableStateFlow<List<Pair<Long, String>>>(emptyList())
 
     private suspend fun autopilot(reconnect: () -> Unit) {
         if (++tick % 24 != 0) return // once a minute
         val s = Tunnel.status.value
         fails = if (s.checkOk == false) fails + 1 else 0
         val now = System.currentTimeMillis()
-        when (pilot(fails, Store.summary.value.heavyMask, Actions.progress.value.running, now - lastFix, now - lastLight)) {
+        when (pilot(fails, Store.summary.value.heavyMask, Actions.progress.value.running, now - lastFix, now - lastLight, now - lastEvolve)) {
+            "evolve" -> {
+                lastEvolve = now
+                val sel = Store.state.value.selected
+                if (sel.isNotEmpty()) {
+                    say("Автопилот: эволюция масок — скрещиваю и проверяю мутантов рабочих масок в этой сети")
+                    withContext(Dispatchers.Main) { Actions.findMasks(sel.take(3), perServer = 12) }
+                    delay(1000); while (Actions.progress.value.running) delay(1000)
+                    Actions.progress.value.message.takeIf { it.isNotEmpty() }?.let { say("Эволюция: $it") }
+                }
+            }
             "fix" -> { lastFix = now; fails = 0; say("Автопилот: интернет через VPN пропал — чиню сам (серверы, маски, обход DPI)"); withContext(Dispatchers.Main) { Actions.fixAll { reconnect() } } }
             "lighten" -> { lastLight = now; say("Автопилот: маска тяжёлая, видео может тормозить — ищу лёгкую"); withContext(Dispatchers.Main) { Actions.lighten() } }
         }
@@ -125,5 +139,5 @@ object AppWatch {
         if (n > 0) { reconnect(); say("Открыт ${need.title}: переключил на серверы ${Countries.title(target)}" + if (Store.state.value.settings.gpsSpoof) ", GPS тоже там" else "") }
     }
 
-    private fun say(t: String) { status.value = t; Assistant.note(t) }
+    private fun say(t: String) { status.value = t; journal.value = (listOf(System.currentTimeMillis() to t) + journal.value).take(20); Assistant.note(t) }
 }

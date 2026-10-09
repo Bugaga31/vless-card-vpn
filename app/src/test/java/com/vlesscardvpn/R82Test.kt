@@ -99,3 +99,13 @@ class R87Test {
         org.junit.Assert.assertNull(W.pilot(5, true, true, 9_000_000, 9_000_000))
     }
 }
+
+class R88Test {
+    private val W = com.vlesscardvpn.core.AppWatch
+    @org.junit.Test fun evolvesEveryTwoHoursWhenHealthy() {
+        org.junit.Assert.assertEquals("evolve", W.pilot(0, false, false, 0, 0, 3 * 3600_000L))
+        org.junit.Assert.assertNull(W.pilot(0, false, false, 0, 0, 3600_000L))
+        org.junit.Assert.assertNull(W.pilot(1, false, false, 0, 0, 9 * 3600_000L))
+        org.junit.Assert.assertNull(W.pilot(0, false, true, 0, 0, 9 * 3600_000L))
+    }
+}
