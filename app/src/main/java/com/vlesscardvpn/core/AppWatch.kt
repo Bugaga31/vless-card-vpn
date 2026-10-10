@@ -37,6 +37,78 @@ object AppWatch {
         "app.revanced.android.youtube" to Need("YouTube", youtube = true),
     )
 
+    /**
+     * «Сторож сервисов»: app → page its service needs. While such an app is open the page is checked through the
+     * tunnel (on opening and every 2 min); if it doesn't load twice in a row, other working servers are selected.
+     */
+    data class Guard(val title: String, val url: String)
+    val GUARDS: Map<String, Guard> = mapOf(
+        "org.telegram.messenger" to Guard("Telegram", "https://web.telegram.org/"),
+        "org.telegram.messenger.web" to Guard("Telegram", "https://web.telegram.org/"),
+        "org.thunderdog.challegram" to Guard("Telegram X", "https://web.telegram.org/"),
+        "org.telegram.plus" to Guard("Telegram", "https://web.telegram.org/"),
+        "com.whatsapp" to Guard("WhatsApp", "https://web.whatsapp.com/"),
+        "com.whatsapp.w4b" to Guard("WhatsApp", "https://web.whatsapp.com/"),
+        "com.instagram.android" to Guard("Instagram", "https://www.instagram.com/"),
+        "com.facebook.katana" to Guard("Facebook", "https://www.facebook.com/"),
+        "com.discord" to Guard("Discord", "https://discord.com/api/v9/gateway"),
+        "com.twitter.android" to Guard("X", "https://x.com/"),
+        "com.zhiliaoapp.musically" to Guard("TikTok", "https://www.tiktok.com/"),
+        "com.ss.android.ugc.trill" to Guard("TikTok", "https://www.tiktok.com/"),
+        "com.google.android.youtube" to Guard("YouTube", "https://www.youtube.com/"),
+        "app.revanced.android.youtube" to Guard("YouTube", "https://www.youtube.com/"),
+        "com.google.android.apps.youtube.music" to Guard("YouTube Music", "https://music.youtube.com/"),
+        "com.openai.chatgpt" to Guard("ChatGPT", "https://chatgpt.com/"),
+        "com.google.android.apps.bard" to Guard("Gemini", "https://gemini.google.com/"),
+        "com.spotify.music" to Guard("Spotify", "https://open.spotify.com/"),
+        "com.reddit.frontpage" to Guard("Reddit", "https://www.reddit.com/"),
+        "com.viber.voip" to Guard("Viber", "https://www.viber.com/"),
+        "com.linkedin.android" to Guard("LinkedIn", "https://www.linkedin.com/"),
+    )
+
+    /** What the guard does after [fails] failed checks in a row: "wait", "switch" (others work) or "rescue" (nothing else). */
+    fun guardDecide(fails: Int, others: Int, tunnelOk: Boolean?, sinceAction: Long): String = when {
+        fails < 2 -> "wait"
+        tunnelOk == false -> "wait" // the whole tunnel is down — the autopilot's «fix» handles that
+        sinceAction < 3 * 60_000L -> "wait" // just switched: give the new servers a moment
+        others > 0 -> "switch"
+        sinceAction > 10 * 60_000L -> "rescue"
+        else -> "wait"
+    }
+    private val guardAt = HashMap<String, Long>(); private var guardFails = 0; private var guardAction = 0L
+
+    private suspend fun guard(pkg: String, g: Guard, opened: Boolean, reconnect: () -> Unit) {
+        val now = System.currentTimeMillis()
+        if (!opened && now - (guardAt[pkg] ?: 0) < 120_000L) return
+        if (Actions.progress.value.running) return
+        guardAt[pkg] = now
+        val port = Tunnel.socks?.port ?: return
+        var p = withContext(Dispatchers.IO) { Tester.site(g.url, port) }
+        if (!p.answers) { delay(1500); p = withContext(Dispatchers.IO) { Tester.site(g.url, port) } }
+        guardFails = if (p.answers) 0 else guardFails + 1
+        if (p.answers) return
+        val st = Store.state.value
+        val cur = st.selected.map { it.id }.toSet()
+        val others = st.servers.filter { it.id !in cur && st.state(it).works }
+        when (guardDecide(maxOf(guardFails, 2), others.size, Tunnel.status.value.checkOk, now - guardAction)) {
+            "switch" -> {
+                guardAction = now; guardFails = 0
+                val n = Actions.selectBest(5, close = true, among = others)
+                if (n > 0) {
+                    reconnect(); say("${g.title} не открывался через текущие серверы (${p.result}) — переключил на $n других")
+                    delay(10_000)
+                    val ok = withContext(Dispatchers.IO) { Tester.site(g.url, Tunnel.socks?.port ?: port) }.answers
+                    if (ok) say("${g.title} теперь открывается") else guardAt[pkg] = 0 // next check right away
+                }
+            }
+            "rescue" -> {
+                guardAction = now; guardFails = 0
+                say("${g.title} не открывается, а других рабочих серверов нет — ищу маскировку, оживляю серверы за Cloudflare, обновляю подписки")
+                withContext(Dispatchers.Main) { Actions.fixAll { reconnect() } }
+            }
+        }
+    }
+
     /** Country to switch to for this app, or null when the current servers already fit (or nothing better works). */
     fun decide(need: Need, current: List<String>, available: List<Pair<String, Int>>, remembered: String? = null): String? {
         if (need.avoid.isEmpty()) return null
@@ -188,7 +260,10 @@ object AppWatch {
                     val st = Store.state.value.settings
                     if (st.gpsSpoof) GpsMock.follow(app, gpsCountry(st.country, countries())) else GpsMock.stop(app)
                     val pkg = if (st.appAware && hasAccess(app)) foreground(app) else null
-                    if (pkg != null && pkg != last) { last = pkg; PROFILES[pkg]?.let { handle(app, it, reconnect) } }
+                    val opened = pkg != null && pkg != last
+                    if (opened) { last = pkg!!; PROFILES[pkg]?.let { handle(app, it, reconnect) } }
+                    // usage events only show an app when it opens: until another one opens, the last one is still on screen
+                    if (st.autopilot && last.isNotEmpty() && interactive(app)) GUARDS[last]?.let { runCatching { guard(last, it, opened, reconnect) } }
                     if (st.autopilot) autopilot(reconnect)
                     delay(1500)
                 }
@@ -217,6 +292,7 @@ object AppWatch {
         if (n > 0) { reconnect(); say("Открыт ${need.title}: переключил на серверы ${Countries.title(target)}" + if (Store.state.value.settings.gpsSpoof) ", GPS тоже там" else "") }
     }
 
+    private fun interactive(ctx: Context) = runCatching { (ctx.getSystemService(Context.POWER_SERVICE) as android.os.PowerManager).isInteractive }.getOrDefault(true)
     private var appCtx: Context? = null
     private fun unmetered(): Boolean = runCatching {
         val cm = appCtx!!.getSystemService(Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager

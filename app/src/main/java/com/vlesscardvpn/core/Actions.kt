@@ -890,6 +890,10 @@ object Actions {
         val cand = (failed + st.servers.filter { st.state(it).tcpMs > 0 && it.id !in ids }.sortedBy { st.state(it).tcpMs }.take(10)).distinctBy { it.id }
         if (cand.isNotEmpty()) doFindMasks(cand, 24, budgetMs = 120_000)
         Store.state.value.let { s2 -> s2.servers.filter { s2.state(it).works } }.takeIf { it.isNotEmpty() }?.let { return selectBest(5, close = true, among = it) }
+        // dead servers behind Cloudflare: the same server on another (unblocked) edge address
+        (failed.filter { Revive.cdnLike(it) } + deadCdn()).distinctBy { it.id }.takeIf { it.isNotEmpty() }?.let { d ->
+            onStep("оживляю серверы за Cloudflare"); if (doRevive(d, 6) > 0) return selectBest(5, close = true)
+        }
         if (level < 3) return 0
         onStep("обновляю подписки и перепроверяю все серверы")
         if (now - st.settings.lastSubRefresh > 3600_000L || st.servers.size < 20) doRefresh()
@@ -900,6 +904,34 @@ object Actions {
         if (c2.isNotEmpty()) doFindMasks(c2, 24, budgetMs = 120_000)
         if (Store.state.value.servers.none { Masks.isWarp(it) && Store.state.value.state(it).works }) { onStep("настраиваю WARP"); runCatching { doSetupWarp(2, null) } }
         return Store.state.value.let { s5 -> s5.servers.filter { s5.state(it).works } }.let { if (it.isEmpty()) 0 else selectBest(5, close = true, among = it) }
+    }
+
+    /** Dead servers that could be revived through another Cloudflare edge (Revive). */
+    fun deadCdn(st: AppState = Store.state.value): List<Server> = st.servers.filter { st.state(it).realMs == 0 && Revive.cdnLike(it) && " · CDN " !in it.name }
+
+    /** «Оживить серверы»: dead CDN servers tried on other Cloudflare addresses; the copies that pass are kept. */
+    fun revive() = launch("Оживляю серверы") {
+        val dead = deadCdn()
+        if (dead.isEmpty()) return@launch "Нечего оживлять: среди нерабочих нет серверов за Cloudflare (ws / xhttp / grpc + TLS). Остальным помогает «Подобрать маскировку»."
+        val n = doRevive(dead, 10)
+        if (n > 0) "Ожило серверов: $n (копии на чистых адресах Cloudflare, в списке с пометкой «· CDN»). Выбираю их." .also { selectBest(5, close = true) }
+        else "Проверил ${minOf(dead.size, 10)} нерабочих серверов за Cloudflare на 8 других адресах — ни один не ожил (скорее всего, сервер выключен у владельца)."
+    }
+
+    /** Returns the number of revived copies kept (max 2 per original). */
+    suspend fun doRevive(dead: List<Server>, limit: Int = 6): Int {
+        val cand = withContext(Bg.io) { dead.filter { Revive.cdnLike(it) }.distinctBy { Revive.routeName(it) + it.secret + it.path }.take(limit * 2).filter { Revive.behindCloudflare(it) }.take(limit) }
+        if (cand.isEmpty()) return 0
+        val addrs = Revive.CLEAN_NAMES.shuffled().take(2) + Revive.randomIps(6)
+        val vars = cand.flatMap { Revive.variants(it, addrs) }
+        Store.addServers(vars)
+        realTest(vars, "Оживляю серверы через Cloudflare", big = false, attempts = 1)
+        val now = Store.state.value
+        val keep = vars.filter { now.state(it).works }.groupBy { it.name.substringBefore(" · CDN") }
+            .flatMap { (_, l) -> l.sortedBy { now.state(it).score }.take(2) }.map { it.id }.toSet()
+        val drop = vars.map { it.id }.filter { it !in keep }.toSet()
+        Store.update { st -> st.copy(servers = st.servers.filter { it.id !in drop }, states = st.states - drop) }
+        return keep.size
     }
 
     /**

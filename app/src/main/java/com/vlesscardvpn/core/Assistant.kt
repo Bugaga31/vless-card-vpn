@@ -70,6 +70,7 @@ object Assistant {
                 }
             }
             has(q, "почему не работ", "почему не подкл", "диагност", "что не так", "в чём причин", "в чем причин", "заморозк") -> Msg(false, "Проверю причину: белые списки, блокировку серверов по IP или по имени (SNI) и «заморозку» загрузки внутри VPN.", listOf(Btn("Проверить", "!diag")), auto = true)
+            has(q, "оживи", "нерабочие сервер", "мёртвые сервер", "мертвые сервер", "дохлые", "не работают сервер", "чистый ip", "чистые ip") -> Msg(false, "Попробую оживить нерабочие серверы за Cloudflare: тот же сервер часто отвечает на другом адресе Cloudflare, если оператор заблокировал только его IP.", listOf(Btn("Оживить", "!revive")), auto = true)
             has(q, "белые списк", "белый спис", "белых спис", "вайтлист", "whitelist") -> Msg(false, "Проверю, включены ли белые списки у оператора: открою напрямую разрешённые, обычные и заблокированные сайты.", listOf(Btn("Проверить", "!wl")), auto = true)
             has(q, "охлад", "греет", "горяч", "нагрел", "нагрев", "температур", "перегр") -> Msg(false, cooling(f), listOf(Btn("Снизить нагрузку", "!cool")), auto = has(q, "охлади", "остуди", "снизь"))
             has(q, "ускорь телефон", "ускорение телефона", "разгони телефон", "оптимизируй телефон", "автоускор") ->
@@ -293,6 +294,7 @@ object Assistant {
                 val r = Diagnose.report(Store.state.value.selected, Tunnel.socks?.port)
                 post(Msg(false, r, if (r.contains("SNI") || r.contains("белые списки")) listOf(Btn("Подобрать маскировку", "!masks")) else emptyList()))
             }
+            cmd == "!revive" -> job(app, null) { Actions.revive() }
             cmd == "!wl" -> scope.launch {
                 val r = Whitelist.check()
                 post(Msg(false, Whitelist.report(r), if (r.verdict == Whitelist.Verdict.WHITELIST) listOf(Btn("Подобрать маскировку", "!masks")) else emptyList()))
