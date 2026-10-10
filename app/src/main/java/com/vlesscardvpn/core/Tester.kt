@@ -166,6 +166,54 @@ object Tester {
         }
     }.getOrNull()
 
+    /** DNS query (A record) in wire format, id = [id]. */
+    fun dnsQuery(host: String, id: Int = 0x5a5a): ByteArray {
+        val out = java.io.ByteArrayOutputStream()
+        out.write(byteArrayOf((id shr 8).toByte(), id.toByte(), 1, 0, 0, 1, 0, 0, 0, 0, 0, 0))
+        host.trimEnd('.').split('.').forEach { l -> val b = l.toByteArray(); out.write(b.size); out.write(b) }
+        out.write(byteArrayOf(0, 0, 1, 0, 1)); return out.toByteArray()
+    }
+
+    /**
+     * The phone's DNS path as apps use it: SOCKS5 UDP ASSOCIATE → 1.1.1.1:53 → Xray's DNS. HTTP checks go via socks5h
+     * (Xray resolves on the server side), so a dead DNS path used to look healthy while apps could not open anything.
+     */
+    fun dnsViaSocks(port: Int, user: String = "", pass: String = "", host: String = "www.google.com"): Boolean = runCatching {
+        java.net.Socket().use { s ->
+            s.connect(InetSocketAddress("127.0.0.1", port), 2000); s.soTimeout = 5000
+            val o = s.getOutputStream(); val i = java.io.DataInputStream(s.getInputStream())
+            o.write(if (user.isNotEmpty()) byteArrayOf(5, 1, 2) else byteArrayOf(5, 1, 0)); o.flush()
+            val m = ByteArray(2); i.readFully(m)
+            if (m[1].toInt() == 2) {
+                val u = user.toByteArray(); val p = pass.toByteArray()
+                o.write(byteArrayOf(1, u.size.toByte()) + u + byteArrayOf(p.size.toByte()) + p); o.flush()
+                val r = ByteArray(2); i.readFully(r); check(r[1].toInt() == 0)
+            } else check(m[1].toInt() == 0)
+            o.write(byteArrayOf(5, 3, 0, 1, 0, 0, 0, 0, 0, 0)); o.flush()
+            val h = ByteArray(4); i.readFully(h); check(h[1].toInt() == 0)
+            val addr = when (h[3].toInt()) { 1 -> ByteArray(4); 4 -> ByteArray(16); else -> error("atyp") }.also { i.readFully(it) }
+            val rport = i.readUnsignedShort()
+            val relay = InetAddress.getByAddress(addr).let { if (it.isAnyLocalAddress) InetAddress.getByName("127.0.0.1") else it }
+            java.net.DatagramSocket().use { u ->
+                u.soTimeout = 5000
+                val q = dnsQuery(host, (System.nanoTime() and 0xffff).toInt())
+                val pkt = byteArrayOf(0, 0, 0, 1, 1, 1, 1, 1, 0, 53) + q
+                u.send(java.net.DatagramPacket(pkt, pkt.size, relay, rport))
+                val buf = ByteArray(1500); val dp = java.net.DatagramPacket(buf, buf.size); u.receive(dp)
+                val off = when (buf[3].toInt()) { 1 -> 10; 4 -> 22; else -> 7 + (buf[4].toInt() and 255) }
+                val an = ((buf[off + 6].toInt() and 255) shl 8) or (buf[off + 7].toInt() and 255)
+                dp.length > off + 12 && buf[off] == q[0] && buf[off + 1] == q[1] && an > 0
+            }
+        }
+    }.getOrDefault(false)
+
+    /** hev stats [txPackets, txBytes, rxPackets, rxBytes] between two samples: true when one direction moves and the other is dead. */
+    fun tunStalled(a: LongArray?, b: LongArray?): Boolean {
+        if (a == null || b == null || a.size < 4 || b.size < 4) return false
+        val dTx = b[0] - a[0]; val dRx = b[2] - a[2]
+        return (dTx >= 200 && dRx == 0L) || (dRx >= 200 && dTx == 0L)
+    }
+
     /** Country (ISO) the internet sees through the tunnel — Cloudflare trace «loc=». null = no answer. */
     fun exitCountry(port: Int): String? = runCatching {
         val client = fast.newBuilder().proxy(Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", port))).build()

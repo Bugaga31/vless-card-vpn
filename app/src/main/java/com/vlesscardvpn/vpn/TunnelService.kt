@@ -386,13 +386,21 @@ class TunnelService : VpnService() {
     private fun watchdog() {
         if (watchJob?.isActive == true) return
         watchJob = scope.launch {
-            var miss = 0
+            var miss = 0; var dnsMiss = 0; var stall = 0
             var offline = false
+            var wasAsleep = false
+            var stats = TProxyService.stats()
             while (Tunnel.status.value.state == Tunnel.State.CONNECTED) {
-                delay(if (offline) 10_000 else 45_000)
+                // wait 45 s (10 s offline), but check right away when the screen turns back on — that's when apps are opened
+                var waited = 0L; val period = if (offline) 10_000L else 45_000L
+                while (waited < period) { delay(5000); waited += 5000; val a = asleep(); if (wasAsleep && !a) { wasAsleep = false; delay(1500); break }; wasAsleep = a }
                 com.vlesscardvpn.core.Traffic.tick()
                 if (healJob?.isActive == true || asleep()) continue
-                val port = Tunnel.socks?.port ?: break
+                val auth = Tunnel.socks ?: break
+                val port = auth.port
+                val vpnMode = !Store.state.value.settings.proxyOnly
+                // the TUN engine stopped: nothing in the phone works, though the proxy itself is fine — rebuild like the big button
+                if (vpnMode && runCatching { !TProxyService.TProxyIsRunning() }.getOrDefault(false)) { hardRestart("движок VPN остановился"); break }
                 val ok = Tester.probeSocks(port, Store.state.value.settings.testUrl, big = false, youtube = false, attempts = 1).realMs > 0
                 if (!ok && !Actions.online()) {
                     miss = 0
@@ -409,8 +417,30 @@ class TunnelService : VpnService() {
                     Tunnel.status.value = cur.copy(check = "Связь пропала — ищу рабочий вариант…", checkOk = false)
                     heal(); break
                 }
+                if (ok && vpnMode) {
+                    // the proxy works, but do apps? DNS the way apps ask it, and traffic through the TUN in both directions
+                    dnsMiss = if (Tester.dnsViaSocks(port, auth.user, auth.pass) || Tester.dnsViaSocks(port, auth.user, auth.pass, "cloudflare.com")) 0 else dnsMiss + 1
+                    val now = TProxyService.stats()
+                    stall = if (Tester.tunStalled(stats, now)) stall + 1 else 0
+                    stats = now
+                    if (dnsMiss >= 2) { hardRestart("DNS перестал отвечать"); break }
+                    if (stall >= 3) { hardRestart("трафик приложений завис"); break }
+                }
             }
         }
+    }
+
+    /** What the big button does (stop + start), by itself: TUN, DNS and Xray are rebuilt. */
+    private var lastHard = 0L
+    private fun hardRestart(why: String) {
+        val now = System.currentTimeMillis()
+        if (now - lastHard < 5 * 60_000L) { heal(); return } // twice in 5 min: restarting doesn't help — heal (masks, servers)
+        lastHard = now
+        Log.i("E2E", "watchdog: hard restart — $why")
+        val cur = Tunnel.status.value
+        if (cur.state == Tunnel.State.CONNECTED) Tunnel.status.value = cur.copy(check = "Сам переподключаюсь: $why", checkOk = null)
+        com.vlesscardvpn.core.AppWatch.note("Связь: $why — переподключился сам, нажимать кнопку не нужно")
+        scope.launch { lock.withLock { connect(soft = false) } }
     }
 
     private var healJob: Job? = null

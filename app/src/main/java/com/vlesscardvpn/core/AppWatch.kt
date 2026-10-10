@@ -25,7 +25,6 @@ object AppWatch {
 
     val PROFILES: Map<String, Need> = mapOf(
         "com.google.android.apps.bard" to Need("Gemini", AI_BAD),
-        "com.google.android.googlequicksearchbox" to Need("Gemini (Google)", AI_BAD),
         "ai.x.grok" to Need("Grok", AI_BAD),
         "com.openai.chatgpt" to Need("ChatGPT", AI_BAD),
         "com.anthropic.claude" to Need("Claude", AI_BAD),
@@ -64,7 +63,7 @@ object AppWatch {
         else -> null
     }
     private var fails = 0; private var lastFix = 0L; private var lastLight = 0L; private var tick = 0
-    private var lastSpeedup = 0L; private var lastSpeedCheck = System.currentTimeMillis() - 35 * 60_000L
+    private var lastSpeedup = 0L; private var lastSpeedCheck = System.currentTimeMillis()
     @Volatile var lastMbps = 0.0
     private var evolveNet = ""
     private var lastEvolve = System.currentTimeMillis() - 100 * 60_000L // first evolution ~20 min after start
@@ -177,6 +176,9 @@ object AppWatch {
         val n = cm.allNetworks.mapNotNull { cm.getNetworkCapabilities(it) }.firstOrNull { !it.hasTransport(android.net.NetworkCapabilities.TRANSPORT_VPN) && it.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET) }
         n?.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_NOT_METERED) == true
     }.getOrDefault(false)
+
+    /** A line into the journal and the chat (also from the service). */
+    fun note(t: String) = say(t)
 
     private fun say(t: String) { status.value = t; journal.value = (listOf(System.currentTimeMillis() to t) + journal.value).take(20); Assistant.note(t) }
 }

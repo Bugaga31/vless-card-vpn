@@ -159,3 +159,25 @@ class R91Test {
         org.junit.Assert.assertFalse(plain.contains("warp-chain"))
     }
 }
+
+class R92Test {
+    @org.junit.Test fun dnsQueryWire() {
+        val q = com.vlesscardvpn.core.Tester.dnsQuery("www.google.com", 0x1234)
+        org.junit.Assert.assertEquals(0x12, q[0].toInt()); org.junit.Assert.assertEquals(0x34, q[1].toInt())
+        org.junit.Assert.assertEquals(12 + 16 + 4, q.size)
+        org.junit.Assert.assertEquals(3, q[12].toInt())
+    }
+    @org.junit.Test fun tunStall() {
+        val T = com.vlesscardvpn.core.Tester
+        org.junit.Assert.assertTrue(T.tunStalled(longArrayOf(0, 0, 0, 0), longArrayOf(250, 5000, 0, 0)))
+        org.junit.Assert.assertFalse(T.tunStalled(longArrayOf(0, 0, 0, 0), longArrayOf(250, 5000, 40, 90000)))
+        org.junit.Assert.assertFalse(T.tunStalled(longArrayOf(0, 0, 0, 0), longArrayOf(3, 100, 0, 0)))
+        org.junit.Assert.assertFalse(T.tunStalled(null, longArrayOf(50, 0, 0, 0)))
+    }
+    @org.junit.Test fun dnsThroughRealXray() {
+        val p = System.getenv("XRAY_SOCKS")?.toIntOrNull() ?: return
+        org.junit.Assert.assertTrue(com.vlesscardvpn.core.Tester.dnsViaSocks(p))
+        org.junit.Assert.assertTrue(com.vlesscardvpn.core.Tester.dnsViaSocks(p + 1, "u", "p"))
+        org.junit.Assert.assertFalse(com.vlesscardvpn.core.Tester.dnsViaSocks(p + 2))
+    }
+}
