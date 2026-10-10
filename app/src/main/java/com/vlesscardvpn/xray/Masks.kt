@@ -70,6 +70,9 @@ object Masks {
 
     /** Russian domains that pass «white lists» of mobile operators: used as «белый SNI». */
     val WHITE_SNI = listOf("vk.com", "ya.ru", "gosuslugi.ru", "ozon.ru")
+    /** Wider pool of allowed names for the mask evolution (all present in the open whitelist geosite-cheburnet, MIT). */
+    val WHITE_POOL = WHITE_SNI + listOf("mail.ru", "yandex.ru", "wildberries.ru", "avito.ru", "sberbank.ru", "2gis.ru", "rutube.ru",
+        "kinopoisk.ru", "dzen.ru", "max.ru", "tbank.ru", "ok.ru", "vkvideo.ru", "x5.ru")
     val ALPNS = listOf("h2,http/1.1", "http/1.1")
     val MSS_VALUES = listOf(536, 300, 120, 88)
 

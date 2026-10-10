@@ -273,3 +273,29 @@ class R96Test {
         org.junit.Assert.assertEquals(F["OK"], D.freezeOf(200_000, 256_000, true))
     }
 }
+
+class R97Test {
+    @org.junit.Test fun asnAndOrg() {
+        val D = com.vlesscardvpn.core.Diagnose
+        org.junit.Assert.assertTrue(D.TSPU_ASN.size > 100)
+        org.junit.Assert.assertEquals(24940 to "Hetzner Online GmbH", D.parseOrg("AS24940 Hetzner Online GmbH\n"))
+        org.junit.Assert.assertNull(D.parseOrg("error"))
+    }
+    @org.junit.Test fun whiteSniGene() {
+        val rnd = kotlin.random.Random(5)
+        val ps = (1..4).mapNotNull { com.vlesscardvpn.xray.MaskLab.random(rnd, udp = false) }
+        val kids = com.vlesscardvpn.xray.MaskLab.breed(ps, 60, known = emptySet(), seed = 9)
+        org.junit.Assert.assertTrue(kids.any { it.sni in com.vlesscardvpn.xray.Masks.WHITE_POOL })
+        org.junit.Assert.assertTrue(com.vlesscardvpn.model.Subs.CATALOG.any { it.url.contains("FLAT447") && it.whitelist })
+    }
+}
+
+class R97bTest {
+    @org.junit.Test fun humanErrors() {
+        val E = com.vlesscardvpn.core.Errors
+        org.junit.Assert.assertEquals("прервано — запущено другое действие", E.human(kotlinx.coroutines.CancellationException("A0 was cancelled")))
+        org.junit.Assert.assertEquals("ошибка", E.human(RuntimeException("A0 was cancelled")))
+        org.junit.Assert.assertEquals("имя сервера не находится (DNS)", E.human(java.net.UnknownHostException("x")))
+        org.junit.Assert.assertEquals("соединение сброшено (DPI?)", E.human(java.net.SocketException("Connection reset")))
+    }
+}

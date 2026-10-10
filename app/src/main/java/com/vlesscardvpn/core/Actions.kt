@@ -54,7 +54,7 @@ object Actions {
         if (job?.isActive == true) return
         progress.value = Progress(title, running = true)
         job = scope.launch {
-            val msg = Store.busy { runCatching { withContext(Dispatchers.IO) { XrayCore.init(app) }; block() }.getOrElse { it.message ?: "Ошибка" } }
+            val msg = Store.busy { runCatching { withContext(Dispatchers.IO) { XrayCore.init(app) }; block() }.getOrElse { if (it is kotlinx.coroutines.CancellationException) "Остановлено" else Errors.human(it).replaceFirstChar { c -> c.uppercase() } } }
             android.util.Log.i("E2E", "action[$title]: $msg")
             progress.value = progress.value.copy(running = false, message = msg)
         }
@@ -778,7 +778,7 @@ object Actions {
                     dpi = runCatching { DpiSet(app).start(Store.state.value.settings, Net.key(app), true, emptySet(), com.vlesscardvpn.BuildConfig.DEBUG) }.getOrNull()
                     dpi?.currentPort?.let { Warp.extraSocks = listOf(it); r = runCatching { Warp.register() } }
                 }
-                r.onSuccess { accs += it }.onFailure { err = it.message ?: it.javaClass.simpleName }
+                r.onSuccess { accs += it }.onFailure { err = Errors.human(it) }
             }
         }
         // WARP+: bind a key to every account (own keys first, then the built-in public ones).
@@ -1112,7 +1112,7 @@ object Actions {
                     sem.withPermit {
                         val px = DpiProxy(app)
                         val r = try { test(s, px.start(s, st.byeDpiSni, allowLocal = com.vlesscardvpn.BuildConfig.DEBUG)) }
-                            catch (e: Throwable) { DpiResult(false, 0, e.message ?: "не запустился") } finally { px.close() }
+                            catch (e: Throwable) { DpiResult(false, 0, Errors.human(e)) } finally { px.close() }
                         synchronized(dpiResults) { dpiResults.value = dpiResults.value + (s.id to r) }
                         step(done.incrementAndGet(), progress.value.total)
                     }

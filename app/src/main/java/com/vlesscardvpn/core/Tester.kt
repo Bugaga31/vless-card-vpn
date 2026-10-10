@@ -128,7 +128,7 @@ object Tester {
                     r.body?.bytes()
                 }
                 best = minOf(best, (System.nanoTime() - t0) / 1_000_000)
-            }.onFailure { err = it.message ?: it.javaClass.simpleName }
+            }.onFailure { err = Errors.human(it) }
         }
         if (best == Long.MAX_VALUE) return Probe(0, null, null, err)
         // big file, YouTube and Telegram at the same time (they used to run one after another: up to 4× longer per server)
@@ -393,7 +393,7 @@ object Tester {
                     val ms = ((System.nanoTime() - t0) / 1_000_000).toInt().coerceAtLeast(1)
                     DpiProbe(total >= DPI_BYTES, ms, total, if (total >= DPI_BYTES) "" else "оборвалось на ${total / 1024} КБ")
                 }
-            }.getOrElse { DpiProbe(false, 0, 0, it.message ?: it.javaClass.simpleName) }
+            }.getOrElse { DpiProbe(false, 0, 0, Errors.human(it)) }
             if (last.ok) { client.connectionPool.evictAll(); return last }
         }
         client.connectionPool.evictAll()
@@ -418,7 +418,7 @@ object Tester {
                     while (total < need) { val n = src.read(buf); if (n < 0) break; total += n }
                     total >= need || r.code in 200..399 && total > 0 && i > 0 && total >= r.body!!.contentLength().coerceAtLeast(1)
                 }
-            }.getOrElse { err = it.message ?: it.javaClass.simpleName; false }
+            }.getOrElse { err = Errors.human(it); false }
             if (ok) { score++; ms += ((System.nanoTime() - t0) / 1_000_000).toInt(); if (i == 0) yt = true }
         }
         client.connectionPool.evictAll()

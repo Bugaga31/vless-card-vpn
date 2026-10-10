@@ -257,10 +257,10 @@ class TunnelService : VpnService() {
                 if (connectFails == 1) safeMasks = true else autoDpiOnly = true
                 Log.i("E2E", "connect retry #$connectFails safe=$safeMasks dpiOnly=$autoDpiOnly")
                 teardown(null)
-                Tunnel.status.value = Tunnel.Status(Tunnel.State.CONNECTING, "Подключение…", check = "Не запустилось (${e.message?.take(80)}) — пробую по-другому…")
+                Tunnel.status.value = Tunnel.Status(Tunnel.State.CONNECTING, "Подключение…", check = "Не запустилось (${com.vlesscardvpn.core.Errors.human(e)}) — пробую по-другому…")
                 connect(); return
             }
-            teardown(e.message ?: e.javaClass.simpleName)
+            teardown(if (e is IllegalStateException) e.message ?: com.vlesscardvpn.core.Errors.human(e) else com.vlesscardvpn.core.Errors.human(e))
             stopSelf()
         }
     }
@@ -381,7 +381,7 @@ class TunnelService : VpnService() {
     private var netJob: Job? = null
     private var watchJob: Job? = null
     /**
-     * Watchdog: a light request through the tunnel every 45 s. Two misses in a row = the connection broke
+     * Watchdog: a light request through the tunnel every 20 s (a miss is re-checked after 3 s). Two misses in a row = the connection broke
      * (masking recognised, server died) → self-healing, without waiting for the user to notice.
      */
     private fun watchdog() {
@@ -393,8 +393,8 @@ class TunnelService : VpnService() {
             var stats = TProxyService.stats()
             while (Tunnel.status.value.state == Tunnel.State.CONNECTED) {
                 // wait 45 s (10 s offline), but check right away when the screen turns back on — that's when apps are opened
-                var waited = 0L; val period = if (offline) 10_000L else 45_000L
-                while (waited < period) { delay(5000); waited += 5000; val a = asleep(); if (wasAsleep && !a) { wasAsleep = false; delay(1500); break }; wasAsleep = a }
+                var waited = 0L; val period = if (offline) 10_000L else if (miss > 0) 3_000L else 20_000L
+                while (waited < period) { val d = minOf(5000L, period - waited); delay(d); waited += d; val a = asleep(); if (wasAsleep && !a) { wasAsleep = false; delay(1500); break }; wasAsleep = a }
                 com.vlesscardvpn.core.Traffic.tick()
                 if (healJob?.isActive == true || asleep()) continue
                 val auth = Tunnel.socks ?: break
@@ -413,10 +413,12 @@ class TunnelService : VpnService() {
                 if (ok && offline) { offline = false; verifySoon(0); break } // internet is back: full check (WARP, YouTube…)
                 miss = if (ok) 0 else miss + 1
                 if (miss >= 2) {
+                    // no answer twice in ~25 s: rebuild at once like the big button (seconds); if that already
+                    // happened in the last 5 min, hardRestart goes on to heal (other masks / servers)
                     Log.i("E2E", "watchdog: connection lost")
                     val cur = Tunnel.status.value
-                    Tunnel.status.value = cur.copy(check = "Связь пропала — ищу рабочий вариант…", checkOk = false)
-                    heal(); break
+                    Tunnel.status.value = cur.copy(check = "Связь пропала — пересобираю соединение…", checkOk = false)
+                    hardRestart("сервер перестал отвечать"); break
                 }
                 if (ok && vpnMode) {
                     // the proxy works, but do apps? DNS the way apps ask it, and traffic through the TUN in both directions
