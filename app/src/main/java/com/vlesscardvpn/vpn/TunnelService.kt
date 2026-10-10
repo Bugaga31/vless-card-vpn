@@ -349,6 +349,7 @@ class TunnelService : VpnService() {
             var calm = 0
             while (Tunnel.status.value.state == Tunnel.State.CONNECTED) {
                 while (asleep() && Tunnel.status.value.state == Tunnel.State.CONNECTED) delay(60_000) // no re-tests while the phone sleeps
+                if (com.vlesscardvpn.core.Thermal.cooling) { delay(5 * 60_000L); continue } // hot phone: no background re-tests
                 val reconnect = runCatching { Store.busy { Actions.optimize() } }.getOrDefault(false)
                 // the user is in a call / watching video: wait a minute; still busy → skip, the next pass decides again
                 val busyNow = reconnect && userActive() && run { Log.i("E2E", "optimize: user is busy — switch postponed"); delay(60_000); userActive() }

@@ -836,7 +836,9 @@ object Actions {
             recallNet(net)
             // Results older than 30 min (or from another network) may be dead: a 2–4 s check of the 12 best first,
             // otherwise the tunnel would connect to a dead server and lose much more time healing.
-            val stale = working.isNotEmpty() && working.none { now - st.state(it).checkedAt < 30 * 60_000L } || st.settings.netServers[net] == null && working.isNotEmpty() && st.settings.netServers.isNotEmpty()
+            // a network we know (its servers worked here and were checked within 3 h): connect at once, the tunnel re-checks itself
+            val known = Store.state.value.let { s -> s.settings.netServers[net]?.let { ids -> s.servers.any { it.id in ids && s.state(it).works && now - s.state(it).checkedAt < 3 * 3600_000L } } } == true
+            val stale = !known && (working.isNotEmpty() && working.none { now - st.state(it).checkedAt < 30 * 60_000L } || st.settings.netServers[net] == null && working.isNotEmpty() && st.settings.netServers.isNotEmpty())
             if (!stale || job?.isActive == true) {
                 if (working.none { now - st.state(it).checkedAt < 6 * 3600_000L }) deepPending = true
                 if (Store.state.value.let { s -> s.selected.none { s.state(it).works } }) selectBest(5, close = true, among = working)
@@ -923,8 +925,10 @@ object Actions {
         val st = Store.state.value
         val cand = (st.selected.filter { st.state(it).works } + preferred(st, st.servers.filter { st.state(it).works }).sortedBy { st.state(it).score })
             .distinctBy { it.id }.take(12)
-        realTest(cand, "Авто: проверяю серверы", big = false, attempts = 1)
-        val now = Store.state.value
+        // the 6 best first: usually enough — connect right away instead of waiting for all 12
+        realTest(cand.take(6), "Авто: проверяю серверы", big = false, attempts = 1)
+        var now = Store.state.value
+        if (cand.take(6).none { now.state(it).works } && cand.size > 6) { realTest(cand.drop(6), "Авто: проверяю серверы", big = false, attempts = 1); now = Store.state.value }
         val ok = cand.filter { now.state(it).works }
         if (ok.isNotEmpty()) {
             deepPending = true
