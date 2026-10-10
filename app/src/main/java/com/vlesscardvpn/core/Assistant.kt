@@ -69,6 +69,7 @@ object Assistant {
                     else -> Msg(false, "Включаю «WARP через сервер»: трафик идёт на ваш сервер с маскировкой, а оттуда в Cloudflare WARP. Оператор видит только маску, сайты — адрес Cloudflare.", listOf(Btn("Применить", "!set warpChain on")), auto = true)
                 }
             }
+            has(q, "почему не работ", "почему не подкл", "диагност", "что не так", "в чём причин", "в чем причин", "заморозк") -> Msg(false, "Проверю причину: белые списки, блокировку серверов по IP или по имени (SNI) и «заморозку» загрузки внутри VPN.", listOf(Btn("Проверить", "!diag")), auto = true)
             has(q, "белые списк", "белый спис", "белых спис", "вайтлист", "whitelist") -> Msg(false, "Проверю, включены ли белые списки у оператора: открою напрямую разрешённые, обычные и заблокированные сайты.", listOf(Btn("Проверить", "!wl")), auto = true)
             has(q, "охлад", "греет", "горяч", "нагрел", "нагрев", "температур", "перегр") -> Msg(false, cooling(f), listOf(Btn("Снизить нагрузку", "!cool")), auto = has(q, "охлади", "остуди", "снизь"))
             has(q, "ускорь телефон", "ускорение телефона", "разгони телефон", "оптимизируй телефон", "автоускор") ->
@@ -287,6 +288,11 @@ object Assistant {
                 if (v && key == "appAware" && !AppWatch.hasAccess(app)) post(Msg(false, "Чтобы видеть, какое приложение открыто, нужен «Доступ к истории использования» для VLESS Card.", listOf(Btn("Разрешить доступ", "!usage"))))
             }
             cmd == "!warp" -> { Store.update { it.copy(settings = it.settings.copy(warpChain = true)) }; job(app, null) { Actions.setupWarp() } }
+            cmd == "!diag" -> scope.launch {
+                post(Msg(false, "Диагностирую… (~15 с)"))
+                val r = Diagnose.report(Store.state.value.selected, Tunnel.socks?.port)
+                post(Msg(false, r, if (r.contains("SNI") || r.contains("белые списки")) listOf(Btn("Подобрать маскировку", "!masks")) else emptyList()))
+            }
             cmd == "!wl" -> scope.launch {
                 val r = Whitelist.check()
                 post(Msg(false, Whitelist.report(r), if (r.verdict == Whitelist.Verdict.WHITELIST) listOf(Btn("Подобрать маскировку", "!masks")) else emptyList()))

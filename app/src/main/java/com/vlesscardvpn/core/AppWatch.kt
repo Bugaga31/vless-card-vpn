@@ -63,6 +63,7 @@ object AppWatch {
         else -> null
     }
     private var evoN = 0
+    private var lastFreeze = System.currentTimeMillis() - 110 * 60_000L
     private var fails = 0; private var lastFix = 0L; private var lastLight = 0L; private var tick = 0
     private var lastSpeedup = 0L; private var lastSpeedCheck = System.currentTimeMillis()
     @Volatile var lastMbps = 0.0
@@ -101,6 +102,18 @@ object AppWatch {
                 say("Автопилот: " + Whitelist.report(r).substringBefore("\nЧто").lowercase().let { "в этой сети " + it })
                 val sel = Store.state.value.selected
                 if (sel.isNotEmpty() && !Actions.progress.value.running) withContext(Dispatchers.Main) { Actions.findMasks(sel.take(4), perServer = 24) }
+            }
+        }
+        if (net.isNotEmpty() && net != evolveNet) lastFreeze = now - 110 * 60_000L // new network: freeze check in ~10 min
+        // mobile «заморозка» (TSPU stops downloads from hosting IPs after ~16 KB): 256 KB through the tunnel every 2 h
+        if (net.startsWith("Моб.") && now - lastFreeze > 2 * 3600_000L && fails == 0 && !Actions.progress.value.running) {
+            lastFreeze = now
+            Tunnel.socks?.port?.let { p ->
+                if (Diagnose.freeze(p) == Diagnose.Freeze.FROZEN && now - lastSpeedup > 30 * 60_000L) {
+                    lastSpeedup = now
+                    say("Автопилот: в этой сети загрузка через сервер замирает после ~16 КБ («заморозка» ТСПУ) — ищу сервер и маску, где этого нет")
+                    withContext(Dispatchers.Main) { Actions.boostYoutube() }
+                }
             }
         }
         if (net.isNotEmpty() && net != evolveNet) { evolveNet = net; lastEvolve = minOf(lastEvolve, now - (if (Store.summary.value.mask.isEmpty()) 117 else 105) * 60_000L) } // no mask known here: search in ~3 min
