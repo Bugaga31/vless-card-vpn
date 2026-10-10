@@ -12,7 +12,7 @@ class R79Test {
         val a = Server("a", "vless", "1.2.3.4", 443, "11111111-1111-1111-1111-111111111111", security = "tls", sni = "a.com")
         val b = a.copy(name = "b", address = "5.6.7.8")
         val cfg = JSONObject(XrayConfigBuilder.vpnConfig(listOf(a to null, b to null), Settings(), null))
-        assertEquals("30s", cfg.getJSONObject("observatory").getString("probeInterval"))
+        assertEquals("10s", cfg.getJSONObject("observatory").getString("probeInterval"))
         java.io.File(System.getenv("XRAY_CONFIG_DUMP") ?: return).apply { mkdirs() }.resolve("two.json").writeText(cfg.toString())
     }
 }
