@@ -356,7 +356,9 @@ object Actions {
             step(done.incrementAndGet(), list.size)
         }
         batch.flush()
-        val alive = list.filter { (tcp[it.id] ?: 0) > 0 }.sortedBy { tcp[it.id] }.take(realLimit)
+        // which of the TCP-reachable ones get the (slower) real check: the mini model's favourites first, then by ping
+        val alive = list.filter { (tcp[it.id] ?: 0) > 0 }.let { l -> runCatching { Brain.load(app) }; val now = Store.state.value
+            if (Brain.seen >= 50 && l.size > realLimit) Brain.order(Net.key(app), l) { now.state(it) } else l.sortedBy { tcp[it.id] } }.take(realLimit)
         // one attempt for all (fast), a second one only for those that failed although TCP answers
         var working = realTest(alive, "Проверка через Xray", big, attempts = 1)
         val again = Store.state.value.let { s -> alive.filter { !s.state(it).works } }

@@ -54,7 +54,7 @@ object Brain {
 
     /** Working candidates first by the model, then by speed. */
     fun order(net: String, list: List<Server>, state: (Server) -> ServerState): List<Server> =
-        list.sortedWith(compareByDescending<Server> { (p(net, it, state(it)) * 10).toInt() }.thenBy { state(it).score })
+        list.sortedWith(compareByDescending<Server> { (p(net, it, state(it)) * 10).toInt() }.thenBy { state(it).score }.thenBy { state(it).tcpMs.let { t -> if (t > 0) t else Int.MAX_VALUE } })
 
     @Synchronized fun save(ctx: android.content.Context) {
         if (!dirty) return; dirty = false
