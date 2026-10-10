@@ -69,6 +69,9 @@ object Assistant {
                     else -> Msg(false, "Включаю «WARP через сервер»: трафик идёт на ваш сервер с маскировкой, а оттуда в Cloudflare WARP. Оператор видит только маску, сайты — адрес Cloudflare.", listOf(Btn("Применить", "!set warpChain on")), auto = true)
                 }
             }
+            has(q, "охлад", "греет", "горяч", "нагрел", "нагрев", "температур", "перегр") -> Msg(false, cooling(f), listOf(Btn("Снизить нагрузку", "!cool")), auto = has(q, "охлади", "остуди", "снизь"))
+            has(q, "ускорь телефон", "ускорение телефона", "разгони телефон", "оптимизируй телефон", "автоускор") ->
+                Msg(false, "Ускоряю телефон в VPN: крупные пакеты (меньше работы процессору), блокировка рекламы (меньше трафика и батареи), лёгкие маски. Память и чужие приложения Android трогать не даёт — это делают только системные «очистки».", listOf(Btn("Ускорить", "!boostphone")), auto = true)
             has(q, "gps", "геолок", "местополож", "локаци", "геопоз", "жпс") -> {
                 val off = has(q, "выключи", "отключи", "убери", "верни")
                 Msg(false, if (off) "Выключаю подмену GPS — вернётся настоящее местоположение." else "Включаю GPS под страну сервера. Если Android не даст — подскажу, где разрешить.",
@@ -99,6 +102,15 @@ object Assistant {
             has(q, "спасиб", "круто", "класс") -> Msg(false, "Пожалуйста! Чем больше подборов, тем точнее я угадываю маски для ваших сетей.")
             else -> Msg(false, "Не понял вопрос. " + HELP, START)
         }
+    }
+
+    private fun cooling(f: Facts): String {
+        val ctx = appRef ?: return "Не удалось прочитать температуру."
+        val t = Thermal.tempC(ctx); val s = Thermal.status(ctx)
+        return "Телефон: ${Thermal.label(t, s).ifEmpty { "температура неизвестна" }}." +
+            (if (Thermal.cooling) " Сейчас я уже снижаю нагрузку." else "") +
+            "\nЧто могу: на время нагрева остановить фоновые проверки и эволюцию масок, включить крупные пакеты и лёгкие маски — VPN будет греть меньше. " +
+            "Охладить телефон сильнее помогут: снять чехол, не заряжать во время игры/видео, уменьшить яркость."
     }
 
     private fun phone(f: Facts): String {
@@ -225,7 +237,10 @@ object Assistant {
 
     private fun post(m: Msg) { messages.value = (messages.value + m).takeLast(80) }
 
+    @Volatile private var appRef: android.content.Context? = null
+
     fun send(app: android.content.Context, text: String) {
+        appRef = app.applicationContext
         val t = text.trim(); if (t.isEmpty()) return
         if (t.startsWith("!")) { run(app, t); return }
         post(Msg(true, t))
@@ -271,6 +286,18 @@ object Assistant {
                 if (v && key == "appAware" && !AppWatch.hasAccess(app)) post(Msg(false, "Чтобы видеть, какое приложение открыто, нужен «Доступ к истории использования» для VLESS Card.", listOf(Btn("Разрешить доступ", "!usage"))))
             }
             cmd == "!warp" -> { Store.update { it.copy(settings = it.settings.copy(warpChain = true)) }; job(app, null) { Actions.setupWarp() } }
+            cmd == "!cool" -> {
+                Store.update { it.copy(settings = it.settings.copy(autoCool = true, turbo = true)) }; Thermal.cooling = true; reconnect(app)
+                if (Store.summary.value.heavyMask) Actions.lighten()
+                post(Msg(false, "Снизил нагрузку: фоновые проверки на паузе, крупные пакеты включены" + (if (Store.summary.value.heavyMask) ", ищу лёгкую маску" else "") + ". Когда телефон остынет, сам всё верну."))
+            }
+            cmd == "!boostphone" -> {
+                Store.update { it.copy(settings = it.settings.copy(turbo = true, blockAds = true, autoCool = true)) }; reconnect(app)
+                if (Store.summary.value.heavyMask) Actions.lighten()
+                post(Msg(false, "Готово: ускорение и блокировка рекламы включены, охлаждение следит за температурой." +
+                    (if (PhoneInfo.collect(app).batteryOptimized) " Ещё: Android ограничивает VPN в фоне — разрешите работу без ограничений." else ""),
+                    if (PhoneInfo.collect(app).batteryOptimized) listOf(Btn("Разрешить работу в фоне", "!battery")) else emptyList()))
+            }
             cmd == "!devsettings" -> { GpsMock.openDevSettings(app); post(Msg(false, "Если пункта нет — включите режим разработчика: О телефоне → 7 раз нажать «Номер сборки».")) }
             cmd == "!usage" -> { AppWatch.openAccess(app); post(Msg(false, "Найдите VLESS Card и включите доступ.")) }
             cmd == "!battery" -> runCatching {

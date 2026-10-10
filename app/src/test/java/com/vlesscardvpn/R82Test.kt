@@ -181,3 +181,18 @@ class R92Test {
         org.junit.Assert.assertFalse(com.vlesscardvpn.core.Tester.dnsViaSocks(p + 2))
     }
 }
+
+class R93Test {
+    private val T = com.vlesscardvpn.core.Thermal
+    @org.junit.Test fun hotWithHysteresis() {
+        org.junit.Assert.assertFalse(T.hot(39.0, 0, false))
+        org.junit.Assert.assertTrue(T.hot(41.5, 0, false))
+        org.junit.Assert.assertTrue(T.hot(30.0, 2, false))
+        org.junit.Assert.assertTrue(T.hot(39.0, 1, true))
+        org.junit.Assert.assertFalse(T.hot(37.0, 1, true))
+    }
+    @org.junit.Test fun label() {
+        org.junit.Assert.assertEquals("42 °C · горячий", T.label(42.0, 2))
+        org.junit.Assert.assertEquals("", T.label(0.0, -1))
+    }
+}

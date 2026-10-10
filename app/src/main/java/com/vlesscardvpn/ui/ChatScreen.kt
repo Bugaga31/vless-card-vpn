@@ -91,6 +91,7 @@ fun ChatScreen() {
                     FilterChip(cfg.autopilot, { set { it.copy(autopilot = !it.autopilot) } }, label = { Text("🧭 Автопилот") })
                     FilterChip(cfg.appAware, { set { it.copy(appAware = !it.appAware) }; if (!cfg.appAware && !AppWatch.hasAccess(ctx)) AppWatch.openAccess(ctx) }, label = { Text("📱 Под приложение") })
                     FilterChip(cfg.gpsSpoof, { set { it.copy(gpsSpoof = !it.gpsSpoof) }; if (cfg.gpsSpoof) GpsMock.stop(ctx) }, label = { Text("📍 GPS") })
+                    FilterChip(cfg.autoCool, { set { it.copy(autoCool = !it.autoCool) } }, label = { Text(if (com.vlesscardvpn.core.Thermal.cooling) "❄ Охлаждаю" else "❄ Охлаждение") })
                     FilterChip(cfg.smartYoutube, { set { it.copy(smartYoutube = !it.smartYoutube, ytDpi = emptyMap()) } }, label = { Text("▶ Умный YouTube") })
                 }
                 if (journal.isNotEmpty()) Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -142,7 +143,7 @@ fun ChatScreen() {
             }
         }
         if (input.isEmpty()) Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            listOf("⚡ Улучши соединение", "▶ Ускорь YouTube", "🧬 Подбери маску", "🔁 Смени маску", "🌐 Что с сетью?", "📱 Проверь телефон").forEach { q ->
+            listOf("⚡ Улучши соединение", "▶ Ускорь YouTube", "🧬 Подбери маску", "🔁 Смени маску", "🌐 Что с сетью?", "📱 Проверь телефон", "🚀 Ускорь телефон", "❄ Охлади").forEach { q ->
                 SuggestionChip(onClick = { send(q.substringAfter(' ')) }, label = { Text(q, fontSize = 12.sp) }, shape = RoundedCornerShape(16.dp))
             }
         }

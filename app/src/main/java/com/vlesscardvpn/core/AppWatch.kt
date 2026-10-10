@@ -70,14 +70,30 @@ object AppWatch {
     /** What the autopilot did (newest first): time + text, shown in «Помощник». */
     val journal = MutableStateFlow<List<Pair<Long, String>>>(emptyList())
 
+    private suspend fun cool(reconnect: () -> Unit) {
+        val ctx = appCtx ?: return
+        val t = Thermal.tempC(ctx); val s = Thermal.status(ctx)
+        val hot = Store.state.value.settings.autoCool && Thermal.hot(t, s, Thermal.cooling)
+        if (hot == Thermal.cooling) return
+        Thermal.cooling = hot
+        if (hot) {
+            val st = Store.state.value.settings
+            val acts = mutableListOf("паузa фоновых проверок и эволюции")
+            if (!st.turbo) { Store.update { it.copy(settings = it.settings.copy(turbo = true)) }; acts += "включил «Ускорение телефона» (крупные пакеты — меньше работы процессору)"; reconnect() }
+            if (Store.summary.value.heavyMask && !Actions.progress.value.running) { acts += "меняю тяжёлую маску на лёгкую"; withContext(Dispatchers.Main) { Actions.lighten() } }
+            say("Телефон нагрелся (${Thermal.label(t, s)}): снижаю нагрузку — " + acts.joinToString(", "))
+        } else say("Телефон остыл (${Thermal.label(t, s)}) — фоновые улучшения снова работают")
+    }
+
     private suspend fun autopilot(reconnect: () -> Unit) {
         if (++tick % 40 != 0) return // once a minute
+        cool(reconnect)
         val s = Tunnel.status.value
         fails = if (s.checkOk == false) fails + 1 else 0
         val now = System.currentTimeMillis()
         // new network: masks that passed elsewhere may not pass here — evolve here ~15 min later instead of waiting 2 h
         val net = appCtx?.let { runCatching { Net.key(it) }.getOrNull() }.orEmpty()
-        if (net.isNotEmpty() && net != evolveNet) { evolveNet = net; lastEvolve = minOf(lastEvolve, now - 105 * 60_000L) }
+        if (net.isNotEmpty() && net != evolveNet) { evolveNet = net; lastEvolve = minOf(lastEvolve, now - (if (Store.summary.value.mask.isEmpty()) 117 else 105) * 60_000L) } // no mask known here: search in ~3 min
         // light speed check (4 s) every 45 min, only on unmetered networks (Wi-Fi) — mobile data is not spent on it
         var slow = false
         if (now - lastSpeedCheck > 45 * 60_000L && fails == 0 && !Actions.progress.value.running && unmetered()) {
@@ -85,7 +101,7 @@ object AppWatch {
             val port = Tunnel.socks?.port
             if (port != null) { lastMbps = withContext(Dispatchers.IO) { runCatching { Tester.speed(port, 4).mbps }.getOrDefault(0.0) }; slow = lastMbps in 0.01..3.0 }
         }
-        when (pilot(fails, Store.summary.value.heavyMask, Actions.progress.value.running, now - lastFix, now - lastLight, now - lastEvolve, slow, now - lastSpeedup)) {
+        when (pilot(fails, Store.summary.value.heavyMask, Actions.progress.value.running || Thermal.cooling && fails < 2, now - lastFix, now - lastLight, now - lastEvolve, slow, now - lastSpeedup)) {
             "speedup" -> { lastSpeedup = now; say("Автопилот: скорость всего %.1f Мбит/с — ищу серверы и маски быстрее".format(lastMbps)); withContext(Dispatchers.Main) { Actions.boostYoutube() } }
             "evolve" -> {
                 lastEvolve = now
