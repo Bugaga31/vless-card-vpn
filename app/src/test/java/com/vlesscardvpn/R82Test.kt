@@ -241,3 +241,15 @@ class R94Test {
         org.junit.Assert.assertTrue(ps[0].id in com.vlesscardvpn.xray.MaskLab.load(com.vlesscardvpn.xray.MaskLab.keep(stored, listOf(ps[0]), stats)).map { it.id })
     }
 }
+
+class R95Test {
+    private val W = com.vlesscardvpn.core.Whitelist
+    @org.junit.Test fun verdicts() {
+        org.junit.Assert.assertEquals(com.vlesscardvpn.core.Whitelist.Verdict.WHITELIST, W.verdict(4, 0, 0))
+        org.junit.Assert.assertEquals(com.vlesscardvpn.core.Whitelist.Verdict.WHITELIST, W.verdict(3, 1, 0))
+        org.junit.Assert.assertEquals(com.vlesscardvpn.core.Whitelist.Verdict.NORMAL, W.verdict(4, 4, 0))
+        org.junit.Assert.assertEquals(com.vlesscardvpn.core.Whitelist.Verdict.OPEN, W.verdict(4, 4, 3))
+        org.junit.Assert.assertEquals(com.vlesscardvpn.core.Whitelist.Verdict.NONE, W.verdict(0, 0, 0))
+        org.junit.Assert.assertTrue(W.report(com.vlesscardvpn.core.Whitelist.Result(4, 0, 0, com.vlesscardvpn.core.Whitelist.Verdict.WHITELIST)).contains("SNI"))
+    }
+}

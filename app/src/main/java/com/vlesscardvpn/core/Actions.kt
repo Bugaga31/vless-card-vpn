@@ -413,6 +413,7 @@ object Actions {
         val pool = if (evo) MaskLab.breed(parents, (slots * 4).coerceIn(6, 40), known = kept.map { it.id }.toSet()) else emptyList()
         val untried = kept.filter { stats[it.id] == null }
         val evoCand = (0 until maxOf(untried.size, pool.size)).flatMap { i -> listOfNotNull(untried.getOrNull(i), pool.getOrNull(i)) }
+        val whitelisted = Whitelist.last.value?.let { it.verdict == Whitelist.Verdict.WHITELIST && System.currentTimeMillis() - it.at < 3600_000L } == true
         val order = { s: Server ->
             val ok = { m: Mask -> Masks.compatible(m, s) && (dpiOk || !m.viaByeDpi) }
             val fresh = evoCand.filter(ok).shuffled().take(slots)
@@ -421,7 +422,9 @@ object Actions {
                 .sortedWith(compareBy<Mask>({ bucket(it) }, { Masks.cost(it) }, { -(stats[it.id]?.takeIf { s -> s.ok > 0 }?.score ?: 0.0) })).take((perServer - fresh.size).coerceAtLeast(1))
             // proven ones first, then one of every kind of trick (not a dozen variants of the same one)
             val proven = base.filter { bucket(it) == 0 }.take(3).ifEmpty { base.take(1) }
-            proven + fresh + Masks.diverse(base - proven.toSet())
+            val rest = Masks.diverse(base - proven.toSet())
+            // operator whitelist on: masks that present an allowed site (SNI vk.com / ya.ru…) go right after the proven ones
+            if (whitelisted) proven + rest.filter { it.sni.isNotEmpty() } + fresh + rest.filter { it.sni.isEmpty() } else proven + fresh + rest
         }
         // Interleaved (1st mask of every server, then the 2nd…): parallel probes hit different servers, and a server
         // that already has [enough] working masks stops early instead of trying all of them.
