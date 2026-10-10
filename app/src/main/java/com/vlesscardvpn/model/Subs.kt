@@ -19,6 +19,7 @@ object Subs {
         SubSource(gh("Maskkost93/kizyak-vpn-4.0/main/kizyakbeta7.txt"), "Кизяк VPN", RU, default = true),
         SubSource(gh("kort0881/vpn-vless-configs-russia/main/output/vless.txt"), "kort0881 · большой сборник VLESS", RU),
         SubSource(gh("FLAT447/v2ray-lists/main/BLACK_LTE.txt"), "FLAT447 · для мобильного (LTE)", RU),
+        SubSource(gh("whoahaow/rjsxrd/main/githubmirror/bypass/bypass-all.txt"), "rjsxrd · обход блокировок", RU),
         SubSource(gh("$IG/Vless-Reality-White-Lists-Rus-Mobile.txt"), "igareck · белые списки", WL, whitelist = true, default = true),
         SubSource(gh("RKPchannel/RKP_bypass_configs/main/whitelist.txt"), "РосКомПозор · белые списки", WL, whitelist = true, default = true),
         SubSource(gh("zieng2/wl/main/vless_lite.txt"), "zieng2 · белые списки lite", WL, whitelist = true, default = true),
@@ -31,6 +32,10 @@ object Subs {
         SubSource(gh("sakha1370/OpenRay/main/output/all_valid_proxies.txt"), "OpenRay (проверенные)", WORLD),
         SubSource(gh("ebrasha/free-v2ray-public-list/main/V2Ray-Config-By-EbraSha.txt"), "EbraSha", WORLD),
         SubSource(gh("roosterkid/openproxylist/main/V2RAY_RAW.txt"), "openproxylist", WORLD),
+        SubSource(gh("barry-far/V2ray-Config/main/Sub1.txt"), "barry-far", WORLD),
+        SubSource(gh("Mosifree/-FREE2CONFIG/main/Reality"), "FREE2CONFIG · Reality", WORLD),
+        SubSource(gh("MhdiTaheri/V2rayCollector/main/sub/mix"), "V2rayCollector", WORLD),
+        SubSource(gh("SoliSpirit/v2ray-configs/main/Protocols/vless.txt"), "SoliSpirit · VLESS", WORLD),
     )
     private val byUrl = CATALOG.associateBy { it.url }
     fun find(url: String): SubSource? = byUrl[url]

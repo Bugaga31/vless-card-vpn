@@ -158,6 +158,7 @@ class TunnelService : VpnService() {
         if (Tunnel.status.value.state == Tunnel.State.CONNECTED) runCatching { com.vlesscardvpn.core.Traffic.tick() }
         // Never block the main thread on a long connect/heal holding the lock (that was an ANR): wait 1.5 s at most.
         runCatching { kotlinx.coroutines.runBlocking { kotlinx.coroutines.withTimeoutOrNull(1500) { lock.withLock { teardown(null) } } ?: teardown(null) } }
+        netCallback?.let { cb -> runCatching { getSystemService(ConnectivityManager::class.java)?.unregisterNetworkCallback(cb) } }; netCallback = null
         scope.cancel()
         super.onDestroy()
     }
@@ -169,6 +170,7 @@ class TunnelService : VpnService() {
     private suspend fun connect(soft: Boolean = false) {
         val prevSocks = Tunnel.socks
         val keepTun = soft && tun != null && prevSocks != null && !Store.state.value.settings.proxyOnly
+        lastSoft = keepTun
         teardown(null, keepTun)
         Store.init(this); XrayCore.init(this); Actions.init(this)
         val prev = Tunnel.status.value
@@ -321,6 +323,13 @@ class TunnelService : VpnService() {
                 scope.launch { lock.withLock { connect(soft = true) } }
                 return@launch
             }
+            if (!p.works && lastSoft && Store.state.value.settings.autoHeal) {
+                // after an internal reconnect (network change, switching servers) the internet didn't come back: do what the
+                // big button does (stop + start, the TUN rebuilt) before the longer healing — once per network change
+                val sinceNet = System.currentTimeMillis() - netChangedAt
+                if (sinceNet < 90_000L && !netHardDone) { netHardDone = true; hardRestart("новая сеть, а интернет не пошёл", force = true); return@launch }
+                if (System.currentTimeMillis() - lastHard > 5 * 60_000L) { hardRestart("после переподключения интернет не пошёл"); return@launch }
+            }
             if (p.works) { healStep = 0; dpiHeals = 0; connectFails = 0; warmUp(); scheduleOptimize(if (com.vlesscardvpn.core.Actions.deepPending) 20_000 else 60_000); com.vlesscardvpn.core.AppWatch.start(this@TunnelService) { scope.launch { lock.withLock { connect(soft = true) } } }; watchdog(); coverTraffic(); if (serverless()) rescueLater() } else heal()
         }
     }
@@ -449,9 +458,14 @@ class TunnelService : VpnService() {
 
     /** What the big button does (stop + start), by itself: TUN, DNS and Xray are rebuilt. */
     private var lastHard = 0L
-    private fun hardRestart(why: String) {
+    @Volatile private var lastSoft = false
+    @Volatile private var netChangedAt = 0L
+    @Volatile private var netHardDone = true
+    /** The network the tunnel was built on; kept across reconnects so a change during a reconnect is not missed. */
+    @Volatile private var curNet: Network? = null
+    private fun hardRestart(why: String, force: Boolean = false) {
         val now = System.currentTimeMillis()
-        if (now - lastHard < 5 * 60_000L) { heal(); return } // twice in 5 min: restarting doesn't help — heal (masks, servers)
+        if (!force && now - lastHard < 5 * 60_000L) { heal(); return } // twice in 5 min: restarting doesn't help — heal (masks, servers)
         lastHard = now
         Log.i("E2E", "watchdog: hard restart — $why")
         val cur = Tunnel.status.value
@@ -551,18 +565,20 @@ class TunnelService : VpnService() {
         }
     }
 
+    /** Registered once while the VPN is on (not on every internal reconnect — that left gaps where a switch was missed). */
     private fun watchNetwork() {
+        if (netCallback != null) return
         val cm = getSystemService(ConnectivityManager::class.java) ?: return
-        var last: Network? = null
         var lost = false
         val cb = object : ConnectivityManager.NetworkCallback() {
             override fun onAvailable(network: Network) {
                 val caps = cm.getNetworkCapabilities(network)
                 if (caps?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) == true) return
-                val changed = last != null && (last != network || lost)
-                last = network; lost = false
+                val changed = curNet != null && (curNet != network || lost)
+                curNet = network; lost = false
                 setUnderlyingNetworks(arrayOf(network))
                 if (!changed) return
+                netChangedAt = System.currentTimeMillis(); netHardDone = false
                 // Another network (Wi-Fi ↔ mobile) or the same one back: connections to the server died with the old
                 // network (apps used to hang for minutes). Restart Xray at once — its DPI strategy and masks for this network too.
                 netJob?.cancel()
@@ -581,7 +597,7 @@ class TunnelService : VpnService() {
             }
 
             override fun onLost(network: Network) {
-                if (network != last) return
+                if (network != curNet) return
                 lost = true
                 netJob?.cancel()
                 val cur = Tunnel.status.value
@@ -597,8 +613,10 @@ class TunnelService : VpnService() {
         checkJob?.cancel(); watchJob?.cancel(); coverJob?.cancel(); if (error != null) netJob?.cancel()
         if (error != null) { healJob?.cancel(); rescueJob?.cancel() }
         if (error != null) optJob?.cancel()
-        netCallback?.let { cb -> runCatching { getSystemService(ConnectivityManager::class.java)?.unregisterNetworkCallback(cb) } }
-        netCallback = null
+        if (error != null) {
+            netCallback?.let { cb -> runCatching { getSystemService(ConnectivityManager::class.java)?.unregisterNetworkCallback(cb) } }
+            netCallback = null; curNet = null
+        }
         if (!keepTun) TProxyService.stop()
         core?.stop(); core = null
         dpi?.close(); dpi = null; Tunnel.byeDpiPort = null

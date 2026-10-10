@@ -357,10 +357,19 @@ private fun PowerButton(on: Boolean, busy: Boolean, color: Color, onClick: () ->
     val pulse by inf.animateFloat(1f, 1.07f, androidx.compose.animation.core.infiniteRepeatable(androidx.compose.animation.core.tween(800),
         androidx.compose.animation.core.RepeatMode.Reverse), label = "s")
     val k = if (busy) pulse else 1f
+    val turn by inf.animateFloat(0f, 360f, androidx.compose.animation.core.infiniteRepeatable(androidx.compose.animation.core.tween(1400, easing = androidx.compose.animation.core.LinearEasing)), label = "r")
+    val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
     Spacer(Modifier.height(18.dp))
     Box(Modifier.size(220.dp), contentAlignment = Alignment.Center) {
         Box(Modifier.size(220.dp).scale(k).clip(CircleShape).background(androidx.compose.ui.graphics.Brush.radialGradient(listOf(c.copy(alpha = 0.35f), Color.Transparent))))
-        Box(Modifier.size(170.dp).clip(CircleShape).background(androidx.compose.ui.graphics.Brush.verticalGradient(listOf(c, c.copy(alpha = 0.7f)))).clickable(onClick = onClick),
+        // connecting: a running arc around the button; connected: a calm full ring
+        androidx.compose.foundation.Canvas(Modifier.size(190.dp)) {
+            val st = androidx.compose.ui.graphics.drawscope.Stroke(width = 5.dp.toPx(), cap = androidx.compose.ui.graphics.StrokeCap.Round)
+            if (busy && !on) drawArc(c, turn, 80f, false, style = st)
+            else if (on) drawArc(c.copy(alpha = 0.55f), 0f, 360f, false, style = st)
+        }
+        Box(Modifier.size(170.dp).clip(CircleShape).background(androidx.compose.ui.graphics.Brush.verticalGradient(listOf(c, c.copy(alpha = 0.7f))))
+            .clickable { haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress); onClick() },
             contentAlignment = Alignment.Center) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Icon(Icons.Filled.PowerSettingsNew, null, tint = Color.White, modifier = Modifier.size(56.dp))
@@ -368,6 +377,10 @@ private fun PowerButton(on: Boolean, busy: Boolean, color: Color, onClick: () ->
             }
         }
     }
+    // what the assistant did last (switched servers, revived, fixed…) — visible without opening the chat
+    val said by com.vlesscardvpn.core.AppWatch.status.collectAsState()
+    if (on && said.isNotEmpty()) Text(said, fontSize = 12.sp, color = Color.Gray, maxLines = 2, textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+        modifier = Modifier.padding(horizontal = 24.dp, vertical = 2.dp))
     Spacer(Modifier.height(6.dp))
 }
 
