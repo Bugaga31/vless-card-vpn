@@ -19,8 +19,16 @@ val Warn = Color(0xFFF5A524)
 
 @Composable
 fun AppUi(onConnect: () -> Unit, onDisconnect: () -> Unit) {
-    val scheme = darkColorScheme(primary = Accent, background = Color(0xFF0F1115), surface = Color(0xFF171A21),
-        surfaceVariant = Color(0xFF1F232C), onBackground = Color(0xFFE8EAED), onSurface = Color(0xFFE8EAED))
+    val theme by remember { com.vlesscardvpn.core.Store.settings }.collectAsState()
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    // «Оформление»: classic dark, AMOLED (true black: saves battery on OLED screens), Material You (wallpaper colors, Android 12+)
+    val scheme = when {
+        theme.theme == "you" && android.os.Build.VERSION.SDK_INT >= 31 -> dynamicDarkColorScheme(ctx)
+        theme.theme == "amoled" -> darkColorScheme(primary = Accent, background = Color.Black, surface = Color(0xFF0A0A0C),
+            surfaceVariant = Color(0xFF16181D), onBackground = Color(0xFFE8EAED), onSurface = Color(0xFFE8EAED))
+        else -> darkColorScheme(primary = Accent, background = Color(0xFF0F1115), surface = Color(0xFF171A21),
+            surfaceVariant = Color(0xFF1F232C), onBackground = Color(0xFFE8EAED), onSurface = Color(0xFFE8EAED))
+    }
     MaterialTheme(colorScheme = scheme) {
         var tab by remember { mutableIntStateOf(0) }
         Scaffold(

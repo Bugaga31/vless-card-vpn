@@ -50,6 +50,20 @@ fun SettingsScreen() {
                 Text(if (checking) "Проверяю…" else "Проверить сеть")
             }
         }
+        Group("Оформление") {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf("dark" to "Тёмная", "amoled" to "AMOLED", "you" to "Material You").forEach { (id, t) ->
+                    if (id != "you" || Build.VERSION.SDK_INT >= 31) FilterChip(selected = s.theme == id, onClick = { set { it.copy(theme = id) } }, label = { Text(t) })
+                }
+            }
+            Hint("AMOLED — чистый чёрный фон, экономит батарею на OLED-экранах. Material You — цвета ваших обоев (Android 12+).")
+        }
+        Group("Почему не работает?") {
+            val sc = rememberCoroutineScope(); var diag by remember { mutableStateOf("") }; var running by remember { mutableStateOf(false) }
+            Hint(diag.ifEmpty { "Находит причину: белые списки, блокировка сервера по IP или по имени (SNI), «заморозка» загрузки после 16 КБ внутри VPN — и подсказывает, что поможет." })
+            Button(onClick = { running = true; sc.launch { diag = com.vlesscardvpn.core.Diagnose.report(Store.state.value.selected, com.vlesscardvpn.core.Tunnel.socks?.port); running = false } },
+                enabled = !running, modifier = Modifier.fillMaxWidth()) { Text(if (running) "Проверяю… (~15 с)" else "Найти причину") }
+        }
         // ---------------- DPI
         Group("Обход DPI без сервера (ByeDPI + zapret)") {
         val network = remember { Net.key(ctx) }

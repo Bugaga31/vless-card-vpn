@@ -253,3 +253,23 @@ class R95Test {
         org.junit.Assert.assertTrue(W.report(com.vlesscardvpn.core.Whitelist.Result(4, 0, 0, com.vlesscardvpn.core.Whitelist.Verdict.WHITELIST)).contains("SNI"))
     }
 }
+
+class R96Test {
+    private val D = com.vlesscardvpn.core.Diagnose
+    @org.junit.Test fun causes() {
+        val H = com.vlesscardvpn.core.Diagnose.Hs.values().associateBy { it.name }
+        val C = com.vlesscardvpn.core.Diagnose.Cause.values().associateBy { it.name }
+        org.junit.Assert.assertEquals(C["DNS"], D.classify(false, false, null, null))
+        org.junit.Assert.assertEquals(C["IP"], D.classify(true, false, null, null))
+        org.junit.Assert.assertEquals(C["OK"], D.classify(true, true, H["ANSWER"], null))
+        org.junit.Assert.assertEquals(C["SNI"], D.classify(true, true, H["TIMEOUT"], H["OK"]))
+        org.junit.Assert.assertEquals(C["TLS"], D.classify(true, true, H["RESET"], H["TIMEOUT"]))
+    }
+    @org.junit.Test fun freeze() {
+        val F = com.vlesscardvpn.core.Diagnose.Freeze.values().associateBy { it.name }
+        org.junit.Assert.assertEquals(F["FROZEN"], D.freezeOf(16_384, 256_000, true))
+        org.junit.Assert.assertEquals(F["OK"], D.freezeOf(256_000, 256_000, false))
+        org.junit.Assert.assertEquals(F["FAIL"], D.freezeOf(0, 256_000, true))
+        org.junit.Assert.assertEquals(F["OK"], D.freezeOf(200_000, 256_000, true))
+    }
+}
