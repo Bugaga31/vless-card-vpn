@@ -94,6 +94,15 @@ object AppWatch {
         val now = System.currentTimeMillis()
         // new network: masks that passed elsewhere may not pass here — evolve here ~15 min later instead of waiting 2 h
         val net = appCtx?.let { runCatching { Net.key(it) }.getOrNull() }.orEmpty()
+        if (net.isNotEmpty() && net != evolveNet && net.startsWith("Моб.")) {
+            // mobile network changed: are the operator's whitelists on? Then masks behind allowed sites are searched now
+            val r = Whitelist.check()
+            if (r.verdict == Whitelist.Verdict.WHITELIST) {
+                say("Автопилот: " + Whitelist.report(r).substringBefore("\nЧто").lowercase().let { "в этой сети " + it })
+                val sel = Store.state.value.selected
+                if (sel.isNotEmpty() && !Actions.progress.value.running) withContext(Dispatchers.Main) { Actions.findMasks(sel.take(4), perServer = 24) }
+            }
+        }
         if (net.isNotEmpty() && net != evolveNet) { evolveNet = net; lastEvolve = minOf(lastEvolve, now - (if (Store.summary.value.mask.isEmpty()) 117 else 105) * 60_000L) } // no mask known here: search in ~3 min
         // light speed check (4 s) every 45 min, only on unmetered networks (Wi-Fi) — mobile data is not spent on it
         var slow = false

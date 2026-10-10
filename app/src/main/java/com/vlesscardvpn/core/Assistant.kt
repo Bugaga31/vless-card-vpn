@@ -69,6 +69,7 @@ object Assistant {
                     else -> Msg(false, "Включаю «WARP через сервер»: трафик идёт на ваш сервер с маскировкой, а оттуда в Cloudflare WARP. Оператор видит только маску, сайты — адрес Cloudflare.", listOf(Btn("Применить", "!set warpChain on")), auto = true)
                 }
             }
+            has(q, "белые списк", "белый спис", "белых спис", "вайтлист", "whitelist") -> Msg(false, "Проверю, включены ли белые списки у оператора: открою напрямую разрешённые, обычные и заблокированные сайты.", listOf(Btn("Проверить", "!wl")), auto = true)
             has(q, "охлад", "греет", "горяч", "нагрел", "нагрев", "температур", "перегр") -> Msg(false, cooling(f), listOf(Btn("Снизить нагрузку", "!cool")), auto = has(q, "охлади", "остуди", "снизь"))
             has(q, "ускорь телефон", "ускорение телефона", "разгони телефон", "оптимизируй телефон", "автоускор") ->
                 Msg(false, "Ускоряю телефон в VPN: крупные пакеты (меньше работы процессору), блокировка рекламы (меньше трафика и батареи), лёгкие маски. Память и чужие приложения Android трогать не даёт — это делают только системные «очистки».", listOf(Btn("Ускорить", "!boostphone")), auto = true)
@@ -286,6 +287,10 @@ object Assistant {
                 if (v && key == "appAware" && !AppWatch.hasAccess(app)) post(Msg(false, "Чтобы видеть, какое приложение открыто, нужен «Доступ к истории использования» для VLESS Card.", listOf(Btn("Разрешить доступ", "!usage"))))
             }
             cmd == "!warp" -> { Store.update { it.copy(settings = it.settings.copy(warpChain = true)) }; job(app, null) { Actions.setupWarp() } }
+            cmd == "!wl" -> scope.launch {
+                val r = Whitelist.check()
+                post(Msg(false, Whitelist.report(r), if (r.verdict == Whitelist.Verdict.WHITELIST) listOf(Btn("Подобрать маскировку", "!masks")) else emptyList()))
+            }
             cmd == "!cool" -> {
                 Store.update { it.copy(settings = it.settings.copy(autoCool = true, turbo = true)) }; Thermal.cooling = true; reconnect(app)
                 if (Store.summary.value.heavyMask) Actions.lighten()

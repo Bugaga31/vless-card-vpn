@@ -3,7 +3,9 @@ package com.vlesscardvpn.ui
 import android.content.Intent
 import android.os.Build
 import android.provider.Settings as AndroidSettings
+import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.clickable
+import kotlinx.coroutines.launch
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -39,8 +41,17 @@ fun SettingsScreen() {
     var appsDialog by remember { mutableStateOf(false) }
     var wipeDialog by remember { mutableStateOf(false) }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Text("Настройки", fontSize = 30.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 4.dp, top = 12.dp, bottom = 8.dp))
+        Group("Белые списки оператора") {
+            val wl by com.vlesscardvpn.core.Whitelist.last.collectAsState()
+            val sc = rememberCoroutineScope(); var checking by remember { mutableStateOf(false) }
+            Hint(wl?.let { com.vlesscardvpn.core.Whitelist.report(it) } ?: "Проверяет напрямую (мимо VPN), открываются ли только разрешённые сайты — так понятно, какие способы обхода вообще могут работать в этой сети. На мобильном автопилот проверяет сам при смене сети.")
+            Button(onClick = { checking = true; sc.launch { com.vlesscardvpn.core.Whitelist.check(); checking = false } }, enabled = !checking, modifier = Modifier.fillMaxWidth()) {
+                Text(if (checking) "Проверяю…" else "Проверить сеть")
+            }
+        }
         // ---------------- DPI
-        Section("Обход DPI без сервера (ByeDPI + zapret)")
+        Group("Обход DPI без сервера (ByeDPI + zapret)") {
         val network = remember { Net.key(ctx) }
         val current = DpiStrategies.resolve(s, network)
         Hint("Используется в режимах «ByeDPI» и «Гибрид» и как маскировка «через ByeDPI» для серверов. Сейчас: ${current.label} (сеть «$network»).")
@@ -76,7 +87,8 @@ fun SettingsScreen() {
             label = { Text("Гибрид: эти сайты — через обход DPI (geosite:… или домены)") }, modifier = Modifier.fillMaxWidth())
 
         // ---------------- hiding
-        Section("Скрытность")
+        }
+        Group("Скрытность") {
         Toggle("Скрытый локальный прокси", "Случайный порт и пароль при каждом подключении — приложения не найдут прокси сканированием 10808 и не смогут им воспользоваться", s.stealthSocks) { v -> set { it.copy(stealthSocks = v) } }
         if (!s.stealthSocks) {
             var port by remember(s.socksPort) { mutableStateOf(s.socksPort.toString()) }
@@ -123,7 +135,8 @@ fun SettingsScreen() {
         OutlinedButton(onClick = { wipeDialog = true }, colors = ButtonDefaults.outlinedButtonColors(contentColor = Bad), modifier = Modifier.fillMaxWidth()) { Text("Стереть все данные") }
 
         // ---------------- servers
-        Section("Несколько серверов одновременно")
+        }
+        Group("Несколько серверов одновременно") {
         Hint("Запросы распределяются между отмеченными серверами; неработающие исключаются автоматически (проверка раз в минуту).")
         Balance.values().forEach { b ->
             Row(verticalAlignment = Alignment.CenterVertically) { RadioButton(selected = s.balance == b, onClick = { set { it.copy(balance = b) } }); Text(b.title) }
@@ -151,7 +164,8 @@ fun SettingsScreen() {
         Toggle("Фоновое ускорение", "Само готовит серверы и маски при запуске, а при подключении раз в 20 минут проверяет и переходит на более быстрые. На мобильном — экономно", s.autoOptimize) { v -> set { it.copy(autoOptimize = v) } }
         Toggle("Самовосстановление", "Если проверка после подключения не прошла: другая рабочая маскировка → новый подбор → (Авто) обход DPI без сервера", s.autoHeal) { v -> set { it.copy(autoHeal = v) } }
 
-        Section("Через VPN только эти сервисы")
+        }
+        Group("Через VPN только эти сервисы") {
         Hint("Ничего не отмечено — через VPN весь трафик. Отмечено — только эти сервисы, остальное напрямую (быстрее, банки и Госуслуги видят обычный IP).")
         com.vlesscardvpn.core.Services.ALL.forEach { sv ->
             Row(Modifier.fillMaxWidth().clickable { set { it.copy(services = if (sv.id in it.services) it.services - sv.id else it.services + sv.id) } },
@@ -161,7 +175,8 @@ fun SettingsScreen() {
             }
         }
 
-        Section("Режим «Прокси»")
+        }
+        Group("Режим «Прокси»") {
         Hint("Без VPN-значка: приложения сами ходят через SOCKS5 127.0.0.1:${s.socksPort} или HTTP 127.0.0.1:${s.httpPort} (Telegram, браузеры, торренты).")
         var port by remember(s.socksPort) { mutableStateOf(s.socksPort.toString()) }
         OutlinedTextField(port, { v -> port = v; v.toIntOrNull()?.takeIf { it in 1024..65534 }?.let { p -> set { it.copy(socksPort = p) } } },
@@ -171,7 +186,8 @@ fun SettingsScreen() {
             runCatching { ctx.startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse("tg://socks?server=127.0.0.1&port=${s.socksPort}")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
         }, modifier = Modifier.fillMaxWidth()) { Text("Добавить прокси в Telegram") }
 
-        Section("WARP")
+        }
+        Group("WARP") {
         Toggle("WARP через сервер", "Телефон → ваш сервер (с маскировкой) → Cloudflare WARP → интернет. Работает, даже когда оператор режет WARP напрямую. Сайты видят адрес Cloudflare — меньше капч и блокировок по IP сервера. Нужны аккаунт WARP (Серверы → «WARP») и хотя бы один обычный сервер", s.warpChain) { v -> set { it.copy(warpChain = v) } }
         Hint("Серверы → «WARP» создаёт аккаунты и подбирает точки входа. Ключ WARP+ ускоряет WARP (вставьте один или целый пост с ключами).")
         var wk by remember(s.warpKeys) { mutableStateOf(s.warpKeys) }
@@ -188,9 +204,10 @@ fun SettingsScreen() {
         if (keysDialog) WarpKeysDialog(onDismiss = { keysDialog = false })
         OutlinedButton(onClick = { Actions.setupWarp() }, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text("Настроить WARP сейчас") }
 
+        }
         MyMasksSection()
 
-        Section("Подбор маскировки: что перебирать")
+        Group("Подбор маскировки: что перебирать") {
         Hint("Ничего не отмечено — все виды. Меньше видов — быстрее подбор. Сервер перестаёт перебираться после 3 рабочих масок.")
         com.vlesscardvpn.xray.Masks.FAMILIES.forEach { (id, title) ->
             Row(Modifier.fillMaxWidth().clickable { set { it.copy(maskFamilies = if (id in it.maskFamilies) it.maskFamilies - id else it.maskFamilies + id) } },
@@ -206,12 +223,14 @@ fun SettingsScreen() {
             }
         }
 
-        Section("DNS через туннель")
+        }
+        Group("DNS через туннель") {
         Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             Settings.DNS_PRESETS.forEach { (n, u) -> FilterChip(selected = s.dnsUrl == u, onClick = { set { it.copy(dnsUrl = u) } }, label = { Text(n) }) }
         }
 
-        Section("Подписки")
+        }
+        Group("Подписки") {
         Toggle("Обновлять автоматически", "При запуске и перед «Авто», если старше 12 часов", s.autoUpdateSubs) { v -> set { it.copy(autoUpdateSubs = v) } }
         Hint("Отметьте источники (${s.subscriptions.size} выбрано). Белые списки — для мобильного интернета, когда открываются только российские сайты.")
         com.vlesscardvpn.model.Subs.CATALOG.groupBy { it.group }.forEach { (group, items) ->
@@ -239,9 +258,11 @@ fun SettingsScreen() {
             TextButton(onClick = { Actions.refreshSubscriptions() }, enabled = !busy) { Text("Обновить сейчас") }
         }
 
-        Section("Проверка")
+        }
+        Group("Проверка") {
         var url by remember(s.testUrl) { mutableStateOf(s.testUrl) }
         OutlinedTextField(url, { v -> url = v; if (v.startsWith("https://")) set { it.copy(testUrl = v) } }, label = { Text("Адрес для пинга") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+        }
         Text(XrayCore.version(), fontSize = 12.sp, color = Color.Gray)
     }
     if (appsDialog) AppsDialog(s, onDismiss = { appsDialog = false }) { apps, only -> set { it.copy(apps = apps, onlyApps = only) } }
@@ -292,6 +313,21 @@ private fun StrategyRow(label: String, selected: Boolean, r: Actions.DpiResult?,
     }
 }
 
+/** One UI-style group: a rounded card with a title; tap the title to fold it (the state is kept while the app lives). */
+private val folded = androidx.compose.runtime.mutableStateMapOf<String, Boolean>()
+@Composable private fun Group(t: String, content: @Composable ColumnScope.() -> Unit) {
+    val open = folded[t] != true
+    androidx.compose.material3.Surface(shape = androidx.compose.foundation.shape.RoundedCornerShape(24.dp), color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+        modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp).animateContentSize(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(Modifier.fillMaxWidth().clickable { folded[t] = open }, verticalAlignment = Alignment.CenterVertically) {
+                Text(t, fontWeight = FontWeight.SemiBold, fontSize = 16.sp, color = MaterialTheme.colorScheme.primary, modifier = Modifier.weight(1f))
+                Text(if (open) "▴" else "▾", fontSize = 18.sp, color = MaterialTheme.colorScheme.primary)
+            }
+            if (open) content()
+        }
+    }
+}
 @Composable private fun Section(t: String) = Text(t, fontWeight = FontWeight.SemiBold, fontSize = 16.sp, modifier = Modifier.padding(top = 8.dp))
 @Composable private fun Hint(t: String) = Text(t, fontSize = 12.sp, color = Color.Gray)
 
