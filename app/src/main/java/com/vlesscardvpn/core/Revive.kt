@@ -41,6 +41,16 @@ object Revive {
     fun cdnLike(s: Server): Boolean = s.protocol in setOf("vless", "vmess", "trojan") && s.network in CDN_NETS &&
         s.security != "reality" && routeName(s).isNotEmpty()
 
+    /** Edge addresses that already revived something (newest first): tried before random ones next time. */
+    val good = java.util.concurrent.CopyOnWriteArrayList<String>()
+    fun remember(addrs: Collection<String>) { val l = (addrs + good).distinct().take(12); good.clear(); good.addAll(l) }
+    /** What to try: up to 4 proven addresses, 2 clean names, the rest random — [n] in total. */
+    fun pick(n: Int = 8, rnd: kotlin.random.Random = kotlin.random.Random): List<String> {
+        val known = good.take(4)
+        val names = CLEAN_NAMES.filter { it !in known }.shuffled(rnd).take(2)
+        return (known + names + randomIps(n, rnd)).distinct().take(n)
+    }
+
     fun randomIps(n: Int, rnd: kotlin.random.Random = kotlin.random.Random): List<String> = List(n) {
         val c = SCAN[rnd.nextInt(SCAN.size)]
         val base = ipv4(c.substringBefore('/'))!!; val bits = c.substringAfter('/').toInt()

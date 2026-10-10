@@ -378,13 +378,14 @@ object Actions {
             Tester.real(variants, st.settings.testUrl, port, own.ports, batch = 64, parallel = parallel, big = big, attempts = attempts) { i, p ->
                 val s = variants[i].first
                 if (p.works) ok.incrementAndGet()
+                runCatching { Brain.learn(net, s, st.state(s), p.works) }
                 states.put(s.id) {
                     it.copy(realMs = p.realMs, bigOk = p.bigOk, ytOk = p.ytOk, tgOk = p.tgOk, checkedAt = System.currentTimeMillis(), kbps = if (p.kbps > 0) p.kbps else it.kbps,
                         okCount = it.okCount + if (p.works) 1 else 0, failCount = it.failCount + if (p.works) 0 else 1)
                 }
                 step(done.incrementAndGet(), variants.size)
             }
-        } finally { own?.close(); states.flush() }
+        } finally { own?.close(); states.flush(); runCatching { Brain.save(app) } }
         return ok.get()
     }
 
@@ -880,7 +881,7 @@ object Actions {
         if (ids.isNotEmpty()) Store.setStates(failed.associate { s -> s.id to { x: com.vlesscardvpn.model.ServerState -> x.copy(realMs = 0, checkedAt = now) } })
         fun working() = Store.state.value.let { st -> st.servers.filter { it.id !in ids && st.state(it).works } }
         // re-check the spares first (2–4 s, outside the tunnel): old «works» marks must not send us to a dead server
-        working().let { w -> Store.state.value.let { st -> preferred(st, w).sortedBy { st.state(it).score }.take(12) } }.takeIf { it.isNotEmpty() }?.let {
+        working().let { w -> Store.state.value.let { st -> runCatching { Brain.load(app) }; Brain.order(Net.key(app), preferred(st, w)) { st.state(it) }.take(12) } }.takeIf { it.isNotEmpty() }?.let {
             onStep("проверяю запасные серверы"); realTest(it, "Авто: проверяю запасные", big = false, attempts = 1)
         }
         working().takeIf { it.isNotEmpty() }?.let { return selectBest(5, close = true, among = it) }
@@ -922,7 +923,7 @@ object Actions {
     suspend fun doRevive(dead: List<Server>, limit: Int = 6): Int {
         val cand = withContext(Bg.io) { dead.filter { Revive.cdnLike(it) }.distinctBy { Revive.routeName(it) + it.secret + it.path }.take(limit * 2).filter { Revive.behindCloudflare(it) }.take(limit) }
         if (cand.isEmpty()) return 0
-        val addrs = Revive.CLEAN_NAMES.shuffled().take(2) + Revive.randomIps(6)
+        val addrs = Revive.pick(8)
         val vars = cand.flatMap { Revive.variants(it, addrs) }
         Store.addServers(vars)
         realTest(vars, "Оживляю серверы через Cloudflare", big = false, attempts = 1)
@@ -930,6 +931,7 @@ object Actions {
         val keep = vars.filter { now.state(it).works }.groupBy { it.name.substringBefore(" · CDN") }
             .flatMap { (_, l) -> l.sortedBy { now.state(it).score }.take(2) }.map { it.id }.toSet()
         val drop = vars.map { it.id }.filter { it !in keep }.toSet()
+        Revive.remember(vars.filter { it.id in keep }.map { it.address })
         Store.update { st -> st.copy(servers = st.servers.filter { it.id !in drop }, states = st.states - drop) }
         return keep.size
     }

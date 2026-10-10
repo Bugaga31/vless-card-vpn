@@ -85,6 +85,8 @@ object Assistant {
                 Msg(false, if (off) "Выключаю подстройку под приложения." else "Включаю подстройку: открыли Gemini/ChatGPT — переключу на серверы страны, где они работают (США, Нидерланды…), YouTube — ускорю.",
                     listOf(Btn("Применить", "!set appAware ${if (off) "off" else "on"}")), auto = true)
             }
+            has(q, "реклам") && has(q, "ютуб", "youtube", "ютьюб") -> Msg(false, "Блокировку рекламы включаю: режу рекламные серверы Google/YouTube (баннеры, рекламу в браузере и других приложениях). Честно: ролики-вставки внутри приложения YouTube идут с тех же серверов, что и само видео, — VPN их не отличит, не сломав видео. Без них — YouTube ReVanced (приложение поддерживается: ускорение видео работает и в нём) или YouTube Premium.", listOf(Btn("Включить", "!set blockAds on")), auto = true)
+            has(q, "промокод", "промо-код", "скидк", "акци", "лучшие предложен", "топовые предложен") -> Msg(false, "Промокоды сам искать и вводить в чужих сервисах я не могу: VPN не имеет доступа к вашим аккаунтам и приложениям (и вводить коды от вашего имени без вас было бы небезопасно). Зато могу открыть сервис из страны, где он дешевле или доступен, — скажите какой.")
             has(q, "турбо", "ускорение телефона", "реклам", "quic") && has(q, "включи", "выключи", "отключи", "убери", "блокир") -> {
                 val off = has(q, "выключи", "отключи") && !has(q, "реклам") || has(q, "реклам") && has(q, "не блокир", "покажи рекламу", "выключи блок", "отключи блок")
                 val key = when { has(q, "реклам") -> "blockAds"; has(q, "quic") -> "blockQuic"; else -> "turbo" }
@@ -291,7 +293,7 @@ object Assistant {
             cmd == "!warp" -> { Store.update { it.copy(settings = it.settings.copy(warpChain = true)) }; job(app, null) { Actions.setupWarp() } }
             cmd == "!diag" -> scope.launch {
                 post(Msg(false, "Диагностирую… (~15 с)"))
-                val r = Diagnose.report(Store.state.value.selected, Tunnel.socks?.port)
+                val r = Diagnose.report(Store.state.value.selected, Tunnel.socks?.port) + "\n" + Brain.report()
                 post(Msg(false, r, if (r.contains("SNI") || r.contains("белые списки")) listOf(Btn("Подобрать маскировку", "!masks")) else emptyList()))
             }
             cmd == "!revive" -> job(app, null) { Actions.revive() }

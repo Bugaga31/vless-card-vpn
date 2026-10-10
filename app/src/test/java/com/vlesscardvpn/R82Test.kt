@@ -333,3 +333,46 @@ class R100Test {
         org.junit.Assert.assertEquals("Telegram", g.GUARDS["org.telegram.messenger"]?.title)
     }
 }
+
+class R101Test {
+    @org.junit.Test fun versionNames() {
+        // mirrors versionOf() in app/build.gradle.kts and the workflow
+        fun v(n: Int) = if (n > 100) "1.1.${n - 101}" else "1.0.$n"
+        org.junit.Assert.assertEquals("1.0.100", v(100)); org.junit.Assert.assertEquals("1.1.0", v(101)); org.junit.Assert.assertEquals("1.1.4", v(105))
+    }
+
+    @org.junit.Test fun revivePicksProvenFirst() {
+        val r = com.vlesscardvpn.core.Revive
+        r.good.clear(); r.remember(listOf("104.16.5.5", "104.16.6.6"))
+        val p = r.pick(8)
+        org.junit.Assert.assertEquals(listOf("104.16.5.5", "104.16.6.6"), p.take(2))
+        org.junit.Assert.assertTrue(p.size <= 8 && p.size >= 6)
+        r.remember(listOf("104.16.7.7")); org.junit.Assert.assertEquals("104.16.7.7", r.good[0]); r.good.clear()
+    }
+
+    @org.junit.Test fun guardPrefersServersThatWorked() {
+        val a = com.vlesscardvpn.model.Server(name = "a", protocol = "vless", address = "1.1.1.1", port = 443, secret = "x")
+        val b = a.copy(name = "b", address = "2.2.2.2")
+        val w = com.vlesscardvpn.core.AppWatch
+        org.junit.Assert.assertEquals(listOf(b), w.guardOrder(listOf(a, b), setOf(b.id)))
+        org.junit.Assert.assertEquals(listOf(a, b), w.guardOrder(listOf(a, b), null))
+        org.junit.Assert.assertEquals(listOf(a, b), w.guardOrder(listOf(a, b), setOf("zzz")))
+    }
+}
+
+class R101bTest {
+    @org.junit.Test fun brainLearns() {
+        val b = com.vlesscardvpn.core.Brain
+        val good = com.vlesscardvpn.model.Server(name = "g", protocol = "vless", address = "1.1.1.1", port = 443, secret = "x", security = "reality")
+        val bad = good.copy(name = "b", security = "tls", network = "ws", host = "h.example.com", port = 8443)
+        val st = com.vlesscardvpn.model.ServerState(tcpMs = 100)
+        repeat(300) { b.learn("Моб.: T", good, st, true); b.learn("Моб.: T", bad, st, false) }
+        org.junit.Assert.assertTrue(b.p("Моб.: T", good, st) > b.p("Моб.: T", bad, st) + 0.3)
+        org.junit.Assert.assertEquals(listOf(good, bad), b.order("Моб.: T", listOf(bad, good)) { st })
+        org.junit.Assert.assertTrue(b.p("Моб.: T", good, st) in 0.0..1.0)
+    }
+
+    @org.junit.Test fun ytAdsAreFullDomains() {
+        org.junit.Assert.assertTrue(com.vlesscardvpn.xray.XrayConfigBuilder.YT_ADS.all { it.startsWith("full:") && "googlevideo" !in it })
+    }
+}

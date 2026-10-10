@@ -23,6 +23,11 @@ object XrayConfigBuilder {
     val RU_DOMAINS = listOf("geosite:category-ru", "domain:ru", "domain:su", "domain:xn--p1ai")
     private val IPV4_LITERAL = Regex("^\\d{1,3}(\\.\\d{1,3}){3}$")
 
+    /** Ad servers of YouTube / Google ads (banners, ad SDK, ad stats). Pre-rolls inside the YouTube app come from the same
+     *  servers as the video itself — no VPN can cut those without breaking video. */
+    val YT_ADS = listOf("full:ads.youtube.com", "full:pagead2.googlesyndication.com", "full:googleads.g.doubleclick.net",
+        "full:pubads.g.doubleclick.net", "full:securepubads.g.doubleclick.net", "full:ad.doubleclick.net", "full:static.doubleclick.net",
+        "full:imasdk.googleapis.com", "full:googleadservices.com", "full:www.googleadservices.com", "full:tpc.googlesyndication.com")
     private fun arr(vararg v: Any): JSONArray = JSONArray().apply { v.forEach { put(it) } }
     private fun csv(s: String) = s.split(',').map { it.trim() }.filter { it.isNotEmpty() }
 
@@ -250,7 +255,7 @@ object XrayConfigBuilder {
         if (settings.alwaysVpn.isNotEmpty()) rules.put(toMain(JSONObject().put("domain", JSONArray(settings.alwaysVpn.map { "domain:$it" }))))
         // AI services (Gemini, ChatGPT, Claude…) refuse Russian addresses: always through the servers, never direct or via the DPI bypass
         if (useServers) rules.put(toMain(JSONObject().put("domain", JSONArray(com.vlesscardvpn.core.AppWatch.AI_DOMAINS))))
-        if (settings.blockAds) rules.put(JSONObject().put("domain", arr("geosite:category-ads-all")).put("outboundTag", "block"))
+        if (settings.blockAds) rules.put(JSONObject().put("domain", JSONArray(listOf("geosite:category-ads-all") + YT_ADS)).put("outboundTag", "block"))
         if (settings.mode == Mode.HYBRID && settings.hybridDomains.isNotEmpty())
             rules.put(JSONObject().put("domain", JSONArray(settings.hybridDomains)).put("outboundTag", BYEDPI_TAG))
         if (settings.ruDirect && useServers) {

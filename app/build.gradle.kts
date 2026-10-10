@@ -6,7 +6,8 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
-// Match the release workflow's v1.0.<run_number> tag.
+// Build 101 = «1.1.0» (anniversary), 102 = 1.1.1, …; up to 100 — 1.0.<n>. The workflow names the tag the same way.
+fun versionOf(n: Int) = if (n > 100) "1.1.${n - 101}" else "1.0.$n"
 val releaseNumber = providers.environmentVariable("GITHUB_RUN_NUMBER").orNull?.toIntOrNull() ?: 59
 val betaPreview = providers.gradleProperty("betaPreview").orNull == "true"
 val armOnly = betaPreview || providers.gradleProperty("armOnly").orNull == "true"
@@ -42,7 +43,7 @@ android {
         minSdk = 24
         targetSdk = 34
         versionCode = releaseNumber
-        versionName = "1.0.$releaseNumber"
+        versionName = versionOf(releaseNumber)
         // AGP forbids ndk.abiFilters together with ABI splits, so the split block carries the same list.
         if (!splitAbi) ndk { abiFilters.addAll(targetAbis) }
     }
