@@ -76,6 +76,13 @@ object AppWatch {
         else -> "wait"
     }
     private val guardAt = HashMap<String, Long>(); private var guardFails = 0; private var guardAction = 0L
+    /** Service → servers it opened through last time: tried first when it breaks again. */
+    private val guardGood = java.util.concurrent.ConcurrentHashMap<String, Set<String>>()
+    /** Spare servers in the order to try: the ones this service worked through before, then the rest. */
+    fun guardOrder(others: List<com.vlesscardvpn.model.Server>, good: Set<String>?): List<com.vlesscardvpn.model.Server> {
+        val g = others.filter { good != null && it.id in good }
+        return if (g.isNotEmpty()) g else others
+    }
 
     private suspend fun guard(pkg: String, g: Guard, opened: Boolean, reconnect: () -> Unit) {
         val now = System.currentTimeMillis()
@@ -86,14 +93,14 @@ object AppWatch {
         var p = withContext(Dispatchers.IO) { Tester.site(g.url, port) }
         if (!p.answers) { delay(1500); p = withContext(Dispatchers.IO) { Tester.site(g.url, port) } }
         guardFails = if (p.answers) 0 else guardFails + 1
-        if (p.answers) return
+        if (p.answers) { guardGood[g.title] = Store.state.value.selected.map { it.id }.toSet(); return }
         val st = Store.state.value
         val cur = st.selected.map { it.id }.toSet()
         val others = st.servers.filter { it.id !in cur && st.state(it).works }
         when (guardDecide(maxOf(guardFails, 2), others.size, Tunnel.status.value.checkOk, now - guardAction)) {
             "switch" -> {
                 guardAction = now; guardFails = 0
-                val n = Actions.selectBest(5, close = true, among = others)
+                val n = Actions.selectBest(5, close = true, among = guardOrder(others, guardGood[g.title]))
                 if (n > 0) {
                     reconnect(); say("${g.title} не открывался через текущие серверы (${p.result}) — переключил на $n других")
                     delay(10_000)
@@ -135,6 +142,7 @@ object AppWatch {
         else -> null
     }
     private var evoN = 0
+    private var lastRevive = System.currentTimeMillis() - 330 * 60_000L // first try ~30 min after start
     private var lastFreeze = System.currentTimeMillis() - 110 * 60_000L
     private var fails = 0; private var lastFix = 0L; private var lastLight = 0L; private var tick = 0
     private var lastSpeedup = 0L; private var lastSpeedCheck = System.currentTimeMillis() - 40 * 60_000L // first speed check ~5 min after start
@@ -189,6 +197,12 @@ object AppWatch {
             }
         }
         if (net.isNotEmpty() && net != evolveNet) { evolveNet = net; lastEvolve = minOf(lastEvolve, now - (if (Store.summary.value.mask.isEmpty()) 117 else 105) * 60_000L) } // no mask known here: search in ~3 min
+        // dead servers behind Cloudflare: quietly try them on other edge addresses every 6 h (the list grows by itself)
+        if (now - lastRevive > 6 * 3600_000L && fails == 0 && !Actions.progress.value.running && !Thermal.cooling) {
+            lastRevive = now
+            val dead = Actions.deadCdn()
+            if (dead.isNotEmpty()) { val n = Actions.doRevive(dead, 6); if (n > 0) say("Автопилот: ожило $n нерабочих серверов за Cloudflare (на других адресах, пометка «· CDN») — теперь они в запасе") }
+        }
         // light speed check (4 s) every 45 min, only on unmetered networks (Wi-Fi) — mobile data is not spent on it
         var slow = false
         if (now - lastSpeedCheck > 45 * 60_000L && fails == 0 && !Actions.progress.value.running && unmetered()) {

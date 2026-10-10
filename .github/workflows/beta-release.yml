@@ -130,20 +130,21 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          V=${VERSION#beta-build-}; V=${V#release-build-}
+          V=${VERSION#beta-build-}; V=${V#release-build-}; D=$V
+          if [ "$V" -gt 100 ] 2>/dev/null; then V="1.$((V-101))"; else V="0.$V"; fi
           cd release
-          mv VLESS-Card-Beta.apk VLESS-Card-Beta-1.0.$V.apk
-          mv VLESS-Card-Beta-arm64.apk VLESS-Card-Beta-1.0.$V-arm64.apk
-          sha256sum VLESS-Card-Beta-1.0.$V.apk VLESS-Card-Beta-1.0.$V-arm64.apk > SHA256SUMS-Beta.txt
+          mv VLESS-Card-Beta.apk VLESS-Card-Beta-1.$V.apk
+          mv VLESS-Card-Beta-arm64.apk VLESS-Card-Beta-1.$V-arm64.apk
+          sha256sum VLESS-Card-Beta-1.$V.apk VLESS-Card-Beta-1.$V-arm64.apk > SHA256SUMS-Beta.txt
           read T F < tests.txt || true
-          NOTES=../docs/release-1.0.$V.md; [ -f "$NOTES" ] || NOTES=../docs/beta-1.0.$V.md
+          NOTES=../docs/release-1.$V.md; [ -f "$NOTES" ] || NOTES=../docs/release-1.0.$D.md; [ -f "$NOTES" ] || NOTES=../docs/beta-1.0.$D.md
           [ -f "$NOTES" ] || NOTES=/dev/null
           { cat "$NOTES"; echo; echo "### Автоматические проверки этой сборки"; echo "- JVM-тесты: $T, ошибок: $F"; echo "- Подписи v1 + v2 + v3, постоянный ключ Beta (следующие версии ставятся поверх)"; echo "- Файл *-arm64.apk — то же приложение только для 64-битных телефонов (почти все с 2017 года), качать примерно вдвое меньше"; echo "- Суммы SHA-256 обоих файлов — в SHA256SUMS-Beta.txt"; echo "- Универсальный файл установлен и запущен на эмуляторах Android 11 и 14 (ARM-трансляция x86_64)"; echo "- Реальный телефон и сети РФ этим не проверяются"; } > notes.md
           case "$VERSION" in
-            release-build-*) gh release create "v1.0.$V" VLESS-Card-Beta-1.0.$V.apk VLESS-Card-Beta-1.0.$V-arm64.apk SHA256SUMS-Beta.txt \
+            release-build-*) gh release create "v1.$V" VLESS-Card-Beta-1.$V.apk VLESS-Card-Beta-1.$V-arm64.apk SHA256SUMS-Beta.txt \
                 --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --latest \
-                --title "VLESS Card 1.0.$V" --notes-file notes.md ;;
-            *) gh release create "beta-v1.0.$V" VLESS-Card-Beta-1.0.$V.apk VLESS-Card-Beta-1.0.$V-arm64.apk SHA256SUMS-Beta.txt \
+                --title "VLESS Card 1.$V" --notes-file notes.md ;;
+            *) gh release create "beta-v1.$V" VLESS-Card-Beta-1.$V.apk VLESS-Card-Beta-1.$V-arm64.apk SHA256SUMS-Beta.txt \
                 --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease --draft \
-                --title "VLESS Card · Beta 1.0.$V" --notes-file notes.md ;;
+                --title "VLESS Card · Beta 1.$V" --notes-file notes.md ;;
           esac
