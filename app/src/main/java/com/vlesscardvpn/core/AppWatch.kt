@@ -65,7 +65,7 @@ object AppWatch {
     private var evoN = 0
     private var lastFreeze = System.currentTimeMillis() - 110 * 60_000L
     private var fails = 0; private var lastFix = 0L; private var lastLight = 0L; private var tick = 0
-    private var lastSpeedup = 0L; private var lastSpeedCheck = System.currentTimeMillis()
+    private var lastSpeedup = 0L; private var lastSpeedCheck = System.currentTimeMillis() - 40 * 60_000L // first speed check ~5 min after start
     @Volatile var lastMbps = 0.0
     private var evolveNet = ""
     private var lastEvolve = System.currentTimeMillis() - 100 * 60_000L // first evolution ~20 min after start
