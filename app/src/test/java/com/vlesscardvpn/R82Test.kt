@@ -299,3 +299,37 @@ class R97bTest {
         org.junit.Assert.assertEquals("соединение сброшено (DPI?)", E.human(java.net.SocketException("Connection reset")))
     }
 }
+
+class R100Test {
+    private val cdn = com.vlesscardvpn.model.Server(name = "cf", protocol = "vless", address = "1.2.3.4", port = 443, secret = "u", network = "ws", security = "tls", host = "my.example.com", path = "/ws")
+
+    @org.junit.Test fun cloudflareRanges() {
+        org.junit.Assert.assertTrue(com.vlesscardvpn.core.Revive.isCloudflare("104.16.123.96"))
+        org.junit.Assert.assertTrue(com.vlesscardvpn.core.Revive.isCloudflare("172.67.1.1"))
+        org.junit.Assert.assertFalse(com.vlesscardvpn.core.Revive.isCloudflare("8.8.8.8"))
+        com.vlesscardvpn.core.Revive.randomIps(30).forEach { org.junit.Assert.assertTrue(it, com.vlesscardvpn.core.Revive.isCloudflare(it)) }
+    }
+
+    @org.junit.Test fun variantsKeepName() {
+        org.junit.Assert.assertTrue(com.vlesscardvpn.core.Revive.cdnLike(cdn))
+        org.junit.Assert.assertFalse(com.vlesscardvpn.core.Revive.cdnLike(cdn.copy(network = "tcp")))
+        org.junit.Assert.assertFalse(com.vlesscardvpn.core.Revive.cdnLike(cdn.copy(host = "")))
+        val v = com.vlesscardvpn.core.Revive.variants(cdn, listOf("104.16.1.2", "1.2.3.4"))
+        org.junit.Assert.assertEquals(1, v.size)
+        org.junit.Assert.assertEquals("104.16.1.2", v[0].address)
+        org.junit.Assert.assertEquals("my.example.com", v[0].sni)
+        org.junit.Assert.assertEquals("my.example.com", v[0].host)
+        org.junit.Assert.assertNotEquals(cdn.id, v[0].id)
+        org.junit.Assert.assertEquals("cf · CDN 104.16.9.9", com.vlesscardvpn.core.Revive.variants(v[0], listOf("104.16.9.9"))[0].name)
+    }
+
+    @org.junit.Test fun guardDecisions() {
+        val g = com.vlesscardvpn.core.AppWatch
+        org.junit.Assert.assertEquals("wait", g.guardDecide(1, 5, true, Long.MAX_VALUE))
+        org.junit.Assert.assertEquals("switch", g.guardDecide(2, 5, true, Long.MAX_VALUE))
+        org.junit.Assert.assertEquals("wait", g.guardDecide(2, 5, false, Long.MAX_VALUE))
+        org.junit.Assert.assertEquals("wait", g.guardDecide(2, 5, true, 60_000L))
+        org.junit.Assert.assertEquals("rescue", g.guardDecide(2, 0, null, 11 * 60_000L))
+        org.junit.Assert.assertEquals("Telegram", g.GUARDS["org.telegram.messenger"]?.title)
+    }
+}
