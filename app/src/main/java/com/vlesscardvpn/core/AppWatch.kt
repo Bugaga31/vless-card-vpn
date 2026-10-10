@@ -62,6 +62,7 @@ object AppWatch {
         fails == 0 && sinceEvolve > 2 * 3600_000L -> "evolve"
         else -> null
     }
+    private var evoN = 0
     private var fails = 0; private var lastFix = 0L; private var lastLight = 0L; private var tick = 0
     private var lastSpeedup = 0L; private var lastSpeedCheck = System.currentTimeMillis()
     @Volatile var lastMbps = 0.0
@@ -104,9 +105,17 @@ object AppWatch {
         when (pilot(fails, Store.summary.value.heavyMask, Actions.progress.value.running || Thermal.cooling && fails < 2, now - lastFix, now - lastLight, now - lastEvolve, slow, now - lastSpeedup)) {
             "speedup" -> { lastSpeedup = now; say("Автопилот: скорость всего %.1f Мбит/с — ищу серверы и маски быстрее".format(lastMbps)); withContext(Dispatchers.Main) { Actions.boostYoutube() } }
             "evolve" -> {
-                lastEvolve = now
-                val sel = Store.state.value.selected
-                if (sel.isNotEmpty()) {
+                lastEvolve = now; evoN++
+                val st0 = Store.state.value
+                val sel = st0.selected
+                val m = st0.settings.mode
+                // ByeDPI strategies evolve too: always in «Без сервера», every second time in «Гибрид», in «Авто» without servers
+                if (m == com.vlesscardvpn.model.Mode.BYEDPI || m == com.vlesscardvpn.model.Mode.HYBRID && evoN % 2 == 0 || m == com.vlesscardvpn.model.Mode.AUTO && sel.isEmpty()) {
+                    say("Автопилот: эволюция обхода DPI — скрещиваю и проверяю мутантов рабочих стратегий")
+                    withContext(Dispatchers.Main) { Actions.findDpi() }
+                    delay(1000); while (Actions.progress.value.running) delay(1000)
+                    Actions.progress.value.message.takeIf { it.isNotEmpty() }?.let { say("Эволюция: $it") }
+                } else if (sel.isNotEmpty()) {
                     say("Автопилот: эволюция масок — скрещиваю и проверяю мутантов рабочих масок в этой сети")
                     withContext(Dispatchers.Main) { Actions.findMasks(sel.take(3), perServer = 12) }
                     delay(1000); while (Actions.progress.value.running) delay(1000)
