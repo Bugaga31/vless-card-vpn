@@ -53,6 +53,8 @@ class TunnelService : VpnService() {
         const val ACTION_STOP = "com.vlesscardvpn.STOP"
         const val ACTION_PAUSE = "com.vlesscardvpn.PAUSE"
         const val PAUSE_MS = 5 * 60_000L
+        val WARM = listOf("www.youtube.com", "i.ytimg.com", "yt3.ggpht.com", "rr1---sn-4g5e6nzz.googlevideo.com", "www.google.com",
+            "play.googleapis.com", "web.telegram.org", "www.instagram.com", "scontent.cdninstagram.com", "discord.com", "chatgpt.com", "x.com")
         /** «Ускорение»: a big TUN MTU — 5-6 times fewer packets for the phone to move for the same traffic (less CPU, less battery). */
         const val TURBO_MTU = 8500
         private const val CHANNEL = "vpn"
@@ -319,7 +321,7 @@ class TunnelService : VpnService() {
                 scope.launch { lock.withLock { connect(soft = true) } }
                 return@launch
             }
-            if (p.works) { healStep = 0; dpiHeals = 0; connectFails = 0; scheduleOptimize(if (com.vlesscardvpn.core.Actions.deepPending) 40_000 else 120_000); com.vlesscardvpn.core.AppWatch.start(this@TunnelService) { scope.launch { lock.withLock { connect(soft = true) } } }; watchdog(); coverTraffic(); if (serverless()) rescueLater() } else heal()
+            if (p.works) { healStep = 0; dpiHeals = 0; connectFails = 0; warmUp(); scheduleOptimize(if (com.vlesscardvpn.core.Actions.deepPending) 20_000 else 60_000); com.vlesscardvpn.core.AppWatch.start(this@TunnelService) { scope.launch { lock.withLock { connect(soft = true) } } }; watchdog(); coverTraffic(); if (serverless()) rescueLater() } else heal()
         }
     }
 
@@ -342,6 +344,18 @@ class TunnelService : VpnService() {
      * one comes in 5 min (confirm the new choice), and while nothing changes the interval grows 10 → 20 → 30 min,
      * so a stable connection is left alone and the battery is spared. A network change restarts the cycle.
      */
+    /**
+     * «Прогрев»: right after the tunnel works, the names apps open first (YouTube and its video servers, Google,
+     * Telegram, Instagram…) are resolved through it — the DNS cache is warm, the first open doesn't wait for DNS.
+     */
+    private fun warmUp() {
+        val auth = Tunnel.socks ?: return
+        if (Store.state.value.settings.proxyOnly) return
+        scope.launch(Dispatchers.IO) {
+            WARM.forEach { h -> launch { runCatching { Tester.dnsViaSocks(auth.port, auth.user, auth.pass, h) } } }
+        }
+    }
+
     private fun scheduleOptimize(firstDelay: Long = 120_000) {
         if (optJob?.isActive == true) return
         optJob = scope.launch {
