@@ -478,7 +478,7 @@ object Actions {
         val keptIds = kept.map { it.id }.toSet()
         val winners = tried.filter { it.third && it.second.startsWith(MaskLab.PREFIX) }.map { it.second }.distinct()
             .mapNotNull { id -> Masks.byId(id) ?: pool.firstOrNull { it.id == id } }
-        if (winners.isNotEmpty()) Store.update { st -> st.copy(settings = st.settings.copy(autoMasks = MaskLab.keep(st.settings.autoMasks, winners))) }
+        Store.update { st -> st.copy(settings = st.settings.copy(autoMasks = MaskLab.keep(st.settings.autoMasks, winners, st.maskStats))) }
         val winIds = winners.map { it.id }.toSet()
         // Failures of a server where nothing worked say nothing about the masks (the server may be dead).
         Store.recordMasks(net, tried.filter { (sid, mid, ok) -> (ok || good.containsKey(sid)) && (!mid.startsWith(MaskLab.PREFIX) || mid in keptIds || mid in winIds) }
@@ -1126,7 +1126,9 @@ object Actions {
         val passed = plan.filter { first[it.id]?.ok == true }.sortedBy { first.getValue(it.id).ms }
         // Stage 2: finals + evolution
         val finals = passed.take(8)
-        val mutants = if (finals.isEmpty()) DpiEvo.breed(plan.filter { it.engine == DpiEngine.BYEDPI }.take(6), 6) else DpiEvo.breed(finals.take(3), 9)
+        val evoPool = st.dpiEvoPool.mapNotNull { DpiEvo.decode(it) }.take(3)
+        val mutants = if (finals.isEmpty()) DpiEvo.breed((evoPool + plan.filter { it.engine == DpiEngine.BYEDPI }).distinctBy { it.id }.take(8), 8)
+            else DpiEvo.breed((finals.take(3) + evoPool).distinctBy { it.id }, 12)
         val stage2 = (finals + mutants).distinctBy { it.id }
         val scores = java.util.concurrent.ConcurrentHashMap<String, MutableList<Tester.DpiScore>>()
         if (stage2.isNotEmpty()) {
@@ -1152,7 +1154,8 @@ object Actions {
         dpiResults.value = first + ranked.associate { it.id to DpiResult(true, msOf(it.id).toInt(), "", total(it.id)) }
         if (best != null) Store.update { a ->
             a.copy(settings = a.settings.copy(dpiRemembered = a.settings.dpiRemembered + (network to best.id) + (Settings.ANY_NETWORK to best.id),
-                dpiRanking = a.settings.dpiRanking + (network to (ranked.ifEmpty { passed }).take(5).map { it.id })))
+                dpiRanking = a.settings.dpiRanking + (network to (ranked.ifEmpty { passed }).take(5).map { it.id }),
+                dpiEvoPool = DpiEvo.keep(a.settings.dpiEvoPool, ranked.take(3).map { it.id })))
         }
         val evoWon = best?.id?.startsWith(DpiEvo.PREFIX) == true
         return if (best == null) "Сеть «$network»: ни одна из ${plan.size} стратегий не открыла YouTube. Нужен сервер — режим «Авто» найдёт его сам."

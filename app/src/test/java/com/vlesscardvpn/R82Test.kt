@@ -196,3 +196,48 @@ class R93Test {
         org.junit.Assert.assertEquals("", T.label(0.0, -1))
     }
 }
+
+class R94Test {
+    private val a = com.vlesscardvpn.core.DpiEvo.decode(com.vlesscardvpn.core.DpiEvo.encode(listOf("--split", "1+s", "--disorder", "1", "--fake", "-1", "--ttl", "8")))!!
+    private val b = com.vlesscardvpn.core.DpiEvo.decode(com.vlesscardvpn.core.DpiEvo.encode(listOf("--oob", "1", "--tlsrec", "3+s")))!!
+    @org.junit.Test fun genes() {
+        val g = com.vlesscardvpn.core.DpiEvo.genes(a.args)!!
+        org.junit.Assert.assertEquals(listOf(listOf("--split", "1+s"), listOf("--disorder", "1"), listOf("--fake", "-1", "--ttl", "8")), g)
+        org.junit.Assert.assertNull(com.vlesscardvpn.core.DpiEvo.genes(listOf("--split", "1", "--auto", "torst", "--disorder", "1")))
+    }
+    @org.junit.Test fun breedReshapesAndCrosses() {
+        val kids = com.vlesscardvpn.core.DpiEvo.breed(listOf(a, b), 30, seed = 7)
+        org.junit.Assert.assertTrue(kids.size >= 15)
+        kids.forEach { k ->
+            org.junit.Assert.assertTrue(k.id, k.id.startsWith("EVO#") && k.args != a.args && k.args != b.args)
+            org.junit.Assert.assertEquals(k.args, com.vlesscardvpn.core.DpiEvo.decode(k.id)!!.args)
+            org.junit.Assert.assertTrue(com.vlesscardvpn.core.ByeDpiArgs.parse(k.args.joinToString(" ")).isSuccess)
+        }
+        // shapes change, not only numbers: some child has an option set neither parent alone had
+        org.junit.Assert.assertTrue(kids.any { k -> val f = k.args.filter { it.startsWith("--") }.toSet(); f != a.args.filter { it.startsWith("--") }.toSet() && f != b.args.filter { it.startsWith("--") }.toSet() })
+        org.junit.Assert.assertEquals(kids, com.vlesscardvpn.core.DpiEvo.breed(listOf(a, b), 30, seed = 7))
+    }
+    @org.junit.Test fun poolKeepAndPlan() {
+        val p = com.vlesscardvpn.core.DpiEvo.keep(listOf("EVO#x"), listOf(a.id, "BYEDPI#1", a.id))
+        org.junit.Assert.assertEquals(listOf(a.id, "EVO#x"), p)
+        org.junit.Assert.assertEquals(20, com.vlesscardvpn.core.DpiEvo.keep((1..30).map { "EVO#$it" }, emptyList()).size)
+        val s = com.vlesscardvpn.model.Settings(dpiEvoPool = listOf(b.id))
+        org.junit.Assert.assertTrue(com.vlesscardvpn.core.DpiStrategies.plan(s, "wifi:x", false).any { it.id == b.id })
+        val back = com.vlesscardvpn.model.Settings.fromJson(org.json.JSONObject(s.toJson().toString()))
+        org.junit.Assert.assertEquals(listOf(b.id), back.dpiEvoPool)
+    }
+    @org.junit.Test fun maskCrossAndSelection() {
+        val rnd = kotlin.random.Random(3)
+        val ps = (1..6).mapNotNull { com.vlesscardvpn.xray.MaskLab.random(rnd, udp = false) }
+        val kids = com.vlesscardvpn.xray.MaskLab.breed(ps, 40, known = emptySet(), seed = 11)
+        org.junit.Assert.assertTrue(kids.any { it.title.contains("скрещивание") })
+        val c = (0 until 50).firstNotNullOf { com.vlesscardvpn.xray.MaskLab.cross(ps[0], ps[1], kotlin.random.Random(it)) }
+        org.junit.Assert.assertTrue(c.auto && c.id.startsWith("auto:"))
+        val stored = ps.map { com.vlesscardvpn.xray.MaskLab.store(it) }
+        val stats = mapOf("n1" to mapOf(ps[0].id to com.vlesscardvpn.core.MaskStat(0, 4)), "n2" to mapOf(ps[0].id to com.vlesscardvpn.core.MaskStat(0, 3)))
+        val kept = com.vlesscardvpn.xray.MaskLab.load(com.vlesscardvpn.xray.MaskLab.keep(stored, emptyList(), stats)).map { it.id }
+        org.junit.Assert.assertFalse(ps[0].id in kept); org.junit.Assert.assertTrue(ps[1].id in kept)
+        // a winner is never pruned
+        org.junit.Assert.assertTrue(ps[0].id in com.vlesscardvpn.xray.MaskLab.load(com.vlesscardvpn.xray.MaskLab.keep(stored, listOf(ps[0]), stats)).map { it.id })
+    }
+}

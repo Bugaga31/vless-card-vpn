@@ -106,6 +106,37 @@ object MaskLab {
         make(o)
     }.getOrNull()
 
+    private val SIG_KEYS = listOf("fp", "mss", "mux", "alpn", "tfo", "v6")
+
+    /**
+     * Child of two masks that passed: the shape (fragments / ladder / noise) of [a] with the signature genes of [b]
+     * (fingerprint, MSS, one stream, ALPN…), or for two ladders the first steps of [a] and the last ones of [b].
+     * Only TCP×TCP or UDP×UDP.
+     */
+    fun cross(a: Mask, b: Mask, rnd: Random): Mask? = runCatching {
+        val udpA = a.hasNoise || a.hop.isNotEmpty(); val udpB = b.hasNoise || b.hop.isNotEmpty()
+        if (udpA != udpB || a.id == b.id) return null
+        val o = MyMasks.toJson(a); val ob = MyMasks.toJson(b)
+        if (udpA) {
+            val na = runCatching { JSONArray(a.noiseJson.ifEmpty { Masks.noiseFor(a) ?: return null }) }.getOrNull() ?: return null
+            val nb = runCatching { JSONArray(b.noiseJson.ifEmpty { Masks.noiseFor(b) ?: return null }) }.getOrNull() ?: return null
+            val items = (0 until rnd.nextInt(1, na.length() + 1)).map { na.get(it) } + (rnd.nextInt(0, nb.length()) until nb.length()).map { nb.get(it) }
+            o.remove("n"); o.put("nj", JSONArray(items.take(16)).toString())
+        } else {
+            SIG_KEYS.forEach { k -> if (rnd.nextBoolean()) { if (ob.has(k)) o.put(k, ob.get(k)) else o.remove(k) } }
+            if (a.lengths.isNotEmpty() && b.lengths.isNotEmpty() && rnd.nextBoolean()) {
+                val la = a.lengths.split(','); val lb = b.lengths.split(','); val da = a.delays.split(','); val db = b.delays.split(',')
+                val ca = rnd.nextInt(1, la.size + 1); val cb = rnd.nextInt(0, lb.size)
+                val ls = (la.take(ca) + lb.drop(cb)).take(14); val ds = (da.take(ca) + db.drop(cb)).take(ls.size)
+                if (ls.size >= 2 && ds.size == ls.size) o.put("ls", ls.joinToString(",")).put("ds", ds.joinToString(","))
+            }
+            if (o.has("dpi")) { o.remove("mss"); o.remove("tfo"); o.remove("v6") }
+        }
+        val gen = listOf(a, b).maxOf { it.title.substringAfter("поколение ", "").substringBefore(')').toIntOrNull() ?: 0 }
+        o.put("t", "Авто: " + kind(o) + " (поколение ${gen + 1}, скрещивание)")
+        make(o).takeIf { it.id != a.id && it.id != b.id }
+    }.getOrNull()
+
     /** A random mask for TCP ([udp] = false) or UDP servers. */
     fun random(rnd: Random, udp: Boolean): Mask? = runCatching {
         val o = JSONObject().put("fp", "chrome")
@@ -138,7 +169,9 @@ object MaskLab {
         val out = LinkedHashMap<String, Mask>()
         var guard = 0
         while (out.size < n && guard++ < n * 8) {
+            fun pick() = parents[(rnd.nextDouble().let { it * it } * parents.size).toInt().coerceAtMost(parents.size - 1)]
             val m = if (parents.isEmpty() || rnd.nextInt(5) == 0) random(rnd, udp = rnd.nextInt(3) == 0)
+                else if (parents.size > 1 && rnd.nextInt(4) == 0) (cross(pick(), parents[rnd.nextInt(parents.size)], rnd) ?: mutate(pick(), rnd))
                 else mutate(parents[(rnd.nextDouble().let { it * it } * parents.size).toInt().coerceAtMost(parents.size - 1)], rnd)
             if (m != null && m.id !in known) out.putIfAbsent(m.id, m)
         }
@@ -146,8 +179,11 @@ object MaskLab {
     }
 
     /** Settings.autoMasks after a search: passed mutants in front, the list capped at [CAP]. */
-    fun keep(stored: List<String>, winners: List<Mask>): List<String> {
+    fun keep(stored: List<String>, winners: List<Mask>, stats: Map<String, Map<String, com.vlesscardvpn.core.MaskStat>> = emptyMap()): List<String> {
         val old = load(stored)
-        return (winners + old).distinctBy { it.id }.take(CAP).map { store(it) }
+        val win = winners.map { it.id }.toSet()
+        // «Отбор»: a bred mask that failed ≥ 6 times everywhere and never passed again dies out (the TSPU learned it)
+        fun dead(m: Mask): Boolean { var ok = 0; var fail = 0; stats.values.forEach { n -> n[m.id]?.let { ok += it.ok; fail += it.fail } }; return fail >= 6 && ok * 4 < fail }
+        return (winners + old.filter { it.id in win || !dead(it) }).distinctBy { it.id }.take(CAP).map { store(it) }
     }
 }

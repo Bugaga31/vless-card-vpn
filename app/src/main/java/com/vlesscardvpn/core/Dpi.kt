@@ -132,6 +132,8 @@ object DpiStrategies {
         custom(s.byeDpiArgs, s.byeDpiSni)?.let { add(it) }
         (byId(s.dpiRemembered[network], s) ?: byId(s.dpiRemembered[Net.family(network)], s))?.let { add(it) }
         (s.dpiRanking[network] ?: s.dpiRanking[Net.family(network)]).orEmpty().forEach { id -> byId(id, s)?.let { add(it) } }
+        // bred strategies that won on other networks: a new network starts from what already beat the TSPU elsewhere
+        s.dpiEvoPool.take(6).forEach { id -> DpiEvo.decode(id)?.let { add(it) } }
         addAll(BUILT_IN)
     }.filter { tpwsAvailable || it.engine != DpiEngine.TPWS }.distinctBy { it.id }
 
@@ -250,6 +252,9 @@ class DpiSet(private val context: Context) : AutoCloseable {
  */
 object DpiEvo {
     const val PREFIX = "EVO#"
+    const val POOL_CAP = 20
+    /** Settings.dpiEvoPool after a search: bred winners in front, ≤ [POOL_CAP]. */
+    fun keep(pool: List<String>, winners: List<String>): List<String> = (winners.filter { it.startsWith(PREFIX) } + pool).distinct().take(POOL_CAP)
     private const val SEP = "\u001f"
     private val POS_FLAGS = setOf("--split", "--disorder", "--tlsrec", "--oob", "--disoob", "--fake")
     private val NUM = Regex("-?\\d+")
@@ -283,7 +288,51 @@ object DpiEvo {
         return decode(encode(a))
     }
 
-    /** [n] distinct mutants of [parents] (best first get more). */
+    /**
+     * Genes borrowed from public ByeDPI / zapret2 recipes (split + disorder near the SNI, OOB byte, fake with low TTL,
+     * TLS record split, other TLS record version). Structural mutation adds or drops whole genes, so the strategy
+     * shape itself evolves — not only the numbers.
+     */
+    val GENES: List<List<String>> = listOf(
+        listOf("--split", "1+s"), listOf("--split", "-1+s"), listOf("--disorder", "1"), listOf("--disorder", "3+s"),
+        listOf("--oob", "1"), listOf("--disoob", "1"), listOf("--fake", "-1", "--ttl", "8"), listOf("--fake", "1+s", "--ttl", "5"),
+        listOf("--tlsrec", "1+s"), listOf("--tlsrec", "3+s"), listOf("--tlsminor", "4"), listOf("--md5sig"),
+    )
+    private val TECH = setOf("--split", "--disorder", "--oob", "--disoob", "--fake", "--tlsrec", "--mod-http", "--tlsminor", "--udp-fake")
+
+    /** "--flag value…" groups; null for `--auto` lines (their groups are positional, cutting them breaks the logic). */
+    fun genes(args: List<String>): List<List<String>>? {
+        if (args.any { it.startsWith("--auto") } || args.firstOrNull()?.startsWith("--") != true) return null
+        val out = ArrayList<MutableList<String>>()
+        args.forEach { a -> if (a.startsWith("--")) out += mutableListOf(a) else out.last() += a }
+        // --ttl belongs to the --fake before it
+        val merged = ArrayList<List<String>>()
+        out.forEach { g -> if (g[0] == "--ttl" && merged.lastOrNull()?.get(0) == "--fake") merged[merged.size - 1] = merged.last() + g else merged += g }
+        return merged
+    }
+
+    private fun valid(a: List<String>) = a.isNotEmpty() && a.size <= 40 && a.any { it in TECH }
+
+    /** Adds a gene the strategy doesn't have, or drops one (at least one bypass technique stays). */
+    fun reshape(base: DpiStrategy, rnd: kotlin.random.Random): DpiStrategy? {
+        if (base.engine != DpiEngine.BYEDPI) return null
+        val g = genes(base.args)?.toMutableList() ?: return null
+        if (g.size > 1 && rnd.nextInt(3) == 0) g.removeAt(rnd.nextInt(g.size))
+        else { val have = g.map { it[0] }.toSet(); val add = GENES.filter { it[0] !in have }.ifEmpty { return null }; g.add(rnd.nextInt(g.size + 1), add[rnd.nextInt(add.size)]) }
+        val a = g.flatten()
+        return if (valid(a) && a != base.args) decode(encode(a)) else null
+    }
+
+    /** Child of two winners: the first genes of [a], the rest from [b] (one copy of each option). */
+    fun cross(a: DpiStrategy, b: DpiStrategy, rnd: kotlin.random.Random): DpiStrategy? {
+        if (a.engine != DpiEngine.BYEDPI || b.engine != DpiEngine.BYEDPI) return null
+        val ga = genes(a.args) ?: return null; val gb = genes(b.args) ?: return null
+        val cut = if (ga.size > 1) rnd.nextInt(1, ga.size) else 1
+        val child = (ga.take(cut) + gb.drop(rnd.nextInt(0, gb.size))).distinctBy { it[0] }.flatten()
+        return if (valid(child) && child != a.args && child != b.args) decode(encode(child)) else null
+    }
+
+    /** [n] distinct mutants of [parents] (best first get more): number shifts, reshapes and crosses of two winners. */
     fun breed(parents: List<DpiStrategy>, n: Int, seed: Long = System.nanoTime()): List<DpiStrategy> {
         val bye = parents.filter { it.engine == DpiEngine.BYEDPI }
         if (bye.isEmpty()) return emptyList()
@@ -292,7 +341,12 @@ object DpiEvo {
         var guard = 0
         while (out.size < n && guard++ < n * 10) {
             val p = bye[(rnd.nextDouble().let { it * it } * bye.size).toInt().coerceAtMost(bye.size - 1)]
-            mutate(p, rnd)?.let { m -> if (parents.none { it.args == m.args }) out.putIfAbsent(m.id, m) }
+            val m = when (rnd.nextInt(4)) {
+                0 -> reshape(p, rnd)
+                1 -> if (bye.size > 1) cross(p, bye[rnd.nextInt(bye.size)], rnd) else reshape(p, rnd)
+                else -> mutate(p, rnd)
+            } ?: mutate(p, rnd)
+            m?.let { if (parents.none { p2 -> p2.args == it.args }) out.putIfAbsent(it.id, it) }
         }
         return out.values.toList()
     }
