@@ -110,13 +110,33 @@ object Diagnose {
         freezeOf(got, want, timedOut)
     }
 
+    /**
+     * Networks (AS numbers) of hostings where the TSPU interferes — the crowdsourced list of the open project
+     * Viktor45/as-tspu (MIT). A server there is likely to get the «заморозка» or slow-downs on mobile.
+     */
+    val TSPU_ASN: Set<Int> = "174,1219,1273,6142,8075,8560,8849,9009,10929,12876,13213,13335,13727,14061,14544,16276,16509,16625,20054,20473,20860,20940,21100,21130,21859,24940,24961,25198,25369,25788,26383,27458,29447,29838,29873,30058,30083,31898,32149,32181,32810,32934,33993,35042,36352,36530,40021,40676,42065,42708,42831,44907,48014,48282,48753,49453,49981,51167,51430,51765,53667,53755,54113,54253,54600,55170,56630,56971,58061,58065,59930,60068,62014,62041,62240,62563,63018,63023,63150,63473,63593,63949,135682,136744,137409,138915,140443,141995,151151,151338,153366,197540,199524,200019,200325,202053,202422,202662,202675,203020,204957,209058,209265,209312,209703,209753,209765,209847,209920,211157,211301,211812,211829,211865,212238,212317,213230,213887,213900,214041,214172,214206,215540,215730,215939,216071,263702,263812,272575,274113,274115,274116,274117,274118,274119,393511,393515,393929,394093,394177,396051,396356,396982,397571,398343,399622".split(',').map { it.toInt() }.toSet()
+
+    /** "AS24940 Hetzner Online GmbH" → 24940 and the name; null when unknown. */
+    fun parseOrg(org: String): Pair<Int, String>? = Regex("^AS(\\d+)\\s*(.*)$").find(org.trim())?.let { it.groupValues[1].toInt() to it.groupValues[2].trim() }
+
+    private fun org(ip: String): Pair<Int, String>? = runCatching {
+        val c = java.net.URL("https://ipinfo.io/$ip/org").openConnection() as java.net.HttpURLConnection
+        c.connectTimeout = 4000; c.readTimeout = 4000
+        try { parseOrg(c.inputStream.bufferedReader().readText()) } finally { c.disconnect() }
+    }.getOrNull()
+
     suspend fun report(selected: List<Server>, socksPort: Int?): String {
         val sb = StringBuilder()
         val wl = Whitelist.check()
         sb.append("Сеть: ").append(wl.verdict.title.replaceFirstChar { it.lowercase() }).append('.')
         if (selected.isNotEmpty()) {
             sb.append("\n\nСерверы (напрямую, мимо VPN):")
-            servers(selected).forEach { (s, c) -> sb.append("\n• ").append(s.name.take(30)).append(" — ").append(c.title).append(if (c.advice.isNotEmpty()) ": " + c.advice else "") }
+            val causes = servers(selected)
+            val orgs = withContext(Dispatchers.IO) { coroutineScope { causes.map { (s, _) -> async { runCatching { java.net.InetAddress.getByName(s.address).hostAddress }.getOrNull()?.let { org(it) } } }.awaitAll() } }
+            causes.forEachIndexed { i, (s, c) ->
+                sb.append("\n• ").append(s.name.take(30)).append(" — ").append(c.title).append(if (c.advice.isNotEmpty()) ": " + c.advice else "")
+                orgs[i]?.let { (n, name) -> if (n in TSPU_ASN) sb.append(" ⚠ Хостинг AS$n ${name.take(24)} — в списке сетей, где ТСПУ мешает (возможны заморозка и тормоза на мобильном).") }
+            }
         }
         if (socksPort != null) {
             val f = freeze(socksPort)
