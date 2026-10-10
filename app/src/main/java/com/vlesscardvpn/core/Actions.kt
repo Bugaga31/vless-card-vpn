@@ -847,8 +847,12 @@ object Actions {
                 if (Store.state.value.let { s -> s.selected.none { s.state(it).works } }) selectBest(5, close = true, among = working)
                 onReady(); return
             }
-            Tunnel.status.value = Tunnel.Status(Tunnel.State.CONNECTING, "Проверяю серверы…", check = "Проверяю, какие серверы работают сейчас, — пара секунд")
-            launch("Авто: быстрая проверка") { preflight(onReady) }
+            // «Мгновенно»: old results are not waited for any more — connect right now to the 8 best at once; the
+            // balancer (least ping, probes every 10 s) itself sends traffic through whichever of them answers fastest.
+            // Meanwhile the quick check runs and narrows the set to the really fastest ones (seamless switch).
+            selectBest(8, close = false, among = working)
+            onReady()
+            launch("Авто: быстрая проверка") { preflight(onReady, connected = true) }
             return
         }
         Tunnel.status.value = Tunnel.Status(Tunnel.State.CONNECTING, "Готовлю серверы…", check = "Первый запуск в этой сети: ищу самые быстрые серверы, обычно 10–20 секунд")
@@ -924,7 +928,7 @@ object Actions {
     }
 
     /** Instant start on old results: the selected + best known servers checked once (no big download), then connect. */
-    private suspend fun preflight(onReady: () -> Unit): String {
+    private suspend fun preflight(onReady: () -> Unit, connected: Boolean = false): String {
         val st = Store.state.value
         val cand = (st.selected.filter { st.state(it).works } + preferred(st, st.servers.filter { st.state(it).works }).sortedBy { st.state(it).score })
             .distinctBy { it.id }.take(12)
@@ -935,11 +939,15 @@ object Actions {
         val ok = cand.filter { now.state(it).works }
         if (ok.isNotEmpty()) {
             deepPending = true
+            val before = Store.state.value.selected.map { it.id }.toSet()
             selectBest(5, close = true, among = ok)
-            withContext(Dispatchers.Main) { onReady() }
-            return "Авто: работают ${ok.size} из ${cand.size} — подключаюсь"
+            val after = Store.state.value.selected.map { it.id }.toSet()
+            // already connected: switch (without a break) only when the fastest set really changed
+            if (!connected || after != before) withContext(Dispatchers.Main) { onReady() }
+            return if (connected) "Авто: самые быстрые сейчас — ${after.size} из ${ok.size} рабочих" + (if (after != before) ", переключился без разрыва" else "")
+                else "Авто: работают ${ok.size} из ${cand.size} — подключаюсь"
         }
-        Tunnel.status.value = Tunnel.Status(Tunnel.State.CONNECTING, "Готовлю серверы…", check = "Прежние серверы здесь не работают: ищу другие, обычно 10–20 секунд")
+        if (!connected) Tunnel.status.value = Tunnel.Status(Tunnel.State.CONNECTING, "Готовлю серверы…", check = "Прежние серверы здесь не работают: ищу другие, обычно 10–20 секунд")
         return doAutoPrepare(onReady)
     }
 
