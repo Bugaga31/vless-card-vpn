@@ -5,7 +5,7 @@ one mini model, one network setup (vcnet://) per operator, phone-verified public
 import base64, json, os, re, sys, time, urllib.parse, urllib.request
 
 REPO = os.environ.get("CLOUD_REPO", "Bugaga31/vless-card-cloud")
-PREV = "https://raw.githubusercontent.com/Bugaga31/vless-card-vpn/servers/cloud.json"
+PREV = "https://raw.githubusercontent.com/Bugaga31/vless-card-vpn/servers/cloud_state.json"
 TOKEN = os.environ.get("REPORT_TOKEN", "").strip()
 N = 14
 BAD = re.compile(r"не |нет |ошиб|упал|обрыв|медлен|блок|сбой|завис|чин|переключ|пропал|не работ", re.I)
@@ -91,6 +91,13 @@ def merge(prev, reports, now):
             "servers": sorted(servers.values(), key=lambda s: (-s["n"], -s["t"]))[:200]}
 
 
+def public(cloud):
+    """What phones download (small, every 20 min with ETag): the stamp changes only when the content does."""
+    o = {"phones": cloud["phones"], "brain": cloud["brain"], "profiles": cloud["profiles"], "servers": [x["l"] for x in cloud["servers"][:40]]}
+    o["stamp"] = __import__("hashlib").sha256(json.dumps(o, sort_keys=True).encode()).hexdigest()[:12]
+    return o
+
+
 def problems(reports):
     seen = {}
     for r in reports:
@@ -119,7 +126,8 @@ def main():
         reports = [r for r in (parse(i.get("body")) for i in issues if i.get("title", "").startswith("[r]")) if isinstance(r, dict)]
     now = int(time.time())
     cloud = merge(prev, reports, now)
-    with open("out/cloud.json", "w") as f: json.dump(cloud, f, ensure_ascii=False, separators=(",", ":"))
+    with open("out/cloud_state.json", "w") as f: json.dump(cloud, f, ensure_ascii=False, separators=(",", ":"))
+    with open("out/cloud.json", "w") as f: json.dump(public(cloud), f, ensure_ascii=False, separators=(",", ":"))
     # phone-verified servers go first in the cloud lists
     links = [s["l"] for s in cloud["servers"]]
     for name in ("alive_ru.txt", "alive.txt"):
