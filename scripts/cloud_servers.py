@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""«Облачная проверка серверов»: runs on GitHub Actions every 6 h.
+"""«Облачная проверка серверов»: runs on GitHub Actions every 10 min (then cloud_real.py checks through Xray).
 
 Downloads all public subscriptions from the app's catalog (+ a few huge world collections), removes duplicates,
 TCP-pings every server from GitHub's machines and publishes the ones that answer (fastest first) as plain

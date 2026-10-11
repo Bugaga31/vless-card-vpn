@@ -30,7 +30,7 @@ object Updater {
     fun codeOf(tag: String): Int {
         val p = tag.trim().removePrefix("v").split('.').mapNotNull { it.toIntOrNull() }
         if (p.size != 3 || p[0] != 1) return 0
-        return when (p[1]) { 0 -> p[2]; 1 -> 101 + p[2]; else -> 0 }
+        return when (p[1]) { 0 -> p[2]; 1 -> 101 + p[2]; 2 -> 111 + p[2]; else -> 0 }
     }
 
     fun apkName(tag: String, arm64: Boolean) = "VLESS-Card-Beta-${tag.removePrefix("v")}" + (if (arm64) "-arm64" else "") + ".apk"

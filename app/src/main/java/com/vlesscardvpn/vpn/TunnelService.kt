@@ -213,6 +213,7 @@ class TunnelService : VpnService() {
             val fixed = if (settings.mode == Mode.BYEDPI) emptySet() else Masks.strategies(withMasks.map { it.second }) - Masks.CURRENT_DPI
             val set = DpiSet(this); dpi = set
             set.start(settings, network, needCurrent, fixed, allowLocal = BuildConfig.DEBUG)
+            set.watch(scope)
             val bdPort = set.currentPort
             Tunnel.byeDpiPort = bdPort
             val dpiLabel = set.current?.label.orEmpty()

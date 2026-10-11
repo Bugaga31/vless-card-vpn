@@ -133,7 +133,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           V=${VERSION#beta-build-}; V=${V#release-build-}; D=$V
-          if [ "$V" -gt 100 ] 2>/dev/null; then V="1.$((V-101))"; else V="0.$V"; fi
+          if [ "$V" -gt 110 ] 2>/dev/null; then V="2.$((V-111))"; elif [ "$V" -gt 100 ] 2>/dev/null; then V="1.$((V-101))"; else V="0.$V"; fi
           cd release
           mv VLESS-Card-Beta.apk VLESS-Card-Beta-1.$V.apk
           mv VLESS-Card-Beta-arm64.apk VLESS-Card-Beta-1.$V-arm64.apk

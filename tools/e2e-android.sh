@@ -147,10 +147,14 @@ adb logcat -c
 adb shell am start -n $PKG/.MainActivity --ez e2e_dpi true >/dev/null
 D=$(waitlog "action\[Подбор обхода DPI\]" 240) || fail "dpi search: no result"
 echo "dpi: $D"
-N=$(echo "$D" | sed -n 's/.*работают \([0-9]*\) из \([0-9]*\).*/\1/p')
-[ "${N:-0}" -ge 15 ] || fail "dpi search: expected at least 15 working strategies (no DPI on the emulator)"
-echo "$D" | grep -q "zapret: [1-9]" || fail "dpi search: no zapret strategy worked"
-echo "$D" | grep -q "Xray: [1-9]" || fail "dpi search: no VLESS Card × Xray strategy worked"
+# Stage 1 stops after 12 passing strategies (the rest is skipped on purpose), so count passes, not "all of them".
+N=$(echo "$D" | sed -n 's/.*YouTube открыли \([0-9]*\) из \([0-9]*\).*/\1/p')
+[ "${N:-0}" -ge 10 ] || fail "dpi search: expected at least 10 strategies to open YouTube (no DPI on the emulator), got ${N:-0}"
+echo "$D" | grep -q "Выбрана:" || fail "dpi search: no strategy chosen"
+E=$(adb logcat -d -s E2E:I | grep "dpi engines" | tail -1); echo "dpi: $E"
+echo "$E" | grep -q "byedpi=[1-9]" || fail "dpi search: no ByeDPI strategy worked"
+echo "$E" | grep -qE "tpws=[1-9]|zapret=[1-9]" || echo "::warning title=dpi::no zapret strategy among the first passes"
+echo "$E" | grep -q "xray=[1-9]" || echo "::warning title=dpi::no Xray strategy among the first passes"
 
 echo "=== in-app tester (multi-inbound Xray instance)"
 adb shell am start -n $PKG/.MainActivity --ez e2e_disconnect true >/dev/null; sleep 2
