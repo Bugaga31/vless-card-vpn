@@ -1068,7 +1068,9 @@ object Actions {
         if (scores.isEmpty()) return 0
         val b = scores.first()
         val k = scores.count { it <= b * 1.6 + 150 }
-        return if (k >= 2 || scores.size < 2) k else if (scores[1] <= b * 3 + 300) 2 else 1
+        // never hang on one server: keep up to 3 in the balancer, spares only if they are not hopeless (≤ 4× + 600 ms)
+        val spares = scores.count { it <= b * 4 + 600 }
+        return maxOf(k, minOf(3, spares))
     }
 
     /** Re-checks up to [n] candidates right now (1–3 s, no big download) and returns the ones that really work. */
@@ -1084,16 +1086,31 @@ object Actions {
     }
 
     /** Selects the [n] fastest working servers (deselects others). */
+    /**
+     * Load spreading: phones must not all pile onto the same server. Each phone gets its own stable ±0-20% "taste"
+     * per server (from its anonymous id), so near-equal servers are picked differently on different phones, and every
+     * other phone already on a server (cloud "load") costs it 25% more, up to 2×.
+     */
+    fun spreadScore(ss: com.vlesscardvpn.model.ServerState, s: Server, phone: String): Int {
+        val base = ss.score
+        if (base == Int.MAX_VALUE || phone.isEmpty()) return base
+        val taste = ((phone + s.id).hashCode().toLong() and 0x7fffffff) % 1000 / 1000.0 * 0.2
+        val others = ((Report.load[Report.serverKey(s)] ?: 0) - if (ss.selected) 1 else 0).coerceAtLeast(0)
+        return (base * (1 + taste + minOf(1.0, others * 0.25))).toInt()
+    }
+
     fun selectBest(n: Int = 5, among: Collection<Server>? = null, close: Boolean = false): Int {
         var c = 0
         val ids = among?.map { it.id }?.toHashSet()
         Store.update { st ->
             // one WireGuard tunnel per key (WARP accounts): two with the same key would steal the session from each other
             val all = st.servers.filter { (ids == null || it.id in ids) && st.state(it).works }
-            val sorted = preferred(st, all).sortedBy { st.state(it).score }
+            val me = runCatching { Report.loadFrom(app); Report.phoneId(app) }.getOrDefault("")
+            val spread = { sv: Server -> spreadScore(st.state(sv), sv, me) }
+            val sorted = preferred(st, all).sortedBy(spread)
                 .distinctBy { if (it.protocol == "wireguard") "wg:" + it.secret else it.id }.take(n)
             val favs = if (close) all.filter { it.id in st.settings.favorites } else emptyList()
-            val best = ((if (close) closeOnes(sorted.map { st.state(it).score }).let { k -> sorted.take(k) } else sorted) + favs).map { it.id }.toSet()
+            val best = ((if (close) closeOnes(sorted.map(spread)).let { k -> sorted.take(k) } else sorted) + favs).map { it.id }.toSet()
             c = best.size
             st.copy(states = st.servers.associate { s -> s.id to st.state(s).copy(selected = s.id in best) } )
         }
