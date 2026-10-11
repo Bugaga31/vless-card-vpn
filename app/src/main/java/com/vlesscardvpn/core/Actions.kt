@@ -1071,6 +1071,18 @@ object Actions {
         return if (k >= 2 || scores.size < 2) k else if (scores[1] <= b * 3 + 300) 2 else 1
     }
 
+    /** Re-checks up to [n] candidates right now (1–3 s, no big download) and returns the ones that really work. */
+    suspend fun verified(list: List<Server>, n: Int = 8, sort: Boolean = true): List<Server> {
+        if (list.isEmpty()) return emptyList()
+        val st = Store.state.value
+        val l = list.distinctBy { it.id }
+        val cand = (if (sort) Brain.order(Net.key(app), l) { st.state(it) } else l).take(n)
+        val prev = progress.value
+        try { realTest(cand, "Проверяю запасные серверы", big = false, attempts = 1) } finally { progress.value = prev }
+        val now = Store.state.value
+        return cand.filter { now.state(it).works }
+    }
+
     /** Selects the [n] fastest working servers (deselects others). */
     fun selectBest(n: Int = 5, among: Collection<Server>? = null, close: Boolean = false): Int {
         var c = 0

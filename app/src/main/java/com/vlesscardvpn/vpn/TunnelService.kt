@@ -324,6 +324,11 @@ class TunnelService : VpnService() {
                 return@launch
             }
             if (!p.works && lastSoft && Store.state.value.settings.autoHeal) {
+                // a fresh Xray sometimes needs a moment: look again in 3 s before rebuilding the whole VPN
+                // (every rebuild makes browsers show «нет сети» for a second — it must not happen by mistake)
+                delay(3000)
+                if (Tester.probeSocks(port, st.testUrl, big = false, youtube = false, attempts = 2).realMs > 0) { lastSoft = false; verifySoon(0); return@launch }
+                if (!Actions.online()) { heal(); return@launch }
                 // after an internal reconnect (network change, switching servers) the internet didn't come back: do what the
                 // big button does (stop + start, the TUN rebuilt) before the longer healing — once per network change
                 val sinceNet = System.currentTimeMillis() - netChangedAt
