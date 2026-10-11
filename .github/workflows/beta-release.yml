@@ -28,6 +28,8 @@ jobs:
       - name: Install pinned NDK
         run: sdkmanager 'ndk;27.2.12479018'
       - name: JVM tests and release build
+        env:
+          REPORT_TOKEN: ${{ secrets.REPORT_TOKEN }}
         run: |
           N=${VERSION#beta-build-}; export GITHUB_RUN_NUMBER=${N#release-build-}
           chmod +x gradlew

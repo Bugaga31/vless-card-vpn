@@ -194,6 +194,7 @@ object AppWatch {
         // battery saver on or < 20 %: only what keeps the internet working (fix, switching) — no evolution, revival,
         // freeze/latency/speed checks; they come back when the phone charges
         val eco = lowPower()
+        if (!eco) appCtx?.let { Report.auto(it) } // shared cloud: pull what all phones learned, send this one's report
         if (eco != ecoOn) { ecoOn = eco; say(if (eco) "Батарея садится — фоновые улучшения на паузе, связь чинится как обычно" else "Батарея в порядке — фоновые улучшения снова работают") }
         val s = Tunnel.status.value
         fails = if (s.checkOk == false) fails + 1 else 0

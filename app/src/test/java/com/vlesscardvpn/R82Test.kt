@@ -421,3 +421,13 @@ class R107Test {
         org.junit.Assert.assertFalse(a.eco(false, 0, false))
     }
 }
+
+class R108Test {
+    @org.junit.Test fun reportIsAnonymous() {
+        val c = com.vlesscardvpn.core.Report.clean("Не открывается youtube.com через 185.12.34.5:443, код 123456")
+        org.junit.Assert.assertFalse(c.contains("youtube")); org.junit.Assert.assertFalse(c.contains("185.12")); org.junit.Assert.assertFalse(c.contains("123456"))
+        org.junit.Assert.assertTrue(com.vlesscardvpn.core.Report.publicSource("https://raw.githubusercontent.com/a/b/main/x.txt"))
+        org.junit.Assert.assertFalse(com.vlesscardvpn.core.Report.publicSource("https://my-paid-vpn.example/sub/abc"))
+        org.junit.Assert.assertFalse(com.vlesscardvpn.core.Report.publicSource(""))
+    }
+}

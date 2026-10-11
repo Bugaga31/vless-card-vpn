@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
-    paths: ['scripts/cloud_servers.py', '.github/workflows/cloud-servers.yml']
+    paths: ['scripts/cloud_servers.py', 'scripts/cloud_reports.py', '.github/workflows/cloud-servers.yml']
 permissions:
   contents: write
 concurrency: { group: cloud-servers, cancel-in-progress: true }
@@ -16,6 +16,10 @@ jobs:
       - uses: actions/checkout@v4
       - name: Collect and ping
         run: mkdir -p out && python3 scripts/cloud_servers.py
+      - name: Merge phone reports (shared cloud)
+        env:
+          REPORT_TOKEN: ${{ secrets.REPORT_TOKEN }}
+        run: python3 scripts/cloud_reports.py || echo "::warning::reports merge failed"
       - name: Publish to the «servers» branch
         run: |
           cd out
