@@ -269,14 +269,21 @@ class TunnelService : VpnService() {
         }
     }
 
+    /** 10.10.14.1 → 10.10.14.2: the other address of the tunnel's /30. */
+    private fun dnsIn(v4: String) = v4.substringBeforeLast('.') + "." + ((v4.substringAfterLast('.').toIntOrNull() ?: 1) + 1)
+
     private fun startTun(settings: com.vlesscardvpn.model.Settings, socks: SocksAuth) {
         val v4 = if (settings.randomTun) com.vlesscardvpn.core.Disguise.tunV4() else IPV4
-        val v6 = if (settings.randomTun) com.vlesscardvpn.core.Disguise.tunV6() else IPV6
         val mtu = if (settings.turbo) TURBO_MTU else MTU
         val b = Builder().setSession(if (settings.randomTun || settings.quietNotification) "Sync" else "VLESS Card").setMtu(mtu)
             .addAddress(v4, 30).addRoute("0.0.0.0", 0)
-            .addAddress(v6, 126).addRoute("::", 0)
-            .addDnsServer("1.1.1.1").addDnsServer("8.8.8.8")
+            // No IPv6 in the tunnel: Android then refuses IPv6 at once and apps (Chrome) fall back to IPv4 instantly.
+            // With an IPv6 route the local TUN «accepted» IPv6 connections and Xray dropped them — Chrome saw a
+            // connection that died and showed «нет соединения» instead of retrying over IPv4.
+            // DNS: an address inside the tunnel, not 1.1.1.1/8.8.8.8 — for those Chrome («Безопасный DNS») and Android
+            // («Частный DNS») switch to their own encrypted DNS, which returns IPv6 addresses and skips the VPN's DNS.
+            // Every query to port 53 goes to Xray's DNS anyway, whatever the address.
+            .addDnsServer(dnsIn(v4))
             .setConfigureIntent(PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE))
         val apps = settings.apps.filter { it != packageName }
         if (!settings.perApp) b.addDisallowedApplication(packageName)
@@ -289,7 +296,7 @@ class TunnelService : VpnService() {
         if (Build.VERSION.SDK_INT >= 29) b.setMetered(false)
         val fd = b.establish() ?: error("Система не дала создать VPN (нет разрешения)")
         tun = fd
-        TProxyService.start(filesDir, fd, socks.port, mtu, v4, v6, socks.user, socks.pass)
+        TProxyService.start(filesDir, fd, socks.port, mtu, v4, null, socks.user, socks.pass)
     }
 
     private fun lanIp(): String? = runCatching {
@@ -604,6 +611,7 @@ class TunnelService : VpnService() {
             override fun onLost(network: Network) {
                 if (network != curNet) return
                 lost = true
+                setUnderlyingNetworks(null) // follow whatever becomes the default — a lost network must not stay «under» the VPN
                 netJob?.cancel()
                 val cur = Tunnel.status.value
                 if (cur.state == Tunnel.State.CONNECTED) Tunnel.status.value = cur.copy(check = "Сеть пропала — VPN ждёт её и восстановится сам", checkOk = null)
