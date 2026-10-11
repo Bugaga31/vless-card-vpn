@@ -24,6 +24,7 @@ object Updater {
     val state = MutableStateFlow(State())
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var lastCheck = 0L
+    private var noted = ""
 
     /** "v1.1.4" → 105, "v1.0.99" → 99 (same numbering as the build: 1.1.x = 101 + x). */
     fun codeOf(tag: String): Int {
@@ -44,7 +45,7 @@ object Updater {
         try { block(client(false)) } catch (e: Exception) { if (Tunnel.socks != null) block(client(true)) else throw e }
 
     /** Checks at most every 6 h unless [force]. */
-    fun check(force: Boolean = false) {
+    fun check(force: Boolean = false, ctx: Context? = null) {
         val now = System.currentTimeMillis()
         if (!force && now - lastCheck < 6 * 3600_000L) return
         lastCheck = now
@@ -59,11 +60,47 @@ object Updater {
                 val mine = com.vlesscardvpn.BuildConfig.VERSION_CODE
                 state.value = if (code > mine) State(tag.removePrefix("v"), code, o.optString("body").substringBefore("### Автоматические").trim().take(1500), text = "Доступна версия ${tag.removePrefix("v")}")
                     else State(text = if (force) "У вас последняя версия (${com.vlesscardvpn.BuildConfig.VERSION_NAME})" else "")
+                state.value.let { st -> if (st.latest.isNotEmpty()) { ctx?.let { prefetch(it.applicationContext) }; if (!force && st.latest != noted) { noted = st.latest; AppWatch.note("Вышла версия ${st.latest} — обновить можно на главной одной кнопкой") } } }
             }.onFailure { if (force) state.value = State(text = "Не удалось проверить: ${Errors.human(it)}") }
         }
     }
 
-    /** Downloads the update and opens Android's «Установить?». */
+    @Volatile private var ready: String = "" // version already downloaded to update.apk
+
+    private fun download(app: Context, s: State): java.io.File {
+        val f = java.io.File(app.cacheDir, "update.apk")
+        if (ready == s.latest && f.length() > 1_000_000) return f
+        val arm64 = android.os.Build.SUPPORTED_ABIS.firstOrNull() == "arm64-v8a"
+        val tag = "v" + s.latest
+        anyPath { c ->
+            c.newCall(Request.Builder().url("https://github.com/$REPO/releases/download/$tag/${apkName(tag, arm64)}").build()).execute().use { r ->
+                if (!r.isSuccessful) error("GitHub ответил ${r.code}")
+                val total = r.body!!.contentLength()
+                r.body!!.byteStream().use { inp -> f.outputStream().use { out ->
+                    val buf = ByteArray(64 * 1024); var done = 0L; var last = 0L
+                    while (true) { val n = inp.read(buf); if (n < 0) break; out.write(buf, 0, n); done += n
+                        if (done - last > 1_000_000 && state.value.busy) { last = done; state.value = state.value.copy(text = "Скачиваю ${s.latest}: ${done shr 20} из ${if (total > 0) total shr 20 else "?"} МБ") } }
+                } }
+                if (total > 0 && f.length() != total) error("файл скачался не полностью")
+            }
+        }
+        ready = s.latest
+        return f
+    }
+
+    /** On Wi-Fi the new version is downloaded in the background, so «Обновить» installs at once. */
+    private fun prefetch(app: Context) {
+        val s = state.value
+        if (s.latest.isEmpty() || s.busy || ready == s.latest) return
+        val unmetered = runCatching {
+            val cm = app.getSystemService(Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
+            cm.getNetworkCapabilities(cm.activeNetwork)?.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_NOT_METERED) == true
+        }.getOrDefault(false)
+        if (!unmetered) return
+        scope.launch { runCatching { download(app, s) }.onSuccess { if (state.value.latest == s.latest && !state.value.busy) state.value = state.value.copy(text = "Версия ${s.latest} скачана — нажмите «Обновить», установка займёт секунды") } }
+    }
+
+    /** Downloads the update (if not yet) and opens Android's «Установить?». */
     fun install(ctx: Context) {
         val s = state.value
         if (s.latest.isEmpty() || s.busy) return
@@ -76,21 +113,7 @@ object Updater {
         state.value = s.copy(busy = true, text = "Скачиваю ${s.latest}…")
         scope.launch {
             try {
-                val arm64 = android.os.Build.SUPPORTED_ABIS.firstOrNull() == "arm64-v8a"
-                val tag = "v" + s.latest
-                val f = java.io.File(app.cacheDir, "update.apk")
-                anyPath { c ->
-                    c.newCall(Request.Builder().url("https://github.com/$REPO/releases/download/$tag/${apkName(tag, arm64)}").build()).execute().use { r ->
-                        if (!r.isSuccessful) error("GitHub ответил ${r.code}")
-                        val total = r.body!!.contentLength()
-                        r.body!!.byteStream().use { inp -> f.outputStream().use { out ->
-                            val buf = ByteArray(64 * 1024); var done = 0L; var last = 0L
-                            while (true) { val n = inp.read(buf); if (n < 0) break; out.write(buf, 0, n); done += n
-                                if (done - last > 1_000_000) { last = done; state.value = state.value.copy(text = "Скачиваю ${s.latest}: ${done shr 20} из ${if (total > 0) total shr 20 else "?"} МБ") } }
-                        } }
-                        if (total > 0 && f.length() != total) error("файл скачался не полностью")
-                    }
-                }
+                val f = download(app, s)
                 val pi = app.packageManager.packageInstaller
                 val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL).apply { setAppPackageName(app.packageName) }
                 val id = pi.createSession(params)
@@ -102,6 +125,7 @@ object Updater {
                 }
                 state.value = state.value.copy(busy = false, text = "Подтвердите установку ${s.latest} в окне Android")
             } catch (e: Exception) {
+                ready = ""
                 state.value = state.value.copy(busy = false, text = "Не получилось обновить: ${Errors.human(e)}. Можно скачать вручную на GitHub")
             }
         }
