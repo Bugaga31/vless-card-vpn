@@ -6,6 +6,8 @@ import com.vlesscardvpn.model.Settings
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import java.io.File
@@ -173,10 +175,15 @@ class DpiProxy(private val context: Context) : AutoCloseable {
     private fun exe(engine: DpiEngine) = File(context.applicationInfo.nativeLibraryDir, engine.library)
 
     /** Starts [s]; returns the loopback port. [allowLocal] lets zapret reach loopback/LAN targets (debug e2e only). */
-    suspend fun start(s: DpiStrategy, mask: String, allowLocal: Boolean = false): Int = withContext(Dispatchers.IO) {
+    private var last: Triple<DpiStrategy, String, Boolean>? = null
+    /** Times this engine was brought back after it died (ByeDPI can abort under heavy load). */
+    var revived: Int = 0; private set
+
+    suspend fun start(s: DpiStrategy, mask: String, allowLocal: Boolean = false, fixedPort: Int = 0): Int = withContext(Dispatchers.IO) {
         close()
+        last = Triple(s, mask, allowLocal)
         check(available(s.engine)) { "${s.engine.title} недоступен на этом устройстве (нужен Android 8+)" }
-        val p = ServerSocket(0, 1, InetAddress.getByName("127.0.0.1")).use { it.localPort }
+        val p = if (fixedPort > 0) fixedPort else ServerSocket(0, 1, InetAddress.getByName("127.0.0.1")).use { it.localPort }
         if (s.engine == DpiEngine.XRAY) {
             XrayCore.init(context)
             val x = XrayCore.Instance("dpi-${s.id}"); xray = x
@@ -203,6 +210,19 @@ class DpiProxy(private val context: Context) : AutoCloseable {
     }
 
     val alive: Boolean get() = process?.isAlive == true || xray?.running == true
+
+    /**
+     * The engine process died (not closed by us): start it again on the same port, so Xray's dialer and the
+     * SOCKS clients keep working without a reconnect. Returns true when it is up again.
+     */
+    suspend fun reviveIfDead(): Boolean {
+        val (s, mask, local) = last ?: return true
+        val dead = process?.let { !it.isAlive } ?: return true // Xray strategies run in-process
+        if (!dead) return true
+        val p = port
+        if (p <= 0) return false
+        return runCatching { start(s, mask, local, fixedPort = p); revived++; true }.getOrDefault(false)
+    }
 
     override fun close() {
         xray?.let { it.stop(); xray = null; port = 0 }
@@ -242,7 +262,21 @@ class DpiSet(private val context: Context) : AutoCloseable {
         return this
     }
 
-    override fun close() { procs.forEach { it.close() }; procs.clear(); ports.clear(); currentPort = null; current = null }
+    private var watch: kotlinx.coroutines.Job? = null
+
+    /** Every 2 s: a crashed ByeDPI / zapret process is restarted on its port (logged for the e2e and diagnostics). */
+    fun watch(scope: kotlinx.coroutines.CoroutineScope) {
+        watch?.cancel()
+        watch = scope.launch(Dispatchers.IO) {
+            while (isActive) {
+                delay(2000)
+                for (p in procs.toList()) if (!p.alive && p.reviveIfDead())
+                    android.util.Log.i("E2E", "dpi engine revived: ${p.strategy?.id} port=${p.port} times=${p.revived}")
+            }
+        }
+    }
+
+    override fun close() { watch?.cancel(); watch = null; procs.forEach { it.close() }; procs.clear(); ports.clear(); currentPort = null; current = null }
 }
 
 /**

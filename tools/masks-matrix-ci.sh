@@ -14,7 +14,8 @@ sed -e "s#@PRIV@#$PRIV#g" -e "s#@U@#$U#g" tools/e2e/matrix-server.json > /tmp/sr
 $X run -c /tmp/srv/server.json > /tmp/srv/server.log 2>&1 &
 gcc -D_DEFAULT_SOURCE -std=c99 -O2 native/byedpi/{packets,main,conev,proxy,desync,mpool,extend}.c -o /tmp/byedpi
 # the host build aborts now and then under 24-way load: keep it running
-(while true; do /tmp/byedpi --ip 127.0.0.1 --port 1080 --oob 1 --auto t,r,s --disorder 1 >> /tmp/bd.log 2>&1; echo restart >> /tmp/bd-restarts; sleep 0.2; done) &
+# `|| true`: under `set -e` one abort used to end this loop, and every later ".b" variant failed.
+(while true; do /tmp/byedpi --ip 127.0.0.1 --port 1080 --oob 1 --auto t,r,s --disorder 1 >> /tmp/bd.log 2>&1 || true; echo restart >> /tmp/bd-restarts; sleep 0.2; done) &
 (command -v apt-get >/dev/null && sudo apt-get install -y -qq libcap-dev zlib1g-dev >/dev/null) || true
 gcc -std=gnu99 -D_GNU_SOURCE -O2 -Inative/tpws native/tpws/*.c -lz -o /tmp/tpws || echo "host tpws build failed"
 SS=$(printf 'chacha20-ietf-poly1305:sspass' | base64 -w0)
@@ -78,7 +79,13 @@ python3 - <<'PY' || MFAIL=1
 import sys
 ok = fail = 0; bad = []; bok = bfail = 0
 from collections import defaultdict
+import json
 per = defaultdict(lambda: [0, 0])
+ALPN = {}
+for o in json.load(open('/tmp/xcfg/local-matrix.json'))['outbounds']:
+    t = o.get('tag', '')
+    if t.startswith('v') and t[1:].isdigit():
+        ALPN[str(30000 + int(t[1:]))] = ((o.get('streamSettings') or {}).get('tlsSettings') or {}).get('alpn') or []
 for line in open('/tmp/xcfg/result.txt'):
     st, port, name, mask = line.split()[:4]
     fp = mask.split('.')[0]
@@ -88,6 +95,8 @@ for line in open('/tmp/xcfg/result.txt'):
     elif name in ('ss', 'vmess-hu', 'socks'): offered = fp in ('chrome', 'none')
     elif name == 'wg': offered = mask == 'none' or mask == 'chrome.n' or (fp == 'chrome' and '.z' in mask and '.d:' not in mask and '.hw' not in mask)
     if '.z' in mask and '.d:' not in mask and name != 'wg': offered = False
+    # Masks.compatible: a browser ALPN (h2) is never offered for WebSocket / HTTPUpgrade (the upgrade needs HTTP/1.1)
+    if name in ('ws-tls', 'vmess-hu') and 'h2' in ALPN.get(port, []): offered = False
     if name == 'wg': continue  # judged sequentially above
     if not offered: continue
     if '.d:' in mask:

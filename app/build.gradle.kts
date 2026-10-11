@@ -6,8 +6,8 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
-// Build 101 = «1.1.0» (anniversary), 102 = 1.1.1, …; up to 100 — 1.0.<n>. The workflow names the tag the same way.
-fun versionOf(n: Int) = if (n > 100) "1.1.${n - 101}" else "1.0.$n"
+// Build 111 = «1.2.0», 112 = 1.2.1, …; 101-110 = 1.1.0-1.1.9; up to 100 — 1.0.<n>. The workflow names the tag the same way.
+fun versionOf(n: Int) = if (n > 110) "1.2.${n - 111}" else if (n > 100) "1.1.${n - 101}" else "1.0.$n"
 val releaseNumber = providers.environmentVariable("GITHUB_RUN_NUMBER").orNull?.toIntOrNull() ?: 59
 val betaPreview = providers.gradleProperty("betaPreview").orNull == "true"
 val armOnly = betaPreview || providers.gradleProperty("armOnly").orNull == "true"

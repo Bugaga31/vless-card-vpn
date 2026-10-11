@@ -1217,6 +1217,8 @@ object Actions {
                 dpiEvoPool = DpiEvo.keep(a.settings.dpiEvoPool, ranked.take(3).map { it.id })))
         }
         val evoWon = best?.id?.startsWith(DpiEvo.PREFIX) == true
+        android.util.Log.i("E2E", "dpi engines passed=${passed.size} plan=${plan.size} " +
+            DpiEngine.values().joinToString(" ") { e -> "${e.name.lowercase()}=${passed.count { it.engine == e }}" })
         return if (best == null) "Сеть «$network»: ни одна из ${plan.size} стратегий не открыла YouTube. Нужен сервер — режим «Авто» найдёт его сам."
         else "Сеть «$network»: YouTube открыли ${passed.size} из ${plan.size}, в финале ${stage2.size} (из них выведенных: ${mutants.size}). " +
             "Выбрана: ${best.label}" + (if (scores.containsKey(best.id)) " — ${total(best.id)} из $max проверок (YouTube, видео-CDN, Discord)" else "") +
