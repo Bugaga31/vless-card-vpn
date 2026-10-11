@@ -50,6 +50,16 @@ fun SettingsScreen() {
                 Text(if (checking) "Проверяю…" else "Проверить сеть")
             }
         }
+        Group("Общее облако") {
+            val rctx = androidx.compose.ui.platform.LocalContext.current
+            var ron by remember { mutableStateOf(com.vlesscardvpn.core.Report.enabled(rctx)) }
+            Toggle("Учиться вместе с другими телефонами", "Раз в 6 часов телефон забирает из облака то, что выучили все: мини-нейросеть и маски/обход DPI для вашего оператора. " +
+                "И отправляет анонимный отчёт: что ломалось, какие маски сработали, публичные рабочие серверы. Без номеров, аккаунтов, IP и посещённых сайтов; ваши личные серверы не отправляются.", ron) {
+                ron = it; com.vlesscardvpn.core.Report.setEnabled(rctx, it)
+            }
+            if (!com.vlesscardvpn.core.Report.available()) Text("В этой сборке отправка отчётов отключена — только приём общего облака.", fontSize = 12.sp, color = androidx.compose.ui.graphics.Color.Gray)
+            com.vlesscardvpn.core.Report.lastText(rctx).takeIf { it.isNotEmpty() }?.let { Text(it, fontSize = 12.sp) }
+        }
         Group("Облако (ваш GitHub)") {
             val cctx = androidx.compose.ui.platform.LocalContext.current
             val cs by com.vlesscardvpn.core.CloudSync.state.collectAsState()

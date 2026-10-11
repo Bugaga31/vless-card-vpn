@@ -78,6 +78,18 @@ object Brain {
         listOf("m", "w").forEach { k -> o.optJSONArray(k)?.takeIf { it.length() == N }?.let { a -> w[k] = DoubleArray(N) { a.getDouble(it) } } }
     }
 
+    /** Merged model from all phones: replaces a fresh one, nudges (20 %) one that already learned on this phone. */
+    @Synchronized fun blend(o: org.json.JSONObject, phones: Int) {
+        if (phones < 1) return
+        listOf("m", "w").forEach { k ->
+            val a = o.optJSONArray(k)?.takeIf { it.length() == N } ?: return@forEach
+            val c = DoubleArray(N) { a.optDouble(it, 0.0).coerceIn(-8.0, 8.0) }
+            val mine = w[k]
+            w[k] = if (mine == null || seen < 50) c else DoubleArray(N) { 0.8 * mine[it] + 0.2 * c[it] }
+        }
+        dirty = true
+    }
+
     @Synchronized fun reload(ctx: android.content.Context) { w.clear(); seen = 0; dirty = false; load(ctx) }
 
     fun report(): String = if (seen < 20) "Мини-нейросеть только учится (проверок: $seen)." else "Мини-нейросеть обучена на $seen проверках серверов — подсказывает, какие запасные пробовать первыми."
