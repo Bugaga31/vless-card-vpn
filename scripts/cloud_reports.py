@@ -141,9 +141,17 @@ def main():
     for k, e in probs:
         title = "[p] " + k
         old = open_p.get(title)
-        cnt = len(e["phones"]) + (int(m.group(1)) if old and (m := re.search(r"Телефонов всего: (\d+)", old.get("body") or "")) else 0)
+        # phones are counted once: hashed ids are kept in a hidden comment of the issue (the old counter grew with
+        # every report of the same phone)
+        ob = (old or {}).get("body") or ""
+        m = re.search(r"<!-- ids: ([0-9a-f,]*) -->", ob)
+        ids = set(filter(None, m.group(1).split(","))) if m else set()
+        ids |= {__import__("hashlib").sha256(str(p).encode()).hexdigest()[:10] for p in e["phones"]}
+        vs = set(e["v"]) | set(filter(None, (re.search(r"Версии: (.*)", ob) or [None, ""])[1].split(", ")))
+        ns = set(e["net"]) | set(filter(None, (re.search(r"Сети: (.*)", ob) or [None, ""])[1].split(", ")))
+        cnt = len(ids) if m or not old else max(len(ids), 1)
         body = (f"**{e['text']}**\n\nТелефонов всего: {cnt}\nПоследний раз: {cloud['stamp']} UTC\n"
-                f"Версии: {', '.join(sorted(e['v']))}\nСети: {', '.join(sorted(e['net']))}\n")
+                f"Версии: {', '.join(sorted(vs))}\nСети: {', '.join(sorted(ns))}\n\n<!-- ids: {','.join(sorted(ids))} -->\n")
         try:
             if old: api("PATCH", f"/issues/{old['number']}", {"body": body})
             else: api("POST", "/issues", {"title": title[:200], "body": body})
