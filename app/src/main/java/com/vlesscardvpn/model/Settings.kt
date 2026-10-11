@@ -155,7 +155,7 @@ data class Settings(
         /** "https://www.Site.com/path" → "site.com"; null when it is not a domain. */
         fun host(input: String): String? = input.trim().lowercase().substringAfter("://").substringBefore('/').substringBefore('?')
             .substringBefore(':').removePrefix("www.").trim('.').takeIf { Regex("^[a-z0-9а-яё-]+(\\.[a-z0-9а-яё-]+)+$").matches(it) }
-        const val REV = 72
+        const val REV = 73
         /** YouTube video, pictures and player — what «Умный YouTube» sends through the DPI bypass. */
         val YT_DOMAINS = listOf("geosite:youtube", "domain:googlevideo.com", "domain:ytimg.com", "domain:ggpht.com", "domain:youtu.be", "domain:youtube.com")
         /**
@@ -168,6 +168,8 @@ data class Settings(
                 maskEvolution = true, autoHeal = true, ruAppsDirect = true, randomTun = true, coverTraffic = true,
                 maskFamilies = if (s.maskFamilies.isEmpty()) s.maskFamilies else (s.maskFamilies + "brand" + "auto").distinct())
             if (s.rev < 72) s = s.copy(turbo = true, blockAds = true)
+            // 73 — the cloud-checked list (GitHub pings servers every 6 h) joins the subscriptions
+            if (s.rev < 73) Subs.CATALOG.firstOrNull { it.url.contains("/servers/alive_ru.txt") }?.url?.let { u -> if (u !in s.subscriptions) s = s.copy(subscriptions = listOf(u) + s.subscriptions) }
             return if (s.rev >= REV) s else s.copy(rev = REV)
         }
         const val DPI_AUTO = "auto"

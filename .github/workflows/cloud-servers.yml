@@ -1,0 +1,22 @@
+name: Cloud server check
+on:
+  schedule: [{ cron: '23 */6 * * *' }]
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency: { group: cloud-servers, cancel-in-progress: true }
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - name: Collect and ping
+        run: mkdir -p out && python3 scripts/cloud_servers.py
+      - name: Publish to the «servers» branch
+        run: |
+          cd out
+          git init -q -b servers
+          git config user.name "cloud-check"; git config user.email "cloud-check@users.noreply.github.com"
+          git add -A && git commit -qm "cloud check $(date -u +%F' '%H:%M)"
+          git push -qf "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" servers
