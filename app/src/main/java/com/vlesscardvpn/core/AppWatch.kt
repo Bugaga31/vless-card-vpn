@@ -152,6 +152,7 @@ object AppWatch {
         else -> null
     }
     private var evoN = 0
+    private var lastLatency = System.currentTimeMillis() - 10 * 60_000L; private var slowMs = 0
     private var lastRevive = System.currentTimeMillis() - 330 * 60_000L // first try ~30 min after start
     private var lastFreeze = System.currentTimeMillis() - 110 * 60_000L
     private var fails = 0; private var lastFix = 0L; private var lastLight = 0L; private var tick = 0
@@ -220,8 +221,20 @@ object AppWatch {
             val port = Tunnel.socks?.port
             if (port != null) { lastMbps = withContext(Dispatchers.IO) { runCatching { Tester.speed(port, 4).mbps }.getOrDefault(0.0) }; slow = lastMbps in 0.01..3.0 }
         }
+        // mobile data: no speed test (costs traffic) — instead a tiny page timed every 15 min; >2.5 s twice = slow
+        if (!unmetered() && now - lastLatency > 15 * 60_000L && fails == 0 && !Actions.progress.value.running) {
+            lastLatency = now
+            Tunnel.socks?.port?.let { port ->
+                val url = Store.state.value.settings.testUrl
+                val a = withContext(Dispatchers.IO) { Tester.site(url, port) }
+                if (a.answers && a.ms > 2500) {
+                    val b = withContext(Dispatchers.IO) { Tester.site(url, port) }
+                    if (b.answers && b.ms > 2500) { slow = true; slowMs = minOf(a.ms, b.ms); lastMbps = 0.0 }
+                }
+            }
+        }
         when (pilot(fails, Store.summary.value.heavyMask, Actions.progress.value.running || Thermal.cooling && fails < 2, now - lastFix, now - lastLight, now - lastEvolve, slow, now - lastSpeedup)) {
-            "speedup" -> { lastSpeedup = now; say("Автопилот: скорость всего %.1f Мбит/с — ищу серверы и маски быстрее".format(lastMbps)); withContext(Dispatchers.Main) { Actions.boostYoutube() } }
+            "speedup" -> { lastSpeedup = now; say(if (lastMbps > 0) "Автопилот: скорость всего %.1f Мбит/с — ищу серверы и маски быстрее".format(lastMbps) else "Автопилот: сайты открываются медленно (ответ ${slowMs / 1000.0} с) — ищу серверы и маски быстрее"); withContext(Dispatchers.Main) { Actions.boostYoutube() } }
             "evolve" -> {
                 lastEvolve = now; evoN++
                 val st0 = Store.state.value

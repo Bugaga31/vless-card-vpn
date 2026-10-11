@@ -42,8 +42,11 @@ object Assistant {
         val host = Regex("([a-z0-9-]+\\.)+[a-z]{2,}").find(q)?.value
         return when {
             q.isEmpty() -> Msg(false, "Напишите вопрос 🙂", START)
-            host != null && has(q, "сайт", "открыва", "провер", "работает", "не грузит", "http") || host != null && q == host ->
+            host != null && has(q, "сайт", "открыва", "провер", "работает", "не грузит", "не заход", "билет", "http") || host != null && q == host ->
                 Msg(false, "Проверяю $host тремя путями: напрямую, через VPN и через обход DPI…", listOf(Btn("Проверить $host", "!site $host")))
+            has(q, "сайт", "билет", "страниц") && has(q, "не открыва", "не заход", "не грузит", "медленно гру", "долго гру") ->
+                Msg(false, "Пришлите адрес сайта (например, tickets.example.ru) — проверю его напрямую, через VPN и через обход DPI и сам направлю туда, где он открывается. " +
+                    "Из Telegram: в открытой странице ⋮ → «Копировать ссылку» и вставьте сюда.")
             // ---- orders: done right away
             has(q, "ускор", "быстрее", "разгон", "оптимиз", "тормоз") && has(q, "ютуб", "youtube", "видео", "ютьюб") || has(q, "ускорь", "оптимизируй", "разгони") ->
                 Msg(false, "Ускоряю YouTube: включаю «Умный YouTube» и ускорение телефона, облегчаю тяжёлые маски, меряю реальную скорость лучших серверов и выбираю самые быстрые.", listOf(Btn("Ускорить YouTube", "!yt")), auto = true)
@@ -264,7 +267,12 @@ object Assistant {
                 if (!quiet) post(Msg(true, "Проверь $host"))
                 Actions.checkSite(host)
                 scope.launch { delay(300); while (Actions.siteCheck.value.running) delay(300); Actions.siteCheck.value.let { r ->
-                    post(Msg(false, r.verdict + if (r.details.isNotEmpty()) "\n" + r.details else "")) } }
+                    post(Msg(false, r.verdict + if (r.details.isNotEmpty()) "\n" + r.details else ""))
+                    // the fix is obvious (e.g. a Russian ticket site that refuses foreign addresses → always direct): apply it right away
+                    if (r.suggest.isNotEmpty() && r.host.isNotEmpty()) {
+                        Actions.routeSite(r.host, r.suggest); reconnect(app)
+                        post(Msg(false, "Запомнил: ${r.host} теперь всегда " + (if (r.suggest == "vpn") "через VPN" else "напрямую") + " — переподключаюсь без разрыва. Отменить: Настройки → «Сайт не открывается?»."))
+                    } } }
             }
             cmd == "!yt" -> job(app, if (quiet) null else "Ускорь YouTube") { Actions.boostYoutube() }
             cmd == "!lighten" -> job(app, if (quiet) null else "Облегчи маски") { Actions.lighten() }
