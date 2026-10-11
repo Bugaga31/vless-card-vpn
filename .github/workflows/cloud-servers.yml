@@ -2,6 +2,9 @@ name: Cloud server check
 on:
   schedule: [{ cron: '23 */6 * * *' }]
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['scripts/cloud_servers.py', '.github/workflows/cloud-servers.yml']
 permissions:
   contents: write
 concurrency: { group: cloud-servers, cancel-in-progress: true }
