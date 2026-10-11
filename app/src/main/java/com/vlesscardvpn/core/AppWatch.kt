@@ -152,6 +152,15 @@ object AppWatch {
         else -> null
     }
     private var evoN = 0
+    @Volatile var ecoOn = false; private set
+    /** Battery saver on, or under 20 % and not charging. */
+    private fun lowPower(): Boolean = runCatching {
+        val ctx = appCtx!!
+        val pm = ctx.getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
+        val bm = ctx.getSystemService(Context.BATTERY_SERVICE) as android.os.BatteryManager
+        eco(pm.isPowerSaveMode, bm.getIntProperty(android.os.BatteryManager.BATTERY_PROPERTY_CAPACITY), bm.isCharging)
+    }.getOrDefault(false)
+    fun eco(saver: Boolean, percent: Int, charging: Boolean) = !charging && (saver || percent in 1..19)
     private var lastLatency = System.currentTimeMillis() - 10 * 60_000L; private var slowMs = 0
     private var lastRevive = System.currentTimeMillis() - 330 * 60_000L // first try ~30 min after start
     private var lastFreeze = System.currentTimeMillis() - 110 * 60_000L
@@ -181,7 +190,11 @@ object AppWatch {
     private suspend fun autopilot(reconnect: () -> Unit) {
         if (++tick % 40 != 0) return // once a minute
         cool(reconnect)
-        appCtx?.let { Updater.check(ctx = it) } // every 6 h at most, also while the app stays closed
+        appCtx?.let { Updater.check(ctx = it); CloudSync.auto(it) } // every 6 h / 3 h at most, also while the app stays closed
+        // battery saver on or < 20 %: only what keeps the internet working (fix, switching) — no evolution, revival,
+        // freeze/latency/speed checks; they come back when the phone charges
+        val eco = lowPower()
+        if (eco != ecoOn) { ecoOn = eco; say(if (eco) "Батарея садится — фоновые улучшения на паузе, связь чинится как обычно" else "Батарея в порядке — фоновые улучшения снова работают") }
         val s = Tunnel.status.value
         fails = if (s.checkOk == false) fails + 1 else 0
         val now = System.currentTimeMillis()
@@ -198,7 +211,7 @@ object AppWatch {
         }
         if (net.isNotEmpty() && net != evolveNet) lastFreeze = now - 110 * 60_000L // new network: freeze check in ~10 min
         // mobile «заморозка» (TSPU stops downloads from hosting IPs after ~16 KB): 256 KB through the tunnel every 2 h
-        if (net.startsWith("Моб.") && now - lastFreeze > 2 * 3600_000L && fails == 0 && !Actions.progress.value.running) {
+        if (!ecoOn && net.startsWith("Моб.") && now - lastFreeze > 2 * 3600_000L && fails == 0 && !Actions.progress.value.running) {
             lastFreeze = now
             Tunnel.socks?.port?.let { p ->
                 if (Diagnose.freeze(p) == Diagnose.Freeze.FROZEN && now - lastSpeedup > 30 * 60_000L) {
@@ -210,20 +223,20 @@ object AppWatch {
         }
         if (net.isNotEmpty() && net != evolveNet) { evolveNet = net; lastEvolve = minOf(lastEvolve, now - (if (Store.summary.value.mask.isEmpty()) 117 else 105) * 60_000L) } // no mask known here: search in ~3 min
         // dead servers behind Cloudflare: quietly try them on other edge addresses every 6 h (the list grows by itself)
-        if (now - lastRevive > 6 * 3600_000L && fails == 0 && !Actions.progress.value.running && !Thermal.cooling) {
+        if (!ecoOn && now - lastRevive > 6 * 3600_000L && fails == 0 && !Actions.progress.value.running && !Thermal.cooling) {
             lastRevive = now
             val dead = Actions.deadCdn()
             if (dead.isNotEmpty()) { val n = Actions.doRevive(dead, 6); if (n > 0) say("Автопилот: ожило $n нерабочих серверов за Cloudflare (на других адресах, пометка «· CDN») — теперь они в запасе") }
         }
         // light speed check (4 s) every 45 min, only on unmetered networks (Wi-Fi) — mobile data is not spent on it
         var slow = false
-        if (now - lastSpeedCheck > 45 * 60_000L && fails == 0 && !Actions.progress.value.running && unmetered()) {
+        if (!ecoOn && now - lastSpeedCheck > 45 * 60_000L && fails == 0 && !Actions.progress.value.running && unmetered()) {
             lastSpeedCheck = now
             val port = Tunnel.socks?.port
             if (port != null) { lastMbps = withContext(Dispatchers.IO) { runCatching { Tester.speed(port, 4).mbps }.getOrDefault(0.0) }; slow = lastMbps in 0.01..3.0 }
         }
         // mobile data: no speed test (costs traffic) — instead a tiny page timed every 15 min; >2.5 s twice = slow
-        if (!unmetered() && now - lastLatency > 15 * 60_000L && fails == 0 && !Actions.progress.value.running) {
+        if (!ecoOn && !unmetered() && now - lastLatency > 15 * 60_000L && fails == 0 && !Actions.progress.value.running) {
             lastLatency = now
             Tunnel.socks?.port?.let { port ->
                 val url = Store.state.value.settings.testUrl
@@ -234,7 +247,7 @@ object AppWatch {
                 }
             }
         }
-        when (pilot(fails, Store.summary.value.heavyMask, Actions.progress.value.running || Thermal.cooling && fails < 2, now - lastFix, now - lastLight, now - lastEvolve, slow, now - lastSpeedup)) {
+        when (pilot(fails, Store.summary.value.heavyMask, Actions.progress.value.running || (Thermal.cooling || ecoOn) && fails < 2, now - lastFix, now - lastLight, now - lastEvolve, slow, now - lastSpeedup)) {
             "speedup" -> { lastSpeedup = now; say(if (lastMbps > 0) "Автопилот: скорость всего %.1f Мбит/с — ищу серверы и маски быстрее".format(lastMbps) else "Автопилот: сайты открываются медленно (ответ ${slowMs / 1000.0} с) — ищу серверы и маски быстрее"); withContext(Dispatchers.Main) { Actions.boostYoutube() } }
             "evolve" -> {
                 lastEvolve = now; evoN++

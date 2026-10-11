@@ -403,3 +403,21 @@ class R106Test {
         org.junit.Assert.assertEquals(1.0, f[12] * f[12] + f[13] * f[13], 1e-9)
     }
 }
+
+class R107Test {
+    @org.junit.Test fun cloudRepoNormalize() {
+        val n = com.vlesscardvpn.core.CloudSync
+        org.junit.Assert.assertEquals("me/vpn-backup", n.normalize("https://github.com/me/vpn-backup.git/"))
+        org.junit.Assert.assertEquals("me/x", n.normalize(" me/x "))
+        org.junit.Assert.assertNull(n.normalize("me"))
+        org.junit.Assert.assertNull(n.normalize("me/x/y"))
+    }
+    @org.junit.Test fun ecoMode() {
+        val a = com.vlesscardvpn.core.AppWatch
+        org.junit.Assert.assertTrue(a.eco(true, 80, false))
+        org.junit.Assert.assertTrue(a.eco(false, 15, false))
+        org.junit.Assert.assertFalse(a.eco(true, 10, true))
+        org.junit.Assert.assertFalse(a.eco(false, 50, false))
+        org.junit.Assert.assertFalse(a.eco(false, 0, false))
+    }
+}

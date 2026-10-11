@@ -50,6 +50,28 @@ fun SettingsScreen() {
                 Text(if (checking) "Проверяю…" else "Проверить сеть")
             }
         }
+        Group("Облако (ваш GitHub)") {
+            val cctx = androidx.compose.ui.platform.LocalContext.current
+            val cs by com.vlesscardvpn.core.CloudSync.state.collectAsState()
+            var repo by remember { mutableStateOf(com.vlesscardvpn.core.CloudSync.repo(cctx)) }
+            var token by remember { mutableStateOf("") }
+            var on by remember { mutableStateOf(com.vlesscardvpn.core.CloudSync.configured(cctx)) }
+            Text("Маски, обход DPI, результаты серверов и мини-нейросеть сохраняются в ваш закрытый репозиторий GitHub (раз в 3 часа, если что-то изменилось) и возвращаются на новом телефоне или после переустановки — заново учить маски не надо. " +
+                "Нужен токен GitHub (Fine-grained, доступ только к этому репозиторию, Contents: Read and write). Он хранится только на этом телефоне.", fontSize = 12.sp, color = androidx.compose.ui.graphics.Color.Gray)
+            androidx.compose.material3.OutlinedTextField(repo, { repo = it }, singleLine = true, modifier = Modifier.fillMaxWidth(), label = { Text("Репозиторий (имя/репо)") })
+            androidx.compose.material3.OutlinedTextField(token, { token = it }, singleLine = true, modifier = Modifier.fillMaxWidth(),
+                visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(), label = { Text(if (on) "Токен сохранён (ввести новый)" else "Токен GitHub") })
+            if (cs.text.isNotEmpty()) Text(cs.text, fontSize = 13.sp)
+            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = {
+                    val err = com.vlesscardvpn.core.CloudSync.save(cctx, repo, token)
+                    if (err != null) com.vlesscardvpn.core.CloudSync.state.value = com.vlesscardvpn.core.CloudSync.State(err)
+                    else { token = ""; on = com.vlesscardvpn.core.CloudSync.configured(cctx); if (on) com.vlesscardvpn.core.CloudSync.upload(cctx, force = true) else com.vlesscardvpn.core.CloudSync.state.value = com.vlesscardvpn.core.CloudSync.State("Введите токен") }
+                }, enabled = !cs.busy) { Text("Сохранить в облако") }
+                if (on) OutlinedButton(onClick = { com.vlesscardvpn.core.CloudSync.restore(cctx) }, enabled = !cs.busy) { Text("Загрузить из облака") }
+                if (on) TextButton(onClick = { com.vlesscardvpn.core.CloudSync.forget(cctx); on = false }) { Text("Отключить") }
+            }
+        }
         Group("Обновление") {
             val upd by com.vlesscardvpn.core.Updater.state.collectAsState()
             val uctx = androidx.compose.ui.platform.LocalContext.current

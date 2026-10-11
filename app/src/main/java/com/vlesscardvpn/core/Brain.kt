@@ -78,5 +78,7 @@ object Brain {
         listOf("m", "w").forEach { k -> o.optJSONArray(k)?.takeIf { it.length() == N }?.let { a -> w[k] = DoubleArray(N) { a.getDouble(it) } } }
     }
 
+    @Synchronized fun reload(ctx: android.content.Context) { w.clear(); seen = 0; dirty = false; load(ctx) }
+
     fun report(): String = if (seen < 20) "Мини-нейросеть только учится (проверок: $seen)." else "Мини-нейросеть обучена на $seen проверках серверов — подсказывает, какие запасные пробовать первыми."
 }
