@@ -15,7 +15,7 @@ class R72Test {
         // a 1.0.71 user who switched QUIC blocking off: speed-up and ad blocking come, QUIC stays as chosen
         val s71 = Settings.fromJson(Settings().copy(rev = 71, blockQuic = false, blockAds = false, turbo = false).toJson())
         val m = Settings.migrate(s71)
-        assertFalse(m.blockQuic); assertTrue(m.turbo && m.blockAds); assertEquals(72, m.rev)
+        assertFalse(m.blockQuic); assertTrue(m.turbo && m.blockAds); assertEquals(Settings.REV, m.rev)
         assertFalse(Settings.migrate(m.copy(turbo = false)).turbo)
         val fresh = Settings.migrate(Settings.fromJson(JSONObject()))
         assertTrue(fresh.blockQuic && fresh.turbo && fresh.blockAds && !fresh.autoStart)

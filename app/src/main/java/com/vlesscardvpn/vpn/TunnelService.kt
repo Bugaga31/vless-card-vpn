@@ -321,6 +321,7 @@ class TunnelService : VpnService() {
             val text = if (p.realMs > 0) "Интернет работает · ${p.realMs} мс · 256 КБ: ${Actions.yn(p.bigOk)} · YouTube: ${Actions.yn(p.ytOk)} · Telegram: ${Actions.yn(p.tgOk)}$warp"
                 else "Нет ответа через выбранный маршрут (${p.error}). " + if (st.mode == Mode.AUTO && st.autoHeal) "Ищу рабочий вариант сам…" else "Проверьте серверы или включите маскировку."
             Tunnel.status.value = cur.copy(check = text, checkOk = p.works)
+            runCatching { val stv = Store.state.value; com.vlesscardvpn.core.Brain.lived(Net.key(this@TunnelService), usedServers, { stv.state(it) }, p.works); com.vlesscardvpn.core.Brain.save(this@TunnelService) }
             Log.i("E2E", "check ok=${p.works} ms=${p.realMs} big=${p.bigOk} yt=${p.ytOk} tg=${p.tgOk} err=${p.error} warp=$warp")
             if (p.works && st.mode == Mode.AUTO) Actions.rememberNet(Net.key(this@TunnelService))
             // «Умный YouTube» broke YouTube here (the bypass stopped working): back to the servers for YouTube
@@ -476,6 +477,7 @@ class TunnelService : VpnService() {
     /** The network the tunnel was built on; kept across reconnects so a change during a reconnect is not missed. */
     @Volatile private var curNet: Network? = null
     private fun hardRestart(why: String, force: Boolean = false) {
+        runCatching { val stv = Store.state.value; com.vlesscardvpn.core.Brain.lived(Net.key(this), usedServers, { stv.state(it) }, false) }
         val now = System.currentTimeMillis()
         if (!force && now - lastHard < 5 * 60_000L) { heal(); return } // twice in 5 min: restarting doesn't help — heal (masks, servers)
         lastHard = now

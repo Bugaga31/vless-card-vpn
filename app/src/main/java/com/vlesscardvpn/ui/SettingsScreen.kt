@@ -50,6 +50,16 @@ fun SettingsScreen() {
                 Text(if (checking) "Проверяю…" else "Проверить сеть")
             }
         }
+        Group("Обновление") {
+            val upd by com.vlesscardvpn.core.Updater.state.collectAsState()
+            val uctx = androidx.compose.ui.platform.LocalContext.current
+            Text("Версия ${com.vlesscardvpn.BuildConfig.VERSION_NAME}. Новые версии проверяются сами (раз в 6 часов) и ставятся отсюда — без GitHub и браузера.", fontSize = 12.sp, color = androidx.compose.ui.graphics.Color.Gray)
+            if (upd.text.isNotEmpty()) Text(upd.text, fontSize = 13.sp)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = { com.vlesscardvpn.core.Updater.check(force = true) }) { Text("Проверить") }
+                if (upd.latest.isNotEmpty()) Button(onClick = { com.vlesscardvpn.core.Updater.install(uctx) }, enabled = !upd.busy) { Text("Обновить до ${upd.latest}") }
+            }
+        }
         Group("Оформление") {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 listOf("dark" to "Тёмная", "amoled" to "AMOLED", "you" to "Material You").forEach { (id, t) ->

@@ -1,0 +1,123 @@
+package com.vlesscardvpn.core
+
+import android.app.PendingIntent
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageInstaller
+import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.MutableStateFlow
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import java.net.InetSocketAddress
+import java.net.Proxy
+import java.util.concurrent.TimeUnit
+
+/**
+ * «Обновления внутри приложения»: looks at the latest GitHub release, downloads the APK for this phone (arm64 or
+ * universal) and hands it to Android's installer — no browser, no GitHub page. Android itself asks «Установить?»
+ * (an app may never install silently). Downloads directly, and through the running VPN if GitHub is slow/blocked.
+ */
+object Updater {
+    const val REPO = "Bugaga31/vless-card-vpn"
+    data class State(val latest: String = "", val code: Int = 0, val notes: String = "", val busy: Boolean = false, val text: String = "")
+    val state = MutableStateFlow(State())
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private var lastCheck = 0L
+
+    /** "v1.1.4" → 105, "v1.0.99" → 99 (same numbering as the build: 1.1.x = 101 + x). */
+    fun codeOf(tag: String): Int {
+        val p = tag.trim().removePrefix("v").split('.').mapNotNull { it.toIntOrNull() }
+        if (p.size != 3 || p[0] != 1) return 0
+        return when (p[1]) { 0 -> p[2]; 1 -> 101 + p[2]; else -> 0 }
+    }
+
+    fun apkName(tag: String, arm64: Boolean) = "VLESS-Card-Beta-${tag.removePrefix("v")}" + (if (arm64) "-arm64" else "") + ".apk"
+
+    private fun client(viaVpn: Boolean): OkHttpClient {
+        val b = OkHttpClient.Builder().connectTimeout(10, TimeUnit.SECONDS).readTimeout(30, TimeUnit.SECONDS).followRedirects(true)
+        if (viaVpn) Tunnel.socks?.port?.let { b.proxy(Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", it))) }
+        return b.build()
+    }
+
+    private fun <T> anyPath(block: (OkHttpClient) -> T): T =
+        try { block(client(false)) } catch (e: Exception) { if (Tunnel.socks != null) block(client(true)) else throw e }
+
+    /** Checks at most every 6 h unless [force]. */
+    fun check(force: Boolean = false) {
+        val now = System.currentTimeMillis()
+        if (!force && now - lastCheck < 6 * 3600_000L) return
+        lastCheck = now
+        scope.launch {
+            if (force) state.value = state.value.copy(text = "Проверяю обновления…")
+            runCatching {
+                val body = anyPath { c -> c.newCall(Request.Builder().url("https://api.github.com/repos/$REPO/releases/latest")
+                    .header("Accept", "application/vnd.github+json").build()).execute().use { it.body!!.string() } }
+                val o = org.json.JSONObject(body)
+                val tag = o.getString("tag_name")
+                val code = codeOf(tag)
+                val mine = com.vlesscardvpn.BuildConfig.VERSION_CODE
+                state.value = if (code > mine) State(tag.removePrefix("v"), code, o.optString("body").substringBefore("### Автоматические").trim().take(1500), text = "Доступна версия ${tag.removePrefix("v")}")
+                    else State(text = if (force) "У вас последняя версия (${com.vlesscardvpn.BuildConfig.VERSION_NAME})" else "")
+            }.onFailure { if (force) state.value = State(text = "Не удалось проверить: ${Errors.human(it)}") }
+        }
+    }
+
+    /** Downloads the update and opens Android's «Установить?». */
+    fun install(ctx: Context) {
+        val s = state.value
+        if (s.latest.isEmpty() || s.busy) return
+        val app = ctx.applicationContext
+        if (android.os.Build.VERSION.SDK_INT >= 26 && !app.packageManager.canRequestPackageInstalls()) {
+            state.value = s.copy(text = "Разрешите VLESS Card устанавливать обновления (один раз) и нажмите «Обновить» снова")
+            runCatching { app.startActivity(Intent(android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, android.net.Uri.parse("package:" + app.packageName)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+            return
+        }
+        state.value = s.copy(busy = true, text = "Скачиваю ${s.latest}…")
+        scope.launch {
+            try {
+                val arm64 = android.os.Build.SUPPORTED_ABIS.firstOrNull() == "arm64-v8a"
+                val tag = "v" + s.latest
+                val f = java.io.File(app.cacheDir, "update.apk")
+                anyPath { c ->
+                    c.newCall(Request.Builder().url("https://github.com/$REPO/releases/download/$tag/${apkName(tag, arm64)}").build()).execute().use { r ->
+                        if (!r.isSuccessful) error("GitHub ответил ${r.code}")
+                        val total = r.body!!.contentLength()
+                        r.body!!.byteStream().use { inp -> f.outputStream().use { out ->
+                            val buf = ByteArray(64 * 1024); var done = 0L; var last = 0L
+                            while (true) { val n = inp.read(buf); if (n < 0) break; out.write(buf, 0, n); done += n
+                                if (done - last > 1_000_000) { last = done; state.value = state.value.copy(text = "Скачиваю ${s.latest}: ${done shr 20} из ${if (total > 0) total shr 20 else "?"} МБ") } }
+                        } }
+                        if (total > 0 && f.length() != total) error("файл скачался не полностью")
+                    }
+                }
+                val pi = app.packageManager.packageInstaller
+                val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL).apply { setAppPackageName(app.packageName) }
+                val id = pi.createSession(params)
+                pi.openSession(id).use { session ->
+                    session.openWrite("update.apk", 0, f.length()).use { out -> f.inputStream().use { it.copyTo(out) }; session.fsync(out) }
+                    val flags = PendingIntent.FLAG_UPDATE_CURRENT or (if (android.os.Build.VERSION.SDK_INT >= 31) PendingIntent.FLAG_MUTABLE else 0)
+                    val cb = PendingIntent.getBroadcast(app, id, Intent(app, InstallReceiver::class.java), flags)
+                    session.commit(cb.intentSender)
+                }
+                state.value = state.value.copy(busy = false, text = "Подтвердите установку ${s.latest} в окне Android")
+            } catch (e: Exception) {
+                state.value = state.value.copy(busy = false, text = "Не получилось обновить: ${Errors.human(e)}. Можно скачать вручную на GitHub")
+            }
+        }
+    }
+}
+
+/** Android's answer about the update: when it needs the user's «Установить», show its window. */
+class InstallReceiver : BroadcastReceiver() {
+    override fun onReceive(ctx: Context, intent: Intent) {
+        when (intent.getIntExtra(PackageInstaller.EXTRA_STATUS, -999)) {
+            PackageInstaller.STATUS_PENDING_USER_ACTION -> {
+                @Suppress("DEPRECATION") val confirm = intent.getParcelableExtra<Intent>(Intent.EXTRA_INTENT) ?: return
+                runCatching { ctx.startActivity(confirm.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+            }
+            PackageInstaller.STATUS_SUCCESS -> Updater.state.value = Updater.State(text = "Обновлено")
+            else -> Updater.state.value = Updater.state.value.copy(busy = false, text = "Установка не прошла: " + (intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE) ?: "отменено"))
+        }
+    }
+}

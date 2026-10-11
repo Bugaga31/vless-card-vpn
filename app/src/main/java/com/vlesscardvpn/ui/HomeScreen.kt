@@ -41,6 +41,16 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
         Text("VLESS Card", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onBackground)
         Text("${BuildConfig.VERSION_NAME} · Xray · " + if (cfg.stealthSocks) "прокси скрыт (случайный порт + пароль)" else "SOCKS 127.0.0.1:${cfg.socksPort}",
             fontSize = 12.sp, color = Color.Gray)
+        val upd by com.vlesscardvpn.core.Updater.state.collectAsState()
+        if (upd.latest.isNotEmpty()) {
+            val uctx = androidx.compose.ui.platform.LocalContext.current
+            Card(Modifier.fillMaxWidth().padding(top = 10.dp), shape = RoundedCornerShape(14.dp), colors = CardDefaults.cardColors(containerColor = Color(0xFF1C3A2A))) {
+                Row(Modifier.padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(upd.text.ifEmpty { "Доступна версия ${upd.latest}" }, Modifier.weight(1f), fontSize = 13.sp)
+                    Button(onClick = { com.vlesscardvpn.core.Updater.install(uctx) }, enabled = !upd.busy) { Text("Обновить") }
+                }
+            }
+        }
         val clip by Actions.clipOffer.collectAsState()
         val hctx = androidx.compose.ui.platform.LocalContext.current
         clip?.let { (text, what) ->

@@ -10,7 +10,7 @@ import com.vlesscardvpn.model.ServerState
  * no background work of its own, nothing leaves the phone.
  */
 object Brain {
-    const val N = 12
+    const val N = 14
     private val w = HashMap<String, DoubleArray>()
     @Volatile var seen = 0; private set
     private var dirty = false
@@ -30,9 +30,12 @@ object Brain {
             if (st.maskId.isNotEmpty()) 1.0 else 0.0,
             if (s.port == 443) 1.0 else 0.0,
             ((System.currentTimeMillis() - st.checkedAt).coerceAtLeast(0) / 86_400_000.0).coerceAtMost(3.0) / 3.0,
+            // time of day: operators cut harder in the evening — the model learns when which servers hold up
+            kotlin.math.sin(hour() * Math.PI / 12), kotlin.math.cos(hour() * Math.PI / 12),
         )
     }
 
+    private fun hour(): Double = java.util.Calendar.getInstance().let { it.get(java.util.Calendar.HOUR_OF_DAY) + it.get(java.util.Calendar.MINUTE) / 60.0 }
     private fun kind(net: String) = if (net.startsWith("Моб.")) "m" else "w"
     private fun weights(net: String) = w.getOrPut(kind(net)) { DoubleArray(N).also { it[4] = 1.5; it[2] = 1.0; it[1] = -0.5; it[5] = 0.5 } }
 
@@ -47,10 +50,15 @@ object Brain {
     @Synchronized fun learn(net: String, s: Server, st: ServerState, works: Boolean) {
         val x = features(s, st); val k = weights(net)
         val err = (if (works) 1.0 else 0.0) - p(net, s, st)
-        val lr = 0.05
+        // learns fast at first, then calmer (one odd check must not undo hundreds of good ones)
+        val lr = maxOf(0.01, 0.2 / kotlin.math.sqrt(1.0 + seen / 50.0))
         for (i in 0 until N) k[i] = (k[i] + lr * err * x[i] - 0.0005 * k[i]).coerceIn(-8.0, 8.0)
         seen++; dirty = true
     }
+
+    /** Real life, not only tests: the servers in use carried the traffic ([works]) or the connection broke. */
+    fun lived(net: String, used: List<Server>, state: (Server) -> ServerState, works: Boolean) =
+        used.take(5).forEach { runCatching { learn(net, it, state(it), works) } }
 
     /** Working candidates first by the model, then by speed. */
     fun order(net: String, list: List<Server>, state: (Server) -> ServerState): List<Server> =

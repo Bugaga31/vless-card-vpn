@@ -11,6 +11,8 @@ object Subs {
     const val WORLD = "Мировые сборники (много, но слабее)"
 
     val CATALOG: List<SubSource> = listOf(
+        // «Облачная проверка»: GitHub pings tens of thousands of servers every 6 h and keeps the ones that answer
+        SubSource(gh("Bugaga31/vless-card-vpn/servers/alive_ru.txt"), "VLESS Card · облачная проверка (для России)", RU, default = true),
         SubSource(gh("$IG/BLACK_VLESS_RUS_mobile.txt"), "igareck · VLESS для мобильного", RU, default = true),
         SubSource(gh("$IG/BLACK_VLESS_RUS.txt"), "igareck · VLESS", RU, default = true),
         SubSource(gh("$IG/BLACK_SS+All_RUS.txt"), "igareck · Shadowsocks и все", RU, default = true),
@@ -26,6 +28,7 @@ object Subs {
         SubSource(gh("zieng2/wl/main/vless_universal.txt"), "zieng2 · белые списки universal", WL, whitelist = true),
         SubSource(gh("Maskkost93/kizyak-vpn-4.0/main/kizyaktestru.txt"), "Кизяк · RU-тест", WL, whitelist = true),
         SubSource(gh("FLAT447/v2ray-lists/main/WHITE_LITE.txt"), "FLAT447 · белые списки lite", WL, whitelist = true),
+        SubSource(gh("Bugaga31/vless-card-vpn/servers/alive.txt"), "VLESS Card · облачная проверка (весь мир, 6000)", WORLD),
         SubSource(gh("Epodonios/v2ray-configs/main/All_Configs_Sub.txt"), "Epodonios", WORLD),
         SubSource(gh("mahdibland/V2RayAggregator/master/sub/sub_merge.txt"), "V2RayAggregator", WORLD),
         SubSource(gh("MatinGhanbari/v2ray-configs/main/subscriptions/v2ray/all_sub.txt"), "MatinGhanbari", WORLD),

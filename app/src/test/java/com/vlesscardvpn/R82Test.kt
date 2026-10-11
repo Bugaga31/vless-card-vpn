@@ -376,3 +376,30 @@ class R101bTest {
         org.junit.Assert.assertTrue(com.vlesscardvpn.xray.XrayConfigBuilder.YT_ADS.all { it.startsWith("full:") && "googlevideo" !in it })
     }
 }
+
+class R106Test {
+    @org.junit.Test fun updaterVersionCodes() {
+        val u = com.vlesscardvpn.core.Updater
+        org.junit.Assert.assertEquals(105, u.codeOf("v1.1.4"))
+        org.junit.Assert.assertEquals(101, u.codeOf("v1.1.0"))
+        org.junit.Assert.assertEquals(99, u.codeOf("v1.0.99"))
+        org.junit.Assert.assertEquals(0, u.codeOf("beta-v1.0.5"))
+        org.junit.Assert.assertEquals("VLESS-Card-Beta-1.1.5-arm64.apk", u.apkName("v1.1.5", true))
+        org.junit.Assert.assertEquals("VLESS-Card-Beta-1.1.5.apk", u.apkName("v1.1.5", false))
+    }
+
+    @org.junit.Test fun cloudListJoinsOldInstalls() {
+        val old = com.vlesscardvpn.model.Settings(subscriptions = listOf("https://example.com/sub"), rev = 72)
+        val m = com.vlesscardvpn.model.Settings.migrate(old)
+        org.junit.Assert.assertTrue(m.subscriptions.first().contains("/servers/alive_ru.txt"))
+        org.junit.Assert.assertTrue("https://example.com/sub" in m.subscriptions)
+        org.junit.Assert.assertEquals(m.subscriptions, com.vlesscardvpn.model.Settings.migrate(m).subscriptions)
+    }
+
+    @org.junit.Test fun brainHasTimeOfDay() {
+        val s = com.vlesscardvpn.model.Server(name = "a", protocol = "vless", address = "1.1.1.1", port = 443, secret = "x")
+        val f = com.vlesscardvpn.core.Brain.features(s, com.vlesscardvpn.model.ServerState())
+        org.junit.Assert.assertEquals(com.vlesscardvpn.core.Brain.N, f.size)
+        org.junit.Assert.assertEquals(1.0, f[12] * f[12] + f[13] * f[13], 1e-9)
+    }
+}
