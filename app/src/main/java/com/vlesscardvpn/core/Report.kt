@@ -21,7 +21,10 @@ import java.util.concurrent.TimeUnit
 object Report {
     const val REPO = "Bugaga31/vless-card-cloud"
     const val DATA = "https://raw.githubusercontent.com/Bugaga31/vless-card-vpn/servers/cloud.json"
-    private const val EVERY = 6 * 3600_000L
+    private const val EVERY = 6 * 3600_000L      // report at the latest
+    private const val CHANGED = 3600_000L         // report sooner when something new happened
+    private const val PULL = 20 * 60_000L         // shared result (tiny, ETag: usually "not modified")
+    const val PHONES = "https://raw.githubusercontent.com/Bugaga31/vless-card-vpn/servers/phones"
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     @Volatile private var busy = false
     private val json = "application/json".toMediaType()
@@ -70,18 +73,26 @@ object Report {
     fun auto(ctx: Context) {
         val app = ctx.applicationContext; val p = prefs(app); val now = System.currentTimeMillis()
         if (busy) return
-        val pull = now - p.getLong("pulled", 0) > EVERY
+        val pull = now - p.getLong("pulled", 0) > PULL
         if (!p.contains("sent")) p.edit().putLong("sent", now - EVERY + 30 * 60_000L).apply() // first report ~30 min after install
-        val send = available() && enabled(app) && now - p.getLong("sent", now) > EVERY
+        val since = now - p.getLong("sent", now)
+        val send = available() && enabled(app) && (since > EVERY || since > CHANGED && digest(app) != p.getInt("digest", 0))
         if (!pull && !send) return
         busy = true
         scope.launch {
             try {
-                if (pull) runCatching { pull(app) }.onSuccess { p.edit().putLong("pulled", now).apply() }
-                if (send) runCatching { send(app) }.onSuccess { p.edit().putLong("sent", now).putString("status", "Отчёт отправлен " + hhmm(now)).apply() }
+                if (pull) runCatching { pull(app) }.onSuccess { p.edit().putLong("pulled", now).apply() }.onFailure { p.edit().putLong("pulled", now - PULL + 5 * 60_000L).apply() }
+                if (send) runCatching { send(app) }.onSuccess { p.edit().putLong("sent", now).putInt("digest", digest(app)).putString("status", "Отчёт отправлен " + hhmm(now)).apply() }
                     .onFailure { p.edit().putLong("sent", now - EVERY + 3600_000L).putString("status", "Отчёт не ушёл: ${Errors.human(it)}").apply() }
             } finally { busy = false }
         }
+    }
+
+    /** Changes when there is something new to tell: problems in the journal, masks learned, servers that worked. */
+    private fun digest(ctx: Context): Int {
+        val st = Store.state.value
+        return (AppWatch.journal.value.map { clean(it.second) } + st.maskStats.map { it.key + it.value.size } +
+            st.servers.filter { publicSource(it.source) && st.state(it).realMs > 0 }.take(15).map { it.id }).hashCode()
     }
 
     private fun hhmm(t: Long) = java.text.SimpleDateFormat("dd.MM HH:mm", java.util.Locale.US).format(java.util.Date(t))
@@ -103,8 +114,12 @@ object Report {
 
     /** Shared result: the merged model and the network setup for this operator (applied once per new cloud version). */
     private fun pull(ctx: Context) {
-        val text = call { c -> c.newCall(Request.Builder().url(DATA).build()).execute().use { r -> if (r.code != 200) error("нет данных ${r.code}"); r.body!!.string() } }
-        val o = JSONObject(text); val stamp = o.optString("stamp"); val p = prefs(ctx)
+        val p = prefs(ctx)
+        val text = call { c -> c.newCall(Request.Builder().url(DATA).apply { p.getString("etag", null)?.let { header("If-None-Match", it) } }.build()).execute().use { r ->
+            if (r.code == 304) return@use null
+            if (r.code != 200) error("нет данных ${r.code}")
+            r.header("ETag")?.let { p.edit().putString("etag", it).apply() }; r.body!!.string() } } ?: return
+        val o = JSONObject(text); val stamp = o.optString("stamp")
         if (stamp.isEmpty() || stamp == p.getString("stamp", "")) return
         o.optJSONObject("brain")?.let { Brain.blend(it, o.optInt("phones")) }
         val fam = Net.family(Net.key(ctx))
@@ -112,6 +127,13 @@ object Report {
             val prof = runCatching { NetProfile.decode(link) }.getOrNull()
             if (prof != null && !prof.isEmpty) Store.update { st -> NetProfile.apply(st, prof, Net.key(ctx)).first }
         }
+        // servers that really worked on phones: a small list of their own, tried by the autopilot's rescue
+        o.optJSONArray("servers")?.let { a -> (0 until minOf(a.length(), 40)).mapNotNull { LinkParser.parse(a.optString(it), PHONES) } }
+            ?.takeIf { it.isNotEmpty() }?.let { list -> Store.update { st ->
+                // the ones in use stay even when the cloud dropped them
+                val keep = st.servers.filter { it.source != PHONES || st.state(it).selected }; val ids = keep.map { it.id }.toHashSet()
+                st.copy(servers = keep + list.filter { ids.add(it.id) })
+            } }
         p.edit().putString("stamp", stamp).apply()
         runCatching { Brain.save(ctx) }
     }

@@ -1,13 +1,13 @@
 name: Cloud server check
 on:
-  schedule: [{ cron: '23 */6 * * *' }]
+  schedule: [{ cron: '*/10 * * * *' }]
   workflow_dispatch:
   push:
     branches: [main]
     paths: ['scripts/cloud_servers.py', 'scripts/cloud_reports.py', '.github/workflows/cloud-servers.yml']
 permissions:
   contents: write
-concurrency: { group: cloud-servers, cancel-in-progress: true }
+concurrency: { group: cloud-servers, cancel-in-progress: false }
 jobs:
   check:
     runs-on: ubuntu-latest
