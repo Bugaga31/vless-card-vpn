@@ -64,6 +64,11 @@ object AppWatch {
         "com.reddit.frontpage" to Guard("Reddit", "https://www.reddit.com/"),
         "com.viber.voip" to Guard("Viber", "https://www.viber.com/"),
         "com.linkedin.android" to Guard("LinkedIn", "https://www.linkedin.com/"),
+        "com.android.chrome" to Guard("Google", "https://www.google.com/"),
+        "com.google.android.googlequicksearchbox" to Guard("Google", "https://www.google.com/"),
+        "com.sec.android.app.sbrowser" to Guard("Google", "https://www.google.com/"),
+        "com.yandex.browser" to Guard("Google", "https://www.google.com/"),
+        "org.mozilla.firefox" to Guard("Google", "https://www.google.com/"),
     )
 
     /** What the guard does after [fails] failed checks in a row: "wait", "switch" (others work) or "rescue" (nothing else). */
@@ -94,13 +99,18 @@ object AppWatch {
         if (!p.answers) { delay(1500); p = withContext(Dispatchers.IO) { Tester.site(g.url, port) } }
         guardFails = if (p.answers) 0 else guardFails + 1
         if (p.answers) { guardGood[g.title] = Store.state.value.selected.map { it.id }.toSet(); return }
+        // does anything open through the tunnel? If not, it's the whole connection — the watchdog/autopilot handle that
+        val control = withContext(Dispatchers.IO) { Tester.site(Store.state.value.settings.testUrl, port) }
+        if (!control.answers) { guardFails = 0; return }
         val st = Store.state.value
         val cur = st.selected.map { it.id }.toSet()
-        val others = st.servers.filter { it.id !in cur && st.state(it).works }
+        // old «works» marks lie: switch only to servers that pass a check right now (never to a dead one)
+        val others = st.servers.filter { it.id !in cur && st.state(it).works }.let { l ->
+            if (l.isEmpty()) l else Actions.verified(guardOrder(l, guardGood[g.title]) + Actions.preferred(st, l).sortedBy { st.state(it).score }, 8, sort = false) }
         when (guardDecide(maxOf(guardFails, 2), others.size, Tunnel.status.value.checkOk, now - guardAction)) {
             "switch" -> {
                 guardAction = now; guardFails = 0
-                val n = Actions.selectBest(5, close = true, among = guardOrder(others, guardGood[g.title]))
+                val n = Actions.selectBest(5, close = true, among = others)
                 if (n > 0) {
                     reconnect(); say("${g.title} не открывался через текущие серверы (${p.result}) — переключил на $n других")
                     delay(10_000)
