@@ -181,6 +181,7 @@ object AppWatch {
     private suspend fun autopilot(reconnect: () -> Unit) {
         if (++tick % 40 != 0) return // once a minute
         cool(reconnect)
+        appCtx?.let { Updater.check(ctx = it) } // every 6 h at most, also while the app stays closed
         val s = Tunnel.status.value
         fails = if (s.checkOk == false) fails + 1 else 0
         val now = System.currentTimeMillis()

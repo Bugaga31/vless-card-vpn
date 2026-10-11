@@ -56,7 +56,7 @@ fun SettingsScreen() {
             Text("Версия ${com.vlesscardvpn.BuildConfig.VERSION_NAME}. Новые версии проверяются сами (раз в 6 часов) и ставятся отсюда — без GitHub и браузера.", fontSize = 12.sp, color = androidx.compose.ui.graphics.Color.Gray)
             if (upd.text.isNotEmpty()) Text(upd.text, fontSize = 13.sp)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = { com.vlesscardvpn.core.Updater.check(force = true) }) { Text("Проверить") }
+                OutlinedButton(onClick = { com.vlesscardvpn.core.Updater.check(force = true, ctx = uctx) }) { Text("Проверить") }
                 if (upd.latest.isNotEmpty()) Button(onClick = { com.vlesscardvpn.core.Updater.install(uctx) }, enabled = !upd.busy) { Text("Обновить до ${upd.latest}") }
             }
         }
