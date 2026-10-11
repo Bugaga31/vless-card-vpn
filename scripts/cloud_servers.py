@@ -6,7 +6,7 @@ TCP-pings every server from GitHub's machines and publishes the ones that answer
 subscriptions the app reads: alive.txt (everything) and alive_ru.txt (from the Russia-oriented sources).
 GitHub's servers are abroad, so this removes dead servers — whether a server passes Russian DPI is still decided
 on the phone (masks, real checks, the mini model)."""
-import asyncio, base64, json, re, ssl, sys, time, urllib.parse, urllib.request
+import asyncio, base64, resource, json, re, ssl, sys, time, urllib.parse, urllib.request
 
 EXTRA = [  # big world collections: too heavy for a phone, fine for a CI runner
     "10ium/V2ray-Config/main/Splitted-By-Protocol/vless.txt",
@@ -32,7 +32,7 @@ def catalog():
 def fetch(path):
     url = path if path.startswith("http") else "https://raw.githubusercontent.com/" + path
     try:
-        with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "vless-card-cloud"}), timeout=60) as r:
+        with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "vless-card-cloud"}), timeout=40) as r:
             text = r.read(60_000_000).decode("utf-8", "ignore")
     except Exception as e:
         print("skip", path, e, file=sys.stderr); return []
@@ -81,9 +81,9 @@ async def ping(host, port, sni, sem):
         t = time.monotonic()
         try:
             if sni:
-                _, w = await asyncio.wait_for(asyncio.open_connection(host, port, ssl=TLS, server_hostname=sni), 5)
+                _, w = await asyncio.wait_for(asyncio.open_connection(host, port, ssl=TLS, server_hostname=sni), 3)
             else:
-                _, w = await asyncio.wait_for(asyncio.open_connection(host, port), 3)
+                _, w = await asyncio.wait_for(asyncio.open_connection(host, port), 2)
             w.close()
             return int((time.monotonic() - t) * 1000) or 1
         except Exception:
@@ -91,9 +91,14 @@ async def ping(host, port, sni, sem):
 
 
 async def main():
+    try: resource.setrlimit(resource.RLIMIT_NOFILE, (65536, 65536))
+    except Exception: pass
     links = {}  # ident -> (link, host, port, ru)
-    for path, ru in catalog() + [(p, False) for p in EXTRA]:
-        got = fetch(path)
+    import concurrent.futures as cf
+    srcs = catalog() + [(p, False) for p in EXTRA]
+    with cf.ThreadPoolExecutor(24) as ex:  # all subscriptions at once instead of one by one
+        fetched = list(ex.map(lambda pr: fetch(pr[0]), srcs))
+    for (path, ru), got in zip(srcs, fetched):
         print(f"{len(got):6d}  {path}")
         for l in got:
             e = endpoint(l)
@@ -101,7 +106,7 @@ async def main():
             old = links.get(e[2])
             if old is None or (ru and not old[3]): links[e[2]] = (l, e[0], e[1], ru or (old[3] if old else False), e[3])
     print("unique:", len(links))
-    sem = asyncio.Semaphore(800)
+    sem = asyncio.Semaphore(2000)
     items = list(links.values())
     ms = await asyncio.gather(*(ping(h, p, sni, sem) for _, h, p, _, sni in items))
     alive = sorted((m, it) for m, it in zip(ms, items) if m > 0)

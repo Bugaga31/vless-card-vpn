@@ -9,7 +9,8 @@ import base64, concurrent.futures as cf, hashlib, json, os, socket, ssl, subproc
 
 XRAY = os.environ.get("XRAY", "/tmp/xray/xray")
 REAL_RU, REAL_ALL = int(os.environ.get("REAL_RU", "1500")), int(os.environ.get("REAL_ALL", "1000"))
-BATCH, PAR, BASE = 250, 96, 21000
+BATCH, PAR, BASE = 400, 192, 21000
+HIST_URL = "https://raw.githubusercontent.com/Bugaga31/vless-card-vpn/servers/history.json"
 URL = "https://www.gstatic.com/generate_204"
 
 
@@ -135,7 +136,7 @@ def accepted(items, d):
 
 
 def probe(port):
-    r = subprocess.run(["curl", "-s", "-o", "/dev/null", "-m", "10", "-w", "%{http_code} %{time_total}", "--socks5-hostname", f"127.0.0.1:{port}", URL],
+    r = subprocess.run(["curl", "-s", "-o", "/dev/null", "-m", "7", "-w", "%{http_code} %{time_total}", "--socks5-hostname", f"127.0.0.1:{port}", URL],
                        capture_output=True, text=True).stdout.split()
     return int(float(r[1]) * 1000) or 1 if len(r) == 2 and r[0] == "204" else 0
 
@@ -151,7 +152,7 @@ def check(links):
             if not chunk: continue
             p = os.path.join(d, "c.json"); json.dump(config(chunk), open(p, "w"))
             x = subprocess.Popen([XRAY, "run", "-c", p], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            time.sleep(1.5)
+            time.sleep(1.0)
             try:
                 with cf.ThreadPoolExecutor(PAR) as ex:
                     for (l, _), ms in zip(chunk, ex.map(probe, [BASE + i for i in range(len(chunk))])): res[l] = ms
@@ -161,39 +162,71 @@ def check(links):
     return res
 
 
+def load_history():
+    """link -> {"ok": runs it worked, "n": runs checked, "ms": smoothed ms, "t": last seen}: the cloud's memory."""
+    try:
+        import urllib.request
+        with urllib.request.urlopen(HIST_URL, timeout=20) as r: return json.loads(r.read())
+    except Exception:
+        return {}
+
+
+def learn(hist, res, now):
+    """Updates the memory with this run. Old evidence fades (×0.9 per run), so a server that died drops quickly."""
+    for l, ms in res.items():
+        h = hist.get(l) or {"ok": 0.0, "n": 0.0, "ms": 0, "t": now}
+        h["ok"] = round(h["ok"] * 0.9 + (1 if ms else 0), 3); h["n"] = round(h["n"] * 0.9 + 1, 3)
+        if ms: h["ms"] = ms if not h["ms"] else int(h["ms"] * 0.6 + ms * 0.4)
+        h["t"] = now
+        hist[l] = h
+    for l in [l for l, h in hist.items() if now - h.get("t", now) > 2 * 86400 or (h["n"] > 3 and h["ok"] / h["n"] < 0.05)]:
+        del hist[l]
+    return hist
+
+
+def score(h):
+    """Lower = better: stable servers first (Bayesian success rate), then speed."""
+    rate = (h["ok"] + 0.5) / (h["n"] + 1)
+    return (1 - rate) * 3000 + (h["ms"] or 3000)
+
+
 def main():
     lists = {}
     for name in ("alive_ru.txt", "alive.txt"):
         p = "out/" + name
         lists[name] = open(p, encoding="utf-8").read().splitlines() if os.path.exists(p) else []
     head = {n: [l for l in ls if not l.startswith("#")] for n, ls in lists.items()}
-    todo = list(dict.fromkeys(head["alive_ru.txt"][:REAL_RU] + head["alive.txt"][:REAL_ALL]))
+    now = int(time.time())
+    hist = load_history()
+    alive = set(head["alive_ru.txt"]) | set(head["alive.txt"])
+    # servers that worked before are always re-checked (if they still answer the ping), then the fastest pings
+    known = sorted((l for l, h in hist.items() if h["ok"] > 0 and l in alive), key=lambda l: score(hist[l]))
+    todo = list(dict.fromkeys(known[:1500] + head["alive_ru.txt"][:REAL_RU] + head["alive.txt"][:REAL_ALL]))
     t = time.time()
     res = check(todo)
+    hist = learn(hist, res, now)
+    json.dump(hist, open("out/history.json", "w"), separators=(",", ":"))
     stamp = time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime())
-    total = 0
     for name, ls in lists.items():
-        comments = [l for l in ls if l.startswith("#")]
         body = head[name]
-        works = sorted((l for l in body if res.get(l)), key=lambda l: res[l])
+        works = sorted((l for l in body if res.get(l)), key=lambda l: score(hist[l]))
         rest = [l for l in body if not res.get(l)]
-        tested_bad = [l for l in rest if l in res]  # answered the ping but carried nothing: to the very end
-        rest = [l for l in rest if l not in res] + tested_bad
+        rest = [l for l in rest if l not in res] + [l for l in rest if l in res]  # pinged but carried nothing: last
         with open("out/" + name, "w", encoding="utf-8") as f:
-            f.write(f"# VLESS Card cloud {stamp}: {len(works)} carried real HTTPS through Xray from GitHub (first, fastest first), then {len(rest)} that only answered the ping\n")
+            f.write(f"# VLESS Card cloud {stamp}: {len(works)} carried real HTTPS through Xray from GitHub (first, most stable and fastest first), then {len(rest)} that only answered the ping\n")
             for l in works + rest: f.write(l + "\n")
         with open("out/" + name.replace("alive", "works"), "w", encoding="utf-8") as f:
-            f.write(f"# VLESS Card cloud {stamp}: {len(works)} servers carried real HTTPS through Xray-core from GitHub, fastest first\n")
+            f.write(f"# VLESS Card cloud {stamp}: {len(works)} servers carried real HTTPS through Xray-core from GitHub, most stable first\n")
             for l in works: f.write(l + "\n")
-        total = max(total, len(works))
     ok = sum(1 for v in res.values() if v)
+    stable = sum(1 for h in hist.values() if h["n"] >= 3 and h["ok"] / h["n"] > 0.8)
     try:
         st = json.load(open("out/stats.json"))
     except Exception:
         st = {}
-    st.update({"real_checked": len(res), "real_ok": ok, "real_s": int(time.time() - t)})
+    st.update({"real_checked": len(res), "real_ok": ok, "real_s": int(time.time() - t), "remembered": len(hist), "stable": stable})
     json.dump(st, open("out/stats.json", "w"))
-    print(f"real: {ok}/{len(res)} carried HTTPS in {int(time.time() - t)} s")
+    print(f"real: {ok}/{len(res)} carried HTTPS in {int(time.time() - t)} s; memory {len(hist)}, stable {stable}")
 
 
 if __name__ == "__main__":
