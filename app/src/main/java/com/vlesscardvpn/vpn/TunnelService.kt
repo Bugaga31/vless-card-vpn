@@ -187,6 +187,8 @@ class TunnelService : VpnService() {
                     .let { l -> l.take(Actions.closeOnes(l.map { st.state(it).score })) }
             }
             if (settings.mode == Mode.AUTO) {
+                // Auto: connections are spread over the best servers (leastLoad) instead of all going to the single lowest ping
+                if (settings.balance == com.vlesscardvpn.model.Balance.LEAST_PING) settings = settings.copy(balance = com.vlesscardvpn.model.Balance.LEAST_LOAD)
                 settings = settings.copy(mode = if (selected.isEmpty() || autoDpiOnly) Mode.BYEDPI else Mode.SERVERS)
                 if (settings.mode == Mode.BYEDPI) selected = emptyList()
             }

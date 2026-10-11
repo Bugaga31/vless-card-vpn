@@ -272,11 +272,15 @@ object XrayConfigBuilder {
         val routing = JSONObject().put("domainStrategy", "AsIs").put("rules", rules)
         if (many) {
             routing.put("balancers", arr(JSONObject().put("tag", "balancer").put("selector", arr(PROXY_PREFIX))
-                .put("strategy", JSONObject().put("type", settings.balance.xray)).put("fallbackTag", "${PROXY_PREFIX}0")))
+                .put("strategy", JSONObject().put("type", settings.balance.xray).apply {
+                    // spread connections over the 3 best that are within 30% of each other (not everything on one server)
+                    if (settings.balance == Balance.LEAST_LOAD) put("settings", JSONObject().put("expected", 3).put("maxRTT", "1500ms")
+                        .put("tolerance", 0.3).put("baselines", JSONArray().put("400ms").put("1s")))
+                }).put("fallbackTag", "${PROXY_PREFIX}0")))
             val probe = settings.testUrl
             if (settings.balance == Balance.LEAST_LOAD) {
                 c.put("burstObservatory", JSONObject().put("subjectSelector", arr(PROXY_PREFIX)).put("pingConfig", JSONObject()
-                    .put("destination", probe).put("interval", "1m").put("connectivity", "").put("timeout", "10s").put("sampling", 3)))
+                    .put("destination", probe).put("interval", "30s").put("connectivity", "").put("timeout", "10s").put("sampling", 3)))
             } else {
                 c.put("observatory", JSONObject().put("subjectSelector", arr(PROXY_PREFIX)).put("probeUrl", probe)
                     .put("probeInterval", "10s").put("enableConcurrency", true))

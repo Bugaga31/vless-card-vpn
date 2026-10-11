@@ -1,5 +1,7 @@
 package com.vlesscardvpn.core
 
+import com.vlesscardvpn.model.Server
+
 import android.content.Context
 import com.vlesscardvpn.model.LinkParser
 import kotlinx.coroutines.*
@@ -38,6 +40,7 @@ object Report {
     fun setEnabled(ctx: Context, on: Boolean) = prefs(ctx).edit().putBoolean("on", on).apply()
     fun lastText(ctx: Context): String = prefs(ctx).getString("status", "").orEmpty()
 
+    fun phoneId(ctx: Context): String = anonId(ctx)
     private fun anonId(ctx: Context): String = prefs(ctx).getString("id", null) ?: java.util.UUID.randomUUID().toString().take(12).also { prefs(ctx).edit().putString("id", it).apply() }
 
     /** Removes what could say who the user is or where they go: sites, addresses, numbers longer than 3 digits. */
@@ -45,6 +48,15 @@ object Report {
         .replace(Regex("\\b\\d{1,3}(\\.\\d{1,3}){3}(:\\d+)?\\b"), "IP")
         .replace(Regex("\\b([a-zA-Z0-9-]+\\.)+[a-zA-Z]{2,}\\b"), "сайт")
         .replace(Regex("\\d{4,}"), "#").take(200)
+
+    /** Short anonymous key of a server ("host:port" hashed): the cloud counts how many phones sit on each one. */
+    fun serverKey(s: Server): String = java.security.MessageDigest.getInstance("SHA-256")
+        .digest("${s.address.lowercase()}:${s.port}".toByteArray()).take(4).joinToString("") { "%02x".format(it) }
+
+    /** Cloud load: server key → phones connected to it in the last hours (from cloud.json "load"). */
+    @Volatile var load: Map<String, Int> = emptyMap()
+    fun loadFrom(ctx: Context) { if (load.isEmpty()) prefs(ctx).getString("load", null)?.let { load = parseLoad(it) } }
+    fun parseLoad(json: String): Map<String, Int> = runCatching { JSONObject(json).let { o -> o.keys().asSequence().associateWith { o.optInt(it) } } }.getOrDefault(emptyMap())
 
     /** Public servers only (from GitHub lists): never the user's own or paid subscriptions. */
     fun publicSource(src: String) = src.contains("githubusercontent.com") || src.contains("github.com/")
@@ -57,7 +69,9 @@ object Report {
             .sortedBy { st.state(it).realMs }.take(15).mapNotNull { runCatching { LinkParser.toLink(it) }.getOrNull() }
         return JSONObject().put("id", id).put("v", version).put("sdk", sdk).put("net", Net.family(net))
             .put("brain", runCatching { JSONObject(brain) }.getOrNull() ?: JSONObject())
-            .put("profiles", profiles).put("ok", JSONArray(ok)).put("lines", JSONArray(lines.map { clean(it) }.distinct().take(20)))
+            .put("profiles", profiles).put("ok", JSONArray(ok))
+            .put("use", JSONArray(st.servers.filter { st.state(it).selected && (publicSource(it.source) || it.source == PHONES) }.take(8).map { serverKey(it) }))
+            .put("lines", JSONArray(lines.map { clean(it) }.distinct().take(20)))
     }
 
     private fun client() = OkHttpClient.Builder().connectTimeout(10, TimeUnit.SECONDS).readTimeout(30, TimeUnit.SECONDS).build()
@@ -122,6 +136,7 @@ object Report {
         val o = JSONObject(text); val stamp = o.optString("stamp")
         if (stamp.isEmpty() || stamp == p.getString("stamp", "")) return
         o.optJSONObject("brain")?.let { Brain.blend(it, o.optInt("phones")) }
+        o.optJSONObject("load")?.let { l -> load = parseLoad(l.toString()); p.edit().putString("load", l.toString()).apply() }
         val fam = Net.family(Net.key(ctx))
         o.optJSONObject("profiles")?.optString(fam)?.takeIf { it.startsWith(NetProfile.SCHEME) }?.let { link ->
             val prof = runCatching { NetProfile.decode(link) }.getOrNull()

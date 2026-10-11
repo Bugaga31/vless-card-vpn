@@ -59,9 +59,13 @@ def merge(prev, reports, now):
         if isinstance(a, list) and len(a) == N and pw: acc[k] = ([v * pw * 100 for v in a], pw * 100)
     servers = {s["l"]: s for s in prev.get("servers", []) if now - s.get("t", 0) < 2 * 86400}
     ids = {k: t for k, t in prev.get("ids", {}).items() if now - t < 30 * 86400}  # phones seen in 30 days (hashed)
+    # which servers each phone sits on (anonymous server keys), last 3 h: the phones spread themselves by this load
+    use = {k: u for k, u in prev.get("use", {}).items() if now - u.get("t", 0) < 3 * 3600}
     for r in reports:
         pid = str(r.get("id", ""))[:16]
         ids[__import__("hashlib").sha256(pid.encode()).hexdigest()[:10]] = now
+        u = [k for k in (r.get("use") or [])[:8] if isinstance(k, str) and re.match(r"^[0-9a-f]{8}$", k)]
+        if u: use[__import__("hashlib").sha256(pid.encode()).hexdigest()[:10]] = {"t": now, "s": u}
         b = r.get("brain") or {}
         wt = min(max(int(b.get("seen", 0)), 0), 200)
         for k in ("m", "w"):
@@ -86,14 +90,19 @@ def merge(prev, reports, now):
     profiles = {fam: vcnet(fam, top(f["d"], 5), top(f["m"], 12), [json.loads(x) for x in top(f["x"], 6)]) for fam, f in votes.items()
                 if f["d"] or f["m"] or f["x"]}
     brain = {k: [round(v / t, 4) for v in s] for k, (s, t) in acc.items() if t}
-    return {"stamp": time.strftime("%Y-%m-%d %H:%M", time.gmtime(now)), "phones": len(ids), "ids": ids,
+    load = {}
+    for u in use.values():
+        for k in u["s"]: load[k] = load.get(k, 0) + 1
+    return {"stamp": time.strftime("%Y-%m-%d %H:%M", time.gmtime(now)), "phones": len(ids), "ids": ids, "use": use,
+            "load": dict(sorted(load.items(), key=lambda kv: -kv[1])[:300]),
             "brain": brain, "profiles": profiles, "votes": votes,
             "servers": sorted(servers.values(), key=lambda s: (-s["n"], -s["t"]))[:200]}
 
 
 def public(cloud):
     """What phones download (small, every 20 min with ETag): the stamp changes only when the content does."""
-    o = {"phones": cloud["phones"], "brain": cloud["brain"], "profiles": cloud["profiles"], "servers": [x["l"] for x in cloud["servers"][:40]]}
+    o = {"phones": cloud["phones"], "brain": cloud["brain"], "profiles": cloud["profiles"], "servers": [x["l"] for x in cloud["servers"][:40]],
+         "load": cloud.get("load", {})}
     o["stamp"] = __import__("hashlib").sha256(json.dumps(o, sort_keys=True).encode()).hexdigest()[:12]
     return o
 
