@@ -156,6 +156,9 @@ object Masks {
         listOf("z10", "AmneziaWG: 1 большой + 6 мелких", """[{"rand":"900-1200","delay":"1-3"},{"rand":"10-40","delay":"1-2"},{"rand":"10-40","delay":"1-2"},{"rand":"10-40","delay":"1-2"},{"rand":"10-40","delay":"1-2"},{"rand":"10-40","delay":"1-2"},{"rand":"10-40","delay":"1-2"}]"""),
         listOf("z11", "шум под QUIC + мусор AmneziaWG", """[{"type":"exp","packet":"<b c3 00000001 08><r 8><b 00 00 44 d0><r 1150>","delay":"2-5"},{"rand":"40-70","delay":"1-3"},{"rand":"40-70","delay":"1-3"},{"rand":"40-70","delay":"1-3"}]"""),
         listOf("z12", "шум под онлайн-игру (8 пакетов)", """[{"rand":"20-60","delay":"8-16"},{"rand":"20-60","delay":"8-16"},{"rand":"20-60","delay":"8-16"},{"rand":"20-60","delay":"8-16"},{"rand":"20-60","delay":"8-16"},{"rand":"20-60","delay":"8-16"},{"rand":"20-60","delay":"8-16"},{"rand":"20-60","delay":"8-16"}]"""),
+        // a real QUIC Initial with a ClientHello of a whitelisted site (the TSPU decrypts it and sees HTTP/3 to ya.ru / vk.com)
+        listOf("z13", "настоящий QUIC-привет к ya.ru (HTTP/3)", QuicInitial.noise("ya.ru")),
+        listOf("z14", "настоящий QUIC-привет к vk.com + мусор AmneziaWG", QuicInitial.noise("vk.com", junk = 3)),
         listOf("z9", "AmneziaWG: 10 пакетов 50-1000 байт", """[{"rand":"50-1000","delay":"1-2"},{"rand":"50-1000","delay":"1-2"},{"rand":"50-1000","delay":"1-2"},{"rand":"50-1000","delay":"1-2"},{"rand":"50-1000","delay":"1-2"},{"rand":"50-1000","delay":"1-2"},{"rand":"50-1000","delay":"1-2"},{"rand":"50-1000","delay":"1-2"},{"rand":"50-1000","delay":"1-2"},{"rand":"50-1000","delay":"1-2"}]"""),
     )
     const val HOP_LOCAL = "hl"
@@ -166,8 +169,8 @@ object Masks {
     fun noiseItems(id: String): String? = NOISE_BY_ID[id]
 
     /**
-     * 7 fingerprints × 22 fragment modes × (direct | via the current DPI strategy) = 308, 4 UDP + 8 WireGuard noise masks, 18 port-hopping,
-     * plus 7 fingerprints × 21 fixed strategies (5 own VLESS Card, 7 zapret, 9 ByeDPI) = 147. Total 485 + 33 signature (SNI, MSS, ALPN, one stream, TFO, IPv6) = 518 (+ «Мои маскировки» and auto masks of MaskLab).
+     * 7 fingerprints × 22 fragment modes × (direct | via the current DPI strategy) = 308, 4 UDP + 10 WireGuard noise masks, 18 port-hopping,
+     * plus 7 fingerprints × 21 fixed strategies (5 own VLESS Card, 7 zapret, 9 ByeDPI) = 147. Total 487 + 33 signature (SNI, MSS, ALPN, one stream, TFO, IPv6) = 520 (+ «Мои маскировки» and auto masks of MaskLab).
      */
     val ALL: List<Mask> = buildList {
         for (via in listOf(false, true)) for (f in FRAGMENTS) for (fp in FINGERPRINTS) {

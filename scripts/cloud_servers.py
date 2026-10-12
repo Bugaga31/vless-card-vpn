@@ -29,6 +29,20 @@ def catalog():
     return out
 
 
+CYBER = "https://warp-gen.cyb-portal.org/api/subscriptions"
+
+
+def cyber():
+    """«Киберпортал» whitelist packs (CP-0xx: VLESS Reality / SS / Hysteria2 for Russian mobile whitelists).
+    The catalog is read live, so new packs come in by themselves; counted as Russia-oriented."""
+    try:
+        with urllib.request.urlopen(urllib.request.Request(CYBER, headers={"User-Agent": "vless-card-cloud"}), timeout=20) as r:
+            items = json.loads(r.read()).get("items") or []
+        return [(i["url"], True) for i in items if isinstance(i, dict) and str(i.get("url", "")).startswith("https://warp-gen.cyb-portal.org/")][:60]
+    except Exception as e:
+        print("skip cyber catalog", e, file=sys.stderr); return []
+
+
 def fetch(path):
     url = path if path.startswith("http") else "https://raw.githubusercontent.com/" + path
     try:
@@ -95,7 +109,7 @@ async def main():
     except Exception: pass
     links = {}  # ident -> (link, host, port, ru)
     import concurrent.futures as cf
-    srcs = catalog() + [(p, False) for p in EXTRA]
+    srcs = catalog() + cyber() + [(p, False) for p in EXTRA]
     with cf.ThreadPoolExecutor(24) as ex:  # all subscriptions at once instead of one by one
         fetched = list(ex.map(lambda pr: fetch(pr[0]), srcs))
     for (path, ru), got in zip(srcs, fetched):
