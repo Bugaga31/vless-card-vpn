@@ -665,8 +665,13 @@ object Actions {
         Store.update { it.copy(settings = it.settings.copy(smartYoutube = true, turbo = true, blockQuic = true, ytDpi = it.settings.ytDpi - net)) }
         progress.value = progress.value.copy(title = "Ускоряю YouTube: облегчаю маски")
         lightenMasks(true)
+        // servers the cloud saw download fast that this phone has not got working yet: a real test here first
+        val s0 = Store.state.value
+        val fresh = runCatching { CloudSpeed.refresh(app); CloudSpeed.pick(s0.servers.filter { !s0.state(it).works }, emptyList(), n = 6) }.getOrDefault(emptyList())
+        if (fresh.isNotEmpty()) realTest(fresh, "Ускоряю: проверяю ${fresh.size} быстрых по облаку", big = true, attempts = 1)
         val s1 = Store.state.value
-        val top = s1.servers.filter { s1.state(it).works }.sortedBy { s1.state(it).score }.take(6)
+        val top = (s1.servers.filter { s1.state(it).works }.sortedBy { s1.state(it).score }.take(6) +
+            fresh.filter { s1.state(it).works }).distinctBy { it.id }
         if (top.isEmpty()) return@launch "Рабочих серверов нет — сначала «Проверить серверы»."
         progress.value = progress.value.copy(title = "Ускоряю YouTube: меряю скорость")
         realSpeed(top)
