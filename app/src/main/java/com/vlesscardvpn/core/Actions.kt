@@ -1107,7 +1107,22 @@ object Actions {
         if (base == Int.MAX_VALUE || phone.isEmpty()) return base
         val taste = ((phone + s.id).hashCode().toLong() and 0x7fffffff) % 1000 / 1000.0 * 0.2
         val others = ((Report.load[Report.serverKey(s)] ?: 0) - if (ss.selected) 1 else 0).coerceAtLeast(0)
-        return (base * (1 + taste + minOf(1.0, others * 0.25))).toInt()
+        return (base * (1 + taste + minOf(1.0, others * 0.25)) * operatorFactor(Report.serverKey(s))).toInt()
+    }
+
+    /**
+     * What other phones on this operator saw (cloud «net»: [kbit/s, % worked, checks]): mostly working there → up to
+     * 15% better, mostly failing → up to 2× worse. Small on purpose: this phone's own measurement still decides.
+     */
+    fun operatorFactor(key: String, net: Map<String, IntArray> = CloudSpeed.net): Double {
+        val e = net[key] ?: return 1.0
+        if (e[2] < 2) return 1.0
+        return when {
+            e[1] >= 80 -> 0.85
+            e[1] < 25 -> 2.0
+            e[1] < 50 -> 1.3
+            else -> 1.0
+        }
     }
 
     /** Servers where Telegram did not fail ([tg] true or not checked yet); all of them if none is left. */

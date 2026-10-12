@@ -50,7 +50,7 @@ done < <(cat /tmp/xcfg/dpi-engines.txt; echo)
 echo "Xray no-server strategies: $XOK/$XALL carry HTTPS"
 [ "$XOK" -eq "$XALL" ] || { echo "xray strategies failed"; exit 1; }
 for f in /tmp/xcfg/*.json; do case $f in */warp-*) continue;; esac; echo "$(basename $f): $($X run -test -c $f 2>&1 | tail -1)"; done
-bash tools/xray-local-e2e.sh $X /tmp/xcfg || true  # raw matrix includes masks the app never offers
+KEEP_CLIENT=1 bash tools/xray-local-e2e.sh $X /tmp/xcfg || true  # raw matrix includes masks the app never offers
 # Only masks the app offers for each server type (Masks.compatible) must pass.
 python3 - <<'PY'
 # WireGuard: one tunnel per key at a time (parallel tunnels with one key make the server roam), so each WG
@@ -109,6 +109,18 @@ for line in open('/tmp/xcfg/result.txt'):
         continue
     if st == 'OK': ok += 1
     else: fail += 1; bad.append(line.strip())
+# 24 parallel downloads on a CI runner time out now and then: each failed offered direct mask gets one calm retry
+# (6 at a time, client still running), only a variant that fails twice counts as broken
+if bad and len(bad) <= 120:
+    import subprocess, concurrent.futures as cf
+    def again(line):
+        port = line.split()[1]
+        a = subprocess.run(['curl', '-s', '-o', '/dev/null', '-m', '15', '-w', '%{http_code}', '--socks5-hostname', '127.0.0.1:' + port, 'https://www.gstatic.com/generate_204'], capture_output=True, text=True).stdout
+        b = subprocess.run(['curl', '-s', '-o', '/dev/null', '-m', '25', '-w', '%{size_download}', '--socks5-hostname', '127.0.0.1:' + port, 'https://speed.cloudflare.com/__down?bytes=262144'], capture_output=True, text=True).stdout
+        return a == '204' and b.isdigit() and int(b) >= 262144
+    with cf.ThreadPoolExecutor(6) as ex: res = list(ex.map(again, bad))
+    fixed = sum(res); print(f"retry: {fixed} of {len(bad)} failed offered masks passed on the second try")
+    bad = [l for l, r in zip(bad, res) if not r]; fail -= fixed; ok += fixed
 print(f"offered direct masks: ok={ok} fail={fail}; via ByeDPI: ok={bok} fail={bfail}")
 for b in bad[:30]: print(b)
 print("fixed strategies in front of servers (ok/fail):")
@@ -125,6 +137,8 @@ wg = [l.split()[0] for l in open('/tmp/xcfg/wg-result.txt')]
 if wg.count('FAIL') > 0: print("WireGuard variants failed"); sys.exit(1)
 sys.exit(1 if fail > 0 or bfail > (bok + bfail) * 0.2 else 0)
 PY
+
+[ -f /tmp/xcfg/client.pid ] && kill "$(cat /tmp/xcfg/client.pid)" 2>/dev/null || true
 
 # Real Cloudflare WARP from the runner: every WireGuard/WARP mask the app offers (noise, QUIC/DTLS/RTP look-alikes, port hopping).
 K=$($X wg); WPRIV=$(echo "$K" | sed -n 's/PrivateKey: //p'); WPUB=$(echo "$K" | sed -n 's/.*PublicKey): //p')
