@@ -61,6 +61,29 @@ def merge(prev, reports, now):
     ids = {k: t for k, t in prev.get("ids", {}).items() if now - t < 30 * 86400}  # phones seen in 30 days (hashed)
     # which servers each phone sits on (anonymous server keys), last 3 h: the phones spread themselves by this load
     use = {k: u for k, u in prev.get("use", {}).items() if now - u.get("t", 0) < 3 * 3600}
+    # per operator: server key -> {"kb": smoothed kbit/s, "ok": checks that worked, "n": checks, "yt": YouTube ok, "t"};
+    # evidence halves every day (by real time, the merge runs every 10 min), gone after 3 days without news
+    net = {}
+    fade = 0.5 ** (max(0, now - prev.get("at", now)) / 86400)
+    for fam, d in (prev.get("net") or {}).items():
+        for k, e in d.items():
+            if now - e.get("t", 0) > 3 * 86400: continue
+            e = dict(e, ok=round(e["ok"] * fade, 3), n=round(e["n"] * fade, 3))
+            if e["n"] >= 0.3: net.setdefault(fam, {})[k] = e
+    for r in reports:
+        fam = str(r.get("net", ""))[:60]
+        if fam and fam != "Нет сети":
+            for row in (r.get("sp") or [])[:60]:
+                if not (isinstance(row, list) and len(row) >= 3 and isinstance(row[0], str) and re.match(r"^[0-9a-f]{8}$", row[0])): continue
+                try: kb, ms = max(0, min(int(row[1]), 1_000_000)), int(row[2])
+                except (TypeError, ValueError): continue
+                yt = row[3] if len(row) > 3 and row[3] in (0, 1) else -1
+                e = net.setdefault(fam, {}).setdefault(row[0], {"kb": 0, "ok": 0.0, "n": 0.0, "yt": 0.0, "t": now})
+                e["n"] = round(e["n"] + 1, 3); e["t"] = now
+                if ms > 0:
+                    e["ok"] = round(e["ok"] + 1, 3)
+                    if kb: e["kb"] = kb if not e["kb"] else int(e["kb"] * 0.6 + kb * 0.4)
+                if yt == 1: e["yt"] = round(e.get("yt", 0) + 1, 3)
     for r in reports:
         pid = str(r.get("id", ""))[:16]
         ids[__import__("hashlib").sha256(pid.encode()).hexdigest()[:10]] = now
@@ -93,16 +116,26 @@ def merge(prev, reports, now):
     load = {}
     for u in use.values():
         for k in u["s"]: load[k] = load.get(k, 0) + 1
-    return {"stamp": time.strftime("%Y-%m-%d %H:%M", time.gmtime(now)), "phones": len(ids), "ids": ids, "use": use,
+    return {"stamp": time.strftime("%Y-%m-%d %H:%M", time.gmtime(now)), "at": now, "phones": len(ids), "ids": ids, "use": use,
             "load": dict(sorted(load.items(), key=lambda kv: -kv[1])[:300]),
+            "net": {f: dict(sorted(d.items(), key=lambda kv: -kv[1]["n"])[:600]) for f, d in net.items()},
             "brain": brain, "profiles": profiles, "votes": votes,
             "servers": sorted(servers.values(), key=lambda s: (-s["n"], -s["t"]))[:200]}
+
+
+def public_net(net):
+    """Per operator: key -> [kbit/s, % worked, checks], the 300 most checked (blocked ones included: phones skip them)."""
+    out = {}
+    for f, d in net.items():
+        rows = sorted(d.items(), key=lambda kv: -kv[1]["n"])[:300]
+        out[f] = {k: [e["kb"], int(round(100 * e["ok"] / e["n"])) if e["n"] else 0, max(1, int(round(e["n"])))] for k, e in rows}
+    return out
 
 
 def public(cloud):
     """What phones download (small, every 20 min with ETag): the stamp changes only when the content does."""
     o = {"phones": cloud["phones"], "brain": cloud["brain"], "profiles": cloud["profiles"], "servers": [x["l"] for x in cloud["servers"][:40]],
-         "load": cloud.get("load", {})}
+         "load": cloud.get("load", {}), "net": public_net(cloud.get("net", {}))}
     o["stamp"] = __import__("hashlib").sha256(json.dumps(o, sort_keys=True).encode()).hexdigest()[:12]
     return o
 

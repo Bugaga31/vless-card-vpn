@@ -58,6 +58,19 @@ object Report {
     fun loadFrom(ctx: Context) { if (load.isEmpty()) prefs(ctx).getString("load", null)?.let { load = parseLoad(it) } }
     fun parseLoad(json: String): Map<String, Int> = runCatching { JSONObject(json).let { o -> o.keys().asSequence().associateWith { o.optInt(it) } } }.getOrDefault(emptyMap())
 
+    /**
+     * What this phone measured on its current network in the last 6 h, anonymous ([serverKey]): [key, kbit/s, ms, YouTube 1/0/-1].
+     * ms 0 = it answered the ping but carried nothing — blocked here. The cloud sums this per operator.
+     */
+    fun speeds(st: AppState, now: Long): JSONArray {
+        val recent = st.servers.filter { s -> publicSource(s.source) || s.source == PHONES }.map { it to st.state(it) }
+            .filter { (_, ss) -> ss.realMs >= 0 && now - ss.checkedAt < 6 * 3600_000L && (ss.realMs > 0 || ss.tcpMs > 0) }
+        val ok = recent.filter { it.second.realMs > 0 }.sortedByDescending { it.second.kbps }.take(30)
+        val bad = recent.filter { it.second.realMs == 0 }.take(20)
+        return JSONArray((ok + bad).map { (s, ss) -> JSONArray().put(serverKey(s)).put(ss.kbps.coerceAtLeast(0)).put(ss.realMs)
+            .put(when (ss.ytOk) { true -> 1; false -> 0; null -> -1 }) })
+    }
+
     /** Public servers only (from GitHub lists): never the user's own or paid subscriptions. */
     fun publicSource(src: String) = src.contains("githubusercontent.com") || src.contains("github.com/")
 
@@ -71,6 +84,7 @@ object Report {
             .put("brain", runCatching { JSONObject(brain) }.getOrNull() ?: JSONObject())
             .put("profiles", profiles).put("ok", JSONArray(ok))
             .put("use", JSONArray(st.servers.filter { st.state(it).selected && (publicSource(it.source) || it.source == PHONES) }.take(8).map { serverKey(it) }))
+            .put("sp", speeds(st, now))
             .put("lines", JSONArray(lines.map { clean(it) }.distinct().take(20)))
     }
 
@@ -138,6 +152,8 @@ object Report {
         o.optJSONObject("brain")?.let { Brain.blend(it, o.optInt("phones")) }
         o.optJSONObject("load")?.let { l -> load = parseLoad(l.toString()); p.edit().putString("load", l.toString()).apply() }
         val fam = Net.family(Net.key(ctx))
+        // what other phones on this operator measured: fast servers and the ones blocked here
+        o.optJSONObject("net")?.optJSONObject(fam)?.let { n -> CloudSpeed.setNet(ctx, fam, n.toString()) }
         o.optJSONObject("profiles")?.optString(fam)?.takeIf { it.startsWith(NetProfile.SCHEME) }?.let { link ->
             val prof = runCatching { NetProfile.decode(link) }.getOrNull()
             if (prof != null && !prof.isEmpty) Store.update { st -> NetProfile.apply(st, prof, Net.key(ctx)).first }
