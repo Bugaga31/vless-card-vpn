@@ -228,7 +228,8 @@ class TunnelService : VpnService() {
             warpChained = warpHop != null
             val used = if (warpHop != null) withMasks.filter { it.first.protocol != "wireguard" } else withMasks
             val config = XrayConfigBuilder.vpnConfig(used, settings, bdPort, socks, set.ports,
-                listen = if (proxy && settings.lanShare) "0.0.0.0" else "127.0.0.1", httpPort = if (proxy) settings.httpPort else null, warpHop = warpHop)
+                listen = if (proxy && settings.lanShare) "0.0.0.0" else "127.0.0.1", httpPort = if (proxy) settings.httpPort else null, warpHop = warpHop,
+                heavy = XrayConfigBuilder.heavyOf(used.map { st.state(it.first).kbps }, used.map { st.state(it.first).ytOk }))
             val c = XrayCore.Instance("vpn"); core = c
             c.start(config)
             check(c.running) { "Xray не запустился: ${c.lastStatus}" }

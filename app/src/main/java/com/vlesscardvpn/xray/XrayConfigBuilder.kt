@@ -27,6 +27,16 @@ object XrayConfigBuilder {
     fun hybridDomains(settings: com.vlesscardvpn.model.Settings): List<String> = settings.hybridDomains.filterNot { it in TELEGRAM_DOMAINS }
     val TELEGRAM_DOMAINS = setOf("geosite:telegram", "domain:t.me", "domain:telegram.org", "domain:telesco.pe", "domain:telegram.me")
 
+    /** Heavy traffic (video): YouTube and its video / picture CDNs. */
+    val HEAVY_DOMAINS = listOf("geosite:youtube", "domain:googlevideo.com", "domain:ytimg.com", "domain:ggpht.com", "domain:youtube.com", "domain:youtu.be")
+
+    /** Indices of the servers for heavy traffic: really measured download ≥ 60% of the fastest, YouTube not failed, at most 2. */
+    fun heavyOf(kbps: List<Int>, yt: List<Boolean?>): Set<Int> {
+        val best = kbps.maxOrNull() ?: 0
+        if (best <= 0 || kbps.size < 2) return emptySet()
+        return kbps.indices.filter { kbps[it] > 0 && kbps[it] * 10 >= best * 6 && yt.getOrNull(it) != false }.sortedByDescending { kbps[it] }.take(2).toSet()
+    }
+
     val RU_DOMAINS = listOf("geosite:category-ru", "domain:ru", "domain:su", "domain:xn--p1ai")
     private val IPV4_LITERAL = Regex("^\\d{1,3}(\\.\\d{1,3}){3}$")
 
@@ -193,7 +203,8 @@ object XrayConfigBuilder {
      * one outbound per selected server, balancer + observatory across them, DNS via DoH through the tunnel.
      */
     fun vpnConfig(servers: List<Pair<Server, Mask?>>, settings0: Settings, byeDpiPort: Int?, socks: SocksAuth = SocksAuth(settings0.socksPort),
-                  dpiPorts: Map<String, Int> = emptyMap(), listen: String = "127.0.0.1", httpPort: Int? = null, warpHop: Server? = null): String {
+                  dpiPorts: Map<String, Int> = emptyMap(), listen: String = "127.0.0.1", httpPort: Int? = null, warpHop: Server? = null,
+                  heavy: Set<Int> = emptySet()): String {
         // Auto: servers when there are working ones, otherwise the DPI engine alone.
         val settings = if (settings0.mode == Mode.AUTO) settings0.copy(mode = if (servers.isEmpty()) Mode.BYEDPI else Mode.SERVERS) else settings0
         require(settings.mode == Mode.BYEDPI || servers.isNotEmpty()) { "Не выбран ни один сервер" }
@@ -270,6 +281,10 @@ object XrayConfigBuilder {
             rules.put(JSONObject().put("ip", arr("geoip:ru")).put("outboundTag", "direct"))
         }
         val only = com.vlesscardvpn.core.Services.domains(settings.services)
+        // video goes to the 1–2 servers that really downloaded fastest (balancer «heavy»), the rest is spread over all
+        val heavyOn = many && hopIdx < 0 && servers.size <= 10 && heavy.isNotEmpty() && heavy.size < servers.size && heavy.all { it in servers.indices } &&
+            (only.isEmpty() || "youtube" in settings.services)
+        if (heavyOn) rules.put(JSONObject().put("domain", JSONArray(HEAVY_DOMAINS)).put("balancerTag", "heavy"))
         if (only.isNotEmpty()) {
             // "Only YouTube + Telegram through the VPN": those services → main route, everything else direct.
             rules.put(toMain(JSONObject().put("domain", JSONArray(only))))
@@ -278,12 +293,16 @@ object XrayConfigBuilder {
         } else rules.put(toMain(JSONObject().put("network", "tcp,udp")))
         val routing = JSONObject().put("domainStrategy", "AsIs").put("rules", rules)
         if (many) {
-            routing.put("balancers", arr(JSONObject().put("tag", "balancer").put("selector", arr(PROXY_PREFIX))
-                .put("strategy", JSONObject().put("type", settings.balance.xray).apply {
-                    // spread connections over the 3 best that are within 30% of each other (not everything on one server)
-                    if (settings.balance == Balance.LEAST_LOAD) put("settings", JSONObject().put("expected", 3).put("maxRTT", "1500ms")
-                        .put("tolerance", 0.3).put("baselines", JSONArray().put("400ms").put("1s")))
-                }).put("fallbackTag", "${PROXY_PREFIX}0")))
+            fun strategy() = JSONObject().put("type", settings.balance.xray).apply {
+                // spread connections over the 3 best that are within 30% of each other (not everything on one server)
+                if (settings.balance == Balance.LEAST_LOAD) put("settings", JSONObject().put("expected", 3).put("maxRTT", "1500ms")
+                    .put("tolerance", 0.3).put("baselines", JSONArray().put("400ms").put("1s")))
+            }
+            val bals = arr(JSONObject().put("tag", "balancer").put("selector", arr(PROXY_PREFIX)).put("strategy", strategy()).put("fallbackTag", "${PROXY_PREFIX}0"))
+            // fallback of «heavy» is the whole balancer pool's first server: a dead fast server never stops the video
+            if (heavyOn) bals.put(JSONObject().put("tag", "heavy").put("selector", JSONArray(heavy.sorted().map { "$PROXY_PREFIX$it" }))
+                .put("strategy", strategy()).put("fallbackTag", "$PROXY_PREFIX${heavy.minOrNull() ?: 0}"))
+            routing.put("balancers", bals)
             val probe = settings.testUrl
             if (settings.balance == Balance.LEAST_LOAD) {
                 c.put("burstObservatory", JSONObject().put("subjectSelector", arr(PROXY_PREFIX)).put("pingConfig", JSONObject()
