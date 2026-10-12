@@ -162,6 +162,39 @@ def check(links):
     return res
 
 
+SPEED_URL = "https://speed.cloudflare.com/__down?bytes=4000000"
+SPEED_TOP, SPEED_PAR = int(os.environ.get("SPEED_TOP", "60")), 12
+
+
+def fetch_speed(port):
+    """Real download speed through one server, kbit/s (0 = failed or under 300 KB in 8 s)."""
+    r = subprocess.run(["curl", "-s", "-o", "/dev/null", "-m", "8", "-w", "%{size_download} %{speed_download}", "--socks5-hostname", f"127.0.0.1:{port}", SPEED_URL],
+                       capture_output=True, text=True).stdout.split()
+    try:
+        return int(float(r[1]) * 8 / 1000) if len(r) == 2 and float(r[0]) >= 300_000 else 0
+    except ValueError:
+        return 0
+
+
+def speeds(links):
+    """link -> kbit/s for the given working links (few at a time, so they do not share the runner's bandwidth too much)."""
+    res = {}
+    items = build(links)
+    if not items: return res
+    with tempfile.TemporaryDirectory() as d:
+        items = accepted(items, d)
+        if not items: return res
+        p = os.path.join(d, "s.json"); json.dump(config(items), open(p, "w"))
+        x = subprocess.Popen([XRAY, "run", "-c", p], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        time.sleep(1.0)
+        try:
+            with cf.ThreadPoolExecutor(SPEED_PAR) as ex:
+                for (l, _), kb in zip(items, ex.map(fetch_speed, [BASE + i for i in range(len(items))])): res[l] = kb
+        finally:
+            x.kill(); x.wait()
+    return res
+
+
 def load_history():
     """link -> {"ok": runs it worked, "n": runs checked, "ms": smoothed ms, "t": last seen}: the cloud's memory."""
     try:
@@ -184,10 +217,37 @@ def learn(hist, res, now):
     return hist
 
 
+def learn_speed(hist, sp):
+    for l, kb in sp.items():
+        h = hist.get(l)
+        if not h: continue
+        old = h.get("kb", 0)
+        h["kb"] = kb if not old else int(old * 0.6 + kb * 0.4)
+
+
+def key(link):
+    """Same as the app's Report.serverKey: first 4 bytes of sha256("host:port"), hex."""
+    p = outbound(link)
+    if not p or not p[10] or not p[11]: return ""
+    return hashlib.sha256(f"{str(p[10]).lower()}:{p[11]}".encode()).hexdigest()[:8]
+
+
+def write_speed(hist):
+    """out/speed.json: server key -> cloud download kbit/s, the 300 fastest stable ones. Auto on phones also tests these."""
+    fast = sorted(((h["kb"], l) for l, h in hist.items() if h.get("kb", 0) > 0 and (h["ok"] + 0.5) / (h["n"] + 1) > 0.5), reverse=True)
+    out = {}
+    for kb, l in fast:
+        k = key(l)
+        if k and k not in out: out[k] = kb
+        if len(out) >= 300: break
+    json.dump({"stamp": int(time.time()), "kbps": out}, open("out/speed.json", "w"), separators=(",", ":"))
+
+
 def score(h):
-    """Lower = better: stable servers first (Bayesian success rate), then speed."""
+    """Lower = better: stable servers first (Bayesian success rate), then response time and real download speed
+    (up to −1500 for 30+ Мбит/с, so a fast server beats a slightly nearer slow one)."""
     rate = (h["ok"] + 0.5) / (h["n"] + 1)
-    return (1 - rate) * 3000 + (h["ms"] or 3000)
+    return (1 - rate) * 3000 + (h["ms"] or 3000) - min(h.get("kb", 0), 30000) / 20
 
 
 def main():
@@ -205,7 +265,14 @@ def main():
     t = time.time()
     res = check(todo)
     hist = learn(hist, res, now)
+    top = sorted((l for l, ms in res.items() if ms), key=lambda l: score(hist[l]))[:SPEED_TOP]
+    ts = time.time()
+    sp = speeds(top)
+    learn_speed(hist, sp)
+    fast = sorted((kb for kb in sp.values() if kb), reverse=True)
+    print(f"speed: {len(fast)}/{len(top)} downloaded in {int(time.time() - ts)} s, best {fast[:5]} kbit/s", flush=True)
     json.dump(hist, open("out/history.json", "w"), separators=(",", ":"))
+    write_speed(hist)
     stamp = time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime())
     for name, ls in lists.items():
         body = head[name]
@@ -224,7 +291,9 @@ def main():
         st = json.load(open("out/stats.json"))
     except Exception:
         st = {}
-    st.update({"real_checked": len(res), "real_ok": ok, "real_s": int(time.time() - t), "remembered": len(hist), "stable": stable})
+    st.update({"real_checked": len(res), "real_ok": ok, "real_s": int(time.time() - t), "remembered": len(hist), "stable": stable,
+               "speed_checked": len(sp), "speed_ok": len(fast), "speed_best_kbps": fast[0] if fast else 0,
+               "speed_median_kbps": fast[len(fast) // 2] if fast else 0})
     json.dump(st, open("out/stats.json", "w"))
     print(f"real: {ok}/{len(res)} carried HTTPS in {int(time.time() - t)} s; memory {len(hist)}, stable {stable}")
 

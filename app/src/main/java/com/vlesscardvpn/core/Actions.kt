@@ -1034,9 +1034,12 @@ object Actions {
             step(done.incrementAndGet(), list.size)
         }
         batch.flush()
-        val near = list.filter { (tcp[it.id] ?: 0) > 0 }.sortedBy { tcp[it.id] }.take(30)
-        val ok = realTest(near, "Авто: проверяю 30 ближайших", big = true, attempts = 1)
-        return "Быстрая проверка: работают $ok из ${near.size} ближайших (всего ${list.size})"
+        val pinged = list.filter { (tcp[it.id] ?: 0) > 0 }.sortedBy { tcp[it.id] }
+        val near = pinged.take(30)
+        // plus up to 10 the cloud measured as fast (real download through them), even if a bit farther
+        val fast = runCatching { CloudSpeed.refresh(app); CloudSpeed.pick(pinged, near) }.getOrDefault(emptyList())
+        val ok = realTest(near + fast, if (fast.isEmpty()) "Авто: проверяю 30 ближайших" else "Авто: проверяю 30 ближайших и ${fast.size} быстрых по облаку", big = true, attempts = 1)
+        return "Быстрая проверка: работают $ok из ${near.size + fast.size} (ближайших ${near.size}, быстрых по облаку ${fast.size}; всего ${list.size})"
     }
 
     /** Subscriptions older than 12 h are refreshed in the background on app start. */
