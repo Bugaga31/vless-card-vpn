@@ -1121,7 +1121,8 @@ object Actions {
             val works = st.servers.filter { (ids == null || it.id in ids) && st.state(it).works }
             // the balancer spreads connections over all selected servers: one that cannot reach Telegram would break
             // every few Telegram connections («иногда не работает»), so such servers stay out while others exist
-            val all = tgCapable(works) { st.state(it).tgOk }
+            // (only in «Авто»: in «Серверы» the user's own choice stays as it is)
+            val all = if (st.settings.mode == com.vlesscardvpn.model.Mode.AUTO) tgCapable(works) { st.state(it).tgOk } else works
             val me = runCatching { Report.loadFrom(app); Report.phoneId(app) }.getOrDefault("")
             val spread = { sv: Server -> spreadScore(st.state(sv), sv, me) }
             val sorted = preferred(st, all).sortedBy(spread)
