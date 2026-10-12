@@ -1040,9 +1040,12 @@ object Actions {
         }
         batch.flush()
         val pinged = list.filter { (tcp[it.id] ?: 0) > 0 }.sortedBy { tcp[it.id] }
-        val near = pinged.take(30)
+        runCatching { CloudSpeed.refresh(app) }
+        // servers other phones on this operator found blocked are skipped, the next nearest take their place
+        val near = pinged.filterNot { runCatching { CloudSpeed.blocked(it) }.getOrDefault(false) }.take(30)
+            .let { if (it.size < 10) pinged.take(30) else it }  // too few left: the cloud may be wrong, test the nearest anyway
         // plus up to 10 the cloud measured as fast (real download through them), even if a bit farther
-        val fast = runCatching { CloudSpeed.refresh(app); CloudSpeed.pick(pinged, near) }.getOrDefault(emptyList())
+        val fast = runCatching { CloudSpeed.pick(pinged, near) }.getOrDefault(emptyList())
         val ok = realTest(near + fast, if (fast.isEmpty()) "Авто: проверяю 30 ближайших" else "Авто: проверяю 30 ближайших и ${fast.size} быстрых по облаку", big = true, attempts = 1)
         return "Быстрая проверка: работают $ok из ${near.size + fast.size} (ближайших ${near.size}, быстрых по облаку ${fast.size}; всего ${list.size})"
     }
