@@ -1110,12 +1110,18 @@ object Actions {
         return (base * (1 + taste + minOf(1.0, others * 0.25))).toInt()
     }
 
+    /** Servers where Telegram did not fail ([tg] true or not checked yet); all of them if none is left. */
+    fun <T> tgCapable(list: List<T>, tg: (T) -> Boolean?): List<T> = list.filter { tg(it) != false }.ifEmpty { list }
+
     fun selectBest(n: Int = 5, among: Collection<Server>? = null, close: Boolean = false): Int {
         var c = 0
         val ids = among?.map { it.id }?.toHashSet()
         Store.update { st ->
             // one WireGuard tunnel per key (WARP accounts): two with the same key would steal the session from each other
-            val all = st.servers.filter { (ids == null || it.id in ids) && st.state(it).works }
+            val works = st.servers.filter { (ids == null || it.id in ids) && st.state(it).works }
+            // the balancer spreads connections over all selected servers: one that cannot reach Telegram would break
+            // every few Telegram connections («иногда не работает»), so such servers stay out while others exist
+            val all = tgCapable(works) { st.state(it).tgOk }
             val me = runCatching { Report.loadFrom(app); Report.phoneId(app) }.getOrDefault("")
             val spread = { sv: Server -> spreadScore(st.state(sv), sv, me) }
             val sorted = preferred(st, all).sortedBy(spread)

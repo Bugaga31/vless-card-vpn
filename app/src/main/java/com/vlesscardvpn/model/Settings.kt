@@ -23,7 +23,7 @@ data class Settings(
     val byeDpiArgs: String = DEFAULT_BYEDPI,
     val byeDpiSni: String = "ya.ru",
     /** Domains that go through ByeDPI in hybrid mode (geosite tags or domains). */
-    val hybridDomains: List<String> = listOf("geosite:youtube", "geosite:discord", "geosite:twitter", "geosite:meta", "geosite:telegram"),
+    val hybridDomains: List<String> = listOf("geosite:youtube", "geosite:discord", "geosite:twitter", "geosite:meta"),
     val testUrl: String = "https://www.gstatic.com/generate_204",
     val dnsUrl: String = "https://1.1.1.1/dns-query",
     val subscriptions: List<String> = DEFAULT_SUBSCRIPTIONS,

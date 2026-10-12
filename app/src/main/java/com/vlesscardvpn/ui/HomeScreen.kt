@@ -135,7 +135,7 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
                     Mode.AUTO -> "Сам обновит подписки, проверит серверы, подберёт маскировку и обход DPI. Если маскировку распознают — сменит её сам"
                     Mode.SERVERS -> "Весь трафик через выбранные серверы (запросы распределяются между ними)"
                     Mode.BYEDPI -> "Без сервера: обход DPI встроенными ByeDPI/zapret (YouTube, Discord и т.п.). Не помогает от блокировки по IP"
-                    Mode.HYBRID -> "YouTube/Discord/Telegram — через обход DPI, остальное — через серверы"
+                    Mode.HYBRID -> "YouTube/Discord — через обход DPI, остальное (и Telegram) — через серверы"
                 }, fontSize = 13.sp, color = Color.Gray, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 6.dp))
                 Spacer(Modifier.height(10.dp))
                 val st = cfg
