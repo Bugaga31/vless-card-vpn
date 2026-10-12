@@ -137,6 +137,8 @@ while read -r id; do
   sed -e "s#@WPRIV@#$WPRIV#" -e "s#@WV4@#$WV4#" -e "s#\[11,22,33\]#[$WRES]#" /tmp/xcfg/warp-$id.json > /tmp/w1.json
   $X run -c /tmp/w1.json > /tmp/w1.log 2>&1 & WP=$!; sleep 1.5
   c=$(curl -s -m 15 -o /dev/null -w '%{http_code}' -x socks5h://127.0.0.1:24901 https://www.cloudflare.com/cdn-cgi/trace || true)
+  # real WARP from a CI runner drops a handshake now and then: one more try before a mask counts as failed
+  [ "$c" = 200 ] || { sleep 2; c=$(curl -s -m 15 -o /dev/null -w '%{http_code}' -x socks5h://127.0.0.1:24901 https://www.cloudflare.com/cdn-cgi/trace || true); }
   kill $WP 2>/dev/null; wait $WP 2>/dev/null; WALL=$((WALL+1))
   if [ "$c" = 200 ]; then WOK=$((WOK+1)); echo "WARP OK $id"; else echo "WARP FAIL $id ($c) $(tail -1 /tmp/w1.log)"; fi
 done < /tmp/xcfg/warp-masks.txt

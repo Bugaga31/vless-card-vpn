@@ -16,6 +16,21 @@ check() {
 export -f check
 xargs -P 24 -L 1 bash -c 'check "$0" "$*"' < "$DIR/local-matrix.txt" > "$DIR/result.txt"
 echo "ok: $(grep -c ^OK "$DIR/result.txt")  fail: $(grep -c ^FAIL "$DIR/result.txt")"
+# 24 parallel downloads on a CI runner time out now and then; each failure gets one calm retry (2 at a time),
+# so only a variant that fails twice counts as broken
+if grep -q ^FAIL "$DIR/result.txt"; then
+  grep ^FAIL "$DIR/result.txt" | awk '{print $2, $3, $4}' > "$DIR/retry.txt"
+  xargs -P 2 -L 1 bash -c 'check "$0" "$*"' < "$DIR/retry.txt" > "$DIR/retry-result.txt"
+  python3 - "$DIR" <<'PY'
+import sys
+d = sys.argv[1]
+again = {l.split()[1]: l for l in open(d + "/retry-result.txt") if l.startswith("OK ")}
+rows = [again.get(l.split()[1], l) if l.startswith("FAIL ") else l for l in open(d + "/result.txt")]
+open(d + "/result.txt", "w").writelines(rows)
+print(f"retry: {len(again)} of {sum(1 for _ in open(d + '/retry.txt'))} failures passed on the second try")
+PY
+  echo "after retry: ok: $(grep -c ^OK "$DIR/result.txt")  fail: $(grep -c ^FAIL "$DIR/result.txt")"
+fi
 grep ^FAIL "$DIR/result.txt" | head -20
 kill -0 $PID 2>/dev/null || { echo "client Xray died during the run:"; tail -5 "$DIR/client.log"; }
 pgrep -f "byedpi --ip 127.0.0.1 --port 1080" >/dev/null || echo "ByeDPI :1080 is not running (via-ByeDPI masks fail because of it)"

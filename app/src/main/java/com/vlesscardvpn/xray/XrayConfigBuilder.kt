@@ -20,6 +20,13 @@ object XrayConfigBuilder {
     /** DoH/DoT names resolved without asking anyone (Private DNS and «свой DNS» by name work even when DNS is broken). */
     val DNS_HOSTS = mapOf("dns.google" to "8.8.8.8", "cloudflare-dns.com" to "1.1.1.1", "one.one.one.one" to "1.1.1.1",
         "dns.quad9.net" to "9.9.9.9", "dns.adguard-dns.com" to "94.140.14.14", "common.dot.dns.yandex.net" to "77.88.8.8")
+    /**
+     * «Гибрид» domains for the DPI bypass, without Telegram: its addresses are blocked by IP in Russia, a DPI trick
+     * cannot help there (media from cdn*.telesco.pe hung), so Telegram always goes through the servers.
+     */
+    fun hybridDomains(settings: com.vlesscardvpn.model.Settings): List<String> = settings.hybridDomains.filterNot { it in TELEGRAM_DOMAINS }
+    val TELEGRAM_DOMAINS = setOf("geosite:telegram", "domain:t.me", "domain:telegram.org", "domain:telesco.pe", "domain:telegram.me")
+
     val RU_DOMAINS = listOf("geosite:category-ru", "domain:ru", "domain:su", "domain:xn--p1ai")
     private val IPV4_LITERAL = Regex("^\\d{1,3}(\\.\\d{1,3}){3}$")
 
@@ -248,16 +255,16 @@ object XrayConfigBuilder {
         // WebRTC/STUN would reveal the real address to websites; QUIC can't be desynced, so TCP+TLS is forced.
         if (settings.blockStun) rules.put(JSONObject().put("network", "udp").put("port", "3478,5349,19302-19309").put("outboundTag", "block"))
         if (settings.blockQuic || !useServers) rules.put(JSONObject().put("network", "udp").put("port", "443").put("outboundTag", "block"))
-        else if (settings.mode == Mode.HYBRID && settings.hybridDomains.isNotEmpty())
-            rules.put(JSONObject().put("network", "udp").put("port", "443").put("domain", JSONArray(settings.hybridDomains)).put("outboundTag", "block"))
+        else if (settings.mode == Mode.HYBRID && hybridDomains(settings).isNotEmpty())
+            rules.put(JSONObject().put("network", "udp").put("port", "443").put("domain", JSONArray(hybridDomains(settings))).put("outboundTag", "block"))
         // «Сайт не открывается?» — the user's own choice wins over everything below (RU direct, services, hybrid)
         if (settings.alwaysDirect.isNotEmpty()) rules.put(JSONObject().put("domain", JSONArray(settings.alwaysDirect.map { "domain:$it" })).put("outboundTag", "direct"))
         if (settings.alwaysVpn.isNotEmpty()) rules.put(toMain(JSONObject().put("domain", JSONArray(settings.alwaysVpn.map { "domain:$it" }))))
         // AI services (Gemini, ChatGPT, Claude…) refuse Russian addresses: always through the servers, never direct or via the DPI bypass
         if (useServers) rules.put(toMain(JSONObject().put("domain", JSONArray(com.vlesscardvpn.core.AppWatch.AI_DOMAINS))))
         if (settings.blockAds) rules.put(JSONObject().put("domain", JSONArray(listOf("geosite:category-ads-all") + YT_ADS)).put("outboundTag", "block"))
-        if (settings.mode == Mode.HYBRID && settings.hybridDomains.isNotEmpty())
-            rules.put(JSONObject().put("domain", JSONArray(settings.hybridDomains)).put("outboundTag", BYEDPI_TAG))
+        if (settings.mode == Mode.HYBRID && hybridDomains(settings).isNotEmpty())
+            rules.put(JSONObject().put("domain", JSONArray(hybridDomains(settings))).put("outboundTag", BYEDPI_TAG))
         if (settings.ruDirect && useServers) {
             rules.put(JSONObject().put("domain", JSONArray(RU_DOMAINS)).put("outboundTag", "direct"))
             rules.put(JSONObject().put("ip", arr("geoip:ru")).put("outboundTag", "direct"))

@@ -314,11 +314,15 @@ class TunnelService : VpnService() {
             delay(delayMs)
             val st = Store.state.value.settings
             val port = Tunnel.socks?.port ?: return@launch
-            val p = Tester.probeSocks(port, st.testUrl)
+            var p = Tester.probeSocks(port, st.testUrl)
+            // right after connecting the first packets may still be on their way (WireGuard/WARP handshake, a slow
+            // mobile network): one calm second try before calling the route bad and starting a heal or a reconnect
+            if (!p.works) { delay(3000); if (Tunnel.socks?.port == port) p = Tester.probeSocks(port, st.testUrl) }
             val cur = Tunnel.status.value
             if (cur.state != Tunnel.State.CONNECTED) return@launch
             // WARP: ask Cloudflare itself whether the traffic comes through WARP (warp=on / plus), so it's clear it works.
-            val warp = if (p.realMs > 0 && (warpChained || usedServers.any { Masks.isWarp(it) })) when (Tester.warpTrace(port)) {
+            val warp = if (p.realMs > 0 && (warpChained || usedServers.any { Masks.isWarp(it) }))
+                when (Tester.warpTrace(port).let { t -> if (t == "plus" || t == "on" || t == "off") t else { delay(2000); Tester.warpTrace(port) } }) {
                 "plus" -> " · WARP+: включён ✓"; "on" -> " · WARP: включён ✓"; "off" -> " · WARP: не через Cloudflare ✗"; else -> " · WARP: Cloudflare не ответил"
             } else ""
             val text = if (p.realMs > 0) "Интернет работает · ${p.realMs} мс · 256 КБ: ${Actions.yn(p.bigOk)} · YouTube: ${Actions.yn(p.ytOk)} · Telegram: ${Actions.yn(p.tgOk)}$warp"
