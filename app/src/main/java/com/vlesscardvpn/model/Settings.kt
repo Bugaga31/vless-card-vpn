@@ -119,6 +119,8 @@ data class Settings(
     /** «Охлаждение»: when the phone is hot the app lowers its own load (pauses background checks, turbo, light masks). */
     val autoCool: Boolean = true,
     val phoneLearning: Boolean = true,
+    val oceanBackground: Boolean = true,
+    val oceanMotion: Boolean = true,
     val powerProfile: String = "balanced",
     val batteryThreshold: Int = 20,
     val quietScreen: Boolean = true,
@@ -153,7 +155,7 @@ data class Settings(
         .put("ruAppsDirect", ruAppsDirect).put("randomTun", randomTun).put("coverTraffic", coverTraffic).put("rev", rev).put("turbo", turbo).put("autoStart", autoStart)
         .put("alwaysVpn", JSONArray(alwaysVpn)).put("alwaysDirect", JSONArray(alwaysDirect))
         .put("traffic", JSONObject().apply { traffic.forEach { (k, v) -> put(k, v) } }).put("monthLimitGb", monthLimitGb)
-        .put("country", country).put("favorites", JSONArray(favorites)).put("smartYoutube", smartYoutube).put("appAware", appAware).put("autopilot", autopilot).put("phoneLearning", phoneLearning).put("powerProfile", powerProfile).put("batteryThreshold", batteryThreshold).put("quietScreen", quietScreen).put("chargeOnly", chargeOnly).put("wifiMaintenance", wifiMaintenance).put("protectActiveTraffic", protectActiveTraffic).put("autoCool", autoCool).put("gpsSpoof", gpsSpoof)
+        .put("country", country).put("favorites", JSONArray(favorites)).put("smartYoutube", smartYoutube).put("appAware", appAware).put("autopilot", autopilot).put("oceanBackground", oceanBackground).put("oceanMotion", oceanMotion).put("phoneLearning", phoneLearning).put("powerProfile", powerProfile).put("batteryThreshold", batteryThreshold).put("quietScreen", quietScreen).put("chargeOnly", chargeOnly).put("wifiMaintenance", wifiMaintenance).put("protectActiveTraffic", protectActiveTraffic).put("autoCool", autoCool).put("gpsSpoof", gpsSpoof)
         .put("ytDpi", JSONObject().apply { ytDpi.forEach { (k, v) -> put(k, v) } })
         .put("netServers", JSONObject().apply { netServers.forEach { (k, v) -> put(k, JSONArray(v)) } })
         .put("subInfo", JSONObject().apply { subInfo.forEach { (k, v) -> put(k, v.toJson()) } })
@@ -219,6 +221,7 @@ data class Settings(
                 traffic = o.optJSONObject("traffic")?.let { m -> m.keys().asSequence().associateWith { m.optLong(it) } } ?: emptyMap(),
                 monthLimitGb = o.optInt("monthLimitGb", 0), country = o.optString("country", ""), favorites = list("favorites", emptyList()),
                 smartYoutube = o.optBoolean("smartYoutube", true), appAware = o.optBoolean("appAware", true), autopilot = o.optBoolean("autopilot", true), autoCool = o.optBoolean("autoCool", true),
+                oceanBackground = o.optBoolean("oceanBackground", true), oceanMotion = o.optBoolean("oceanMotion", true),
                 phoneLearning = o.optBoolean("phoneLearning", true),
                 powerProfile = o.optString("powerProfile", "balanced").takeIf { it in listOf("balanced", "eco", "fast") } ?: "balanced",
                 batteryThreshold = o.optInt("batteryThreshold", 20).coerceIn(5, 50), quietScreen = o.optBoolean("quietScreen", true),

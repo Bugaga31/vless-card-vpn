@@ -67,10 +67,10 @@ fun ChatScreen() {
             Column(Modifier.weight(1f)) {
                 Text("Помощник", fontSize = 19.sp, fontWeight = FontWeight.SemiBold)
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.size(8.dp).clip(CircleShape).background(if (cfg.autopilot && on) Good else Color.Gray))
+                    Box(Modifier.size(8.dp).clip(CircleShape).background(if (cfg.autopilot && on) Good else MaterialTheme.colorScheme.onSurfaceVariant))
                     Spacer(Modifier.width(6.dp))
                     Text(when { prog.running -> "Работаю: ${prog.title}"; cfg.autopilot && on -> "Автопилот следит за связью"; cfg.autopilot -> "Автопилот ждёт подключения"; else -> "Автопилот выключен" },
-                        fontSize = 12.sp, color = Color.Gray, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
             TextButton(onClick = { panel = !panel }) { Text(if (panel) "Скрыть" else "Панель") }
@@ -81,7 +81,7 @@ fun ChatScreen() {
                 verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Tile("Связь", if (on) (if (status.checkOk == false) "Нет интернета" else "Подключено") else "Выключено",
-                        if (on) (if (status.checkOk == false) Warn else Good) else Color.Gray, Modifier.weight(1f))
+                        if (on) (if (status.checkOk == false) Warn else Good) else MaterialTheme.colorScheme.onSurfaceVariant, Modifier.weight(1f))
                     Tile("Маска", sum.mask.ifEmpty { "подберу сам" }, MaterialTheme.colorScheme.onSurface, Modifier.weight(1f))
                     Tile("Лучший", if (sum.bestMs > 0) "${sum.bestMs} мс" + (if (sum.bestKbps > 0) " · " + Actions.mbps(sum.bestKbps) else "") else "—",
                         MaterialTheme.colorScheme.onSurface, Modifier.weight(1f))
@@ -95,7 +95,7 @@ fun ChatScreen() {
                     FilterChip(cfg.smartYoutube, { set { it.copy(smartYoutube = !it.smartYoutube, ytDpi = emptyMap()) } }, label = { Text("▶ Умный YouTube") })
                 }
                 if (journal.isNotEmpty()) Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Text("Что я сделал сам", fontSize = 12.sp, color = Color.Gray)
+                    Text("Что я сделал сам", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     journal.take(3).forEach { (t, s) ->
                         Text(java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(java.util.Date(t)) + "  " + s.removePrefix("Автопилот: "),
                             fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
@@ -163,7 +163,7 @@ fun ChatScreen() {
 @Composable
 private fun Tile(title: String, value: String, color: Color, modifier: Modifier) {
     Column(modifier.clip(RoundedCornerShape(12.dp)).background(Color(0xFF12151B)).padding(horizontal = 10.dp, vertical = 8.dp)) {
-        Text(title, fontSize = 11.sp, color = Color.Gray)
+        Text(title, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Text(value, fontSize = 13.sp, color = color, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }

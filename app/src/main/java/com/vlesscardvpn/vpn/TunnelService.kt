@@ -171,11 +171,12 @@ class TunnelService : VpnService() {
         val keepTun = soft && tun != null && prevSocks != null && !Store.state.value.settings.proxyOnly
         lastSoft = keepTun
         teardown(null, keepTun)
-        Store.init(this); XrayCore.init(this); Actions.init(this)
+        Store.init(this); Actions.init(this)
         val prev = Tunnel.status.value
         Tunnel.status.value = if (keepTun && prev.state == Tunnel.State.CONNECTED) prev.copy(check = "Переподключаюсь без разрыва VPN…", checkOk = null)
             else Tunnel.Status(Tunnel.State.CONNECTING, "Подключение…")
         try {
+            kotlinx.coroutines.withContext(Dispatchers.IO) { XrayCore.init(this@TunnelService) }
             val st = Store.state.value
             val network = Net.key(this)
             var settings = st.settings

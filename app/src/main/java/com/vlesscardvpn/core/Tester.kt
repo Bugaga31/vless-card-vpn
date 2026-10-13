@@ -121,33 +121,42 @@ object Tester {
     fun probeSocks(port: Int, testUrl: String, big: Boolean = true, youtube: Boolean = true, attempts: Int = 2, budgetMs: Long = 0): Probe {
         val client = (if (attempts == 1) fast else base).newBuilder().apply {
             if (budgetMs > 0) { callTimeout(budgetMs, TimeUnit.MILLISECONDS); connectTimeout(minOf(budgetMs, 2500), TimeUnit.MILLISECONDS); readTimeout(budgetMs, TimeUnit.MILLISECONDS) }
-        }.proxy(Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", port))).build()
-        var best = Long.MAX_VALUE; var err = ""
-        repeat(attempts) {
-            val t0 = System.nanoTime()
-            runCatching {
-                client.newCall(Request.Builder().url(testUrl).header("User-Agent", UA).build()).execute().use { r ->
-                    check(r.code in 200..399) { "HTTP ${r.code}" }
-                    r.body?.byteStream()?.use { it.read(ByteArray(4096)) }
-                }
-                best = minOf(best, (System.nanoTime() - t0) / 1_000_000)
-            }.onFailure { err = Errors.human(it) }
+        }.dispatcher(okhttp3.Dispatcher()).connectionPool(okhttp3.ConnectionPool(2, 30, TimeUnit.SECONDS))
+            .proxy(Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", port))).build()
+        val tasks = mutableListOf<java.util.concurrent.Future<*>>()
+        try {
+            var best = Long.MAX_VALUE; var err = ""
+            repeat(attempts.coerceIn(1, 3)) {
+                if (Thread.currentThread().isInterrupted) throw java.io.InterruptedIOException("Проверка отменена")
+                val t0 = System.nanoTime()
+                runCatching {
+                    client.newCall(Request.Builder().url(testUrl).header("User-Agent", UA).build()).execute().use { r ->
+                        check(r.code in 200..399) { "HTTP ${r.code}" }
+                        r.body?.byteStream()?.use { it.read(ByteArray(4096)) }
+                    }
+                    best = minOf(best, (System.nanoTime() - t0) / 1_000_000)
+                }.onFailure { err = Errors.human(it) }
+            }
+            if (best == Long.MAX_VALUE) return Probe(0, null, null, err)
+            val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(40)
+            fun remaining() = TimeUnit.NANOSECONDS.toMillis((deadline - System.nanoTime()).coerceAtLeast(1)).coerceAtLeast(1)
+            val bigF = if (big) pool.submit<Pair<Boolean, Int>> { bigDownload(client) }.also { tasks += it } else null
+            val ytF = if (youtube) pool.submit<Boolean> { runCatching {
+                client.newCall(Request.Builder().url(YT_URL).header("User-Agent", UA).build()).execute().use { it.code in 200..399 } }.getOrDefault(false) }.also { tasks += it } else null
+            val tgF = if (youtube) pool.submit<Boolean> { runCatching {
+                client.newCall(Request.Builder().url(TG_URL).header("User-Agent", UA).build()).execute().use { it.code in 200..499 } }.getOrDefault(false) }.also { tasks += it } else null
+            val bigResult = ProbeTasks.await(bigF, remaining(), false to 0)
+            val ytOk = if (ytF != null) ProbeTasks.await(ytF, remaining(), false) else null
+            val tgOk = if (tgF != null) ProbeTasks.await(tgF, remaining(), false) else null
+            return Probe(best.toInt().coerceAtLeast(1), if (bigF != null) bigResult.first else null, ytOk, tgOk = tgOk, kbps = bigResult.second)
+        } finally {
+            ProbeTasks.cancel(tasks)
+            // Private dispatcher/pool: cancellation cannot cancel another probe or the live VPN's HTTP calls.
+            client.dispatcher.cancelAll(); client.connectionPool.evictAll()
         }
-        if (best == Long.MAX_VALUE) return Probe(0, null, null, err)
-        // big file, YouTube and Telegram at the same time (they used to run one after another: up to 4× longer per server)
-        val bigF = if (big) pool.submit<Pair<Boolean, Int>> { bigDownload(client) } else null
-        val ytF = if (youtube) pool.submit<Boolean> { runCatching {
-            client.newCall(Request.Builder().url(YT_URL).header("User-Agent", UA).build()).execute().use { it.code in 200..399 } }.getOrDefault(false) } else null
-        val tgF = if (youtube) pool.submit<Boolean> { runCatching {
-            client.newCall(Request.Builder().url(TG_URL).header("User-Agent", UA).build()).execute().use { it.code in 200..499 } }.getOrDefault(false) } else null
-        val (bigOk, kbps) = bigF?.let { f -> runCatching { f.get(40, TimeUnit.SECONDS) }.getOrDefault(false to 0) }?.let { it.first to it.second } ?: (null to 0)
-        val ytOk = ytF?.let { f -> runCatching { f.get(40, TimeUnit.SECONDS) }.getOrDefault(false) }
-        val tgOk = tgF?.let { f -> runCatching { f.get(40, TimeUnit.SECONDS) }.getOrDefault(false) }
-        client.connectionPool.evictAll()
-        return Probe(best.toInt().coerceAtLeast(1), bigOk, ytOk, tgOk = tgOk, kbps = kbps)
     }
 
-    private val pool = java.util.concurrent.Executors.newCachedThreadPool { r -> Thread(r, "probe").apply { isDaemon = true } }
+    private val pool = java.util.concurrent.Executors.newFixedThreadPool(12) { r -> Thread(r, "probe").apply { isDaemon = true } }
 
     /** 256 KB through the server: (passed, kbit/s). A freeze (read timeout — the TSPU "16 KB" cut) fails at once, no second mirror. */
     private fun bigDownload(client: OkHttpClient): Pair<Boolean, Int> {

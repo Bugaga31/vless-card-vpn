@@ -32,10 +32,13 @@ fun AppUi(onConnect: () -> Unit, onDisconnect: () -> Unit) {
     }
     MaterialTheme(colorScheme = scheme) {
         var tab by remember { mutableIntStateOf(0) }
+        Box(Modifier.fillMaxSize()) {
+        val sea = theme.oceanBackground && theme.theme != "amoled"
+        if (sea) OceanBackground(theme.oceanMotion)
         Scaffold(
-            containerColor = scheme.background,
+            containerColor = if (sea) Color.Transparent else scheme.background,
             bottomBar = {
-                NavigationBar(containerColor = scheme.surface) {
+                NavigationBar(containerColor = if (sea) scheme.surface.copy(alpha = .95f) else scheme.surface) {
                     NavigationBarItem(selected = tab == 0, onClick = { tab = 0 }, icon = { Icon(Icons.Filled.PowerSettingsNew, null) }, label = { Text("Главная") })
                     NavigationBarItem(selected = tab == 1, onClick = { tab = 1 }, icon = { Icon(Icons.Filled.Dns, null) }, label = { Text("Серверы") })
                     NavigationBarItem(selected = tab == 3, onClick = { tab = 3 }, icon = { Icon(Icons.Filled.Psychology, null) }, label = { Text("Помощник") })
@@ -44,7 +47,7 @@ fun AppUi(onConnect: () -> Unit, onDisconnect: () -> Unit) {
                 }
             }
         ) { pad ->
-            Box(Modifier.padding(pad).fillMaxSize().background(scheme.background)) {
+            Box(Modifier.padding(pad).fillMaxSize()) {
                 androidx.compose.animation.Crossfade(tab, label = "tab") { t -> when (t) {
                     0 -> HomeScreen(onConnect, onDisconnect, openServers = { tab = 1 })
                     1 -> ServersScreen()
@@ -53,6 +56,7 @@ fun AppUi(onConnect: () -> Unit, onDisconnect: () -> Unit) {
                     else -> SettingsScreen()
                 } }
             }
+        }
         }
     }
 }
