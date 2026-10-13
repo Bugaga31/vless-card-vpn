@@ -74,7 +74,7 @@ fun ServersScreen() {
         }
         Row(Modifier.horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Filter.values().forEach { f -> FilterChip(selected = filter == f, onClick = { filter = f }, label = { Text(f.title) }) }
-            Text("${list.size}", color = Color.Gray, fontSize = 12.sp)
+            Text("${list.size}", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
         }
         val countries = remember(app) { Actions.countries(app) }
         if (countries.isNotEmpty()) Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -86,12 +86,12 @@ fun ServersScreen() {
         LiveProgress(stop = true)
         if (app.settings.mode == com.vlesscardvpn.model.Mode.AUTO && app.servers.isNotEmpty())
             Text("Режим «Авто»: выбирать ничего не нужно — при подключении возьму 5 самых быстрых рабочих и сам подберу маскировку. " +
-                "Отмечайте серверы, только если нужны конкретные.", fontSize = 12.sp, color = Color.Gray, modifier = Modifier.padding(vertical = 4.dp))
+                "Отмечайте серверы, только если нужны конкретные.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(vertical = 4.dp))
         if (app.servers.isEmpty()) {
             Text("Список пуст. Нажмите «Подписки» — загрузятся бесплатные серверы для России (igareck, с зеркал), " +
                 "или «Добавить» и вставьте свои ссылки vless:// vmess:// trojan:// ss:// hysteria2://.\n\n" +
                 "Публичные серверы держат посторонние люди: владелец видит, куда вы ходите, и может читать трафик без HTTPS. " +
-                "Не входите через них в банк и важные аккаунты.", color = Color.Gray, modifier = Modifier.padding(top = 16.dp))
+                "Не входите через них в банк и важные аккаунты.", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 16.dp))
         }
         LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(vertical = 6.dp)) {
             items(list, key = { it.id }) { s ->
@@ -119,17 +119,17 @@ private fun ServerRow(s: Server, st: ServerState, fav: Boolean = false, onToggle
                 val mask = Masks.byId(st.maskId)?.title
                 // Catalog subscriptions are third-party free servers: mark them so they are not mistaken for your own.
                 val isPublic = com.vlesscardvpn.model.Subs.find(s.source) != null
-                Text(s.label + (if (isPublic) " · публичный" else "") + (mask?.let { " · $it" } ?: ""), maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 11.sp, color = Color.Gray)
+                Text(s.label + (if (isPublic) " · публичный" else "") + (mask?.let { " · $it" } ?: ""), maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             Column(horizontalAlignment = Alignment.End) {
                 val real = st.realMs
                 Text(when { real > 0 -> "$real мс"; real == 0 -> "не работает"; st.tcpMs == 0 -> "недоступен"; st.tcpMs > 0 -> "TCP ${st.tcpMs} мс"; else -> "—" },
-                    color = when { real > 0 && st.bigOk != false -> Good; real > 0 -> Warn; real == 0 || st.tcpMs == 0 -> Bad; else -> Color.Gray }, fontSize = 13.sp)
+                    color = when { real > 0 && st.bigOk != false -> Good; real > 0 -> Warn; real == 0 || st.tcpMs == 0 -> Bad; else -> MaterialTheme.colorScheme.onSurfaceVariant }, fontSize = 13.sp)
                 if (real > 0) Text(buildString {
                     append(when (st.bigOk) { true -> if (st.kbps > 0) Actions.mbps(st.kbps) else "256К ✓"; false -> "256К ✗ (обрыв)"; null -> "" })
                     st.ytOk?.let { append(if (it) " · YT ✓" else " · YT ✗") }
                     st.tgOk?.let { append(if (it) " · TG ✓" else " · TG ✗") }
-                }, fontSize = 11.sp, color = if (st.bigOk == false) Warn else Color.Gray)
+                }, fontSize = 11.sp, color = if (st.bigOk == false) Warn else MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
     }
@@ -148,7 +148,7 @@ private fun AddDialog(onDismiss: () -> Unit, onAdd: (String) -> Unit) {
                     val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                     text = cm.primaryClip?.getItemAt(0)?.coerceToText(ctx)?.toString().orEmpty()
                 }) { Text("Вставить из буфера") }
-                Text("Ссылку на подписку (https://…) добавьте в Настройках → Подписки.", fontSize = 12.sp, color = Color.Gray)
+                Text("Ссылку на подписку (https://…) добавьте в Настройках → Подписки.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         },
         confirmButton = { Button(onClick = { onAdd(text) }, enabled = text.isNotBlank()) { Text("Добавить") } },
@@ -178,8 +178,8 @@ private fun ServerMenu(s: Server, st: ServerState, onDismiss: () -> Unit) {
     AlertDialog(onDismissRequest = onDismiss, title = { Text(s.name, maxLines = 2) },
         text = {
             Column {
-                Text("${s.label}\n${s.address}:${s.port}", fontSize = 13.sp, color = Color.Gray)
-                Text("Маскировка: " + (Masks.byId(st.maskId)?.title ?: "авто") + " — подбирается сама под сеть и меняется, если её распознают.", fontSize = 12.sp, color = Color.Gray)
+                Text("${s.label}\n${s.address}:${s.port}", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("Маскировка: " + (Masks.byId(st.maskId)?.title ?: "авто") + " — подбирается сама под сеть и меняется, если её распознают.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 TextButton(onClick = { Actions.findMasks(listOf(s)); onDismiss() }) { Text("Подобрать заново для этой сети") }
                 var expert by remember { mutableStateOf(false) }
                 TextButton(onClick = { expert = !expert }) { Text(if (expert) "Для опытных ▾" else "Для опытных ▸") }
@@ -216,7 +216,7 @@ fun QrDialog(title: String, text: String, onDismiss: () -> Unit) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 if (bmp != null) androidx.compose.foundation.Image(bmp.asImageBitmap(), "QR", Modifier.size(280.dp))
                 else Text("Ссылка слишком длинная для QR-кода")
-                Text("Внутри ключ сервера — показывайте только себе и тем, кому доверяете.", fontSize = 12.sp, color = Color.Gray)
+                Text("Внутри ключ сервера — показывайте только себе и тем, кому доверяете.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }, confirmButton = { TextButton(onClick = onDismiss) { Text("Закрыть") } })
 }

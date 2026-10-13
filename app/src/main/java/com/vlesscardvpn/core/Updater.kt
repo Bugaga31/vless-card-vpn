@@ -51,9 +51,10 @@ object Updater {
         if (checking || state.value.busy || !force && !UpdatePolicy.checkDue(now, lastCheck, lastAttempt)) return
         checking = true; lastAttempt = now
         scope.launch {
+            try {
             if (force) state.value = state.value.copy(text = "Проверяю обновления…")
             runCatching {
-                val body = anyPath { c -> c.newCall(Request.Builder().url("https://api.github.com/repos/$REPO/releases/latest")
+                val body = anyPath { c -> c.newBuilder().callTimeout(12, TimeUnit.SECONDS).readTimeout(8, TimeUnit.SECONDS).build().newCall(Request.Builder().url("https://api.github.com/repos/$REPO/releases/latest")
                     .header("Accept", "application/vnd.github+json").build()).execute().use { r ->
                         if (!r.isSuccessful) throw java.io.IOException("GitHub ответил ${r.code}")
                         String(r.body!!.byteStream().use { BoundedInput.read(it, 512 * 1024) }) } }
@@ -67,7 +68,7 @@ object Updater {
                     else State(text = if (force) "У вас последняя версия (${com.vlesscardvpn.BuildConfig.VERSION_NAME})" else "")
                 state.value.let { st -> if (st.latest.isNotEmpty()) { ctx?.let { prefetch(it.applicationContext) }; if (!force && st.latest != noted) { noted = st.latest; AppWatch.note("Вышла версия ${st.latest} — обновить можно на главной одной кнопкой") } } }
             }.onFailure { if (force) state.value = state.value.copy(text = "Не удалось проверить: ${Errors.human(it)}") }
-            checking = false
+            } finally { checking = false }
         }
     }
 

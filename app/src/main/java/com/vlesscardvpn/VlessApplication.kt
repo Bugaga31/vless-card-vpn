@@ -6,7 +6,6 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import com.vlesscardvpn.core.Actions
 import com.vlesscardvpn.core.Store
-import com.vlesscardvpn.core.XrayCore
 
 class VlessApplication : Application() {
     override fun onCreate() {
@@ -15,7 +14,6 @@ class VlessApplication : Application() {
         Actions.init(this)
         runCatching { com.vlesscardvpn.core.DeviceCoach.restoreBackground(this) }
         com.vlesscardvpn.core.Tester.installAuthenticator()
-        Thread({ runCatching { XrayCore.init(this) } }, "xray-init").start()
         // widget + quick tile follow the VPN state
         val app = this
         kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Main).launch {

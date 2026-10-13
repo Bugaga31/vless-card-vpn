@@ -40,7 +40,7 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
         Text("VLESS Card", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onBackground)
         Text("${BuildConfig.VERSION_NAME} · Xray · " + if (cfg.stealthSocks) "прокси скрыт (случайный порт + пароль)" else "SOCKS 127.0.0.1:${cfg.socksPort}",
-            fontSize = 12.sp, color = Color.Gray)
+            fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
         val upd by com.vlesscardvpn.core.Updater.state.collectAsState()
         if (upd.latest.isNotEmpty()) {
             val uctx = androidx.compose.ui.platform.LocalContext.current
@@ -69,9 +69,9 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
         PowerButton(on, busy, color) { if (on || busy) onDisconnect() else onConnect() }
         if (status.message.isNotEmpty()) Text(status.message, color = if (status.state == Tunnel.State.ERROR) Bad else MaterialTheme.colorScheme.onBackground,
             textAlign = TextAlign.Center, fontWeight = FontWeight.Medium)
-        if (status.route.isNotEmpty()) Text(status.route, color = Color.Gray, fontSize = 13.sp, textAlign = TextAlign.Center)
+        if (status.route.isNotEmpty()) Text(status.route, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp, textAlign = TextAlign.Center)
         val cloudStatus by com.vlesscardvpn.core.CloudSpeed.status.collectAsState()
-        Text(cloudStatus, color = Color.Gray, fontSize = 12.sp, textAlign = TextAlign.Center)
+        Text(cloudStatus, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp, textAlign = TextAlign.Center)
         val pausedUntil by Tunnel.pausedUntil.collectAsState()
         val ctx = androidx.compose.ui.platform.LocalContext.current
         if (status.state == Tunnel.State.CONNECTED) {
@@ -91,7 +91,7 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
             val aw by com.vlesscardvpn.core.AppWatch.status.collectAsState()
             if (aw.isNotEmpty()) Text(aw, fontSize = 12.sp, color = Accent, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 4.dp))
             val (month, over) = com.vlesscardvpn.core.Traffic.line(cfg)
-            if (month.isNotEmpty()) Text(month, fontSize = 12.sp, color = if (over) Warn else Color.Gray, textAlign = TextAlign.Center)
+            if (month.isNotEmpty()) Text(month, fontSize = 12.sp, color = if (over) Warn else MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
             Row(Modifier.horizontalScroll(rememberScrollState()).padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 AssistChip(onClick = { Actions.fixAll { onConnect() } }, enabled = !working, label = { Text("🛠 Починить") })
                 AssistChip(onClick = { Actions.boostYoutube() }, enabled = !working, label = { Text("▶ Ускорить YouTube") })
@@ -103,7 +103,7 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
         } else if (status.state == Tunnel.State.ERROR) {
             TextButton(onClick = { Actions.fixAll { onConnect() } }, enabled = !working) { Text("Починить и подключить") }
         }
-        if (status.check.isNotEmpty()) Text(status.check, color = when (status.checkOk) { true -> Good; false -> Bad; null -> Color.Gray },
+        if (status.check.isNotEmpty()) Text(status.check, color = when (status.checkOk) { true -> Good; false -> Bad; null -> MaterialTheme.colorScheme.onSurfaceVariant },
             fontSize = 14.sp, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 6.dp))
         if (status.state == Tunnel.State.CONNECTING) Box(Modifier.fillMaxWidth().padding(top = 8.dp)) { LiveProgress(stop = false) { it.running } }
         Spacer(Modifier.height(20.dp))
@@ -118,7 +118,7 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
                             if (cfg.proxyOnly) "Прокси" else "VPN",
                             if (!cfg.perApp || cfg.apps.isEmpty()) "все приложения" else if (cfg.onlyApps) "только ${cfg.apps.size} прил." else "кроме ${cfg.apps.size} прил.",
                             if (cfg.services.isEmpty()) "весь трафик" else com.vlesscardvpn.core.Services.label(cfg.services)).joinToString(" · "),
-                            fontSize = 12.sp, color = Color.Gray, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                            fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
                     }
                     Text(if (opts) "▴" else "▾", fontSize = 18.sp, color = Accent)
                 }
@@ -138,7 +138,7 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
                     Mode.SERVERS -> "Весь трафик через выбранные серверы (запросы распределяются между ними)"
                     Mode.BYEDPI -> "Без сервера: обход DPI встроенными ByeDPI/zapret (YouTube, Discord и т.п.). Не помогает от блокировки по IP"
                     Mode.HYBRID -> "YouTube/Discord — через обход DPI, остальное (и Telegram) — через серверы"
-                }, fontSize = 13.sp, color = Color.Gray, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 6.dp))
+                }, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 6.dp))
                 Spacer(Modifier.height(10.dp))
                 val st = cfg
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -147,7 +147,7 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
                     FilterChip(selected = st.proxyOnly, onClick = { if (!st.proxyOnly) { onDisconnect(); Store.update { it.copy(settings = it.settings.copy(proxyOnly = true)) } } }, label = { Text("Прокси") })
                 }
                 if (st.proxyOnly) Text("Без VPN: SOCKS5 127.0.0.1:${st.socksPort}, HTTP :${st.httpPort}" + (if (st.lanShare) " — раздаётся в Wi-Fi" else "") + ". Telegram — кнопка в Настройках",
-                    fontSize = 11.sp, color = Color.Gray, textAlign = TextAlign.Center)
+                    fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
                 else {
                     var appsDialog by remember { mutableStateOf(false) }
                     val n = st.apps.size
@@ -178,7 +178,7 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
                 }
                 Text(if (services.isEmpty()) "Ничего не отмечено — через VPN идёт весь трафик"
                     else "Через VPN: " + com.vlesscardvpn.core.Services.label(services) + ", остальное напрямую (другие сервисы — в Настройках)",
-                    fontSize = 11.sp, color = Color.Gray, textAlign = TextAlign.Center)
+                    fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
                 }
             }
         }
@@ -198,11 +198,11 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
                         sum.selectedCount == 0 && sum.working > 0 -> "Рабочих по последней проверке: ${sum.working}. Подключусь к 5 самым быстрым — выбирать ничего не нужно."
                         sum.selectedCount == 0 -> "Всего ${sum.total}. Нажмите «Подключить» — проверю и выберу сам."
                         else -> sum.selectedNames.joinToString() + if (sum.selectedCount > 3) " и ещё ${sum.selectedCount - 3}" else ""
-                    }, fontSize = 13.sp, color = Color.Gray)
+                    }, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     if (sum.bestMs > 0) Text("Лучший: ${sum.bestMs} мс" + (if (sum.bestKbps > 0) " · ${Actions.mbps(sum.bestKbps)}" else "") +
                         when (sum.bestYt) { true -> " · YouTube ✓"; false -> " · YouTube ✗"; null -> "" },
                         fontSize = 13.sp, color = if (sum.bestKbps in 1..2999 || sum.bestYt == false) Warn else Good)
-                    Text("Маскировка: авто" + (if (sum.mask.isNotEmpty()) " — ${sum.mask}" else " (подбирается сама под сеть)"), fontSize = 12.sp, color = Color.Gray,
+                    Text("Маскировка: авто" + (if (sum.mask.isNotEmpty()) " — ${sum.mask}" else " (подбирается сама под сеть)"), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
                     CountryPicker(onChange = { reconnect() })
                     if (sum.heavyMask) Text("Маскировка «тяжёлая» (мелкие пакеты) — видео может тормозить. После подключения сам поищу лёгкую", fontSize = 11.sp, color = Warn)
@@ -232,10 +232,10 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
         Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
             Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text("Что с сетью?", fontWeight = FontWeight.SemiBold)
-                if (report.verdict.isEmpty()) Text("Проверю, режут ли YouTube (DPI) и не включены ли белые списки", fontSize = 13.sp, color = Color.Gray)
+                if (report.verdict.isEmpty()) Text("Проверю, режут ли YouTube (DPI) и не включены ли белые списки", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 else {
                     Text(report.verdict, fontSize = 14.sp, color = when (report.kind) { Actions.Kind.OPEN -> Good; Actions.Kind.OFFLINE -> Bad; else -> Warn })
-                    Text(report.details, fontSize = 12.sp, color = Color.Gray)
+                    Text(report.details, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedButton(onClick = { Actions.diagnoseNetwork() }, enabled = !busy) { Text("Проверить сеть") }
@@ -268,19 +268,19 @@ private fun SiteCard(on: Boolean, reconnect: () -> Unit) {
                     placeholder = { Text("адрес, например rutracker.org", fontSize = 13.sp) })
                 OutlinedButton(onClick = { Actions.checkSite(input) }, enabled = !r.running) { Text("Проверить") }
             }
-            if (r.verdict.isEmpty()) Text("Сравню: напрямую, через VPN и через обход DPI — и скажу, кто виноват" + if (!on) " (лучше с включённым VPN)" else "", fontSize = 12.sp, color = Color.Gray)
+            if (r.verdict.isEmpty()) Text("Сравню: напрямую, через VPN и через обход DPI — и скажу, кто виноват" + if (!on) " (лучше с включённым VPN)" else "", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             else {
-                Text(r.verdict, fontSize = 14.sp, color = when { r.running -> Color.Gray; r.good -> Good; else -> Warn })
-                if (r.details.isNotEmpty()) Text(r.details, fontSize = 12.sp, color = Color.Gray)
+                Text(r.verdict, fontSize = 14.sp, color = when { r.running -> MaterialTheme.colorScheme.onSurfaceVariant; r.good -> Good; else -> Warn })
+                if (r.details.isNotEmpty()) Text(r.details, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             if (!r.running && r.suggest.isNotEmpty()) Button(onClick = { Actions.routeSite(r.host, r.suggest); reconnect() }) {
                 Text(if (r.suggest == "vpn") "Всегда через VPN" else "Всегда напрямую")
             }
             val pop by Actions.popular.collectAsState()
             OutlinedButton(onClick = { Actions.checkPopular() }, enabled = !pop.running) { Text("Проверить популярные (YouTube, Instagram, ChatGPT…)") }
-            if (pop.summary.isNotEmpty()) Text(pop.summary, fontSize = 13.sp, color = when { pop.running -> Color.Gray; pop.rows.all { it.second.good } -> Good; else -> Warn })
+            if (pop.summary.isNotEmpty()) Text(pop.summary, fontSize = 13.sp, color = when { pop.running -> MaterialTheme.colorScheme.onSurfaceVariant; pop.rows.all { it.second.good } -> Good; else -> Warn })
             pop.rows.forEach { (title, c) ->
-                Text((if (c.good) "✓ " else "✗ ") + title + " — " + c.verdict, fontSize = 12.sp, color = if (c.good) Color.Gray else Warn,
+                Text((if (c.good) "✓ " else "✗ ") + title + " — " + c.verdict, fontSize = 12.sp, color = if (c.good) MaterialTheme.colorScheme.onSurfaceVariant else Warn,
                     modifier = Modifier.clickable { Actions.siteCheck.value = c })
             }
         }
@@ -298,9 +298,9 @@ private fun NetCard(on: Boolean, cfgKey: Int) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text("Эта сеть: ${info.net}", fontWeight = FontWeight.SemiBold)
             Text(if (info.dpi.isEmpty()) "Обход DPI ещё не подобран" else "Обход DPI: ${info.dpi}" + if (info.dpiCount > 1) " (запасных: ${info.dpiCount - 1})" else "",
-                fontSize = 12.sp, color = Color.Gray)
-            Text(if (info.masks == 0) "Рабочие маскировки здесь ещё не найдены" else "Маскировок, прошедших здесь: ${info.masks}", fontSize = 12.sp, color = Color.Gray)
-            if (speed.text.isNotEmpty()) Text(speed.text, fontSize = 13.sp, color = when { speed.running -> Color.Gray; speed.mbps >= 2 -> Good; else -> Warn })
+                fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(if (info.masks == 0) "Рабочие маскировки здесь ещё не найдены" else "Маскировок, прошедших здесь: ${info.masks}", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (speed.text.isNotEmpty()) Text(speed.text, fontSize = 13.sp, color = when { speed.running -> MaterialTheme.colorScheme.onSurfaceVariant; speed.mbps >= 2 -> Good; else -> Warn })
             Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(onClick = { Actions.speedTest() }, enabled = on && !speed.running) { Text("Тест скорости") }
                 OutlinedButton(onClick = {
@@ -310,7 +310,7 @@ private fun NetCard(on: Boolean, cfgKey: Int) {
                         .putExtra(android.content.Intent.EXTRA_TEXT, "Настройка VLESS Card для сети «${info.net.substringBefore(" · ")}» (вставьте в приложении: Серверы → Добавить):\n$link"), "Поделиться настройкой сети"))
                 }) { Text("Поделиться настройкой") }
             }
-            Text("Друг на том же провайдере вставит ссылку и сразу получит рабочий обход и маскировки — без серверов и ключей.", fontSize = 11.sp, color = Color.Gray)
+            Text("Друг на том же провайдере вставит ссылку и сразу получит рабочий обход и маскировки — без серверов и ключей.", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
@@ -333,7 +333,7 @@ fun ProgressBlock(p: Actions.Progress) {
             Text("${p.title}: ${p.done}/${p.total}", fontSize = 13.sp)
             if (p.total > 0) LinearProgressIndicator(progress = { p.done.toFloat() / p.total }, modifier = Modifier.fillMaxWidth().padding(top = 4.dp))
             else LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 4.dp))
-        } else Text(p.message, fontSize = 13.sp, color = Color.Gray)
+        } else Text(p.message, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
@@ -391,7 +391,7 @@ private fun PowerButton(on: Boolean, busy: Boolean, color: Color, onClick: () ->
     }
     // what the assistant did last (switched servers, revived, fixed…) — visible without opening the chat
     val said by com.vlesscardvpn.core.AppWatch.status.collectAsState()
-    if (on && said.isNotEmpty()) Text(said, fontSize = 12.sp, color = Color.Gray, maxLines = 2, textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+    if (on && said.isNotEmpty()) Text(said, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, textAlign = androidx.compose.ui.text.style.TextAlign.Center,
         modifier = Modifier.padding(horizontal = 24.dp, vertical = 2.dp))
     Spacer(Modifier.height(6.dp))
 }
@@ -404,9 +404,9 @@ private fun SessionStats(min: Long, rx: Long, tx: Long, turbo: Boolean) {
             Column(Modifier.weight(1f).clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surface).padding(vertical = 8.dp),
                 horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(v, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-                Text(t, fontSize = 11.sp, color = Color.Gray)
+                Text(t, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
     }
-    if (turbo) Text("Ускорение включено", fontSize = 11.sp, color = Color.Gray, modifier = Modifier.padding(top = 4.dp))
+    if (turbo) Text("Ускорение включено", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp))
 }

@@ -22,9 +22,13 @@ object XrayCore {
         val version = runCatching { context.packageManager.getPackageInfo(context.packageName, 0).lastUpdateTime.toString() }.getOrDefault("0")
         if (marker.takeIf { it.isFile }?.readText() != version || listOf("geoip.dat", "geosite.dat").any { !dir.resolve(it).isFile }) {
             for (name in listOf("geoip.dat", "geosite.dat")) {
-                val tmp = dir.resolve("$name.tmp")
-                context.assets.open(name).use { input -> tmp.outputStream().use { input.copyTo(it) } }
-                tmp.renameTo(dir.resolve(name))
+                val file = android.util.AtomicFile(dir.resolve(name))
+                val out = file.startWrite()
+                try {
+                    val copied = context.assets.open(name).use { it.copyTo(out) }
+                    check(copied > 0) { "Пустой ресурс Xray: $name" }
+                    file.finishWrite(out)
+                } catch (e: Exception) { file.failWrite(out); throw e }
             }
             marker.writeText(version)
         }
@@ -32,7 +36,7 @@ object XrayCore {
         initialized = true
     }
 
-    fun version(): String = runCatching { Libv2ray.checkVersionX() }.getOrDefault("?")
+    fun version(): String = if (!initialized) "Xray 26.9.30 · запуск по необходимости" else runCatching { Libv2ray.checkVersionX() }.getOrDefault("?")
 
     /** A separate core instance. The VPN uses one, the tester another one at the same time. */
     class Instance(private val name: String) {

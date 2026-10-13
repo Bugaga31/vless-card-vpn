@@ -63,7 +63,7 @@ fun SettingsScreen() {
                 "Отправка отчётов в этой версии отключена: общий ключ больше не встраивается в APK. Обучение на ваших проверках остаётся локальным.", ron) {
                 ron = it; com.vlesscardvpn.core.Report.setEnabled(rctx, it)
             }
-            if (!com.vlesscardvpn.core.Report.available()) Text("В этой сборке отправка отчётов отключена — только приём общего облака.", fontSize = 12.sp, color = androidx.compose.ui.graphics.Color.Gray)
+            if (!com.vlesscardvpn.core.Report.available()) Text("В этой сборке отправка отчётов отключена — только приём общего облака.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             com.vlesscardvpn.core.Report.lastText(rctx).takeIf { it.isNotEmpty() }?.let { Text(it, fontSize = 12.sp) }
         }
         Group("Облако (ваш GitHub)") {
@@ -73,7 +73,7 @@ fun SettingsScreen() {
             var token by remember { mutableStateOf("") }
             var on by remember { mutableStateOf(com.vlesscardvpn.core.CloudSync.configured(cctx)) }
             Text("Маски, обход DPI, результаты серверов и мини-нейросеть сохраняются в ваш закрытый репозиторий GitHub (раз в 3 часа, если что-то изменилось) и возвращаются на новом телефоне или после переустановки — заново учить маски не надо. " +
-                "Нужен токен GitHub (Fine-grained, доступ только к этому репозиторию, Contents: Read and write). На телефоне токен шифруется ключом Android Keystore. Копия в GitHub переносимая, но не зашифрованная: в ней могут быть ключи серверов и ссылки подписок. Используйте только закрытый репозиторий.", fontSize = 12.sp, color = androidx.compose.ui.graphics.Color.Gray)
+                "Нужен токен GitHub (Fine-grained, доступ только к этому репозиторию, Contents: Read and write). На телефоне токен шифруется ключом Android Keystore. Копия в GitHub переносимая, но не зашифрованная: в ней могут быть ключи серверов и ссылки подписок. Используйте только закрытый репозиторий.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             androidx.compose.material3.OutlinedTextField(repo, { repo = it }, singleLine = true, modifier = Modifier.fillMaxWidth(), label = { Text("Репозиторий (имя/репо)") })
             androidx.compose.material3.OutlinedTextField(token, { token = it }, singleLine = true, modifier = Modifier.fillMaxWidth(),
                 visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(), label = { Text(if (on) "Токен сохранён (ввести новый)" else "Токен GitHub") })
@@ -91,7 +91,7 @@ fun SettingsScreen() {
         Group("Обновление") {
             val upd by com.vlesscardvpn.core.Updater.state.collectAsState()
             val uctx = androidx.compose.ui.platform.LocalContext.current
-            Text("Версия ${com.vlesscardvpn.BuildConfig.VERSION_NAME}. Новые версии проверяются сами (раз в 6 часов) и ставятся отсюда — без GitHub и браузера.", fontSize = 12.sp, color = androidx.compose.ui.graphics.Color.Gray)
+            Text("Версия ${com.vlesscardvpn.BuildConfig.VERSION_NAME}. Новые версии проверяются сами (раз в 6 часов) и ставятся отсюда — без GitHub и браузера.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             if (upd.text.isNotEmpty()) Text(upd.text, fontSize = 13.sp)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(onClick = { com.vlesscardvpn.core.Updater.check(force = true, ctx = uctx) }) { Text("Проверить") }
@@ -99,6 +99,10 @@ fun SettingsScreen() {
             }
         }
         Group("Оформление") {
+            Toggle("Море на фоне", "Спокойное морское оформление. AMOLED остаётся чёрным; включение моря переключит его на обычную тёмную тему", s.oceanBackground && s.theme != "amoled") { v ->
+                set { it.copy(oceanBackground = v, theme = if (v && it.theme == "amoled") "dark" else it.theme) }
+            }
+            Toggle("Анимация волн", "Не чаще 20 кадров/с. Замирает в фоне, при экономии энергии, низком заряде, нагреве и выключенной системной анимации; фон остаётся виден", s.oceanMotion) { v -> set { it.copy(oceanMotion = v) } }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 listOf("dark" to "Тёмная", "amoled" to "AMOLED", "you" to "Material You").forEach { (id, t) ->
                     if (id != "you" || Build.VERSION.SDK_INT >= 31) FilterChip(selected = s.theme == id, onClick = { set { it.copy(theme = id) } }, label = { Text(t) })
@@ -247,7 +251,7 @@ fun SettingsScreen() {
         Toggle("GPS под страну сервера", "Пока включён VPN, телефон «окажется» в столице страны сервера (подмена местоположения Android). Нужно выбрать VLESS Card в Параметрах разработчика → «Приложение для фиктивных местоположений»", s.gpsSpoof) { v -> set { it.copy(gpsSpoof = v) }; if (!v) com.vlesscardvpn.core.GpsMock.stop(ctx) }
         if (s.gpsSpoof) {
             val g by com.vlesscardvpn.core.GpsMock.state.collectAsState()
-            if (g.isNotEmpty()) Text(g, fontSize = 12.sp, color = Color.Gray)
+            if (g.isNotEmpty()) Text(g, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             TextButton(onClick = { com.vlesscardvpn.core.GpsMock.openDevSettings(ctx) }) { Text("Открыть параметры разработчика") }
         }
         Toggle("Фоновое ускорение", "Само готовит серверы и маски при запуске, а при подключении раз в 20 минут проверяет и переходит на более быстрые. На мобильном — экономно", s.autoOptimize) { v -> set { it.copy(autoOptimize = v) } }
@@ -352,7 +356,7 @@ fun SettingsScreen() {
         var url by remember(s.testUrl) { mutableStateOf(s.testUrl) }
         OutlinedTextField(url, { v -> url = v; if (v.startsWith("https://")) set { it.copy(testUrl = v) } }, label = { Text("Адрес для пинга") }, singleLine = true, modifier = Modifier.fillMaxWidth())
         }
-        Text(XrayCore.version(), fontSize = 12.sp, color = Color.Gray)
+        Text(XrayCore.version(), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
     if (appsDialog) AppsDialog(s, onDismiss = { appsDialog = false }) { apps, only -> set { it.copy(apps = apps, onlyApps = only) } }
     if (wipeDialog) AlertDialog(onDismissRequest = { wipeDialog = false },
@@ -383,7 +387,7 @@ fun AppsDialog(s: Settings, onDismiss: () -> Unit, onSave: (List<String>, Boolea
                         Row(Modifier.fillMaxWidth().clickable { chosen = if (a.pkg in chosen) chosen - a.pkg else chosen + a.pkg },
                             verticalAlignment = Alignment.CenterVertically) {
                             Checkbox(a.pkg in chosen, { chosen = if (it) chosen + a.pkg else chosen - a.pkg })
-                            Column { Text(a.label, fontSize = 14.sp); Text(a.pkg, fontSize = 11.sp, color = Color.Gray) }
+                            Column { Text(a.label, fontSize = 14.sp); Text(a.pkg, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) }
                         }
                     }
                 }
@@ -418,10 +422,10 @@ private val folded = androidx.compose.runtime.mutableStateMapOf<String, Boolean>
     }
 }
 @Composable private fun Section(t: String) = Text(t, fontWeight = FontWeight.SemiBold, fontSize = 16.sp, modifier = Modifier.padding(top = 8.dp))
-@Composable private fun Hint(t: String) = Text(t, fontSize = 12.sp, color = Color.Gray)
+@Composable private fun Hint(t: String) = Text(t, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
 
 @Composable private fun Toggle(t: String, hint: String?, v: Boolean, on: (Boolean) -> Unit) =
     Row(verticalAlignment = Alignment.CenterVertically) {
-        Column(Modifier.weight(1f)) { Text(t, fontSize = 14.sp); if (hint != null) Text(hint, fontSize = 11.sp, color = Color.Gray) }
+        Column(Modifier.weight(1f)) { Text(t, fontSize = 14.sp); if (hint != null) Text(hint, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) }
         Switch(v, on)
     }
