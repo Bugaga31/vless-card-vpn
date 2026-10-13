@@ -33,7 +33,7 @@ jobs:
           chmod +x gradlew
           bash tools/test-security-result-parser.sh
           PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p 'test_cloud_learning.py'
-          ./gradlew -PbetaPreview=true -PsplitAbi=true --no-daemon --max-workers=2 :app:testDebugUnitTest :app:assembleRelease :security-test-probe:assembleDebug
+          ./gradlew -PbetaPreview=true -PemulatorAbis=true -PsplitAbi=true --no-daemon --max-workers=2 :app:testDebugUnitTest :app:assembleRelease :security-test-probe:assembleDebug
       - name: Sign with persistent Beta key (v1+v2+v3)
         env:
           KS_B64: ${{ secrets.BETA_KEYSTORE_B64 }}
@@ -63,6 +63,10 @@ jobs:
           $BT/zipalign -c -p 4 release/VLESS-Card-Beta.apk
           $BT/aapt2 dump badging release/VLESS-Card-Beta.apk | grep -E "^package|application-label:|native-code"
           unzip -tq release/VLESS-Card-Beta.apk
+          # Same signed universal APK used by launch gates must include native emulator libraries.
+          for lib in libgojni.so libhev-socks5-tunnel.so; do
+            unzip -l release/VLESS-Card-Beta.apk | grep -q "lib/x86_64/$lib"
+          done
           $BT/apksigner verify --print-certs -v release/VLESS-Card-Beta.apk | grep -E "key size|SHA-256 digest"
           $BT/apksigner verify --print-certs -v release/VLESS-Card-Beta.apk | grep -q "key size (bits): 2048"
           unzip -l release/VLESS-Card-Beta.apk | grep -E "META-INF/.*\.(RSA|SF)$"
@@ -143,7 +147,7 @@ jobs:
           read T F < tests.txt || true
           NOTES=../docs/release-1.$V.md; [ -f "$NOTES" ] || NOTES=../docs/release-1.0.$D.md; [ -f "$NOTES" ] || NOTES=../docs/beta-1.0.$D.md
           [ -f "$NOTES" ] || NOTES=/dev/null
-          { cat "$NOTES"; echo; echo "### Автоматические проверки этой сборки"; echo "- JVM-тесты: $T, ошибок: $F"; echo "- Подписи v1 + v2 + v3, постоянный ключ Beta (следующие версии ставятся поверх)"; echo "- Файл *-arm64.apk — то же приложение только для 64-битных телефонов (почти все с 2017 года), качать примерно вдвое меньше"; echo "- Суммы SHA-256 обоих файлов — в SHA256SUMS-Beta.txt"; echo "- Универсальный файл установлен и запущен на эмуляторах Android 11 и 14 (ARM-трансляция x86_64)"; echo "- Реальный телефон и сети РФ этим не проверяются"; } > notes.md
+          { cat "$NOTES"; echo; echo "### Автоматические проверки этой сборки"; echo "- JVM-тесты: $T, ошибок: $F"; echo "- Подписи v1 + v2 + v3, постоянный ключ Beta (следующие версии ставятся поверх)"; echo "- Файл *-arm64.apk — то же приложение только для 64-битных телефонов (почти все с 2017 года), качать примерно вдвое меньше"; echo "- Суммы SHA-256 обоих файлов — в SHA256SUMS-Beta.txt"; echo "- Универсальный файл установлен и запущен на эмуляторах Android 11 и 14 (нативный x86_64, без ARM-трансляции)"; echo "- Реальный телефон и сети РФ этим не проверяются"; } > notes.md
           case "$VERSION" in
             release-build-*) gh release create "v1.$V" VLESS-Card-Beta-1.$V.apk VLESS-Card-Beta-1.$V-arm64.apk SHA256SUMS-Beta.txt \
                 --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --latest \
