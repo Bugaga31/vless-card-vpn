@@ -32,9 +32,12 @@ object XrayConfigBuilder {
 
     /** Indices of the servers for heavy traffic: really measured download ≥ 60% of the fastest, YouTube not failed, at most 2. */
     fun heavyOf(kbps: List<Int>, yt: List<Boolean?>): Set<Int> {
-        val best = kbps.maxOrNull() ?: 0
-        if (best <= 0 || kbps.size < 2) return emptySet()
-        return kbps.indices.filter { kbps[it] > 0 && kbps[it] * 10 >= best * 6 && yt.getOrNull(it) != false }.sortedByDescending { kbps[it] }.take(2).toSet()
+        if (kbps.size < 2) return emptySet()
+        // A very fast server that failed YouTube must not raise the threshold for the usable ones.
+        val usable = kbps.indices.filter { kbps[it] > 0 && yt.getOrNull(it) != false }
+        val best = usable.maxOfOrNull { kbps[it] } ?: return emptySet()
+        return usable.filter { kbps[it].toLong() * 10 >= best.toLong() * 6 }
+            .sortedByDescending { kbps[it] }.take(2).toSet()
     }
 
     val RU_DOMAINS = listOf("geosite:category-ru", "domain:ru", "domain:su", "domain:xn--p1ai")

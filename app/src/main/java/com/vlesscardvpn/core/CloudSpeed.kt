@@ -55,8 +55,10 @@ object CloudSpeed {
         netFam = fam
     }
 
-    /** Other phones here saw it answer the ping but carry nothing, again and again: blocked on this operator. */
-    fun blocked(s: Server, n: Map<String, IntArray> = net): Boolean = n[Report.serverKey(s)]?.let { it[2] >= 2 && it[1] < 25 } == true
+    /** Only sustained failures on this operator justify skipping it; 1–2 unlucky checks do not. */
+    fun blocked(s: Server, n: Map<String, IntArray> = net): Boolean = n[Report.serverKey(s)]?.let {
+        it.size >= 3 && it[2] >= 5 && ServerChoice.successChance(it[1], it[2]) < 0.25
+    } == true
 
     /** Best known speed: this operator's phones first (if it mostly works there), else the GitHub measurement. */
     fun speedOf(key: String, gh: Map<String, Int> = kbps, n: Map<String, IntArray> = net): Int =
@@ -104,6 +106,7 @@ object CloudSpeed {
         if (speeds.isEmpty() && here.isEmpty()) return emptyList()
         val ids = skip.map { it.id }.toHashSet()
         return pinged.filter { it.id !in ids && !blocked(it, here) }.map { it to speedOf(Report.serverKey(it), speeds, here) }
-            .filter { it.second >= min }.sortedByDescending { it.second }.take(n).map { it.first }
+            .filter { it.second >= min }.sortedByDescending { it.second }.map { it.first }
+            .let { ServerChoice.diverse(it, n) }
     }
 }

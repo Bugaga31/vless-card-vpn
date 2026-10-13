@@ -16,7 +16,7 @@ class R124Test {
 
     @Test fun netParseBlockedSpeed() {
         val a = srv(1); val b = srv(2); val c = srv(3)
-        val n = CloudSpeed.parseNet("""{"${Report.serverKey(a)}":[8000,90,4],"${Report.serverKey(b)}":[0,0,3],"${Report.serverKey(c)}":[0,0,1]}""")
+        val n = CloudSpeed.parseNet("""{"${Report.serverKey(a)}":[8000,90,4],"${Report.serverKey(b)}":[0,0,5],"${Report.serverKey(c)}":[0,0,1]}""")
         assertFalse(CloudSpeed.blocked(a, n)); assertTrue(CloudSpeed.blocked(b, n)); assertFalse(CloudSpeed.blocked(c, n)) // one check is not enough
         // operator speed beats the GitHub one; unknown here → GitHub
         assertEquals(8000, CloudSpeed.speedOf(Report.serverKey(a), mapOf(Report.serverKey(a) to 100000), n))

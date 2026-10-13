@@ -358,7 +358,8 @@ object Actions {
         batch.flush()
         // which of the TCP-reachable ones get the (slower) real check: the mini model's favourites first, then by ping
         val alive = list.filter { (tcp[it.id] ?: 0) > 0 }.let { l -> runCatching { Brain.load(app) }; val now = Store.state.value
-            if (Brain.seen >= 50 && l.size > realLimit) Brain.order(Net.key(app), l) { now.state(it) } else l.sortedBy { tcp[it.id] } }.take(realLimit)
+            if (Brain.seen >= 50 && l.size > realLimit) Brain.order(Net.key(app), l) { now.state(it) } else l.sortedBy { tcp[it.id] } }
+            .let { ServerChoice.diverse(it, realLimit) }
         // one attempt for all (fast), a second one only for those that failed although TCP answers
         var working = realTest(alive, "Проверка через Xray", big, attempts = 1)
         val again = Store.state.value.let { s -> alive.filter { !s.state(it).works } }
@@ -1042,8 +1043,8 @@ object Actions {
         val pinged = list.filter { (tcp[it.id] ?: 0) > 0 }.sortedBy { tcp[it.id] }
         runCatching { CloudSpeed.refresh(app) }
         // servers other phones on this operator found blocked are skipped, the next nearest take their place
-        val near = pinged.filterNot { runCatching { CloudSpeed.blocked(it) }.getOrDefault(false) }.take(30)
-            .let { if (it.size < 10) pinged.take(30) else it }  // too few left: the cloud may be wrong, test the nearest anyway
+        val near = ServerChoice.diverse(pinged.filterNot { runCatching { CloudSpeed.blocked(it) }.getOrDefault(false) }, 30)
+            .let { if (it.size < 10) ServerChoice.diverse(pinged, 30) else it }  // too few left: the cloud may be wrong, test the nearest anyway
         // plus up to 10 the cloud measured as fast (real download through them), even if a bit farther
         val fast = runCatching { CloudSpeed.pick(pinged, near) }.getOrDefault(emptyList())
         val ok = realTest(near + fast, if (fast.isEmpty()) "Авто: проверяю 30 ближайших" else "Авто: проверяю 30 ближайших и ${fast.size} быстрых по облаку", big = true, attempts = 1)
@@ -1107,22 +1108,23 @@ object Actions {
         if (base == Int.MAX_VALUE || phone.isEmpty()) return base
         val taste = ((phone + s.id).hashCode().toLong() and 0x7fffffff) % 1000 / 1000.0 * 0.2
         val others = ((Report.load[Report.serverKey(s)] ?: 0) - if (ss.selected) 1 else 0).coerceAtLeast(0)
-        return (base * (1 + taste + minOf(1.0, others * 0.25)) * operatorFactor(Report.serverKey(s))).toInt()
+        return (base * (1 + taste + minOf(1.0, others * 0.25)) * operatorFactor(Report.serverKey(s)) * ServerChoice.stayFactor(ss.selected)).toInt()
     }
 
     /**
      * What other phones on this operator saw (cloud «net»: [kbit/s, % worked, checks]): mostly working there → up to
-     * 15% better, mostly failing → up to 2× worse. Small on purpose: this phone's own measurement still decides.
+     * 15% better, mostly failing → up to 2× worse. Weighted by sample count (n / (n + 6)); this phone still decides.
      */
     fun operatorFactor(key: String, net: Map<String, IntArray> = CloudSpeed.net): Double {
         val e = net[key] ?: return 1.0
-        if (e[2] < 2) return 1.0
-        return when {
+        if (e.size < 3 || e[2] < 2) return 1.0
+        val target = when {
             e[1] >= 80 -> 0.85
             e[1] < 25 -> 2.0
             e[1] < 50 -> 1.3
             else -> 1.0
         }
+        return 1.0 + ServerChoice.evidence(e[2]) * (target - 1.0)
     }
 
     /** Servers where Telegram did not fail ([tg] true or not checked yet); all of them if none is left. */
