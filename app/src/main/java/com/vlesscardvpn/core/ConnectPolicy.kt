@@ -14,9 +14,11 @@ object ConnectPolicy {
     const val NEXT = 16
     const val BACKGROUND = 24
     fun candidates(list: List<Server>, cloud: List<Server>, remembered: Set<String>,
-                   score: (Server) -> Int): List<Server> {
+                   cooling: (Server) -> Boolean = { false }, score: (Server) -> Int): List<Server> {
         val byId = list.associateBy { it.id }
         val ranked = list.filter { it.id in remembered }.sortedBy(score) + cloud.mapNotNull { byId[it.id] } + list.sortedBy(score)
-        return ServerChoice.diverse(ranked, FIRST)
+        val unique = ranked.distinctBy { it.id }
+        val (deferred, ready) = unique.partition(cooling)
+        return ServerChoice.diverse(ready + deferred, FIRST)
     }
 }

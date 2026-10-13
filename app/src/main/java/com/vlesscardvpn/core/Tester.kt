@@ -118,7 +118,7 @@ object Tester {
     }
 
     /** Requests through a local SOCKS port (the tester's or the running VPN's). */
-    fun probeSocks(port: Int, testUrl: String, big: Boolean = true, youtube: Boolean = true, attempts: Int = 2, budgetMs: Long = 0): Probe {
+    fun probeSocks(port: Int, testUrl: String, big: Boolean = true, youtube: Boolean = true, attempts: Int = 2, budgetMs: Long = 0, onCall: ((okhttp3.Call) -> Unit)? = null): Probe {
         val client = (if (attempts == 1) fast else base).newBuilder().apply {
             if (budgetMs > 0) { callTimeout(budgetMs, TimeUnit.MILLISECONDS); connectTimeout(minOf(budgetMs, 2500), TimeUnit.MILLISECONDS); readTimeout(budgetMs, TimeUnit.MILLISECONDS) }
         }.dispatcher(okhttp3.Dispatcher()).connectionPool(okhttp3.ConnectionPool(2, 30, TimeUnit.SECONDS))
@@ -130,7 +130,7 @@ object Tester {
                 if (Thread.currentThread().isInterrupted) throw java.io.InterruptedIOException("Проверка отменена")
                 val t0 = System.nanoTime()
                 runCatching {
-                    client.newCall(Request.Builder().url(testUrl).header("User-Agent", UA).build()).execute().use { r ->
+                    client.newCall(Request.Builder().url(testUrl).header("User-Agent", UA).build()).also { onCall?.invoke(it) }.execute().use { r ->
                         check(r.code in 200..399) { "HTTP ${r.code}" }
                         r.body?.byteStream()?.use { it.read(ByteArray(4096)) }
                     }
@@ -336,17 +336,18 @@ object Tester {
                         val one = XrayCore.Instance("test1")
                         val p = freePorts(1)
                         val ok = runCatching { one.start(XrayConfigBuilder.testConfig(listOf(v), p, byeDpiPort, dpiPorts)) }.isSuccess && one.running
-                        try { report(idx[i], if (ok) kotlinx.coroutines.runInterruptible { probeSocks(p[0], testUrl, big = big, youtube = youtube, attempts = attempts, budgetMs = budgetMs) } else Probe(0, null, null, "конфиг не принят ядром")) }
+                        try { report(idx[i], if (ok) CancellableProbe.run { bind -> probeSocks(p[0], testUrl, big = big, youtube = youtube, attempts = attempts, budgetMs = budgetMs, onCall = { call -> bind { call.cancel() } }) } else Probe(0, null, null, "конфиг не принят ядром")) }
                         finally { one.stop() }
                     }
                     continue
                 }
                 try {
                     coroutineScope {
-                        val sem = Semaphore(PowerPolicy.cap(parallel, PhonePower.state.value.realParallel))
-                        chunk.indices.map { i ->
-                            async { sem.withPermit { report(idx[i], if (skipped(idx[i])) SKIPPED else kotlinx.coroutines.runInterruptible { probeSocks(ports[i], testUrl, big = big, youtube = youtube, attempts = attempts, budgetMs = budgetMs) }) } }
-                        }.awaitAll()
+                        ProbeRace.run(chunk.indices.toList(), PowerPolicy.cap(parallel, PhonePower.state.value.realParallel), stopAfter,
+                            skip = { i -> skipped(idx[i]) },
+                            probe = { i -> CancellableProbe.run { bind -> probeSocks(ports[i], testUrl, big = big, youtube = youtube,
+                                attempts = attempts, budgetMs = budgetMs, onCall = { call -> bind { call.cancel() } }) } },
+                            onEach = { i, p -> report(idx[i], p) })
                     }
                 } finally { core.stop() }
             }
