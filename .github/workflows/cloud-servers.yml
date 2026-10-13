@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
-    paths: ['scripts/cloud_servers.py', 'scripts/cloud_reports.py', '.github/workflows/cloud-servers.yml']
+    paths: ['scripts/cloud_servers.py', 'scripts/cloud_reports.py', 'scripts/cloud_real.py', '.github/workflows/cloud-servers.yml']
 permissions:
   contents: write
   actions: write  # the run starts the next one itself: GitHub's cron here did not fire at all

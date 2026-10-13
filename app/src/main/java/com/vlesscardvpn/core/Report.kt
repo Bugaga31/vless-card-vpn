@@ -97,18 +97,21 @@ object Report {
         }
     }
 
-    /** From the autopilot (not in eco mode): pull the shared result and send this phone's report, each at most every 6 h. */
-    fun auto(ctx: Context) {
+    /** From the autopilot: pull every 20 min, report hourly when changed (6 h otherwise). */
+    @Synchronized fun auto(ctx: Context) {
         val app = ctx.applicationContext; val p = prefs(app); val now = System.currentTimeMillis()
         if (busy) return
         val pull = now - p.getLong("pulled", 0) > PULL
         if (!p.contains("sent")) p.edit().putLong("sent", now - EVERY + 30 * 60_000L).apply() // first report ~30 min after install
         val since = now - p.getLong("sent", now)
         val send = available() && enabled(app) && (since > EVERY || since > CHANGED && digest(app) != p.getInt("digest", 0))
-        if (!pull && !send) return
+        val applyCached = p.contains("cloud") && p.getString("appliedNet", "") != Net.key(app)
+        if (!pull && !send && !applyCached) return
         busy = true
         scope.launch {
             try {
+                // Network switch needs no download: the saved snapshot contains all operators.
+                if (applyCached) runCatching { applyCloud(app, p.getString("cloud", "").orEmpty()) }
                 if (pull) runCatching { pull(app) }.onSuccess { p.edit().putLong("pulled", now).apply() }.onFailure { p.edit().putLong("pulled", now - PULL + 5 * 60_000L).apply() }
                 if (send) runCatching { send(app) }.onSuccess { p.edit().putLong("sent", now).putInt("digest", digest(app)).putString("status", "Отчёт отправлен " + hhmm(now)).apply() }
                     .onFailure { p.edit().putLong("sent", now - EVERY + 3600_000L).putString("status", "Отчёт не ушёл: ${Errors.human(it)}").apply() }
@@ -143,21 +146,45 @@ object Report {
     /** Shared result: the merged model and the network setup for this operator (applied once per new cloud version). */
     private fun pull(ctx: Context) {
         val p = prefs(ctx)
-        val text = call { c -> c.newCall(Request.Builder().url(DATA).apply { p.getString("etag", null)?.let { header("If-None-Match", it) } }.build()).execute().use { r ->
+        val result = call { c -> c.newCall(Request.Builder().url(DATA).apply {
+            if (p.contains("cloud")) p.getString("etag", null)?.let { header("If-None-Match", it) }
+        }.build()).execute().use { r ->
             if (r.code == 304) return@use null
             if (r.code != 200) error("нет данных ${r.code}")
-            r.header("ETag")?.let { p.edit().putString("etag", it).apply() }; r.body!!.string() } } ?: return
-        val o = JSONObject(text); val stamp = o.optString("stamp")
-        if (stamp.isEmpty() || stamp == p.getString("stamp", "")) return
-        o.optJSONObject("brain")?.let { Brain.blend(it, o.optInt("phones")) }
-        o.optJSONObject("load")?.let { l -> load = parseLoad(l.toString()); p.edit().putString("load", l.toString()).apply() }
-        val fam = Net.family(Net.key(ctx))
-        // what other phones on this operator measured: fast servers and the ones blocked here
-        o.optJSONObject("net")?.optJSONObject(fam)?.let { n -> CloudSpeed.setNet(ctx, fam, n.toString()) }
-        o.optJSONObject("profiles")?.optString(fam)?.takeIf { it.startsWith(NetProfile.SCHEME) }?.let { link ->
-            val prof = runCatching { NetProfile.decode(link) }.getOrNull()
-            if (prof != null && !prof.isEmpty) Store.update { st -> NetProfile.apply(st, prof, Net.key(ctx)).first }
+            r.body!!.string() to r.header("ETag") } }
+        if (result == null) {
+            p.getString("cloud", null)?.let { applyCloud(ctx, it) }
+            return
         }
+        applyCloud(ctx, result.first)
+        // Save only after successful parsing/application, otherwise the next 304 could hide bad data.
+        p.edit().putString("cloud", result.first).putString("etag", result.second).apply()
+    }
+
+    fun needsNetwork(stamp: String, appliedStamp: String, key: String, appliedKey: String): Boolean =
+        stamp != appliedStamp || key != appliedKey
+
+    private fun applyCloud(ctx: Context, text: String) {
+        val p = prefs(ctx)
+        val o = JSONObject(text); val stamp = o.optString("stamp")
+        require(stamp.isNotEmpty()) { "облако без версии" }
+        val key = Net.key(ctx); val fam = Net.family(key)
+        if (needsNetwork(stamp, p.getString("netStamp", "").orEmpty(), key, p.getString("appliedNet", "").orEmpty())) {
+            CloudSpeed.cacheNet(ctx, o.optJSONObject("net")?.toString() ?: "{}", fam)
+            // Returning to a network must not count the same cloud masks as new successful tests.
+            if (p.getString("profileStamp:$key", "") != stamp) {
+                o.optJSONObject("profiles")?.optString(fam)?.takeIf { it.startsWith(NetProfile.SCHEME) }?.let { link ->
+                    val prof = runCatching { NetProfile.decode(link) }.getOrNull()
+                    if (prof != null && !prof.isEmpty) Store.update { st -> NetProfile.apply(st, prof, key).first }
+                }
+                p.edit().putString("profileStamp:$key", stamp).apply()
+            }
+            p.edit().putString("netStamp", stamp).putString("appliedNet", key).apply()
+        }
+        if (stamp == p.getString("stamp", "")) return
+        o.optJSONObject("brain")?.let { Brain.blend(it, o.optInt("phones")) }
+        load = parseLoad(o.optJSONObject("load")?.toString() ?: "{}")
+        p.edit().putString("load", o.optJSONObject("load")?.toString() ?: "{}").apply()
         // servers that really worked on phones: a small list of their own, tried by the autopilot's rescue
         o.optJSONArray("servers")?.let { a -> (0 until minOf(a.length(), 40)).mapNotNull { LinkParser.parse(a.optString(it), PHONES) } }
             ?.takeIf { it.isNotEmpty() }?.let { list -> Store.update { st ->

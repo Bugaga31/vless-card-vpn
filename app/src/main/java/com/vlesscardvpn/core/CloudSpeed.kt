@@ -13,6 +13,7 @@ object CloudSpeed {
     const val URL = "https://raw.githubusercontent.com/Bugaga31/vless-card-vpn/servers/speed.json"
     @Volatile var kbps: Map<String, Int> = emptyMap()
     private var fetchedAt = 0L
+    private var attemptedAt = 0L
 
     fun parse(json: String): Map<String, Int> = runCatching {
         JSONObject(json).getJSONObject("kbps").let { o -> o.keys().asSequence().associateWith { o.optInt(it) }.filterValues { it > 0 } }
@@ -35,10 +36,22 @@ object CloudSpeed {
         net = parseNet(json); netFam = fam
     }
 
-    private fun loadNet(ctx: Context) {
+    /** One complete snapshot: absent operators must not retain obsolete evidence. */
+    fun netForFamily(json: String, fam: String): Map<String, IntArray> = runCatching {
+        JSONObject(json).optJSONObject(fam)?.let { parseNet(it.toString()) } ?: emptyMap()
+    }.getOrDefault(emptyMap())
+
+    fun cacheNet(ctx: Context, json: String, fam: String) {
+        ctx.getSharedPreferences("cloud_speed", Context.MODE_PRIVATE).edit().putString("net_json", json).apply()
+        net = netForFamily(json, fam); netFam = fam
+    }
+
+    fun loadNet(ctx: Context) {
         val fam = Net.family(Net.key(ctx))
         if (fam == netFam) return
-        net = ctx.getSharedPreferences("cloud_speed", Context.MODE_PRIVATE).getString("net:$fam", null)?.let { parseNet(it) } ?: emptyMap()
+        val p = ctx.getSharedPreferences("cloud_speed", Context.MODE_PRIVATE)
+        net = p.getString("net_json", null)?.let { netForFamily(it, fam) }
+            ?: p.getString("net:$fam", null)?.let { parseNet(it) } ?: emptyMap()
         netFam = fam
     }
 
@@ -49,20 +62,37 @@ object CloudSpeed {
     fun speedOf(key: String, gh: Map<String, Int> = kbps, n: Map<String, IntArray> = net): Int =
         n[key]?.takeIf { it[0] > 0 && it[1] >= 50 }?.get(0) ?: gh[key] ?: 0
 
-    /** Fresh copy at most once an hour; offline → the saved one. Never throws, never waits more than ~4 s. */
-    fun refresh(ctx: Context) {
+    /** Cloud changes every 10 min. Errors back off for a minute; saved data remain usable offline. */
+    fun refreshDue(now: Long, fetched: Long, attempted: Long, hasCache: Boolean): Boolean =
+        (!hasCache || now < fetched || now - fetched >= 10 * 60_000L) &&
+            (attempted == 0L || now < attempted || now - attempted >= 60_000L)
+
+    @Synchronized fun refresh(ctx: Context) {
         runCatching { loadNet(ctx) }
         val p = ctx.getSharedPreferences("cloud_speed", Context.MODE_PRIVATE)
-        if (kbps.isEmpty()) p.getString("json", null)?.let { kbps = parse(it) }
-        if (System.currentTimeMillis() - fetchedAt < 3600_000L && kbps.isNotEmpty()) return
+        val cached = p.getString("json", null)
+        if (kbps.isEmpty()) cached?.let { kbps = parse(it) }
+        if (fetchedAt == 0L) fetchedAt = p.getLong("fetched", 0)
+        val now = System.currentTimeMillis()
+        if (!refreshDue(now, fetchedAt, attemptedAt, cached != null)) return
+        attemptedAt = now
         runCatching {
             val c = java.net.URL(URL).openConnection() as java.net.HttpURLConnection
             c.connectTimeout = 2500; c.readTimeout = 2500
+            if (cached != null) p.getString("etag", null)?.let { c.setRequestProperty("If-None-Match", it) }
             try {
-                if (c.responseCode == 200) {
-                    val text = c.inputStream.bufferedReader().use { it.readText() }
-                    val m = parse(text)
-                    if (m.isNotEmpty()) { kbps = m; fetchedAt = System.currentTimeMillis(); p.edit().putString("json", text).apply() }
+                when (c.responseCode) {
+                    304 -> if (cached != null) {
+                        fetchedAt = now; p.edit().putLong("fetched", now).apply()
+                    }
+                    200 -> {
+                        val text = c.inputStream.bufferedReader().use { it.readText() }
+                        // Validate before saving the ETag: a bad response must not poison the cache.
+                        JSONObject(text).getJSONObject("kbps")
+                        kbps = parse(text); fetchedAt = now
+                        p.edit().putString("json", text).putString("etag", c.getHeaderField("ETag"))
+                            .putLong("fetched", now).apply()
+                    }
                 }
             } finally { c.disconnect() }
         }
