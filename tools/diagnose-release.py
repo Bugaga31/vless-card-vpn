@@ -15,6 +15,14 @@ for filename in glob.glob('diagnostic-input/*.zip'):
    source='Android30' if '(30' in name or 'api-30' in filename else 'Android34' if '(34' in name or 'api-34' in filename else 'release'
    lines=text.splitlines()
    for i,line in enumerate(lines):
+    if any(k in line for k in ['mResumedActivity','topResumedActivity','mFocusedApp','ANR in','Application Not Responding']):
+     component=re.search(r'\b((?:com\.|android\.)[A-Za-z0-9_.$]+/[A-Za-z0-9_.$]+)',line)
+     if component:add(source+': focused activity '+component.group(1))
+     if 'ANR in' in line or 'Application Not Responding' in line:add(source+': ANR detected')
+    if 'am_anr' in line:add(source+': ANR event')
+    if 'ActivityTaskManager' in line and ('Displayed com.vlesscardvpn' in line or 'START u0' in line):
+     component=re.search(r'\b(com\.vlesscardvpn[A-Za-z0-9_.$]*/[A-Za-z0-9_.$]+)',line)
+     if component:add(source+': app activity started '+component.group(1))
     signal=re.search(r'Fatal signal (\d+) \(([A-Z0-9]+)\)',line)
     if signal: counts['fatal']+=1; add(source+': native crash '+signal.group(1)+' '+signal.group(2))
     ins=re.search(r'ndk_translation: Undefined instruction (0x[0-9a-f]+)',line)
