@@ -118,15 +118,17 @@ object Tester {
     }
 
     /** Requests through a local SOCKS port (the tester's or the running VPN's). */
-    fun probeSocks(port: Int, testUrl: String, big: Boolean = true, youtube: Boolean = true, attempts: Int = 2): Probe {
-        val client = (if (attempts == 1) fast else base).newBuilder().proxy(Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", port))).build()
+    fun probeSocks(port: Int, testUrl: String, big: Boolean = true, youtube: Boolean = true, attempts: Int = 2, budgetMs: Long = 0): Probe {
+        val client = (if (attempts == 1) fast else base).newBuilder().apply {
+            if (budgetMs > 0) { callTimeout(budgetMs, TimeUnit.MILLISECONDS); connectTimeout(minOf(budgetMs, 2500), TimeUnit.MILLISECONDS); readTimeout(budgetMs, TimeUnit.MILLISECONDS) }
+        }.proxy(Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", port))).build()
         var best = Long.MAX_VALUE; var err = ""
         repeat(attempts) {
             val t0 = System.nanoTime()
             runCatching {
                 client.newCall(Request.Builder().url(testUrl).header("User-Agent", UA).build()).execute().use { r ->
                     check(r.code in 200..399) { "HTTP ${r.code}" }
-                    r.body?.bytes()
+                    r.body?.byteStream()?.use { it.read(ByteArray(4096)) }
                 }
                 best = minOf(best, (System.nanoTime() - t0) / 1_000_000)
             }.onFailure { err = Errors.human(it) }
@@ -302,11 +304,16 @@ object Tester {
         batch: Int = 32, parallel: Int = 12, attempts: Int = 2, big: Boolean = true,
         /** Early stop: variants for which this returns true are not probed (reported as skipped). */
         skip: (Int) -> Boolean = { false },
+        stopAfter: Int = Int.MAX_VALUE,
+        budgetMs: Long = 0,
         onEach: (Int, Probe) -> Unit,
     ) = mutex.withLock {
         withContext(Bg.io) {
+            val successes = java.util.concurrent.atomic.AtomicInteger()
+            fun skipped(i: Int) = successes.get() >= stopAfter.coerceAtLeast(1) || skip(i)
+            fun report(i: Int, p: Probe) { if (p.works) successes.incrementAndGet(); onEach(i, p) }
             for (all in chunks(variants, batch)) {
-                val idx = all.filter { i -> if (skip(i)) { onEach(i, SKIPPED); false } else true }
+                val idx = all.filter { i -> if (skipped(i)) { onEach(i, SKIPPED); false } else true }
                 if (idx.isEmpty()) continue
                 val chunk = idx.map { variants[it] }
                 val ports = freePorts(chunk.size)
@@ -316,11 +323,12 @@ object Tester {
                     // A broken link must not hide the others: fall back to one instance per variant.
                     core.stop()
                     chunk.forEachIndexed { i, v ->
+                        if (skipped(idx[i])) { onEach(idx[i], SKIPPED); return@forEachIndexed }
                         val one = XrayCore.Instance("test1")
                         val p = freePorts(1)
                         val ok = runCatching { one.start(XrayConfigBuilder.testConfig(listOf(v), p, byeDpiPort, dpiPorts)) }.isSuccess && one.running
-                        onEach(idx[i], if (ok) probeSocks(p[0], testUrl, big = big, youtube = youtube, attempts = attempts) else Probe(0, null, null, "конфиг не принят ядром"))
-                        one.stop()
+                        try { report(idx[i], if (ok) kotlinx.coroutines.runInterruptible { probeSocks(p[0], testUrl, big = big, youtube = youtube, attempts = attempts, budgetMs = budgetMs) } else Probe(0, null, null, "конфиг не принят ядром")) }
+                        finally { one.stop() }
                     }
                     continue
                 }
@@ -328,7 +336,7 @@ object Tester {
                     coroutineScope {
                         val sem = Semaphore(PowerPolicy.cap(parallel, PhonePower.state.value.realParallel))
                         chunk.indices.map { i ->
-                            async { sem.withPermit { onEach(idx[i], if (skip(idx[i])) SKIPPED else probeSocks(ports[i], testUrl, big = big, youtube = youtube, attempts = attempts)) } }
+                            async { sem.withPermit { report(idx[i], if (skipped(idx[i])) SKIPPED else kotlinx.coroutines.runInterruptible { probeSocks(ports[i], testUrl, big = big, youtube = youtube, attempts = attempts, budgetMs = budgetMs) }) } }
                         }.awaitAll()
                     }
                 } finally { core.stop() }

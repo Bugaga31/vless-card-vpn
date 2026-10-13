@@ -207,7 +207,7 @@ object XrayConfigBuilder {
      */
     fun vpnConfig(servers: List<Pair<Server, Mask?>>, settings0: Settings, byeDpiPort: Int?, socks: SocksAuth = SocksAuth(settings0.socksPort),
                   dpiPorts: Map<String, Int> = emptyMap(), listen: String = "127.0.0.1", httpPort: Int? = null, warpHop: Server? = null,
-                  heavy: Set<Int> = emptySet()): String {
+                  heavy: Set<Int> = emptySet(), serviceRoutes: Map<String, List<String>> = emptyMap()): String {
         // Auto: servers when there are working ones, otherwise the DPI engine alone.
         val settings = if (settings0.mode == Mode.AUTO) settings0.copy(mode = if (servers.isEmpty()) Mode.BYEDPI else Mode.SERVERS) else settings0
         require(settings.mode == Mode.BYEDPI || servers.isNotEmpty()) { "Не выбран ни один сервер" }
@@ -275,6 +275,13 @@ object XrayConfigBuilder {
         if (settings.alwaysDirect.isNotEmpty()) rules.put(JSONObject().put("domain", JSONArray(settings.alwaysDirect.map { "domain:$it" })).put("outboundTag", "direct"))
         if (settings.alwaysVpn.isNotEmpty()) rules.put(toMain(JSONObject().put("domain", JSONArray(settings.alwaysVpn.map { "domain:$it" }))))
         // AI services (Gemini, ChatGPT, Claude…) refuse Russian addresses: always through the servers, never direct or via the DPI bypass
+        val servicePools = if (useServers && warpHop == null) com.vlesscardvpn.core.ServiceRoutes.indices(servers.map { it.first.id }, serviceRoutes) else emptyMap()
+        servicePools.forEach { (id, pool) ->
+            val target = com.vlesscardvpn.core.ServiceRoutes.targets.first { it.id == id }
+            val rule = JSONObject().put("domain", JSONArray(target.domains))
+            if (pool.size == 1) rule.put("outboundTag", "$PROXY_PREFIX${pool.first()}") else rule.put("balancerTag", "service-$id")
+            rules.put(rule)
+        }
         if (useServers) rules.put(toMain(JSONObject().put("domain", JSONArray(com.vlesscardvpn.core.AppWatch.AI_DOMAINS))))
         if (settings.blockAds) rules.put(JSONObject().put("domain", JSONArray(listOf("geosite:category-ads-all") + YT_ADS)).put("outboundTag", "block"))
         if (settings.mode == Mode.HYBRID && hybridDomains(settings).isNotEmpty())
@@ -305,6 +312,10 @@ object XrayConfigBuilder {
             // fallback of «heavy» is the whole balancer pool's first server: a dead fast server never stops the video
             if (heavyOn) bals.put(JSONObject().put("tag", "heavy").put("selector", JSONArray(heavy.sorted().map { "$PROXY_PREFIX$it" }))
                 .put("strategy", strategy()).put("fallbackTag", "$PROXY_PREFIX${heavy.minOrNull() ?: 0}"))
+            servicePools.filterValues { it.size > 1 }.forEach { (id, pool) ->
+                bals.put(JSONObject().put("tag", "service-$id").put("selector", JSONArray(pool.map { "$PROXY_PREFIX$it" }))
+                    .put("strategy", strategy()).put("fallbackTag", "$PROXY_PREFIX${pool.first()}"))
+            }
             routing.put("balancers", bals)
             val probe = settings.testUrl
             if (settings.balance == Balance.LEAST_LOAD) {

@@ -124,6 +124,13 @@ object Report {
         }
     }
 
+    /** Apply saved public hints now; the refresh runs asynchronously and never gates connection. */
+    fun prime(ctx: Context) {
+        if (!enabled(ctx)) return
+        prefs(ctx).getString("cloud", null)?.let { runCatching { applyCloud(ctx, it) } }
+        auto(ctx)
+    }
+
     /** Changes when there is something new to tell: problems in the journal, masks learned, servers that worked. */
     private fun digest(ctx: Context): Int {
         val st = Store.state.value
@@ -156,7 +163,7 @@ object Report {
         }.build()).execute().use { r ->
             if (r.code == 304) return@use null
             if (r.code != 200) error("нет данных ${r.code}")
-            r.body!!.string() to r.header("ETag") } }
+            r.body!!.byteStream().use { String(BoundedInput.read(it, 2 * 1024 * 1024)) } to r.header("ETag") } }
         if (g != generation || !enabled(ctx)) return
         if (result == null) {
             p.getString("cloud", null)?.let { applyCloud(ctx, it) }

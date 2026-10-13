@@ -10,6 +10,7 @@ import org.json.JSONObject
  * so a fast server a bit farther away gets its chance; the phone's own test still decides.
  */
 object CloudSpeed {
+    val status = kotlinx.coroutines.flow.MutableStateFlow("Облако: подсказки ещё не загружены")
     const val URL = "https://raw.githubusercontent.com/Bugaga31/vless-card-vpn/servers/speed.json"
     @Volatile var kbps: Map<String, Int> = emptyMap()
     private var fetchedAt = 0L
@@ -71,6 +72,13 @@ object CloudSpeed {
         (!hasCache || now < fetched || now - fetched >= 10 * 60_000L) &&
             (attempted == 0L || now < attempted || now - attempted >= 60_000L)
 
+    /** Memory/disk only: never make «Подключить» wait for a cloud HTTP timeout. */
+    fun loadCached(ctx: Context) {
+        runCatching { loadNet(ctx) }
+        if (kbps.isEmpty()) ctx.getSharedPreferences("cloud_speed", Context.MODE_PRIVATE).getString("json", null)?.let { kbps = parse(it) }
+        status.value = if (kbps.isNotEmpty() || net.isNotEmpty()) "Облако: используются сохранённые рейтинги; подтверждение на телефоне" else "Облако: кэша рейтингов нет; используем локальное обучение"
+    }
+
     @Synchronized fun refresh(ctx: Context) {
         runCatching { loadNet(ctx) }
         val p = ctx.getSharedPreferences("cloud_speed", Context.MODE_PRIVATE)
@@ -88,18 +96,21 @@ object CloudSpeed {
                 when (c.responseCode) {
                     304 -> if (cached != null) {
                         fetchedAt = now; p.edit().putLong("fetched", now).apply()
+                        status.value = "Облако: сохранённый рейтинг подтверждён сервером"
                     }
                     200 -> {
-                        val text = c.inputStream.bufferedReader().use { it.readText() }
+                        val text = c.inputStream.use { String(BoundedInput.read(it, 2 * 1024 * 1024)) }
                         // Validate before saving the ETag: a bad response must not poison the cache.
                         JSONObject(text).getJSONObject("kbps")
                         kbps = parse(text); fetchedAt = now
+                        status.value = if (kbps.isNotEmpty()) "Облако: свежий рейтинг загружен" else "Облако: свежий рейтинг пока пуст; локальные результаты остаются"
                         p.edit().putString("json", text).putString("etag", c.getHeaderField("ETag"))
                             .putLong("fetched", now).apply()
                     }
+                    else -> error("HTTP ${c.responseCode}")
                 }
             } finally { c.disconnect() }
-        }
+        }.onFailure { status.value = "Облако недоступно: используем кэш и локальное обучение" }
     }
 
     /** Up to [n] servers from [pinged] (not in [skip]) the cloud saw download ≥ [min] kbit/s, fastest first. */

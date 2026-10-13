@@ -70,6 +70,8 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
         if (status.message.isNotEmpty()) Text(status.message, color = if (status.state == Tunnel.State.ERROR) Bad else MaterialTheme.colorScheme.onBackground,
             textAlign = TextAlign.Center, fontWeight = FontWeight.Medium)
         if (status.route.isNotEmpty()) Text(status.route, color = Color.Gray, fontSize = 13.sp, textAlign = TextAlign.Center)
+        val cloudStatus by com.vlesscardvpn.core.CloudSpeed.status.collectAsState()
+        Text(cloudStatus, color = Color.Gray, fontSize = 12.sp, textAlign = TextAlign.Center)
         val pausedUntil by Tunnel.pausedUntil.collectAsState()
         val ctx = androidx.compose.ui.platform.LocalContext.current
         if (status.state == Tunnel.State.CONNECTED) {
