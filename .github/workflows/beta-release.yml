@@ -31,6 +31,7 @@ jobs:
         run: |
           N=${VERSION#beta-build-}; export GITHUB_RUN_NUMBER=${N#release-build-}
           chmod +x gradlew
+          bash tools/test-security-result-parser.sh
           PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p 'test_cloud_learning.py'
           ./gradlew -PbetaPreview=true -PsplitAbi=true --no-daemon --max-workers=2 :app:testDebugUnitTest :app:assembleRelease :security-test-probe:assembleDebug
       - name: Sign with persistent Beta key (v1+v2+v3)
