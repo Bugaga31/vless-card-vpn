@@ -228,7 +228,8 @@ class TunnelService : VpnService() {
             val used = if (warpHop != null) withMasks.filter { it.first.protocol != "wireguard" } else withMasks
             val config = XrayConfigBuilder.vpnConfig(used, settings, bdPort, socks, set.ports,
                 listen = if (proxy && settings.lanShare) "0.0.0.0" else "127.0.0.1", httpPort = if (proxy) settings.httpPort else null, warpHop = warpHop,
-                heavy = XrayConfigBuilder.heavyOf(used.map { st.state(it.first).kbps }, used.map { st.state(it.first).ytOk }))
+                heavy = XrayConfigBuilder.heavyOf(used.map { st.state(it.first).kbps }, used.map { st.state(it.first).ytOk }),
+                serviceRoutes = com.vlesscardvpn.core.ServiceRoutes.snapshot(network, android.os.SystemClock.elapsedRealtime()))
             val c = XrayCore.Instance("vpn"); core = c
             c.start(config)
             check(c.running) { "Xray не запустился: ${c.lastStatus}" }
@@ -314,10 +315,10 @@ class TunnelService : VpnService() {
             delay(delayMs)
             val st = Store.state.value.settings
             val port = Tunnel.socks?.port ?: return@launch
-            var p = Tester.probeSocks(port, st.testUrl)
+            var p = Tester.probeSocks(port, st.testUrl, big = false, youtube = false, attempts = 1, budgetMs = 3500)
             // right after connecting the first packets may still be on their way (WireGuard/WARP handshake, a slow
             // mobile network): one calm second try before calling the route bad and starting a heal or a reconnect
-            if (!p.works) { delay(3000); if (Tunnel.socks?.port == port) p = Tester.probeSocks(port, st.testUrl) }
+            if (!p.works) { delay(3000); if (Tunnel.socks?.port == port) p = Tester.probeSocks(port, st.testUrl, big = false, youtube = false, attempts = 1, budgetMs = 3500) }
             val cur = Tunnel.status.value
             if (cur.state != Tunnel.State.CONNECTED) return@launch
             // WARP: ask Cloudflare itself whether the traffic comes through WARP (warp=on / plus), so it's clear it works.
@@ -325,7 +326,7 @@ class TunnelService : VpnService() {
                 when (Tester.warpTrace(port).let { t -> if (t == "plus" || t == "on" || t == "off") t else { delay(2000); Tester.warpTrace(port) } }) {
                 "plus" -> " · WARP+: включён ✓"; "on" -> " · WARP: включён ✓"; "off" -> " · WARP: не через Cloudflare ✗"; else -> " · WARP: Cloudflare не ответил"
             } else ""
-            val text = if (p.realMs > 0) "Интернет работает · ${p.realMs} мс · 256 КБ: ${Actions.yn(p.bigOk)} · YouTube: ${Actions.yn(p.ytOk)} · Telegram: ${Actions.yn(p.tgOk)}$warp"
+            val text = if (p.realMs > 0) "HTTPS работает · ${p.realMs} мс · скорость и сервисы проверяются в фоне$warp"
                 else "Нет ответа через выбранный маршрут (${p.error}). " + if (st.mode == Mode.AUTO && st.autoHeal) "Ищу рабочий вариант сам…" else "Проверьте серверы или включите маскировку."
             Tunnel.status.value = cur.copy(check = text, checkOk = p.works)
             runCatching { val stv = Store.state.value; com.vlesscardvpn.core.Brain.lived(Net.key(this@TunnelService), usedServers, { stv.state(it) }, p.works); com.vlesscardvpn.core.Brain.save(this@TunnelService) }
@@ -350,7 +351,7 @@ class TunnelService : VpnService() {
                 if (sinceNet < 90_000L && !netHardDone) { netHardDone = true; hardRestart("новая сеть, а интернет не пошёл", force = true); return@launch }
                 if (System.currentTimeMillis() - lastHard > 5 * 60_000L) { hardRestart("после переподключения интернет не пошёл"); return@launch }
             }
-            if (p.works) { healStep = 0; dpiHeals = 0; connectFails = 0; warmUp(); scheduleOptimize(if (com.vlesscardvpn.core.Actions.deepPending) 20_000 else 60_000); com.vlesscardvpn.core.AppWatch.start(this@TunnelService) { scope.launch { lock.withLock { connect(soft = true) } } }; watchdog(); coverTraffic(); if (serverless()) rescueLater() } else heal()
+            if (p.works) { healStep = 0; dpiHeals = 0; connectFails = 0; warmUp(); scheduleOptimize(if (com.vlesscardvpn.core.Actions.deepPending) 20_000 else 60_000); com.vlesscardvpn.core.AppWatch.start(this@TunnelService) { scope.launch { lock.withLock { connect(soft = true) } } }; watchdog(); coverTraffic(); serviceRoutes(); if (serverless()) rescueLater() } else heal()
         }
     }
 
@@ -363,6 +364,27 @@ class TunnelService : VpnService() {
                 delay(com.vlesscardvpn.core.Disguise.nextDelaySec() * 1000L)
                 if (Tunnel.status.value.state != Tunnel.State.CONNECTED || !Store.state.value.settings.coverTraffic) break
                 if (com.vlesscardvpn.core.PhonePower.refresh(this@TunnelService).allowed) com.vlesscardvpn.core.Disguise.cover()
+            }
+        }
+    }
+
+    private var serviceJob: Job? = null
+    private fun serviceRoutes() {
+        if (serviceJob?.isActive == true) return
+        serviceJob = scope.launch {
+            delay(15000)
+            var pending = false
+            while (Tunnel.status.value.state == Tunnel.State.CONNECTED) {
+                val p = com.vlesscardvpn.core.PhonePower.refresh(this@TunnelService)
+                if (p.allowLight && !p.deferTraffic && !Actions.progress.value.running) {
+                    pending = runCatching { Store.busy { Actions.checkServiceRoutes() } }.getOrDefault(false) || pending
+                    if (pending && (!Store.state.value.settings.protectActiveTraffic || !userActive())) {
+                        pending = false
+                        scope.launch { lock.withLock { connect(soft = true) } }
+                        break
+                    }
+                }
+                delay(30000)
             }
         }
     }
@@ -634,7 +656,7 @@ class TunnelService : VpnService() {
     private fun teardown(error: String?, keepTun: Boolean = false) {
         if (!keepTun) runCatching { com.vlesscardvpn.core.Traffic.tick() }
         liveJob?.cancel()
-        checkJob?.cancel(); watchJob?.cancel(); coverJob?.cancel(); if (error != null) netJob?.cancel()
+        checkJob?.cancel(); watchJob?.cancel(); coverJob?.cancel(); serviceJob?.cancel(); if (error != null) netJob?.cancel()
         if (error != null) { healJob?.cancel(); rescueJob?.cancel() }
         if (error != null) optJob?.cancel()
         if (error != null) {

@@ -99,9 +99,10 @@ object Actions {
 
     fun refreshSubscriptions(then: (() -> Unit)? = null) = launch("Обновление подписок") { doRefresh(then) }
 
-    private suspend fun doRefresh(then: (() -> Unit)? = null): String {
+    private suspend fun doRefresh(then: (() -> Unit)? = null, firstReady: (suspend (List<Server>) -> Unit)? = null): String {
         val subs = Store.state.value.settings.subscriptions
         val ok = AtomicInteger(); val total = AtomicInteger(); val done = AtomicInteger()
+        val first = java.util.concurrent.atomic.AtomicBoolean()
         step(0, subs.size)
         coroutineScope {
             val sem = Semaphore(6) // all sources at once instead of one by one (each may try 4 mirrors)
@@ -113,6 +114,7 @@ object Actions {
                         if (body != null) {
                             val list = LinkParser.parseMany(body, url).take(MAX_PER_SUB)
                             Store.replaceSource(url, list); ok.incrementAndGet(); total.addAndGet(list.size)
+                            if (list.isNotEmpty() && firstReady != null && first.compareAndSet(false, true)) firstReady(list)
                         }
                         step(done.incrementAndGet(), subs.size)
                     }
@@ -368,7 +370,8 @@ object Actions {
         return "Работают: $working из ${alive.size} доступных по TCP (всего ${list.size})"
     }
 
-    private suspend fun realTest(servers: List<Server>, title: String, big: Boolean = true, attempts: Int = 2, parallel: Int = 32): Int {
+    private suspend fun realTest(servers: List<Server>, title: String, big: Boolean = true, attempts: Int = 2, parallel: Int = 32, youtube: Boolean = true,
+                                 stopAfter: Int = Int.MAX_VALUE, budgetMs: Long = 0, onFirst: ((Server) -> Unit)? = null): Int {
         if (servers.isEmpty()) return 0
         progress.value = progress.value.copy(title = title, done = 0, total = servers.size)
         val pinned = pinCertificates(servers)
@@ -379,14 +382,16 @@ object Actions {
         val done = AtomicInteger(); val ok = AtomicInteger()
         val states = StateBatch(200)
         try {
-            Tester.real(variants, st.settings.testUrl, port, own.ports, batch = 64, parallel = parallel, big = big, attempts = attempts) { i, p ->
+            Tester.real(variants, st.settings.testUrl, port, own.ports, batch = if (onFirst != null) ConnectPolicy.FIRST else 64, parallel = parallel, big = big, youtube = youtube, attempts = attempts, stopAfter = stopAfter, budgetMs = budgetMs) { i, p ->
+                if (p == Tester.SKIPPED) return@real
                 val s = variants[i].first
-                if (p.works) ok.incrementAndGet()
+                val firstSuccess = p.works && ok.incrementAndGet() == 1
                 runCatching { Brain.learn(net, s, st.state(s), p.works) }
                 states.put(s.id) {
                     it.copy(realMs = p.realMs, bigOk = p.bigOk, ytOk = p.ytOk, tgOk = p.tgOk, checkedAt = System.currentTimeMillis(), kbps = if (p.kbps > 0) p.kbps else it.kbps,
                         okCount = it.okCount + if (p.works) 1 else 0, failCount = it.failCount + if (p.works) 0 else 1)
                 }
+                if (firstSuccess && onFirst != null) { states.flush(); onFirst(s) }
                 step(done.incrementAndGet(), variants.size)
             }
         } finally { own?.close(); states.flush(); runCatching { Brain.save(app) } }
@@ -552,28 +557,15 @@ object Actions {
      * masks for the reachable ones that don't open sites. Lighter on mobile data (fewer servers, no 256 KB download).
      */
     fun warmup() {
-        if (!PhonePower.refresh(app).allowed) return
+        runCatching { Report.prime(app); CloudSpeed.loadCached(app) }
+        scope.launch(Bg.io) { runCatching { CloudSpeed.refresh(app) } }
         val st = Store.state.value
-        if (!st.settings.autoOptimize || job?.isActive == true || Tunnel.status.value.state != Tunnel.State.IDLE) return
-        val now = System.currentTimeMillis()
-        val fresh = st.servers.count { st.state(it).works && now - st.state(it).checkedAt < 3 * 3600_000L }
-        val subsStale = st.settings.autoUpdateSubs && now - st.settings.lastSubRefresh > 12 * 3600_000L
-        if (fresh >= 5 && !subsStale) return
+        if (!PhonePower.refresh(app).allowLight || !st.settings.autoOptimize || job?.isActive == true || Tunnel.status.value.state != Tunnel.State.IDLE) return
+        if (st.servers.any { st.state(it).works }) return
         launch("Фоновая подготовка") {
-            val wifi = unmetered()
-            val notes = mutableListOf<String>()
-            if (subsStale || Store.state.value.servers.isEmpty()) notes += doRefresh()
-            if (!PhonePower.refresh(app).allowed) return@launch "Фоновая подготовка отложена: " + PhonePower.state.value.reason
-            val s1 = Store.state.value
-            if (s1.servers.count { s1.state(it).works && now - s1.state(it).checkedAt < 3 * 3600_000L } < 5)
-                notes += doTestAll(s1.servers, if (wifi) 120 else 40, big = wifi)
-            if (!PhonePower.refresh(app).allowed) return@launch "Фоновая подготовка отложена: " + PhonePower.state.value.reason
-            val s2 = Store.state.value
-            if (s2.servers.count { s2.state(it).works } < 3) {
-                val cand = s2.servers.filter { s2.state(it).tcpMs > 0 && !s2.state(it).works }.sortedBy { s2.state(it).tcpMs }.take(if (wifi) 10 else 5)
-                if (cand.isNotEmpty()) notes += doFindMasks(cand, 24)
-            }
-            "Готово к подключению: " + notes.joinToString("; ")
+            if (Store.state.value.servers.isEmpty()) doRefresh(firstReady = { list -> quickTest(list) })
+            else quickTest(Store.state.value.servers)
+            "Короткая подготовка завершена. Полный каталог и скорость проверяются после подключения"
         }
     }
 
@@ -701,16 +693,59 @@ object Actions {
         "Облегчено масок: ${before - after} из $before" + if (after < before && Tunnel.socks != null) " — переподключаюсь." else if (after == before) " (лёгкие маски здесь не прошли — тяжёлые оставлены, иначе не будет работать)." else "."
     }
 
+    private var catalogAt = -300000L
+    private suspend fun catalogWave() {
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (now - catalogAt < 5 * 60000 || !PhonePower.refresh(app).allowed || progress.value.running) return
+        catalogAt = now
+        val st = Store.state.value
+        val wave = ServerChoice.diverse(st.servers.filter { !st.state(it).selected }.sortedBy { st.state(it).checkedAt }, ConnectPolicy.BACKGROUND)
+        val states = StateBatch(); val alive = java.util.concurrent.ConcurrentHashMap<String, Int>()
+        Tester.tcp(wave, parallel = 32, timeoutMs = 1500) { s, ms -> alive[s.id] = ms; states.put(s.id) { it.copy(tcpMs = ms, checkedAt = System.currentTimeMillis()) } }
+        states.flush()
+        if (!PhonePower.refresh(app).allowed) return
+        val test = wave.filter { (alive[it.id] ?: 0) > 0 }.sortedBy { alive[it.id] }.take(6)
+        val prev = progress.value
+        try { realTest(test, "Фон: проверяю запасные маршруты", big = true, attempts = 1) } finally { progress.value = prev }
+        AppWatch.note("Фон: просмотрены ${wave.size} запасных маршрутов, через Xray проверены ${test.size}; основной туннель не ждёт этот поиск")
+    }
+
+    private var serviceCursor = 0; private var serviceAt = -300000L
+    /** Small endpoint checks also on mobile; each round is bounded and does not need Usage Access. */
+    suspend fun checkServiceRoutes(): Boolean {
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (now - serviceAt < (if (serviceCursor < ServiceRoutes.targets.size) 30000L else 5 * 60000L) || progress.value.running || !PhonePower.refresh(app).allowLight) return false
+        val st = Store.state.value; val selected = st.selected
+        if (selected.isEmpty()) return false
+        serviceAt = now
+        val target = ServiceRoutes.targets[serviceCursor++ % ServiceRoutes.targets.size]
+        val eligible = selected.filter { !target.ai || Countries.of(it.name) !in AppWatch.AI_BAD }.take(4)
+        if (eligible.isEmpty()) return false
+        val net = Net.key(app); val results = java.util.concurrent.ConcurrentHashMap<String, Int>()
+        val variants = eligible.map { it to Masks.byId(st.state(it).maskFor(net)) }
+        val (own, port) = dpiForTests(variants.map { it.second })
+        try {
+            Tester.real(variants, target.url, port, own.ports, parallel = 3, attempts = 1, big = false, youtube = false, budgetMs = ConnectPolicy.QUICK_BUDGET_MS) { i, p ->
+                results[eligible[i].id] = p.realMs.takeIf { p.works } ?: 0
+            }
+        } finally { own?.close() }
+        val changed = ServiceRoutes.update(net, target.id, results.entries.map { it.key to it.value }, now)
+        AppWatch.note("${target.title}: HTTPS доступен через ${results.values.count { it > 0 }} из ${eligible.size} маршрутов; это не проверка аккаунта")
+        return changed && selected.size > 1
+    }
+
     /** Whether the last [optimize] pass switched servers (TunnelService checks again sooner then). */
     @Volatile var lastOptimizeSwitched = false
 
     suspend fun optimize(): Boolean {
         lastOptimizeSwitched = false
         if (!PhonePower.refresh(app).allowed) return false
-        val st = Store.state.value
+        var st = Store.state.value
         if (!st.settings.autoOptimize || job?.isActive == true) return false
         if (st.settings.mode == com.vlesscardvpn.model.Mode.BYEDPI) return false
         val wifi = unmetered()
+        catalogWave()
+        st = Store.state.value
         var ytSwitch = false
         if (deepPending) {
             // connected right after the quick check: now test the rest calmly (outside the tunnel) and lighten heavy masks
@@ -718,7 +753,7 @@ object Actions {
             val prev0 = progress.value
             val s0 = Store.state.value
             val rest = s0.servers.filter { s0.state(it).tcpMs > 0 && (s0.state(it).realMs < 0 || System.currentTimeMillis() - s0.state(it).checkedAt > 6 * 3600_000L) }
-                .sortedBy { s0.state(it).tcpMs }.take(if (wifi) 60 else 24)
+                .sortedBy { s0.state(it).tcpMs }.take(if (wifi) 12 else 6)
             if (rest.isNotEmpty()) realTest(rest, "Фоновая проверка", big = true, attempts = 1)
             if (!PhonePower.refresh(app).allowed) { deepPending = true; progress.value = prev0; return false }
             lightenMasks(wifi)
@@ -749,7 +784,7 @@ object Actions {
         val bestMs = now.state(best.first()).score
         // Ping is not everything: a server that answers fast but breaks big downloads (256 KB) feels slow — video stalls.
         val selBroken = wifi && selOk.isNotEmpty() && selOk.all { now.state(it).bigOk == false } && best.any { now.state(it).bigOk == true }
-        val switch = selOk.size < sel.size || selBroken || (median > bestMs * 1.6 && median - bestMs > 150)
+        val switch = selOk.size < sel.size || selOk.size < minOf(3, best.size) || selBroken || (median > bestMs * 1.6 && median - bestMs > 150)
         lastOptimizeSwitched = switch
         android.util.Log.i("E2E", "optimize sel=${sel.size} ok=${selOk.size} median=$median best=$bestMs switch=$switch")
         val pick = if (selBroken) best.filter { now.state(it).bigOk == true } else best
@@ -843,7 +878,12 @@ object Actions {
      * «Авто»: fresh subscriptions → test → masks for the best candidates → DPI search when no server works →
      * the 5 fastest selected. Then [onReady] connects (servers, or ByeDPI if none passed).
      */
+    private val autoGeneration = AtomicInteger()
     fun autoConnect(onReady: () -> Unit) {
+        val ticket = autoGeneration.incrementAndGet()
+        val ready = { if (autoGeneration.get() == ticket) onReady() }
+        runCatching { Report.prime(app); CloudSpeed.loadCached(app) }
+        scope.launch(Bg.io) { runCatching { CloudSpeed.refresh(app) } }
         val st = Store.state.value
         val working = st.servers.filter { st.state(it).works }
         val busy = job
@@ -861,23 +901,24 @@ object Actions {
             if (!stale || job?.isActive == true) {
                 if (working.none { now - st.state(it).checkedAt < 6 * 3600_000L }) deepPending = true
                 if (Store.state.value.let { s -> s.selected.none { s.state(it).works } }) selectBest(5, close = true, among = working)
-                onReady(); return
+                ready(); return
             }
             // «Мгновенно»: old results are not waited for any more — connect right now to the 8 best at once; the
             // balancer (least ping, probes every 10 s) itself sends traffic through whichever of them answers fastest.
             // Meanwhile the quick check runs and narrows the set to the really fastest ones (seamless switch).
             selectBest(8, close = false, among = working)
-            onReady()
-            launch("Авто: быстрая проверка") { preflight(onReady, connected = true) }
+            ready()
+            launch("Авто: быстрая проверка") { preflight(ready, connected = true) }
             return
         }
-        Tunnel.status.value = Tunnel.Status(Tunnel.State.CONNECTING, "Готовлю серверы…", check = "Первый запуск в этой сети: ищу самые быстрые серверы, обычно 10–20 секунд")
-        if (busy?.isActive == true) { scope.launch { busy.join(); autoPrepare(onReady) }; return }
-        autoPrepare(onReady)
+        Tunnel.status.value = Tunnel.Status(Tunnel.State.CONNECTING, "Готовлю серверы…", check = "Ищу первый рабочий HTTPS-маршрут; полный поиск продолжится в фоне")
+        if (busy?.isActive == true) cancel()
+        autoPrepare(ready)
     }
 
     /** «Подключение…» tapped again while Auto is still preparing: stop preparing. */
     fun cancelPrepare() {
+        autoGeneration.incrementAndGet()
         if (progress.value.title.startsWith("Авто")) cancel()
         if (Tunnel.status.value.state == Tunnel.State.CONNECTING && Tunnel.socks == null) Tunnel.status.value = Tunnel.Status()
     }
@@ -982,9 +1023,9 @@ object Actions {
         val cand = (st.selected.filter { st.state(it).works } + preferred(st, st.servers.filter { st.state(it).works }).sortedBy { st.state(it).score })
             .distinctBy { it.id }.take(12)
         // the 6 best first: usually enough — connect right away instead of waiting for all 12
-        realTest(cand.take(6), "Авто: проверяю серверы", big = false, attempts = 1)
+        realTest(cand.take(6), "Авто: проверяю серверы", big = false, attempts = 1, youtube = false)
         var now = Store.state.value
-        if (cand.take(6).none { now.state(it).works } && cand.size > 6) { realTest(cand.drop(6), "Авто: проверяю серверы", big = false, attempts = 1); now = Store.state.value }
+        if (cand.take(6).none { now.state(it).works } && cand.size > 6) { realTest(cand.drop(6), "Авто: проверяю серверы", big = false, attempts = 1, youtube = false); now = Store.state.value }
         val ok = cand.filter { now.state(it).works }
         if (ok.isNotEmpty()) {
             deepPending = true
@@ -1006,19 +1047,30 @@ object Actions {
         val now = System.currentTimeMillis()
         val st0 = Store.state.value
         val notes = mutableListOf<String>()
-        if (st0.servers.isEmpty() || st0.settings.autoUpdateSubs && now - st0.settings.lastSubRefresh > 12 * 3600_000L) {
-            progress.value = progress.value.copy(title = "Авто: обновляю подписки"); notes += doRefresh()
+        val started = ConnectPolicy.StartGate()
+        val firstReady: (Server) -> Unit = { server ->
+            if (started.claim()) {
+                deepPending = true
+                selectBest(1, close = true, among = listOf(server))
+                scope.launch(Dispatchers.Main) { onReady() }
+            }
         }
         fun fresh() = Store.state.value.let { st -> st.servers.filter { st.state(it).works && now - st.state(it).checkedAt < 6 * 3600_000L } }
-        if (fresh().size < 3 && Store.state.value.servers.isNotEmpty()) {
-            // Quick start: ping everything in a few seconds, test only the 30 nearest — connect to the best of them.
-            // The rest is tested in the background after connecting (optimize → deepPending) and switched to if faster.
-            notes += quickTest(Store.state.value.servers)
-            if (fresh().isEmpty()) {
-                progress.value = progress.value.copy(title = "Авто: проверяю ещё серверы")
-                val st = Store.state.value
-                realTest(st.servers.filter { st.state(it).tcpMs > 0 && st.state(it).realMs < 0 }.sortedBy { st.state(it).tcpMs }.take(60), "Авто: проверяю ещё серверы", big = true, attempts = 1)
-            }
+        // Existing catalog first, even when subscription timestamps are old. Cloud cache was applied before this.
+        if (st0.servers.isNotEmpty() && fresh().isEmpty()) notes += quickTest(st0.servers, firstReady)
+        if (started.started) return "Первый HTTPS-маршрут найден — VPN подключается; подробные проверки в фоне"
+        if (st0.servers.isEmpty() || fresh().isEmpty() && st0.settings.autoUpdateSubs && now - st0.settings.lastSubRefresh > 12 * 3600_000L) {
+            progress.value = progress.value.copy(title = "Авто: загружаю первые серверы")
+            notes += doRefresh(firstReady = { list -> quickTest(list, firstReady) })
+        }
+        if (started.started) return "VPN подключается; подписки дозагружены в фоне"
+        if (fresh().isEmpty() && Store.state.value.servers.isNotEmpty()) {
+            notes += quickTest(Store.state.value.servers, firstReady)
+            if (started.started) return "Первый HTTPS-маршрут найден — подключаюсь"
+            val st = Store.state.value
+            realTest(st.servers.filter { st.state(it).tcpMs > 0 && st.state(it).realMs < 0 }.sortedBy { st.state(it).tcpMs }.take(ConnectPolicy.NEXT),
+                "Авто: запасные маршруты", big = false, youtube = false, attempts = 1, stopAfter = 1, budgetMs = ConnectPolicy.QUICK_BUDGET_MS, onFirst = firstReady)
+            if (started.started) return "Запасной маршрут найден — подключаюсь"
             deepPending = true
         }
         if (fresh().isEmpty()) {
@@ -1037,25 +1089,28 @@ object Actions {
         return if (n > 0) "Авто: выбрано $n лучших серверов — подключаюсь" else "Авто: рабочих серверов нет — подключаюсь через обход DPI без сервера"
     }
 
-    /** «Авто», first time on a network: all servers pinged at once (1.5 s), the 30 nearest really tested (speed + YouTube). */
-    suspend fun quickTest(list: List<Server>): String {
-        progress.value = progress.value.copy(title = "Авто: пинг ${list.size} серверов", done = 0, total = list.size)
-        val done = AtomicInteger(); val batch = StateBatch(); val tcp = java.util.concurrent.ConcurrentHashMap<String, Int>()
-        Tester.tcp(list, parallel = 192, timeoutMs = 1500) { s, ms ->
-            tcp[s.id] = ms
-            batch.put(s.id) { it.copy(tcpMs = ms, realMs = if (ms == 0) 0 else it.realMs, checkedAt = System.currentTimeMillis()) }
-            step(done.incrementAndGet(), list.size)
-        }
-        batch.flush()
-        val pinged = list.filter { (tcp[it.id] ?: 0) > 0 }.sortedBy { tcp[it.id] }
-        runCatching { CloudSpeed.refresh(app) }
-        // servers other phones on this operator found blocked are skipped, the next nearest take their place
-        val near = ServerChoice.diverse(pinged.filterNot { runCatching { CloudSpeed.blocked(it) }.getOrDefault(false) }, 30)
-            .let { if (it.size < 10) ServerChoice.diverse(pinged, 30) else it }  // too few left: the cloud may be wrong, test the nearest anyway
-        // plus up to 10 the cloud measured as fast (real download through them), even if a bit farther
-        val fast = runCatching { CloudSpeed.pick(pinged, near) }.getOrDefault(emptyList())
-        val ok = realTest(near + fast, if (fast.isEmpty()) "Авто: проверяю 30 ближайших" else "Авто: проверяю 30 ближайших и ${fast.size} быстрых по облаку", big = true, attempts = 1)
-        return "Быстрая проверка: работают $ok из ${near.size + fast.size} (ближайших ${near.size}, быстрых по облаку ${fast.size}; всего ${list.size})"
+    /** Cached cloud/network candidates first; no whole-catalog TCP scan or video downloads before first connect. */
+    suspend fun quickTest(list: List<Server>, onFirst: ((Server) -> Unit)? = null): String {
+        val st = Store.state.value
+        CloudSpeed.loadCached(app)
+        val eligible = preferred(st, list).filterNot { CloudSpeed.blocked(it) }.ifEmpty { preferred(st, list) }
+        val cloud = CloudSpeed.pick(eligible, emptyList(), n = ConnectPolicy.FIRST)
+        val remembered = st.settings.netServers[Net.key(app)].orEmpty().toSet()
+        val learned = Brain.order(Net.key(app), eligible) { st.state(it) }.mapIndexed { i, s -> s.id to i }.toMap()
+        val first = ConnectPolicy.candidates(eligible, cloud, remembered) { s -> learned[s.id] ?: Int.MAX_VALUE }
+        val ok = realTest(first, "Авто: первые ${first.size} маршрутов (облако: ${cloud.size})", big = false,
+            youtube = false, attempts = 1, stopAfter = 1, budgetMs = ConnectPolicy.QUICK_BUDGET_MS, onFirst = onFirst)
+        if (ok > 0) { deepPending = true; return "Первый HTTPS-маршрут готов; облачные подсказки ${cloud.size}, полный поиск в фоне" }
+        // Only if the first wave failed: bound DNS/TCP work to a small diverse wave, not thousands of subscriptions.
+        val rest = ServerChoice.diverse(eligible.filter { s -> first.none { it.id == s.id } }, ConnectPolicy.NEXT)
+        val tcp = java.util.concurrent.ConcurrentHashMap<String, Int>(); val states = StateBatch()
+        Tester.tcp(rest, parallel = 32, timeoutMs = 1500) { server, ms -> tcp[server.id] = ms; states.put(server.id) { it.copy(tcpMs = ms) } }
+        states.flush()
+        val candidates = rest.filter { (tcp[it.id] ?: 0) > 0 }.sortedBy { tcp[it.id] }
+        val second = realTest(candidates, "Авто: запасные ${candidates.size} маршрутов", big = false, youtube = false,
+            attempts = 1, stopAfter = 1, budgetMs = ConnectPolicy.QUICK_BUDGET_MS, onFirst = onFirst)
+        if (second > 0) deepPending = true
+        return "Короткая проверка: работают ${ok + second}; остальные серверы не задерживают первый успех"
     }
 
     /** Subscriptions older than 12 h are refreshed in the background on app start. */

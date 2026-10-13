@@ -43,6 +43,9 @@ object AppWatch {
      */
     data class Guard(val title: String, val url: String)
     val GUARDS: Map<String, Guard> = mapOf(
+        "com.google.android.apps.bard" to Guard("Gemini", "https://gemini.google.com/"),
+        "com.openai.chatgpt" to Guard("ChatGPT", "https://chatgpt.com/"),
+        "com.anthropic.claude" to Guard("Claude", "https://claude.ai/"),
         "org.telegram.messenger" to Guard("Telegram", "https://web.telegram.org/"),
         "org.telegram.messenger.web" to Guard("Telegram", "https://web.telegram.org/"),
         "org.thunderdog.challegram" to Guard("Telegram X", "https://web.telegram.org/"),
@@ -188,8 +191,8 @@ object AppWatch {
         // battery saver on or < 20 %: only what keeps the internet working (fix, switching) — no evolution, revival,
         // freeze/latency/speed checks; they come back when the phone charges
         val eco = !plan.allowed
-        if (!eco) appCtx?.let { Report.auto(it) } // shared cloud: pull what all phones learned, send this one's report
-        if (eco != ecoOn) { ecoOn = eco; say(if (eco) "Батарея садится — фоновые улучшения на паузе, связь чинится как обычно" else "Батарея в порядке — фоновые улучшения снова работают") }
+        if (plan.allowLight) appCtx?.let { Report.auto(it) } // shared cloud: pull what all phones learned, send this one's report
+        ecoOn = eco
         val s = Tunnel.status.value
         fails = if (s.checkOk == false) fails + 1 else 0
         val now = System.currentTimeMillis()

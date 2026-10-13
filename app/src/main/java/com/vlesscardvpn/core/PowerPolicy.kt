@@ -12,7 +12,7 @@ object PowerPolicy {
     data class Memory(val low: Boolean = false, val hot: Boolean = false, val coolSince: Long = -1)
     data class Plan(val memory: Memory = Memory(), val allowed: Boolean = true,
         val reason: String = "Готов к фоновым улучшениям", val tcpParallel: Int = 96,
-        val realParallel: Int = 12, val loopMs: Long = 3000, val healthyMs: Long = 20000)
+        val realParallel: Int = 12, val loopMs: Long = 3000, val healthyMs: Long = 20000, val allowLight: Boolean = true, val deferTraffic: Boolean = false)
     fun evaluate(i: Input, o: Options, prev: Memory = Memory(), pauseUntil: Long = 0): Plan {
         val threshold = o.threshold.coerceIn(5, 50)
         val low = if (i.charging) false else if (i.battery !in 1..100) prev.low
@@ -42,7 +42,8 @@ object PowerPolicy {
         return Plan(Memory(low, hot, since), reason == "Готов к фоновым улучшениям", reason,
             tcp, if (pressure) 2 else if (o.profile == "fast") 12 else 6,
             if (!i.screen) 15000 else if (pressure) 5000 else 3000,
-            if (pressure) 45000 else 20000)
+            if (pressure) 45000 else 20000,
+            !hot && !i.saver && !low && !(i.now < pauseUntil) && !(!i.screen && o.quietScreen) && !i.dataSaver, o.protectTraffic && i.activeTraffic)
     }
     fun cap(requested: Int, limit: Int) = requested.coerceIn(1, limit.coerceAtLeast(1))
 }
