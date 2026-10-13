@@ -1131,6 +1131,7 @@ object Actions {
     fun selectBest(n: Int = 5, among: Collection<Server>? = null, close: Boolean = false): Int {
         var c = 0
         val ids = among?.map { it.id }?.toHashSet()
+        runCatching { CloudSpeed.loadNet(app) }
         Store.update { st ->
             // one WireGuard tunnel per key (WARP accounts): two with the same key would steal the session from each other
             val works = st.servers.filter { (ids == null || it.id in ids) && st.state(it).works }
