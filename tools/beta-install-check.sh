@@ -29,8 +29,9 @@ adb logcat -d > logcat.txt
 PID=$(adb shell pidof $PKG | tr -d '\r')
 echo "pid: $PID"
 # The emulator runs ARM code through ndk_translation, which lacks arm64 MRS system-register reads (CNTVCT_EL0, MIDR_EL1) used by the
-# Go runtime inside Xray-core (libgojni). Real ARM phones support it. Treat exactly that as "can't test here".
-if grep -q "ndk_translation: Undefined instruction 0xd53[0-9a-f]" logcat.txt && grep -E "Fatal signal 4 \(SIGILL\)" logcat.txt | grep -q "xray"; then
+# Go runtime inside Xray-core (libgojni). Real ARM phones support it. Legacy ARM-only APKs can skip exactly that.
+# A universal APK with native x86_64 may NOT use the translation exception; its launch must really pass.
+if ! unzip -l "$APK" | grep -q "lib/x86_64/libgojni.so" && grep -q "ndk_translation: Undefined instruction 0xd53[0-9a-f]" logcat.txt && grep -E "Fatal signal 4 \(SIGILL\)" logcat.txt | grep -q "xray"; then
   echo "LAUNCH SKIPPED: ARM translator cannot run Go/Xray (SIGILL on MRS CNTVCT_EL0/MIDR_EL1) - emulator limitation, not an app bug"
   grep -E "FATAL EXCEPTION" -A25 logcat.txt | grep -q "$PKG" && { grep -E "FATAL EXCEPTION" -A25 logcat.txt | head -40; exit 1; }
 else
