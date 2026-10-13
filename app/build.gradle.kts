@@ -10,7 +10,9 @@ plugins {
 fun versionOf(n: Int) = if (n > 110) "1.2.${n - 111}" else if (n > 100) "1.1.${n - 101}" else "1.0.$n"
 val releaseNumber = providers.environmentVariable("GITHUB_RUN_NUMBER").orNull?.toIntOrNull() ?: 59
 val betaPreview = providers.gradleProperty("betaPreview").orNull == "true"
-val armOnly = betaPreview || providers.gradleProperty("armOnly").orNull == "true"
+// Release universal APK must run native x86 on CI, not translate Go/ARM system-register instructions.
+// Dedicated arm64 split stays small. Legacy ARM-only builds remain available explicitly.
+val armOnly = (betaPreview && providers.gradleProperty("emulatorAbis").orNull != "true") || providers.gradleProperty("armOnly").orNull == "true"
 // -PsplitAbi=true: besides the universal APK, also build one APK per ABI (arm64 is ~2x smaller to download).
 val splitAbi = providers.gradleProperty("splitAbi").orNull == "true"
 val targetAbis = if (armOnly) listOf("arm64-v8a", "armeabi-v7a") else listOf("arm64-v8a", "armeabi-v7a", "x86_64", "x86")
