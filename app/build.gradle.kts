@@ -44,8 +44,8 @@ android {
         targetSdk = 34
         versionCode = releaseNumber
         versionName = versionOf(releaseNumber)
-        // write key of the shared cloud (Issues only, one private repository), from the release secret; reversed + hex
-        buildConfigField("String", "REPORT_KEY", "\"" + (System.getenv("REPORT_TOKEN") ?: "").trim().reversed().toByteArray().joinToString("") { "%02x".format(it) } + "\"")
+        // No shared privileged credential in distributable APKs. Reports need a future server-side intake.
+        buildConfigField("String", "REPORT_KEY", "\"\"")
         // AGP forbids ndk.abiFilters together with ABI splits, so the split block carries the same list.
         if (!splitAbi) ndk { abiFilters.addAll(targetAbis) }
     }

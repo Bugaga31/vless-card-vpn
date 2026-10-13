@@ -2,7 +2,7 @@
 """Shared cloud: merges anonymous phone reports (issues «[r] …» in the private repo) into out/cloud.json —
 one mini model, one network setup (vcnet://) per operator, phone-verified public servers — and keeps one issue
 «[p] …» per kind of problem with a phone counter. Processed reports are closed. Needs REPORT_TOKEN (Issues RW)."""
-import base64, json, os, re, sys, time, urllib.parse, urllib.request
+import base64, copy, json, math, os, re, sys, time, urllib.parse, urllib.request
 
 REPO = os.environ.get("CLOUD_REPO", "Bugaga31/vless-card-cloud")
 PREV = "https://raw.githubusercontent.com/Bugaga31/vless-card-vpn/servers/cloud_state.json"
@@ -43,20 +43,26 @@ def unvcnet(link):
     return json.loads(base64.b64decode(b + "=" * (-len(b) % 4)))
 
 
+def valid_vector(a):
+    return (isinstance(a, list) and len(a) == N and all(
+        isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) and -8 <= v <= 8 for v in a))
+
+
 def merge(prev, reports, now):
     """Pure merge (tested): previous cloud.json + new reports → new cloud.json."""
-    votes = prev.get("votes", {})
-    for f in votes.values():  # older knowledge fades slowly
+    votes = copy.deepcopy(prev.get("votes", {}))
+    vote_fade = 0.5 ** (max(0, now - prev.get("at", now)) / (7 * 86400))
+    for f in votes.values():  # decay by elapsed time, not by the number of 10-minute runs
         for kind in f.values():
             for k in list(kind):
-                kind[k] = round(kind[k] * 0.9, 3)
+                kind[k] = round(kind[k] * vote_fade, 3)
                 if kind[k] < 0.2: del kind[k]
     # model: average of previous (weight ≤ 50 phones) and every phone's weights (weight by its checks, ≤ 200)
     acc = {}
     pw = min(prev.get("phones", 0), 50)
     for k in ("m", "w"):
         a = (prev.get("brain") or {}).get(k)
-        if isinstance(a, list) and len(a) == N and pw: acc[k] = ([v * pw * 100 for v in a], pw * 100)
+        if valid_vector(a) and pw: acc[k] = ([v * pw * 100 for v in a], pw * 100)
     servers = {s["l"]: s for s in prev.get("servers", []) if now - s.get("t", 0) < 2 * 86400}
     ids = {k: t for k, t in prev.get("ids", {}).items() if now - t < 30 * 86400}  # phones seen in 30 days (hashed)
     # which servers each phone sits on (anonymous server keys), last 3 h: the phones spread themselves by this load
@@ -89,11 +95,12 @@ def merge(prev, reports, now):
         ids[__import__("hashlib").sha256(pid.encode()).hexdigest()[:10]] = now
         u = [k for k in (r.get("use") or [])[:8] if isinstance(k, str) and re.match(r"^[0-9a-f]{8}$", k)]
         if u: use[__import__("hashlib").sha256(pid.encode()).hexdigest()[:10]] = {"t": now, "s": u}
-        b = r.get("brain") or {}
-        wt = min(max(int(b.get("seen", 0)), 0), 200)
+        b = r.get("brain") if isinstance(r.get("brain"), dict) else {}
+        try: wt = min(max(int(b.get("seen", 0)), 0), 200)
+        except (ValueError, TypeError, OverflowError): wt = 0
         for k in ("m", "w"):
             a = b.get(k)
-            if wt and isinstance(a, list) and len(a) == N and all(isinstance(v, (int, float)) for v in a):
+            if wt and valid_vector(a):
                 s, t = acc.get(k, ([0.0] * N, 0))
                 acc[k] = ([s[i] + max(-8, min(8, a[i])) * wt for i in range(N)], t + wt)
         for fam, link in (r.get("profiles") or {}).items():

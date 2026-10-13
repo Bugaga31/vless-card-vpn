@@ -42,6 +42,8 @@ fun SettingsScreen() {
     var wipeDialog by remember { mutableStateOf(false) }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text("Настройки", fontSize = 30.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 4.dp, top = 12.dp, bottom = 8.dp))
+        val storageError by Store.storageError.collectAsState()
+        if (storageError.isNotEmpty()) Text(storageError, color = Bad, fontSize = 13.sp)
         Group("Белые списки оператора") {
             val wl by com.vlesscardvpn.core.Whitelist.last.collectAsState()
             val sc = rememberCoroutineScope(); var checking by remember { mutableStateOf(false) }
@@ -50,11 +52,15 @@ fun SettingsScreen() {
                 Text(if (checking) "Проверяю…" else "Проверить сеть")
             }
         }
+        Group("Защита данных") {
+            Hint(if (com.vlesscardvpn.BuildConfig.DEBUG) "Отладочная сборка: state.json не зашифрован для тестов. Для повседневного использования установите подписанный релиз."
+                else "Локальные серверы, подписки и настройки шифруются AES-256-GCM; ключ хранится в Android Keystore. Токен личного GitHub-облака тоже зашифрован. При утрате ключа потребуется ваша переносимая резервная копия.")
+        }
         Group("Общее облако") {
             val rctx = androidx.compose.ui.platform.LocalContext.current
             var ron by remember { mutableStateOf(com.vlesscardvpn.core.Report.enabled(rctx)) }
-            Toggle("Учиться вместе с другими телефонами", "Каждые 20 минут телефон забирает из облака то, что выучили все: мини-нейросеть и маски/обход DPI для вашего оператора. " +
-                "И отправляет анонимный отчёт (раз в час, если было что-то новое): что ломалось, какие маски сработали, публичные рабочие серверы. Без номеров, аккаунтов, IP и посещённых сайтов; ваши личные серверы не отправляются.", ron) {
+            Toggle("Получать обучение из общего облака", "Каждые 20 минут телефон забирает из облака то, что выучили все: мини-нейросеть и маски/обход DPI для вашего оператора. " +
+                "Отправка отчётов в этой версии отключена: общий ключ больше не встраивается в APK. Обучение на ваших проверках остаётся локальным.", ron) {
                 ron = it; com.vlesscardvpn.core.Report.setEnabled(rctx, it)
             }
             if (!com.vlesscardvpn.core.Report.available()) Text("В этой сборке отправка отчётов отключена — только приём общего облака.", fontSize = 12.sp, color = androidx.compose.ui.graphics.Color.Gray)
@@ -67,7 +73,7 @@ fun SettingsScreen() {
             var token by remember { mutableStateOf("") }
             var on by remember { mutableStateOf(com.vlesscardvpn.core.CloudSync.configured(cctx)) }
             Text("Маски, обход DPI, результаты серверов и мини-нейросеть сохраняются в ваш закрытый репозиторий GitHub (раз в 3 часа, если что-то изменилось) и возвращаются на новом телефоне или после переустановки — заново учить маски не надо. " +
-                "Нужен токен GitHub (Fine-grained, доступ только к этому репозиторию, Contents: Read and write). Он хранится только на этом телефоне.", fontSize = 12.sp, color = androidx.compose.ui.graphics.Color.Gray)
+                "Нужен токен GitHub (Fine-grained, доступ только к этому репозиторию, Contents: Read and write). На телефоне токен шифруется ключом Android Keystore. Копия в GitHub переносимая, но не зашифрованная: в ней могут быть ключи серверов и ссылки подписок. Используйте только закрытый репозиторий.", fontSize = 12.sp, color = androidx.compose.ui.graphics.Color.Gray)
             androidx.compose.material3.OutlinedTextField(repo, { repo = it }, singleLine = true, modifier = Modifier.fillMaxWidth(), label = { Text("Репозиторий (имя/репо)") })
             androidx.compose.material3.OutlinedTextField(token, { token = it }, singleLine = true, modifier = Modifier.fillMaxWidth(),
                 visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(), label = { Text(if (on) "Токен сохранён (ввести новый)" else "Токен GitHub") })
@@ -187,7 +193,7 @@ fun SettingsScreen() {
             ctx.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT,
                 "Резервная копия VLESS Card (вставьте в приложении: Серверы → Добавить). Внутри ключи серверов — не пересылайте чужим:\n" + Actions.backup()), "Сохранить резервную копию"))
         }, modifier = Modifier.fillMaxWidth()) { Text("Резервная копия (в Избранное / заметки)") }
-        Hint("Настройки, свои серверы и WARP, выученные маскировки и обходы — одной ссылкой. Для нового телефона или после переустановки.")
+        Hint("Копия не зашифрована и содержит ключи серверов и ссылки подписок — храните её только у себя. Настройки, свои серверы и WARP, выученные маскировки и обходы — одной ссылкой. Для нового телефона или после переустановки.")
         OutlinedButton(onClick = { wipeDialog = true }, colors = ButtonDefaults.outlinedButtonColors(contentColor = Bad), modifier = Modifier.fillMaxWidth()) { Text("Стереть все данные") }
 
         // ---------------- servers
@@ -323,7 +329,7 @@ fun SettingsScreen() {
     }
     if (appsDialog) AppsDialog(s, onDismiss = { appsDialog = false }) { apps, only -> set { it.copy(apps = apps, onlyApps = only) } }
     if (wipeDialog) AlertDialog(onDismissRequest = { wipeDialog = false },
-        title = { Text("Стереть всё?") }, text = { Text("VPN отключится, удалятся серверы, подписки, результаты проверок и настройки.") },
+        title = { Text("Стереть всё?") }, text = { Text("VPN отключится, удалятся локальные серверы, подписки, обучение, токены и настройки. Копии, которые вы сохраняли в GitHub или отправляли в заметки, не удаляются.") },
         confirmButton = { TextButton(onClick = { wipeDialog = false; com.vlesscardvpn.vpn.TunnelService.stop(ctx); Actions.wipe(); Apps.applyDisguise(ctx, "") }) { Text("Стереть", color = Bad) } },
         dismissButton = { TextButton(onClick = { wipeDialog = false }) { Text("Отмена") } })
 }

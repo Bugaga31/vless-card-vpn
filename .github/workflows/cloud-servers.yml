@@ -16,6 +16,8 @@ jobs:
     steps:
       - run: echo "START=$(date +%s)" >> "$GITHUB_ENV"
       - uses: actions/checkout@v4
+      - name: Validate cloud-learning policies
+        run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p 'test_cloud_learning.py'
       - name: Collect and ping
         run: mkdir -p out && python3 scripts/cloud_servers.py
       - name: Real check through Xray (HTTPS through every top server)

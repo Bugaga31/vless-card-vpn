@@ -15,6 +15,8 @@ object CloudSpeed {
     private var fetchedAt = 0L
     private var attemptedAt = 0L
 
+    fun clear() { kbps = emptyMap(); net = emptyMap(); netFam = ""; fetchedAt = 0; attemptedAt = 0 }
+
     fun parse(json: String): Map<String, Int> = runCatching {
         JSONObject(json).getJSONObject("kbps").let { o -> o.keys().asSequence().associateWith { o.optInt(it) }.filterValues { it > 0 } }
     }.getOrDefault(emptyMap())

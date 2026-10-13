@@ -29,7 +29,10 @@ object Report {
     const val PHONES = "https://raw.githubusercontent.com/Bugaga31/vless-card-vpn/servers/phones"
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     @Volatile private var busy = false
+    @Volatile private var generation = 0
     private val json = "application/json".toMediaType()
+
+    fun stop() { generation++; scope.coroutineContext.cancelChildren(); busy = false }
 
     private fun prefs(ctx: Context) = ctx.getSharedPreferences("report", 0)
     private fun token(): String = runCatching {
@@ -37,7 +40,7 @@ object Report {
     }.getOrDefault("")
     fun available() = token().startsWith("github_pat_") || token().startsWith("ghp_")
     fun enabled(ctx: Context) = prefs(ctx).getBoolean("on", true)
-    fun setEnabled(ctx: Context, on: Boolean) = prefs(ctx).edit().putBoolean("on", on).apply()
+    fun setEnabled(ctx: Context, on: Boolean) { prefs(ctx).edit().putBoolean("on", on).apply(); if (!on) stop() }
     fun lastText(ctx: Context): String = prefs(ctx).getString("status", "").orEmpty()
 
     fun phoneId(ctx: Context): String = anonId(ctx)
@@ -92,6 +95,7 @@ object Report {
     private fun <T> call(block: (OkHttpClient) -> T): T {
         val c = client()
         return try { block(c) } catch (e: Exception) {
+            if (e is CancellationException || e !is java.io.IOException) throw e
             val p = Tunnel.socks?.port ?: throw e
             block(c.newBuilder().proxy(java.net.Proxy(java.net.Proxy.Type.SOCKS, java.net.InetSocketAddress("127.0.0.1", p))).build())
         }
@@ -100,7 +104,7 @@ object Report {
     /** From the autopilot: pull every 20 min, report hourly when changed (6 h otherwise). */
     @Synchronized fun auto(ctx: Context) {
         val app = ctx.applicationContext; val p = prefs(app); val now = System.currentTimeMillis()
-        if (busy) return
+        if (busy || !enabled(app)) return
         val pull = now - p.getLong("pulled", 0) > PULL
         if (!p.contains("sent")) p.edit().putLong("sent", now - EVERY + 30 * 60_000L).apply() // first report ~30 min after install
         val since = now - p.getLong("sent", now)
@@ -108,14 +112,15 @@ object Report {
         val applyCached = p.contains("cloud") && p.getString("appliedNet", "") != Net.key(app)
         if (!pull && !send && !applyCached) return
         busy = true
+        val g = generation
         scope.launch {
             try {
                 // Network switch needs no download: the saved snapshot contains all operators.
                 if (applyCached) runCatching { applyCloud(app, p.getString("cloud", "").orEmpty()) }
-                if (pull) runCatching { pull(app) }.onSuccess { p.edit().putLong("pulled", now).apply() }.onFailure { p.edit().putLong("pulled", now - PULL + 5 * 60_000L).apply() }
+                if (pull) runCatching { pull(app, g) }.onSuccess { if (g == generation) p.edit().putLong("pulled", now).apply() }.onFailure { if (g == generation) p.edit().putLong("pulled", now - PULL + 5 * 60_000L).apply() }
                 if (send) runCatching { send(app) }.onSuccess { p.edit().putLong("sent", now).putInt("digest", digest(app)).putString("status", "Отчёт отправлен " + hhmm(now)).apply() }
                     .onFailure { p.edit().putLong("sent", now - EVERY + 3600_000L).putString("status", "Отчёт не ушёл: ${Errors.human(it)}").apply() }
-            } finally { busy = false }
+            } finally { if (g == generation) busy = false }
         }
     }
 
@@ -144,7 +149,7 @@ object Report {
     }
 
     /** Shared result: the merged model and the network setup for this operator (applied once per new cloud version). */
-    private fun pull(ctx: Context) {
+    private fun pull(ctx: Context, g: Int) {
         val p = prefs(ctx)
         val result = call { c -> c.newCall(Request.Builder().url(DATA).apply {
             if (p.contains("cloud")) p.getString("etag", null)?.let { header("If-None-Match", it) }
@@ -152,6 +157,7 @@ object Report {
             if (r.code == 304) return@use null
             if (r.code != 200) error("нет данных ${r.code}")
             r.body!!.string() to r.header("ETag") } }
+        if (g != generation || !enabled(ctx)) return
         if (result == null) {
             p.getString("cloud", null)?.let { applyCloud(ctx, it) }
             return
