@@ -28,12 +28,11 @@ jobs:
       - name: Install pinned NDK
         run: sdkmanager 'ndk;27.2.12479018'
       - name: JVM tests and release build
-        env:
-          REPORT_TOKEN: ${{ secrets.REPORT_TOKEN }}
         run: |
           N=${VERSION#beta-build-}; export GITHUB_RUN_NUMBER=${N#release-build-}
           chmod +x gradlew
-          ./gradlew -PbetaPreview=true -PsplitAbi=true --no-daemon --max-workers=2 :app:testDebugUnitTest :app:assembleRelease
+          PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p 'test_cloud_learning.py'
+          ./gradlew -PbetaPreview=true -PsplitAbi=true --no-daemon --max-workers=2 :app:testDebugUnitTest :app:assembleRelease :security-test-probe:assembleDebug
       - name: Sign with persistent Beta key (v1+v2+v3)
         env:
           KS_B64: ${{ secrets.BETA_KEYSTORE_B64 }}
@@ -42,6 +41,7 @@ jobs:
           BT=$ANDROID_HOME/build-tools/34.0.0
           echo "$KS_B64" | base64 -d > beta.jks
           mkdir -p release
+          cp security-test-probe/build/outputs/apk/debug/security-test-probe-debug.apk release/security-test-probe.apk
           OUT=app/build/outputs/apk/release
           sign() {
             $BT/zipalign -f -p 4 "$1" aligned.apk
@@ -106,7 +106,7 @@ jobs:
           target: ${{ matrix.target }}
           arch: x86_64
           disable-animations: true
-          script: bash tools/beta-install-check.sh
+          script: bash tools/security-storage-check.sh && bash tools/beta-install-check.sh
       - if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -114,6 +114,7 @@ jobs:
           path: |
             screen.png
             logcat.txt
+            security-results.txt
           if-no-files-found: ignore
   publish:
     needs: [build, emulator-install]

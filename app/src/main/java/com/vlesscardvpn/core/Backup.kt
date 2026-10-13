@@ -22,8 +22,9 @@ object Backup {
     fun find(text: String): String? = LINK.find(text)?.groupValues?.get(1)
 
     fun unpack(body: String): AppState? = runCatching {
+        if (body.length > 3_000_000) return null
         val bytes = Base64.decode(body) ?: return null
-        Store.decode(JSONObject(String(java.util.zip.GZIPInputStream(bytes.inputStream()).use { it.readBytes() })))
+        Store.decode(JSONObject(String(java.util.zip.GZIPInputStream(bytes.inputStream()).use { BoundedInput.read(it, 8 * 1024 * 1024) })))
     }.getOrNull()
 
     /** Settings from the backup; servers, results and mask stats added to what is here (this phone wins on conflicts). */

@@ -70,13 +70,27 @@ object Store {
             sel.any { com.vlesscardvpn.xray.Masks.byId(st.state(it).maskId)?.let { m -> com.vlesscardvpn.xray.Masks.cost(m) >= 2 } == true })
     }.distinctUntilChanged().stateIn(scope, SharingStarted.Eagerly, Summary())
     private var file: File? = null
+    private var app: Context? = null
+    private var storageReady = true
+    val storageError = MutableStateFlow("")
     private var saveJob: Job? = null
     private val lock = Any()
 
     fun init(context: Context) = synchronized(lock) {
         if (file != null) return
-        val f = File(context.filesDir, "state.json"); file = f
-        if (f.isFile) runCatching { _state.value = decode(JSONObject(f.readText())) }
+        val f = File(context.filesDir, "state.json"); file = f; app = context.applicationContext
+        try {
+            if (com.vlesscardvpn.BuildConfig.DEBUG) {
+                if (f.isFile) _state.value = decode(JSONObject(f.readText()))
+            } else {
+                LocalSecrets.readOrMigrateState(context, f) { decode(JSONObject(it)) }
+                    ?.let { _state.value = decode(JSONObject(it)) }
+            }
+            storageReady = true; storageError.value = ""
+        } catch (_: Exception) {
+            storageReady = false
+            storageError.value = "Не удалось открыть защищённое хранилище. Данные не удалены и не перезаписываются. Перезапустите телефон; при утрате ключа сначала явно сотрите локальные данные, затем восстановите свою резервную копию."
+        }
         syncMasks()
     }
 
@@ -94,6 +108,7 @@ object Store {
 
     /** Re-reads state.json (used by the debug e2e hook after the file was replaced). */
     fun reload(context: Context) = synchronized(lock) {
+        if (!com.vlesscardvpn.BuildConfig.DEBUG) return
         val f = File(context.filesDir, "state.json"); file = f
         val o = if (f.isFile) runCatching { JSONObject(f.readText()) }.getOrNull() else null
         var st = o?.let { runCatching { decode(it) }.getOrNull() } ?: AppState()
@@ -141,14 +156,22 @@ object Store {
 
     fun saveNow() { saveJob?.cancel(); save() }
 
-    private fun save() {
+    private fun save(): Unit = synchronized(lock) {
         val f = file ?: return
-        // a full disk or a race must not crash the app; the next save will retry
+        if (!storageReady) return
         runCatching {
-            val tmp = File(f.path + ".tmp")
-            tmp.writeText(encode(_state.value).toString())
-            if (!tmp.renameTo(f)) { f.delete(); tmp.renameTo(f) }
-        }
+            val text = encode(_state.value).toString()
+            if (com.vlesscardvpn.BuildConfig.DEBUG) {
+                val atomic = android.util.AtomicFile(f); val out = atomic.startWrite()
+                try { out.write(text.toByteArray()); atomic.finishWrite(out) }
+                catch (e: Exception) { atomic.failWrite(out); throw e }
+            } else {
+                val ctx = app ?: return
+                LocalSecrets.writeState(ctx, text)
+            }
+            storageError.value = ""
+        }.onFailure { storageError.value = "Не удалось сохранить данные в защищённое хранилище. Предыдущее сохранение не удалено; следующая запись повторит попытку." }
+        Unit
     }
 
     fun encode(s: AppState): JSONObject = JSONObject()
@@ -193,7 +216,13 @@ object Store {
         saveJob?.cancel()
         _state.value = AppState()
         syncMasks()
-        runCatching { File(context.filesDir, "state.json").delete() }
+        runCatching { LocalSecrets.deleteState(context) }
+        runCatching { android.util.AtomicFile(File(context.filesDir, "state.json")).delete(); File(context.filesDir, "state.json.tmp").delete() }
+        CloudSync.forget(context); Report.stop(); Brain.clear()
+        listOf("brain", "report", "cloud_speed", "clip").forEach { context.getSharedPreferences(it, 0).edit().clear().commit() }
+        runCatching { LocalSecrets.destroy(context) }
+        CloudSpeed.clear(); Report.load = emptyMap()
+        storageReady = true; storageError.value = ""
         runCatching { File(context.filesDir, "hev-socks5-tunnel.yaml").delete() }
         runCatching { context.cacheDir.deleteRecursively() }
     }

@@ -485,7 +485,7 @@ class TunnelService : VpnService() {
     /** The network the tunnel was built on; kept across reconnects so a change during a reconnect is not missed. */
     @Volatile private var curNet: Network? = null
     private fun hardRestart(why: String, force: Boolean = false) {
-        runCatching { val stv = Store.state.value; com.vlesscardvpn.core.Brain.lived(Net.key(this), usedServers, { stv.state(it) }, false) }
+        // A restart can be caused by DNS/TUN/app stalls; it is not a failed probe of every server.
         val now = System.currentTimeMillis()
         if (!force && now - lastHard < 5 * 60_000L) { heal(); return } // twice in 5 min: restarting doesn't help — heal (masks, servers)
         lastHard = now

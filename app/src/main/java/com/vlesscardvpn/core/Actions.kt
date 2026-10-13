@@ -44,6 +44,7 @@ object Actions {
 
     fun init(context: Context) {
         app = context.applicationContext
+        runCatching { Brain.load(app) } // load before the first probe can initialize fresh weights
         // 1.0.81–1.0.83 left a mask neural network and maybe a 0.5–1.8 GB language model on the phone: removed, space freed
         runCatching { java.io.File(app.filesDir, "mask_brain.json").delete(); java.io.File(app.filesDir, "llm").deleteRecursively() }
     }
