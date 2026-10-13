@@ -7,6 +7,8 @@ import android.content.Intent
 import android.content.pm.PackageInstaller
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.net.InetSocketAddress
@@ -24,68 +26,105 @@ object Updater {
     val state = MutableStateFlow(State())
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var lastCheck = 0L
+    private var lastAttempt = 0L
+    @Volatile private var checking = false
+    private val downloadLock = Mutex()
     private var noted = ""
 
     /** "v1.1.4" → 105, "v1.0.99" → 99 (same numbering as the build: 1.1.x = 101 + x). */
-    fun codeOf(tag: String): Int {
-        val p = tag.trim().removePrefix("v").split('.').mapNotNull { it.toIntOrNull() }
-        if (p.size != 3 || p[0] != 1) return 0
-        return when (p[1]) { 0 -> p[2]; 1 -> 101 + p[2]; 2 -> 111 + p[2]; else -> 0 }
-    }
+    fun codeOf(tag: String): Int = UpdatePolicy.codeOf(tag)
 
     fun apkName(tag: String, arm64: Boolean) = "VLESS-Card-Beta-${tag.removePrefix("v")}" + (if (arm64) "-arm64" else "") + ".apk"
 
     private fun client(viaVpn: Boolean): OkHttpClient {
-        val b = OkHttpClient.Builder().connectTimeout(10, TimeUnit.SECONDS).readTimeout(30, TimeUnit.SECONDS).followRedirects(true)
+        val b = OkHttpClient.Builder().connectTimeout(10, TimeUnit.SECONDS).readTimeout(30, TimeUnit.SECONDS).callTimeout(10, TimeUnit.MINUTES).followRedirects(true)
         if (viaVpn) Tunnel.socks?.port?.let { b.proxy(Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", it))) }
         return b.build()
     }
 
     private fun <T> anyPath(block: (OkHttpClient) -> T): T =
-        try { block(client(false)) } catch (e: Exception) { if (Tunnel.socks != null) block(client(true)) else throw e }
+        try { block(client(false)) } catch (e: Exception) { if (e is CancellationException) throw e; if (Tunnel.socks != null && e is java.io.IOException) block(client(true)) else throw e }
 
     /** Checks at most every 6 h unless [force]. */
-    fun check(force: Boolean = false, ctx: Context? = null) {
+    @Synchronized fun check(force: Boolean = false, ctx: Context? = null) {
         val now = System.currentTimeMillis()
-        if (!force && now - lastCheck < 6 * 3600_000L) return
-        lastCheck = now
+        if (checking || state.value.busy || !force && !UpdatePolicy.checkDue(now, lastCheck, lastAttempt)) return
+        checking = true; lastAttempt = now
         scope.launch {
             if (force) state.value = state.value.copy(text = "Проверяю обновления…")
             runCatching {
                 val body = anyPath { c -> c.newCall(Request.Builder().url("https://api.github.com/repos/$REPO/releases/latest")
-                    .header("Accept", "application/vnd.github+json").build()).execute().use { it.body!!.string() } }
+                    .header("Accept", "application/vnd.github+json").build()).execute().use { r ->
+                        if (!r.isSuccessful) throw java.io.IOException("GitHub ответил ${r.code}")
+                        String(r.body!!.byteStream().use { BoundedInput.read(it, 512 * 1024) }) } }
                 val o = org.json.JSONObject(body)
                 val tag = o.getString("tag_name")
                 val code = codeOf(tag)
+                require(code > 0 && !o.optBoolean("draft") && !o.optBoolean("prerelease")) { "Некорректная версия релиза" }
+                lastCheck = now
                 val mine = com.vlesscardvpn.BuildConfig.VERSION_CODE
                 state.value = if (code > mine) State(tag.removePrefix("v"), code, o.optString("body").substringBefore("### Автоматические").trim().take(1500), text = "Доступна версия ${tag.removePrefix("v")}")
                     else State(text = if (force) "У вас последняя версия (${com.vlesscardvpn.BuildConfig.VERSION_NAME})" else "")
                 state.value.let { st -> if (st.latest.isNotEmpty()) { ctx?.let { prefetch(it.applicationContext) }; if (!force && st.latest != noted) { noted = st.latest; AppWatch.note("Вышла версия ${st.latest} — обновить можно на главной одной кнопкой") } } }
-            }.onFailure { if (force) state.value = State(text = "Не удалось проверить: ${Errors.human(it)}") }
+            }.onFailure { if (force) state.value = state.value.copy(text = "Не удалось проверить: ${Errors.human(it)}") }
+            checking = false
         }
     }
 
-    @Volatile private var ready: String = "" // version already downloaded to update.apk
+    @Volatile private var ready: String = ""
+    private var readyDigest = ""
 
-    private fun download(app: Context, s: State): java.io.File {
+    @Suppress("DEPRECATION") private fun signers(info: android.content.pm.PackageInfo): Set<String> {
+        val certs = if (android.os.Build.VERSION.SDK_INT >= 28) info.signingInfo?.apkContentsSigners else info.signatures
+        return certs.orEmpty().map { UpdatePolicy.hash(it.toByteArray().inputStream()) }.toSet()
+    }
+    @Suppress("DEPRECATION") private fun validateArchive(app: Context, f: java.io.File, s: State) {
+        val flags = if (android.os.Build.VERSION.SDK_INT >= 28) android.content.pm.PackageManager.GET_SIGNING_CERTIFICATES else android.content.pm.PackageManager.GET_SIGNATURES
+        val candidate = app.packageManager.getPackageArchiveInfo(f.absolutePath, flags) ?: error("Файл не является корректным APK")
+        val installed = app.packageManager.getPackageInfo(app.packageName, flags)
+        val code = if (android.os.Build.VERSION.SDK_INT >= 28) candidate.longVersionCode else candidate.versionCode.toLong()
+        require(UpdatePolicy.acceptsArchive(app.packageName, s.code, com.vlesscardvpn.BuildConfig.VERSION_CODE, candidate.packageName, code,
+            signers(installed), signers(candidate))) { "Пакет, версия или сертификат обновления не совпадают — установка остановлена" }
+    }
+    private suspend fun download(app: Context, s: State): java.io.File = downloadLock.withLock {
+        val job = currentCoroutineContext()
         val f = java.io.File(app.cacheDir, "update.apk")
-        if (ready == s.latest && f.length() > 1_000_000) return f
+        val tmp = java.io.File(app.cacheDir, "update.part.apk")
+        if (ready == s.latest && f.isFile && readyDigest.isNotEmpty()) {
+            val valid = f.length() in 1..UpdatePolicy.MAX_APK && runCatching { validateArchive(app, f, s); f.inputStream().use { UpdatePolicy.hash(it) } == readyDigest }.getOrDefault(false)
+            if (valid) return@withLock f
+            f.delete(); ready = ""; readyDigest = ""
+        }
         val arm64 = android.os.Build.SUPPORTED_ABIS.firstOrNull() == "arm64-v8a"
         val tag = "v" + s.latest
-        anyPath { c ->
-            c.newCall(Request.Builder().url("https://github.com/$REPO/releases/download/$tag/${apkName(tag, arm64)}").build()).execute().use { r ->
-                if (!r.isSuccessful) error("GitHub ответил ${r.code}")
-                val total = r.body!!.contentLength()
-                r.body!!.byteStream().use { inp -> f.outputStream().use { out ->
-                    val buf = ByteArray(64 * 1024); var done = 0L; var last = 0L
-                    while (true) { val n = inp.read(buf); if (n < 0) break; out.write(buf, 0, n); done += n
-                        if (done - last > 1_000_000 && state.value.busy) { last = done; state.value = state.value.copy(text = "Скачиваю ${s.latest}: ${done shr 20} из ${if (total > 0) total shr 20 else "?"} МБ") } }
-                } }
-                if (total > 0 && f.length() != total) error("файл скачался не полностью")
+        require(codeOf(tag) == s.code && s.code > com.vlesscardvpn.BuildConfig.VERSION_CODE)
+        val name = apkName(tag, arm64)
+        val base = "https://github.com/$REPO/releases/download/$tag/"
+        val manifest = anyPath { c -> c.newCall(Request.Builder().url(base + "SHA256SUMS-Beta.txt").build()).execute().use { r ->
+            if (!r.isSuccessful) throw java.io.IOException("Нет контрольных сумм: ${r.code}")
+            String(r.body!!.byteStream().use { BoundedInput.read(it, 64 * 1024) }) } }
+        val sha = UpdatePolicy.checksum(manifest, name)
+        try {
+            anyPath { c ->
+                c.newCall(Request.Builder().url(base + name).build()).execute().use { r ->
+                    if (!r.isSuccessful) throw java.io.IOException("GitHub ответил ${r.code}")
+                    val body = r.body ?: error("Пустой ответ загрузки")
+                    val total = body.contentLength(); var last = 0L
+                    body.byteStream().use { inp -> tmp.outputStream().use { out ->
+                        UpdatePolicy.copyVerified(inp, out, sha, total) { done ->
+                            job.ensureActive()
+                            if (done - last > 1_000_000 && state.value.busy && state.value.latest == s.latest) {
+                                last = done; state.value = state.value.copy(text = "Скачиваю ${s.latest}: ${done shr 20} из ${if (total > 0) total shr 20 else "?"} МБ")
+                            }
+                        }
+                    } }
+                }
             }
-        }
-        ready = s.latest
-        return f
+            job.ensureActive(); validateArchive(app, tmp, s)
+            check(tmp.renameTo(f)) { "Не удалось сохранить проверенное обновление" }
+            ready = s.latest; readyDigest = sha
+            f
+        } catch (e: Exception) { tmp.delete(); throw e }
     }
 
     /** On Wi-Fi the new version is downloaded in the background, so «Обновить» installs at once. */
@@ -112,20 +151,22 @@ object Updater {
         }
         state.value = s.copy(busy = true, text = "Скачиваю ${s.latest}…")
         scope.launch {
+            var sessionId: Int? = null
             try {
                 val f = download(app, s)
                 val pi = app.packageManager.packageInstaller
                 val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL).apply { setAppPackageName(app.packageName) }
-                val id = pi.createSession(params)
+                val id = pi.createSession(params); sessionId = id
                 pi.openSession(id).use { session ->
                     session.openWrite("update.apk", 0, f.length()).use { out -> f.inputStream().use { it.copyTo(out) }; session.fsync(out) }
                     val flags = PendingIntent.FLAG_UPDATE_CURRENT or (if (android.os.Build.VERSION.SDK_INT >= 31) PendingIntent.FLAG_MUTABLE else 0)
                     val cb = PendingIntent.getBroadcast(app, id, Intent(app, InstallReceiver::class.java), flags)
-                    session.commit(cb.intentSender)
+                    session.commit(cb.intentSender); sessionId = null
                 }
                 state.value = state.value.copy(busy = false, text = "Подтвердите установку ${s.latest} в окне Android")
             } catch (e: Exception) {
-                ready = ""
+                sessionId?.let { runCatching { app.packageManager.packageInstaller.abandonSession(it) } }
+                ready = ""; readyDigest = ""
                 state.value = state.value.copy(busy = false, text = "Не получилось обновить: ${Errors.human(e)}. Можно скачать вручную на GitHub")
             }
         }

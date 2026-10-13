@@ -1,9 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
+source "$(dirname "$0")/security-results-valid.sh"
 PKG=com.vlesscardvpn.securityprobe
 adb install -r -t release/security-test-probe.apk >/dev/null
-adb shell am instrument -w "$PKG/.ProbeInstrumentation" | tee security-results.txt
-grep -q 'INSTRUMENTATION_RESULT: failures=0' security-results.txt
-grep -q 'INSTRUMENTATION_RESULT: tests=7' security-results.txt
-grep -q 'INSTRUMENTATION_CODE: -1' security-results.txt
+# -r is required: without it Android prints only the human-readable stream, hiding result counters/code.
+adb shell am instrument -w -r "$PKG/.ProbeInstrumentation" | tr -d '\r' | tee security-results.txt
+if ! security_results_valid security-results.txt; then
+  python3 - <<'PY'
+from pathlib import Path
+text = Path('security-results.txt').read_text(errors='replace')[:4000]
+text = text.replace('%','%25').replace('\r','%0D').replace('\n','%0A')
+print('::error title=Android storage security checks::' + text)
+PY
+  exit 1
+fi
 adb uninstall "$PKG" >/dev/null
