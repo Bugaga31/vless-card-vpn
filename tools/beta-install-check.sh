@@ -21,6 +21,12 @@ echo "$OUT" | grep -q Success || exit 1
 adb uninstall $PKG >/dev/null
 echo "== new APK via adb install"
 adb install "$APK" 2>&1 | tail -1 | grep -q Success || exit 1
+# API33+: acknowledge only the notification permission on the test emulator before launch.
+# Otherwise GrantPermissionsActivity legitimately covers the app and the foreground assertion fails.
+API=$(adb shell getprop ro.build.version.sdk | tr -d '\r')
+if [ "$API" -ge 33 ]; then
+  adb shell pm grant "$PKG" android.permission.POST_NOTIFICATIONS || exit 1
+fi
 adb logcat -c
 adb shell monkey -p $PKG -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1
 sleep 20
