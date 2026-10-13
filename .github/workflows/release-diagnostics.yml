@@ -1,0 +1,27 @@
+name: Diagnose blocked release
+on:
+  push:
+    branches: ['diagnostics-127']
+permissions:
+  actions: read
+  contents: read
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Read failed release logs and emulator artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          mkdir diagnostic-input
+          gh api "repos/$GH_REPO/actions/runs/38435693809/logs" > diagnostic-input/run.zip
+          gh api "repos/$GH_REPO/actions/runs/38435693809/artifacts" --jq '.artifacts[] | select(.name | startswith("install-check-api-")) | [.id,.name] | @tsv' > artifact-ids.txt
+          while IFS=$'\t' read -r id name; do
+            gh api "repos/$GH_REPO/actions/artifacts/$id/zip" > "diagnostic-input/$name.zip"
+          done < artifact-ids.txt
+          python3 tools/diagnose-release.py
