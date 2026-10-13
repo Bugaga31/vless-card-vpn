@@ -13,6 +13,7 @@ class VlessApplication : Application() {
         super.onCreate()
         Store.init(this)
         Actions.init(this)
+        runCatching { com.vlesscardvpn.core.DeviceCoach.restoreBackground(this) }
         com.vlesscardvpn.core.Tester.installAuthenticator()
         Thread({ runCatching { XrayCore.init(this) } }, "xray-init").start()
         // widget + quick tile follow the VPN state

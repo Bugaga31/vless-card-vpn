@@ -118,6 +118,13 @@ data class Settings(
     val autopilot: Boolean = true,
     /** «Охлаждение»: when the phone is hot the app lowers its own load (pauses background checks, turbo, light masks). */
     val autoCool: Boolean = true,
+    val phoneLearning: Boolean = true,
+    val powerProfile: String = "balanced",
+    val batteryThreshold: Int = 20,
+    val quietScreen: Boolean = true,
+    val chargeOnly: Boolean = false,
+    val wifiMaintenance: Boolean = true,
+    val protectActiveTraffic: Boolean = true,
     /** «GPS под страну сервера» (mock location, needs Developer options). */
     val gpsSpoof: Boolean = false,
     /** network → YouTube through the DPI bypass there (measured; false = servers were faster or it broke). */
@@ -146,7 +153,7 @@ data class Settings(
         .put("ruAppsDirect", ruAppsDirect).put("randomTun", randomTun).put("coverTraffic", coverTraffic).put("rev", rev).put("turbo", turbo).put("autoStart", autoStart)
         .put("alwaysVpn", JSONArray(alwaysVpn)).put("alwaysDirect", JSONArray(alwaysDirect))
         .put("traffic", JSONObject().apply { traffic.forEach { (k, v) -> put(k, v) } }).put("monthLimitGb", monthLimitGb)
-        .put("country", country).put("favorites", JSONArray(favorites)).put("smartYoutube", smartYoutube).put("appAware", appAware).put("autopilot", autopilot).put("autoCool", autoCool).put("gpsSpoof", gpsSpoof)
+        .put("country", country).put("favorites", JSONArray(favorites)).put("smartYoutube", smartYoutube).put("appAware", appAware).put("autopilot", autopilot).put("phoneLearning", phoneLearning).put("powerProfile", powerProfile).put("batteryThreshold", batteryThreshold).put("quietScreen", quietScreen).put("chargeOnly", chargeOnly).put("wifiMaintenance", wifiMaintenance).put("protectActiveTraffic", protectActiveTraffic).put("autoCool", autoCool).put("gpsSpoof", gpsSpoof)
         .put("ytDpi", JSONObject().apply { ytDpi.forEach { (k, v) -> put(k, v) } })
         .put("netServers", JSONObject().apply { netServers.forEach { (k, v) -> put(k, JSONArray(v)) } })
         .put("subInfo", JSONObject().apply { subInfo.forEach { (k, v) -> put(k, v.toJson()) } })
@@ -211,7 +218,11 @@ data class Settings(
                 alwaysVpn = list("alwaysVpn", emptyList()), alwaysDirect = list("alwaysDirect", emptyList()),
                 traffic = o.optJSONObject("traffic")?.let { m -> m.keys().asSequence().associateWith { m.optLong(it) } } ?: emptyMap(),
                 monthLimitGb = o.optInt("monthLimitGb", 0), country = o.optString("country", ""), favorites = list("favorites", emptyList()),
-                smartYoutube = o.optBoolean("smartYoutube", true), appAware = o.optBoolean("appAware", true), autopilot = o.optBoolean("autopilot", true), autoCool = o.optBoolean("autoCool", true), gpsSpoof = o.optBoolean("gpsSpoof", false), ytDpi = o.optJSONObject("ytDpi")?.let { m -> m.keys().asSequence().associateWith { m.optBoolean(it) } } ?: emptyMap(),
+                smartYoutube = o.optBoolean("smartYoutube", true), appAware = o.optBoolean("appAware", true), autopilot = o.optBoolean("autopilot", true), autoCool = o.optBoolean("autoCool", true),
+                phoneLearning = o.optBoolean("phoneLearning", true),
+                powerProfile = o.optString("powerProfile", "balanced").takeIf { it in listOf("balanced", "eco", "fast") } ?: "balanced",
+                batteryThreshold = o.optInt("batteryThreshold", 20).coerceIn(5, 50), quietScreen = o.optBoolean("quietScreen", true),
+                chargeOnly = o.optBoolean("chargeOnly", false), wifiMaintenance = o.optBoolean("wifiMaintenance", true), protectActiveTraffic = o.optBoolean("protectActiveTraffic", true), gpsSpoof = o.optBoolean("gpsSpoof", false), ytDpi = o.optJSONObject("ytDpi")?.let { m -> m.keys().asSequence().associateWith { m.optBoolean(it) } } ?: emptyMap(),
                 netServers = o.optJSONObject("netServers")?.let { m -> m.keys().asSequence().associateWith { k -> m.optJSONArray(k)?.let { a -> (0 until a.length()).map { a.getString(it) } }.orEmpty() } } ?: emptyMap(),
                 subInfo = o.optJSONObject("subInfo")?.let { m -> m.keys().asSequence().mapNotNull { k -> m.optJSONObject(k)?.let { k to SubInfo.fromJson(it) } }.toMap() } ?: emptyMap(),
             )

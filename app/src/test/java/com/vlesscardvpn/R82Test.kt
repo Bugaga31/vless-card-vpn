@@ -416,7 +416,9 @@ class R107Test {
         val a = com.vlesscardvpn.core.AppWatch
         org.junit.Assert.assertTrue(a.eco(true, 80, false))
         org.junit.Assert.assertTrue(a.eco(false, 15, false))
-        org.junit.Assert.assertFalse(a.eco(true, 10, true))
+        // Charging must not override an explicitly enabled Android power saver.
+        org.junit.Assert.assertTrue(a.eco(true, 10, true))
+        org.junit.Assert.assertFalse(a.eco(false, 10, true))
         org.junit.Assert.assertFalse(a.eco(false, 50, false))
         org.junit.Assert.assertFalse(a.eco(false, 0, false))
     }

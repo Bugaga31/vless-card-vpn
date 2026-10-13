@@ -129,6 +129,7 @@ object Updater {
 
     /** On Wi-Fi the new version is downloaded in the background, so «Обновить» installs at once. */
     private fun prefetch(app: Context) {
+        if (!PhonePower.refresh(app).allowed) return
         val s = state.value
         if (s.latest.isEmpty() || s.busy || ready == s.latest) return
         val unmetered = runCatching {

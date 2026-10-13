@@ -86,9 +86,21 @@ object LocalSecrets {
         check(SecretEnvelope.open(k, "github-token", sealed) == token)
         check(ctx.getSharedPreferences("cloud", Context.MODE_PRIVATE).edit().putString("token_enc", Base64.encode(sealed)).remove("token").commit())
     }
+    private fun phoneFile(ctx: Context) = AtomicFile(File(ctx.noBackupFilesDir, "phone-model.enc"))
+    @Synchronized fun readPhoneModel(ctx: Context): String? {
+        if (!File(ctx.noBackupFilesDir, "phone-model.enc").exists() && !File(ctx.noBackupFilesDir, "phone-model.enc.bak").exists()) return null
+        return SecretEnvelope.open(key(), "phone-model-v1", phoneFile(ctx).openRead().use { BoundedInput.read(it, 8192) })
+    }
+    @Synchronized fun writePhoneModel(ctx: Context, text: String) {
+        require(text.length <= 4096)
+        val data = SecretEnvelope.seal(key(), "phone-model-v1", text)
+        val f = phoneFile(ctx); val out = f.startWrite()
+        try { out.write(data); f.finishWrite(out) } catch (e: Exception) { f.failWrite(out); throw e }
+    }
+    @Synchronized fun deletePhoneModel(ctx: Context) { phoneFile(ctx).delete() }
     @Synchronized fun deleteState(ctx: Context) { stateFile(ctx).delete() }
     @Synchronized fun destroy(ctx: Context) {
-        stateFile(ctx).delete()
+        stateFile(ctx).delete(); phoneFile(ctx).delete()
         KeyStore.getInstance("AndroidKeyStore").apply { load(null); deleteEntry(ALIAS) }
     }
 }

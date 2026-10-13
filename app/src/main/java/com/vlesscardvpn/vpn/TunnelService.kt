@@ -129,9 +129,8 @@ class TunnelService : VpnService() {
 
     /** Screen off or battery saver (with «Ускорение»): no background probes — they wake the radio and drain the battery. */
     private fun asleep(): Boolean {
-        if (!Store.state.value.settings.turbo) return false
         val pm = getSystemService(android.os.PowerManager::class.java) ?: return false
-        return !pm.isInteractive || pm.isPowerSaveMode
+        return !pm.isInteractive && Store.state.value.settings.quietScreen
     }
 
     private var screenReceiver: android.content.BroadcastReceiver? = null
@@ -363,7 +362,7 @@ class TunnelService : VpnService() {
             while (true) {
                 delay(com.vlesscardvpn.core.Disguise.nextDelaySec() * 1000L)
                 if (Tunnel.status.value.state != Tunnel.State.CONNECTED || !Store.state.value.settings.coverTraffic) break
-                if (!asleep()) com.vlesscardvpn.core.Disguise.cover()
+                if (com.vlesscardvpn.core.PhonePower.refresh(this@TunnelService).allowed) com.vlesscardvpn.core.Disguise.cover()
             }
         }
     }
@@ -382,7 +381,8 @@ class TunnelService : VpnService() {
         val auth = Tunnel.socks ?: return
         if (Store.state.value.settings.proxyOnly) return
         scope.launch(Dispatchers.IO) {
-            WARM.forEach { h -> launch { runCatching { Tester.dnsViaSocks(auth.port, auth.user, auth.pass, h) } } }
+            if (!com.vlesscardvpn.core.PhonePower.refresh(this@TunnelService).allowed) return@launch
+            WARM.take(com.vlesscardvpn.core.PhonePower.state.value.realParallel).forEach { h -> launch { runCatching { Tester.dnsViaSocks(auth.port, auth.user, auth.pass, h) } } }
         }
     }
 
@@ -393,7 +393,8 @@ class TunnelService : VpnService() {
             var calm = 0
             while (Tunnel.status.value.state == Tunnel.State.CONNECTED) {
                 while (asleep() && Tunnel.status.value.state == Tunnel.State.CONNECTED) delay(60_000) // no re-tests while the phone sleeps
-                if (com.vlesscardvpn.core.Thermal.cooling) { delay(5 * 60_000L); continue } // hot phone: no background re-tests
+                if (!com.vlesscardvpn.core.PhonePower.refresh(this@TunnelService).allowed) { delay(60_000); continue }
+                if (Store.state.value.settings.protectActiveTraffic && userActive()) { delay(60_000); continue } // hot phone: no background re-tests
                 val reconnect = runCatching { Store.busy { Actions.optimize() } }.getOrDefault(false)
                 // the user is in a call / watching video: wait a minute; still busy → skip, the next pass decides again
                 val busyNow = reconnect && userActive() && run { Log.i("E2E", "optimize: user is busy — switch postponed"); delay(60_000); userActive() }
@@ -437,7 +438,7 @@ class TunnelService : VpnService() {
             var stats = TProxyService.stats()
             while (Tunnel.status.value.state == Tunnel.State.CONNECTED) {
                 // wait 45 s (10 s offline), but check right away when the screen turns back on — that's when apps are opened
-                var waited = 0L; val period = if (offline) 10_000L else if (miss > 0) 3_000L else 20_000L
+                var waited = 0L; val period = if (offline) 10_000L else if (miss > 0) 3_000L else com.vlesscardvpn.core.PhonePower.refresh(this@TunnelService).healthyMs
                 while (waited < period) { val d = minOf(5000L, period - waited); delay(d); waited += d; val a = asleep(); if (wasAsleep && !a) { wasAsleep = false; delay(1500); break }; wasAsleep = a }
                 com.vlesscardvpn.core.Traffic.tick()
                 if (healJob?.isActive == true || asleep()) continue

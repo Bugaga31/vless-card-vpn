@@ -9,6 +9,9 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import kotlinx.coroutines.launch
+import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
+import androidx.lifecycle.Lifecycle
 import com.vlesscardvpn.ui.AppUi
 import com.vlesscardvpn.vpn.TunnelService
 
@@ -39,6 +42,13 @@ class MainActivity : ComponentActivity() {
         com.vlesscardvpn.core.Actions.init(this)
         if (!BuildConfig.DEBUG) com.vlesscardvpn.core.Actions.warmup() // background: subscriptions, tests, masks — ready before «Подключить»
         com.vlesscardvpn.core.Updater.check(ctx = this)
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    while (true) { runCatching { com.vlesscardvpn.core.DeviceCoach.sample(applicationContext) }; kotlinx.coroutines.delay(60000) }
+                }
+            }
+        }
         setContent { AppUi(onConnect = { connect() }, onDisconnect = { com.vlesscardvpn.core.Actions.cancelPrepare(); TunnelService.stop(this) }) }
         e2e(intent)
         importFrom(intent)

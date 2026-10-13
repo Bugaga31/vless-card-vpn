@@ -160,11 +160,11 @@ object AppWatch {
         val bm = ctx.getSystemService(Context.BATTERY_SERVICE) as android.os.BatteryManager
         eco(pm.isPowerSaveMode, bm.getIntProperty(android.os.BatteryManager.BATTERY_PROPERTY_CAPACITY), bm.isCharging)
     }.getOrDefault(false)
-    fun eco(saver: Boolean, percent: Int, charging: Boolean) = !charging && (saver || percent in 1..19)
+    fun eco(saver: Boolean, percent: Int, charging: Boolean) = saver || !charging && percent in 1..19
     private var lastLatency = System.currentTimeMillis() - 10 * 60_000L; private var slowMs = 0
     private var lastRevive = System.currentTimeMillis() - 330 * 60_000L // first try ~30 min after start
     private var lastFreeze = System.currentTimeMillis() - 110 * 60_000L
-    private var fails = 0; private var lastFix = 0L; private var lastLight = 0L; private var tick = 0
+    private var fails = 0; private var lastFix = 0L; private var lastLight = 0L; private var pilotAt = -60000L
     private var lastSpeedup = 0L; private var lastSpeedCheck = System.currentTimeMillis() - 40 * 60_000L // first speed check ~5 min after start
     @Volatile var lastMbps = 0.0
     private var evolveNet = ""
@@ -172,28 +172,22 @@ object AppWatch {
     /** What the autopilot did (newest first): time + text, shown in «Помощник». */
     val journal = MutableStateFlow<List<Pair<Long, String>>>(emptyList())
 
-    private suspend fun cool(reconnect: () -> Unit) {
-        val ctx = appCtx ?: return
-        val t = Thermal.tempC(ctx); val s = Thermal.status(ctx)
-        val hot = Store.state.value.settings.autoCool && Thermal.hot(t, s, Thermal.cooling)
-        if (hot == Thermal.cooling) return
-        Thermal.cooling = hot
-        if (hot) {
-            val st = Store.state.value.settings
-            val acts = mutableListOf("паузa фоновых проверок и эволюции")
-            if (!st.turbo) { Store.update { it.copy(settings = it.settings.copy(turbo = true)) }; acts += "включил «Ускорение телефона» (крупные пакеты — меньше работы процессору)"; reconnect() }
-            if (Store.summary.value.heavyMask && !Actions.progress.value.running) { acts += "меняю тяжёлую маску на лёгкую"; withContext(Dispatchers.Main) { Actions.lighten() } }
-            say("Телефон нагрелся (${Thermal.label(t, s)}): снижаю нагрузку — " + acts.joinToString(", "))
-        } else say("Телефон остыл (${Thermal.label(t, s)}) — фоновые улучшения снова работают")
+    private var powerReason = ""
+    private fun powerNote(plan: PowerPolicy.Plan) {
+        val reason = plan.reason.substringBefore(": ")
+        if (reason != powerReason) { powerReason = reason; say("Нагрузка VPN: ${plan.reason}. Самовосстановление остаётся включено") }
     }
 
     private suspend fun autopilot(reconnect: () -> Unit) {
-        if (++tick % 40 != 0) return // once a minute
-        cool(reconnect)
-        appCtx?.let { Updater.check(ctx = it); CloudSync.auto(it) } // every 6 h / 3 h at most, also while the app stays closed
+        val elapsed = android.os.SystemClock.elapsedRealtime()
+        if (elapsed - pilotAt < 60000) return
+        pilotAt = elapsed
+        val plan = appCtx?.let { PhonePower.refresh(it) } ?: return
+        powerNote(plan)
+        if (plan.allowed) appCtx?.let { Updater.check(ctx = it); CloudSync.auto(it) } // every 6 h / 3 h at most, also while the app stays closed
         // battery saver on or < 20 %: only what keeps the internet working (fix, switching) — no evolution, revival,
         // freeze/latency/speed checks; they come back when the phone charges
-        val eco = lowPower()
+        val eco = !plan.allowed
         if (!eco) appCtx?.let { Report.auto(it) } // shared cloud: pull what all phones learned, send this one's report
         if (eco != ecoOn) { ecoOn = eco; say(if (eco) "Батарея садится — фоновые улучшения на паузе, связь чинится как обычно" else "Батарея в порядке — фоновые улучшения снова работают") }
         val s = Tunnel.status.value
@@ -201,7 +195,7 @@ object AppWatch {
         val now = System.currentTimeMillis()
         // new network: masks that passed elsewhere may not pass here — evolve here ~15 min later instead of waiting 2 h
         val net = appCtx?.let { runCatching { Net.key(it) }.getOrNull() }.orEmpty()
-        if (net.isNotEmpty() && net != evolveNet && net.startsWith("Моб.")) {
+        if (!eco && net.isNotEmpty() && net != evolveNet && net.startsWith("Моб.")) {
             // mobile network changed: are the operator's whitelists on? Then masks behind allowed sites are searched now
             val r = Whitelist.check()
             if (r.verdict == Whitelist.Verdict.WHITELIST) {
@@ -310,14 +304,15 @@ object AppWatch {
             try {
                 while (isActive && Tunnel.status.value.state == Tunnel.State.CONNECTED) {
                     val st = Store.state.value.settings
-                    if (st.gpsSpoof) GpsMock.follow(app, gpsCountry(st.country, countries())) else GpsMock.stop(app)
-                    val pkg = if (st.appAware && hasAccess(app)) foreground(app) else null
+                    val plan = PhonePower.refresh(app)
+                    if (st.gpsSpoof && interactive(app)) GpsMock.follow(app, gpsCountry(st.country, countries())) else GpsMock.stop(app)
+                    val pkg = if (st.appAware && interactive(app) && hasAccess(app)) foreground(app) else null
                     val opened = pkg != null && pkg != last
-                    if (opened) { last = pkg!!; PROFILES[pkg]?.let { handle(app, it, reconnect) } }
+                    if (opened) { last = pkg!!; PROFILES[pkg]?.let { if (!it.youtube || plan.allowed) handle(app, it, reconnect) } }
                     // usage events only show an app when it opens: until another one opens, the last one is still on screen
                     if (st.autopilot && last.isNotEmpty() && interactive(app)) GUARDS[last]?.let { runCatching { guard(last, it, opened, reconnect) } }
                     if (st.autopilot) autopilot(reconnect)
-                    delay(1500)
+                    delay(plan.loopMs)
                 }
             } finally { GpsMock.stop(app); status.value = "" }
         }

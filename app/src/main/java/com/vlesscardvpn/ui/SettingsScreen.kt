@@ -198,6 +198,33 @@ fun SettingsScreen() {
 
         // ---------------- servers
         }
+        Group("Нагрузка VPN и батарея") {
+        val power by com.vlesscardvpn.core.PhonePower.state.collectAsState()
+        val sensors by com.vlesscardvpn.core.PhonePower.sensors.collectAsState()
+        LaunchedEffect(Unit) { while (true) { com.vlesscardvpn.core.PhonePower.refresh(ctx); kotlinx.coroutines.delay(10000) } }
+        Text(power.reason, color = MaterialTheme.colorScheme.primary)
+        Hint(sensors)
+        Hint("Лимиты проверок: TCP ${power.tcpParallel}, реальные ${power.realParallel}. VPN и аварийное восстановление не отключаются. Это не физическое охлаждение и не ускоритель других приложений.")
+        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            listOf("balanced" to "Баланс", "eco" to "Экономия", "fast" to "Быстрее").forEach { (id, title) ->
+                FilterChip(selected = s.powerProfile == id, onClick = { set { it.copy(powerProfile = id) } }, label = { Text(title) })
+            }
+        }
+        Hint("Профиль «Быстрее» разрешает больше одновременных проверок, но не отменяет защиту батареи и нагрева.")
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            listOf(10, 20, 30).forEach { n -> FilterChip(selected = s.batteryThreshold == n,
+                onClick = { set { it.copy(batteryThreshold = n) } }, label = { Text("Заряд ≤ $n%") }) }
+        }
+        Toggle("Тихо с выключенным экраном", "Необязательные задачи спят; при включении экрана связь проверяется снова. Не зависит от крупных пакетов", s.quietScreen) { v -> set { it.copy(quietScreen = v) } }
+        Toggle("Улучшения только на зарядке", "Поиск более быстрых серверов и эволюция ждут зарядку. Восстановление связи — всегда", s.chargeOnly) { v -> set { it.copy(chargeOnly = v) } }
+        Toggle("Фоновые улучшения без тарификации", "Не тратить мобильный трафик на необязательные проверки; системная экономия трафика учитывается всегда", s.wifiMaintenance) { v -> set { it.copy(wifiMaintenance = v) } }
+        Toggle("Не мешать активному трафику", "Отложить фоновые тесты при потоке свыше 40 КБ/с. Это оценка трафика, а не распознавание звонков", s.protectActiveTraffic) { v -> set { it.copy(protectActiveTraffic = v) } }
+        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            listOf(15, 30, 60).forEach { n -> OutlinedButton(onClick = { com.vlesscardvpn.core.PhonePower.pause(n); com.vlesscardvpn.core.PhonePower.refresh(ctx) }) { Text("Пауза $n мин") } }
+            TextButton(onClick = { com.vlesscardvpn.core.PhonePower.resume(); com.vlesscardvpn.core.PhonePower.refresh(ctx) }) { Text("Возобновить") }
+        }
+        Hint("Пауза касается только улучшений, не VPN; после перезапуска приложения сбрасывается. При зарядке тепловая защита начинается раньше (39 °C батареи), возврат — после двух минут устойчивого остывания. Критический статус Android ограничивает нагрузку всегда.")
+        }
         Group("Несколько серверов одновременно") {
         Hint("Запросы распределяются между отмеченными серверами; неработающие исключаются автоматически (проверка раз в минуту).")
         Balance.values().forEach { b ->
@@ -206,7 +233,7 @@ fun SettingsScreen() {
         Toggle("Мультиплексирование (mux)", "Меньше новых соединений — меньше рукопожатий, которые видит DPI. Не для Vision/XHTTP", s.mux) { v -> set { it.copy(mux = v) } }
         Toggle("Менять маскировку при каждом подключении", "Случайная из рабочих, найденных «Подобрать маскировку», — у трафика нет постоянного отпечатка", s.rotateMasks) { v -> set { it.copy(rotateMasks = v) } }
         Toggle("Блокировать рекламу и трекеры", "Страницы грузятся быстрее, меньше трафика и батареи. Если какой-то сайт сломается — выключите", s.blockAds) { v -> set { it.copy(blockAds = v) } }
-        Toggle("Ускорение телефона", "Крупные пакеты внутри VPN (в 5-6 раз меньше работы процессору), мгновенные ответы DNS из кэша, а с выключенным экраном и в режиме экономии — никаких фоновых проверок. VPN не сажает батарею", s.turbo) { v -> set { it.copy(turbo = v) } }
+        Toggle("Ускорение телефона", "Крупные пакеты внутри VPN и кэш DNS могут уменьшать накладные расходы. Результат зависит от устройства и сети; экономия батареи не гарантируется", s.turbo) { v -> set { it.copy(turbo = v) } }
         var lim by remember(s.monthLimitGb) { mutableStateOf(if (s.monthLimitGb > 0) s.monthLimitGb.toString() else "") }
         OutlinedTextField(lim, { v -> lim = v.filter { it.isDigit() }.take(5); set { it.copy(monthLimitGb = lim.toIntOrNull() ?: 0) } }, singleLine = true,
             label = { Text("Лимит трафика в месяц, ГБ (пусто — без лимита)") }, modifier = Modifier.fillMaxWidth(),
@@ -214,7 +241,7 @@ fun SettingsScreen() {
         Toggle("Подключаться после перезагрузки", "Телефон включился — VPN включится сам (если разрешение уже дано)", s.autoStart) { v -> set { it.copy(autoStart = v) } }
         Toggle("Умный YouTube", "Авто: в каждой сети сам сравнивает скорость YouTube через серверы и через обход DPI напрямую к Google. Если обход заметно быстрее — YouTube идёт им, остальное через серверы. Сломается — сам вернёт серверы", s.smartYoutube) { v -> set { it.copy(smartYoutube = v, ytDpi = emptyMap()) } }
         Toggle("Автопилот помощника", "Пока VPN включён, помощник сам следит за связью: пропал интернет — чинит (серверы, маски, обход DPI), маска тяжёлая — ищет лёгкую. Обо всём пишет во вкладке «Помощник»", s.autopilot) { v -> set { it.copy(autopilot = v) } }
-        Toggle("Охлаждение", "Телефон нагрелся — приложение снижает свою нагрузку: фоновые проверки и эволюция масок на паузе, крупные пакеты, лёгкие маски. Остыл — всё возвращается", s.autoCool) { v -> set { it.copy(autoCool = v) } }
+        Toggle("Охлаждение", "Снижает только нагрузку VPN: пауза необязательных задач, ограничение параллелизма, возврат после устойчивого остывания. Настройки пакетов и масок не меняются; критическая защита действует всегда", s.autoCool) { v -> set { it.copy(autoCool = v) } }
         Toggle("Под приложение", "Видит, что открыто: Gemini, ChatGPT, Claude, Spotify, Netflix — сам переключит на серверы страны, где они работают (США, Нидерланды…); YouTube — ускорит видео для этой сети", s.appAware) { v -> set { it.copy(appAware = v) } }
         if (s.appAware && !com.vlesscardvpn.core.AppWatch.hasAccess(ctx)) TextButton(onClick = { com.vlesscardvpn.core.AppWatch.openAccess(ctx) }) { Text("Разрешить «Доступ к истории использования»") }
         Toggle("GPS под страну сервера", "Пока включён VPN, телефон «окажется» в столице страны сервера (подмена местоположения Android). Нужно выбрать VLESS Card в Параметрах разработчика → «Приложение для фиктивных местоположений»", s.gpsSpoof) { v -> set { it.copy(gpsSpoof = v) }; if (!v) com.vlesscardvpn.core.GpsMock.stop(ctx) }
