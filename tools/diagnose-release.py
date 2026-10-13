@@ -2,16 +2,30 @@ import re,zipfile,os,glob
 # Only exception classes, source locations and install result codes leave the diagnostic job.
 # No raw log lines, app state, credentials, URLs or device identifiers are published.
 rows=[]
+counts={'zip':0,'files':0,'fatal':0}
 def add(x):
  if x not in rows: rows.append(x)
 for filename in glob.glob('diagnostic-input/*.zip'):
+ counts['zip']+=1
  with zipfile.ZipFile(filename) as z:
   for name in z.namelist():
    if not name.endswith(('.txt','.log')): continue
+   counts['files']+=1
    text=z.read(name).decode('utf-8',errors='replace')
    source='Android30' if '(30' in name or 'api-30' in filename else 'Android34' if '(34' in name or 'api-34' in filename else 'release'
    lines=text.splitlines()
    for i,line in enumerate(lines):
+    signal=re.search(r'Fatal signal (\d+) \(([A-Z0-9]+)\)',line)
+    if signal: counts['fatal']+=1; add(source+': native crash '+signal.group(1)+' '+signal.group(2))
+    ins=re.search(r'ndk_translation: Undefined instruction (0x[0-9a-f]+)',line)
+    if ins:add(source+': ARM translation unsupported instruction '+ins.group(1))
+    lib=re.search(r'#[0-9]+\s+pc\s+[0-9a-f]+\s+[^\s]*[/!]([A-Za-z0-9_.-]+\.so)(?:\s+\(([A-Za-z0-9_.$:+ -]+)\))?',line)
+    if lib:add(source+': native library '+lib.group(1)+((' '+lib.group(2)) if lib.group(2) else ''))
+    if re.search(r'\bpid: ?(?:</[^>]+>)*\s*$',line):add(source+': APP PROCESS NOT RUNNING')
+    for marker in ['== old Beta 1.0.51 installed first','== session install','== new APK via pm install','== new APK via adb install','== upgrade over published Beta 1.0.52','LAUNCH OK','LAUNCH SKIPPED','INSTRUMENTATION_CODE: -1','security-storage-check.sh','beta-install-check.sh']:
+     if marker in line:add(source+': checkpoint '+marker)
+    if re.search(r'\bpid: ?[0-9]+',line):add(source+': app process present')
+
     if 'FATAL EXCEPTION' in line:
      add(source+': FATAL EXCEPTION')
      for l in lines[i:i+38]:
@@ -23,6 +37,7 @@ for filename in glob.glob('diagnostic-input/*.zip'):
     if 'INSTRUMENTATION_FAILED' in line:add(source+': INSTRUMENTATION_FAILED')
     if re.search(r'(?:tests failed|FAILURES!!!)',line,re.I):add(source+': instrumentation failures')
     if 'ALL INSTALL CHECKS OK' in line:add(source+': install checks passed')
+add('Sanitized scan counts '+str(counts))
 if not rows: rows=['No exception stack or installation code found; diagnostic data needs further inspection.']
 for i in range(0,min(len(rows),100),15):
  msg='\n'.join(rows[i:i+15]).replace('%','%25').replace('\r','%0D').replace('\n','%0A')
