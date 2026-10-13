@@ -44,10 +44,10 @@ class R128Test {
 class R129Test {
     @Test fun operatorFactor() {
         val n = mapOf("a" to intArrayOf(9000, 90, 5), "b" to intArrayOf(0, 0, 3), "c" to intArrayOf(0, 0, 1), "d" to intArrayOf(1000, 40, 4))
-        org.junit.Assert.assertEquals(0.85, com.vlesscardvpn.core.Actions.operatorFactor("a", n), 1e-9)
-        org.junit.Assert.assertEquals(2.0, com.vlesscardvpn.core.Actions.operatorFactor("b", n), 1e-9)
+        org.junit.Assert.assertEquals(1.0 - 0.15 * 5.0 / 11.0, com.vlesscardvpn.core.Actions.operatorFactor("a", n), 1e-9)
+        org.junit.Assert.assertEquals(1.0 + 3.0 / 9.0, com.vlesscardvpn.core.Actions.operatorFactor("b", n), 1e-9)
         org.junit.Assert.assertEquals(1.0, com.vlesscardvpn.core.Actions.operatorFactor("c", n), 1e-9)  // one check is not enough
-        org.junit.Assert.assertEquals(1.3, com.vlesscardvpn.core.Actions.operatorFactor("d", n), 1e-9)
+        org.junit.Assert.assertEquals(1.0 + 0.3 * 4.0 / 10.0, com.vlesscardvpn.core.Actions.operatorFactor("d", n), 1e-9)
         org.junit.Assert.assertEquals(1.0, com.vlesscardvpn.core.Actions.operatorFactor("zz", n), 1e-9)
     }
 }
