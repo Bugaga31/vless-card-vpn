@@ -41,6 +41,7 @@ object Actions {
         .stateIn(scope, kotlinx.coroutines.flow.SharingStarted.Eagerly, false)
     private var job: Job? = null
     private lateinit var app: Context
+    private val probeMemory = ProbeMemory()
 
     fun init(context: Context) {
         app = context.applicationContext
@@ -386,9 +387,10 @@ object Actions {
                 if (p == Tester.SKIPPED) return@real
                 val s = variants[i].first
                 val firstSuccess = p.works && ok.incrementAndGet() == 1
+                probeMemory.record(net, s.id, st.state(s).maskFor(net), p.works, System.currentTimeMillis())
                 runCatching { Brain.learn(net, s, st.state(s), p.works) }
                 states.put(s.id) {
-                    it.copy(realMs = p.realMs, bigOk = p.bigOk, ytOk = p.ytOk, tgOk = p.tgOk, checkedAt = System.currentTimeMillis(), kbps = if (p.kbps > 0) p.kbps else it.kbps,
+                    it.copy(realMs = p.realMs, bigOk = p.bigOk ?: it.bigOk?.takeIf { old -> old }, ytOk = p.ytOk ?: it.ytOk, tgOk = p.tgOk ?: it.tgOk, checkedAt = System.currentTimeMillis(), kbps = if (p.kbps > 0) p.kbps else it.kbps,
                         okCount = it.okCount + if (p.works) 1 else 0, failCount = it.failCount + if (p.works) 0 else 1)
                 }
                 if (firstSuccess && onFirst != null) { states.flush(); onFirst(s) }
@@ -1023,9 +1025,9 @@ object Actions {
         val cand = (st.selected.filter { st.state(it).works } + preferred(st, st.servers.filter { st.state(it).works }).sortedBy { st.state(it).score })
             .distinctBy { it.id }.take(12)
         // the 6 best first: usually enough — connect right away instead of waiting for all 12
-        realTest(cand.take(6), "Авто: проверяю серверы", big = false, attempts = 1, youtube = false)
+        realTest(cand.take(6), "Авто: проверяю серверы", big = false, attempts = 1, youtube = false, budgetMs = ConnectPolicy.QUICK_BUDGET_MS)
         var now = Store.state.value
-        if (cand.take(6).none { now.state(it).works } && cand.size > 6) { realTest(cand.drop(6), "Авто: проверяю серверы", big = false, attempts = 1, youtube = false); now = Store.state.value }
+        if (cand.take(6).none { now.state(it).works } && cand.size > 6) { realTest(cand.drop(6), "Авто: проверяю серверы", big = false, attempts = 1, youtube = false, budgetMs = ConnectPolicy.QUICK_BUDGET_MS); now = Store.state.value }
         val ok = cand.filter { now.state(it).works }
         if (ok.isNotEmpty()) {
             deepPending = true
@@ -1048,6 +1050,7 @@ object Actions {
         val st0 = Store.state.value
         val notes = mutableListOf<String>()
         val started = ConnectPolicy.StartGate()
+        val attempted = mutableSetOf<String>()
         val firstReady: (Server) -> Unit = { server ->
             if (started.claim()) {
                 deepPending = true
@@ -1057,18 +1060,18 @@ object Actions {
         }
         fun fresh() = Store.state.value.let { st -> st.servers.filter { st.state(it).works && now - st.state(it).checkedAt < 6 * 3600_000L } }
         // Existing catalog first, even when subscription timestamps are old. Cloud cache was applied before this.
-        if (st0.servers.isNotEmpty() && fresh().isEmpty()) notes += quickTest(st0.servers, firstReady)
+        if (st0.servers.isNotEmpty() && fresh().isEmpty()) notes += quickTest(st0.servers, firstReady, attempted)
         if (started.started) return "Первый HTTPS-маршрут найден — VPN подключается; подробные проверки в фоне"
         if (st0.servers.isEmpty() || fresh().isEmpty() && st0.settings.autoUpdateSubs && now - st0.settings.lastSubRefresh > 12 * 3600_000L) {
             progress.value = progress.value.copy(title = "Авто: загружаю первые серверы")
-            notes += doRefresh(firstReady = { list -> quickTest(list, firstReady) })
+            notes += doRefresh(firstReady = { list -> quickTest(list, firstReady, attempted) })
         }
         if (started.started) return "VPN подключается; подписки дозагружены в фоне"
         if (fresh().isEmpty() && Store.state.value.servers.isNotEmpty()) {
-            notes += quickTest(Store.state.value.servers, firstReady)
+            notes += quickTest(Store.state.value.servers, firstReady, attempted)
             if (started.started) return "Первый HTTPS-маршрут найден — подключаюсь"
             val st = Store.state.value
-            realTest(st.servers.filter { st.state(it).tcpMs > 0 && st.state(it).realMs < 0 }.sortedBy { st.state(it).tcpMs }.take(ConnectPolicy.NEXT),
+            realTest(st.servers.filter { st.state(it).tcpMs > 0 && st.state(it).realMs < 0 && it.id !in attempted }.sortedBy { st.state(it).tcpMs }.take(ConnectPolicy.NEXT),
                 "Авто: запасные маршруты", big = false, youtube = false, attempts = 1, stopAfter = 1, budgetMs = ConnectPolicy.QUICK_BUDGET_MS, onFirst = firstReady)
             if (started.started) return "Запасной маршрут найден — подключаюсь"
             deepPending = true
@@ -1090,19 +1093,24 @@ object Actions {
     }
 
     /** Cached cloud/network candidates first; no whole-catalog TCP scan or video downloads before first connect. */
-    suspend fun quickTest(list: List<Server>, onFirst: ((Server) -> Unit)? = null): String {
-        val st = Store.state.value
+    suspend fun quickTest(list: List<Server>, onFirst: ((Server) -> Unit)? = null, attempted: MutableSet<String> = mutableSetOf()): String {
         CloudSpeed.loadCached(app)
-        val eligible = preferred(st, list).filterNot { CloudSpeed.blocked(it) }.ifEmpty { preferred(st, list) }
+        val st = Store.state.value
+        val untried = list.filter { it.id !in attempted }
+        if (untried.isEmpty()) return "Эти маршруты уже проверены в текущем поиске"
+        val eligible = preferred(st, untried).filterNot { CloudSpeed.blocked(it) }.ifEmpty { preferred(st, untried) }
         val cloud = CloudSpeed.pick(eligible, emptyList(), n = ConnectPolicy.FIRST)
-        val remembered = st.settings.netServers[Net.key(app)].orEmpty().toSet()
+        val net = Net.key(app)
+        val remembered = (st.settings.netServers[net] ?: st.settings.netServers[Net.family(net)]).orEmpty().toSet()
         val learned = Brain.order(Net.key(app), eligible) { st.state(it) }.mapIndexed { i, s -> s.id to i }.toMap()
-        val first = ConnectPolicy.candidates(eligible, cloud, remembered) { s -> learned[s.id] ?: Int.MAX_VALUE }
+        val first = ConnectPolicy.candidates(eligible, cloud, remembered, cooling = { probeMemory.cooling(net, it.id, st.state(it).maskFor(net), System.currentTimeMillis()) }) { s -> learned[s.id] ?: Int.MAX_VALUE }
+        attempted.addAll(first.map { it.id })
         val ok = realTest(first, "Авто: первые ${first.size} маршрутов (облако: ${cloud.size})", big = false,
             youtube = false, attempts = 1, stopAfter = 1, budgetMs = ConnectPolicy.QUICK_BUDGET_MS, onFirst = onFirst)
         if (ok > 0) { deepPending = true; return "Первый HTTPS-маршрут готов; облачные подсказки ${cloud.size}, полный поиск в фоне" }
         // Only if the first wave failed: bound DNS/TCP work to a small diverse wave, not thousands of subscriptions.
-        val rest = ServerChoice.diverse(eligible.filter { s -> first.none { it.id == s.id } }, ConnectPolicy.NEXT)
+        val rest = ServerChoice.diverse(eligible.filter { it.id !in attempted }, ConnectPolicy.NEXT)
+        attempted.addAll(rest.map { it.id })
         val tcp = java.util.concurrent.ConcurrentHashMap<String, Int>(); val states = StateBatch()
         Tester.tcp(rest, parallel = 32, timeoutMs = 1500) { server, ms -> tcp[server.id] = ms; states.put(server.id) { it.copy(tcpMs = ms) } }
         states.flush()
