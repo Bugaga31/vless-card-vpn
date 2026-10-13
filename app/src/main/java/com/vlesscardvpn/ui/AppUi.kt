@@ -7,6 +7,7 @@ import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -38,6 +39,7 @@ fun AppUi(onConnect: () -> Unit, onDisconnect: () -> Unit) {
                     NavigationBarItem(selected = tab == 0, onClick = { tab = 0 }, icon = { Icon(Icons.Filled.PowerSettingsNew, null) }, label = { Text("Главная") })
                     NavigationBarItem(selected = tab == 1, onClick = { tab = 1 }, icon = { Icon(Icons.Filled.Dns, null) }, label = { Text("Серверы") })
                     NavigationBarItem(selected = tab == 3, onClick = { tab = 3 }, icon = { Icon(Icons.Filled.Psychology, null) }, label = { Text("Помощник") })
+                    NavigationBarItem(selected = tab == 4, onClick = { tab = 4 }, icon = { Icon(Icons.Filled.PhoneAndroid, null) }, label = { Text("Телефон") })
                     NavigationBarItem(selected = tab == 2, onClick = { tab = 2 }, icon = { Icon(Icons.Filled.Settings, null) }, label = { Text("Настройки") })
                 }
             }
@@ -47,6 +49,7 @@ fun AppUi(onConnect: () -> Unit, onDisconnect: () -> Unit) {
                     0 -> HomeScreen(onConnect, onDisconnect, openServers = { tab = 1 })
                     1 -> ServersScreen()
                     3 -> ChatScreen()
+                    4 -> DeviceScreen()
                     else -> SettingsScreen()
                 } }
             }

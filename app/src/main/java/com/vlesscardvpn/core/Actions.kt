@@ -552,6 +552,7 @@ object Actions {
      * masks for the reachable ones that don't open sites. Lighter on mobile data (fewer servers, no 256 KB download).
      */
     fun warmup() {
+        if (!PhonePower.refresh(app).allowed) return
         val st = Store.state.value
         if (!st.settings.autoOptimize || job?.isActive == true || Tunnel.status.value.state != Tunnel.State.IDLE) return
         val now = System.currentTimeMillis()
@@ -562,9 +563,11 @@ object Actions {
             val wifi = unmetered()
             val notes = mutableListOf<String>()
             if (subsStale || Store.state.value.servers.isEmpty()) notes += doRefresh()
+            if (!PhonePower.refresh(app).allowed) return@launch "Фоновая подготовка отложена: " + PhonePower.state.value.reason
             val s1 = Store.state.value
             if (s1.servers.count { s1.state(it).works && now - s1.state(it).checkedAt < 3 * 3600_000L } < 5)
                 notes += doTestAll(s1.servers, if (wifi) 120 else 40, big = wifi)
+            if (!PhonePower.refresh(app).allowed) return@launch "Фоновая подготовка отложена: " + PhonePower.state.value.reason
             val s2 = Store.state.value
             if (s2.servers.count { s2.state(it).works } < 3) {
                 val cand = s2.servers.filter { s2.state(it).tcpMs > 0 && !s2.state(it).works }.sortedBy { s2.state(it).tcpMs }.take(if (wifi) 10 else 5)
@@ -703,6 +706,7 @@ object Actions {
 
     suspend fun optimize(): Boolean {
         lastOptimizeSwitched = false
+        if (!PhonePower.refresh(app).allowed) return false
         val st = Store.state.value
         if (!st.settings.autoOptimize || job?.isActive == true) return false
         if (st.settings.mode == com.vlesscardvpn.model.Mode.BYEDPI) return false
@@ -716,12 +720,14 @@ object Actions {
             val rest = s0.servers.filter { s0.state(it).tcpMs > 0 && (s0.state(it).realMs < 0 || System.currentTimeMillis() - s0.state(it).checkedAt > 6 * 3600_000L) }
                 .sortedBy { s0.state(it).tcpMs }.take(if (wifi) 60 else 24)
             if (rest.isNotEmpty()) realTest(rest, "Фоновая проверка", big = true, attempts = 1)
+            if (!PhonePower.refresh(app).allowed) { deepPending = true; progress.value = prev0; return false }
             lightenMasks(wifi)
             // Wi-Fi: a real 3-second download through the 5 best (≈ what YouTube gets), not a 256 KB guess
             if (wifi) Store.state.value.let { s1 -> realSpeed(s1.servers.filter { s1.state(it).works }.sortedBy { s1.state(it).score }.take(5)) }
-            ytSwitch = runCatching { decideYoutube() }.getOrDefault(false)
+            if (PhonePower.refresh(app).allowed) ytSwitch = runCatching { decideYoutube() }.getOrDefault(false)
             progress.value = prev0
         }
+        if (!PhonePower.refresh(app).allowed) return ytSwitch
         // Auto with nothing selected connects to the 5 best: compare against those.
         val sel = st.selected.ifEmpty { st.servers.filter { st.state(it).works }.sortedBy { st.state(it).score }.take(5) }
         val others = st.servers.filter { it !in sel && st.state(it).works }.sortedBy { st.state(it).score }.take(if (wifi) 12 else 6)

@@ -57,13 +57,14 @@ object Tester {
      */
     suspend fun tcp(servers: List<Server>, parallel: Int = 96, timeoutMs: Int = 2500, onEach: (Server, Int) -> Unit) = coroutineScope {
         val names = servers.map { it.address }.distinct()
-        val sem = Semaphore(64)
+        val limit = PowerPolicy.cap(parallel, PhonePower.state.value.tcpParallel)
+        val sem = Semaphore(minOf(32, limit))
         val ips = names.map { h -> async(Bg.io) { sem.withPermit { h to runCatching { InetAddress.getByName(h) }.getOrNull() } } }.awaitAll().toMap()
         servers.filter { !it.isTcpBased }.forEach { onEach(it, if (ips[it.address] != null) 1 else 0) }
         val tcpList = servers.filter { it.isTcpBased }
         tcpList.filter { ips[it.address] == null }.forEach { onEach(it, 0) }
         val ok = tcpList.filter { ips[it.address] != null }
-        kotlinx.coroutines.withContext(Bg.io) { nioPing(ok.map { InetSocketAddress(ips.getValue(it.address), it.port) }, timeoutMs, maxOf(parallel, 512)) { i, ms -> onEach(ok[i], ms) } }
+        kotlinx.coroutines.withContext(Bg.io) { nioPing(ok.map { InetSocketAddress(ips.getValue(it.address), it.port) }, timeoutMs, limit) { i, ms -> onEach(ok[i], ms) } }
     }
 
     /** Connects to all [targets] with up to [window] sockets open at once; [onEach] (index, ms or 0). Blocking. */
@@ -325,7 +326,7 @@ object Tester {
                 }
                 try {
                     coroutineScope {
-                        val sem = Semaphore(parallel)
+                        val sem = Semaphore(PowerPolicy.cap(parallel, PhonePower.state.value.realParallel))
                         chunk.indices.map { i ->
                             async { sem.withPermit { onEach(idx[i], if (skip(idx[i])) SKIPPED else probeSocks(ports[i], testUrl, big = big, youtube = youtube, attempts = attempts)) } }
                         }.awaitAll()

@@ -2,11 +2,7 @@ package com.vlesscardvpn.core
 
 import android.content.Context
 
-/**
- * «Охлаждение»: the app can't cool the phone or close other apps (Android forbids it), but it can stop heating it
- * itself. When the phone is hot: background tests, mask evolution and speed checks pause; «Ускорение телефона»
- * (big packets = several times less CPU work per megabyte) turns on; tiny-packet masks are swapped for light ones.
- */
+/** Battery and Android thermal sensors. Optional-load control lives in PowerPolicy. */
 object Thermal {
     /** Battery temperature, °C (0 = unknown). */
     fun tempC(ctx: Context): Double = runCatching {
