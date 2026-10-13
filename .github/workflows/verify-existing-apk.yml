@@ -1,0 +1,89 @@
+name: Verify and publish existing signed 1.2.16 APK
+on:
+  push:
+    branches: ['verify-apk-127']
+env:
+  VERSION: release-build-127
+  SOURCE_SHA: 5a2161951e3bfaffc6de7d8e64fa883a030d2a08
+permissions:
+  contents: read
+  actions: read
+jobs:
+  emulator-install:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { api: 30, target: google_apis }
+          - { api: 34, target: google_apis }
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: beta-apk
+          path: release
+          run-id: 38445056906
+          github-token: ${{ github.token }}
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - uses: reactivecircus/android-emulator-runner@4c44018e59b437e86cdfc41da381398f93ed8808
+        with:
+          api-level: ${{ matrix.api }}
+          target: ${{ matrix.target }}
+          arch: x86_64
+          disable-animations: true
+          script: bash tools/security-storage-check.sh && bash tools/beta-install-check.sh
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: install-check-api-${{ matrix.api }}
+          path: |
+            screen.png
+            logcat.txt
+            security-results.txt
+          if-no-files-found: ignore
+  publish:
+    needs: [emulator-install]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: beta-apk
+          path: release
+          run-id: 38445056906
+          github-token: ${{ github.token }}
+      - name: Create prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          V=${VERSION#beta-build-}; V=${V#release-build-}; D=$V
+          if [ "$V" -gt 110 ] 2>/dev/null; then V="2.$((V-111))"; elif [ "$V" -gt 100 ] 2>/dev/null; then V="1.$((V-101))"; else V="0.$V"; fi
+          cd release
+          mv VLESS-Card-Beta.apk VLESS-Card-Beta-1.$V.apk
+          mv VLESS-Card-Beta-arm64.apk VLESS-Card-Beta-1.$V-arm64.apk
+          sha256sum VLESS-Card-Beta-1.$V.apk VLESS-Card-Beta-1.$V-arm64.apk > SHA256SUMS-Beta.txt
+          read T F < tests.txt || true
+          NOTES=../docs/release-1.$V.md; [ -f "$NOTES" ] || NOTES=../docs/release-1.0.$D.md; [ -f "$NOTES" ] || NOTES=../docs/beta-1.0.$D.md
+          [ -f "$NOTES" ] || NOTES=/dev/null
+          { cat "$NOTES"; echo; echo "### Автоматические проверки этой сборки"; echo "- JVM-тесты: $T, ошибок: $F"; echo "- Подписи v1 + v2 + v3, постоянный ключ Beta (следующие версии ставятся поверх)"; echo "- Файл *-arm64.apk — то же приложение только для 64-битных телефонов (почти все с 2017 года), качать примерно вдвое меньше"; echo "- Суммы SHA-256 обоих файлов — в SHA256SUMS-Beta.txt"; echo "- Универсальный файл установлен и запущен на эмуляторах Android 11 и 14 (нативный x86_64, без ARM-трансляции)"; echo "- Реальный телефон и сети РФ этим не проверяются"; } > notes.md
+          case "$VERSION" in
+            release-build-*) gh release create "v1.$V" VLESS-Card-Beta-1.$V.apk VLESS-Card-Beta-1.$V-arm64.apk SHA256SUMS-Beta.txt \
+                --repo "$GITHUB_REPOSITORY" --target "$SOURCE_SHA" --latest \
+                --title "VLESS Card 1.$V" --notes-file notes.md ;;
+            *) gh release create "beta-v1.$V" VLESS-Card-Beta-1.$V.apk VLESS-Card-Beta-1.$V-arm64.apk SHA256SUMS-Beta.txt \
+                --repo "$GITHUB_REPOSITORY" --target "$SOURCE_SHA" --prerelease --draft \
+                --title "VLESS Card · Beta 1.$V" --notes-file notes.md ;;
+          esac
