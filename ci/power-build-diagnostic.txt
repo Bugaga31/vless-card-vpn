@@ -1,0 +1,4 @@
+2026-10-14T13:49:47.1015801Z > Task :app:mergeDebugJniLibFolders FAILED
+2026-10-14T13:50:00.8996354Z Execution failed for task ':app:mergeDebugJniLibFolders'.
+2026-10-14T13:50:00.9034555Z BUILD FAILED in 4m 8s
+2026-10-14T13:50:01.3653797Z ##[error]Process completed with exit code 1.
