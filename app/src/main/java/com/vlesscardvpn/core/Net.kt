@@ -7,14 +7,29 @@ import android.telephony.TelephonyManager
 
 /** Name of the current underlying network ("Моб.: Beeline", "Wi-Fi"): DPI strategies are remembered per network. */
 object Net {
+    fun underlying(context: Context): android.net.Network? = runCatching {
+        val cm = context.getSystemService(ConnectivityManager::class.java)
+        val active = cm.activeNetwork
+        val current = cm.getNetworkCapabilities(active)
+        if (current != null && !current.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) active
+        else cm.allNetworks.filter { n -> cm.getNetworkCapabilities(n)?.let {
+            !it.hasTransport(NetworkCapabilities.TRANSPORT_VPN) && it.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+        } == true }.sortedByDescending { n ->
+            val caps = cm.getNetworkCapabilities(n)!!
+            (if (caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)) 2 else 0) +
+                (if (current != null && listOf(NetworkCapabilities.TRANSPORT_WIFI, NetworkCapabilities.TRANSPORT_CELLULAR,
+                    NetworkCapabilities.TRANSPORT_ETHERNET).any { caps.hasTransport(it) && current.hasTransport(it) }) 1 else 0)
+        }.firstOrNull()
+    }.getOrNull()
     fun key(context: Context): String = runCatching {
         val cm = context.getSystemService(ConnectivityManager::class.java)
-        val caps = cm.getNetworkCapabilities(cm.activeNetwork)
+        val network = underlying(context)
+        val caps = cm.getNetworkCapabilities(network)
         when {
             caps == null -> "Нет сети"
             // Each Wi-Fi has its own DPI (home provider ≠ café ≠ work): told apart by the router address (no location permission needed).
             caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> {
-                val link = cm.getLinkProperties(cm.activeNetwork)
+                val link = cm.getLinkProperties(network)
                 val gateway = link?.routes?.firstOrNull { it.isDefaultRoute && it.gateway != null }?.gateway?.hostAddress.orEmpty()
                 // SSID is OPTIONAL: when Android redacts it, do not request new location permissions.
                 val ssid = runCatching { (context.applicationContext.getSystemService(Context.WIFI_SERVICE) as android.net.wifi.WifiManager).connectionInfo?.ssid }

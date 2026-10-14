@@ -27,10 +27,14 @@ import com.vlesscardvpn.core.Actions
 import com.vlesscardvpn.core.Store
 import com.vlesscardvpn.core.Tunnel
 import com.vlesscardvpn.model.Mode
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.repeatOnLifecycle
+import androidx.compose.ui.platform.LocalLifecycleOwner
 
 @Composable
 fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () -> Unit) {
     val status by Tunnel.status.collectAsState()
+    val lifecycleOwner = LocalLifecycleOwner.current
     // Only settings and a small summary: the home screen does not redraw for every server result of a check.
     val cfg by Store.settings.collectAsState()
     val sum by Store.summary.collectAsState()
@@ -77,14 +81,14 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
         if (status.state == Tunnel.State.CONNECTED) {
             // session: time and traffic through the VPN, refreshed every 5 s only while this screen is open
             var tick by remember { mutableStateOf(0) }
-            LaunchedEffect(status.since) { while (true) { kotlinx.coroutines.delay(5000); tick++ } }
+            LaunchedEffect(status.since, lifecycleOwner) { lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) { while (true) { tick++; kotlinx.coroutines.delay(5000) } } }
             val uid = android.os.Process.myUid()
             val rx = remember(tick) { (android.net.TrafficStats.getUidRxBytes(uid) - Tunnel.rx0).coerceAtLeast(0) }
             val tx = remember(tick) { (android.net.TrafficStats.getUidTxBytes(uid) - Tunnel.tx0).coerceAtLeast(0) }
             val min = remember(tick) { ((System.currentTimeMillis() - status.since) / 60_000).coerceAtLeast(0) }
             // speed right now: bytes since the previous tick (5 s)
-            val prev = remember { longArrayOf(rx, tx) }
-            val now = remember(tick) { val r = ((rx - prev[0]) * 8 / 5000).coerceAtLeast(0) to ((tx - prev[1]) * 8 / 5000).coerceAtLeast(0); prev[0] = rx; prev[1] = tx; r }
+            val prev = remember { longArrayOf(rx, tx, android.os.SystemClock.elapsedRealtime()) }
+            val now = remember(tick) { val t = android.os.SystemClock.elapsedRealtime(); val dt = (t - prev[2]).coerceAtLeast(1); val r = ((rx - prev[0]) * 8 / dt).coerceAtLeast(0) to ((tx - prev[1]) * 8 / dt).coerceAtLeast(0); prev[0] = rx; prev[1] = tx; prev[2] = t; r }
             if (tick > 0 && (now.first > 0 || now.second > 0)) Text("Сейчас: ↓ ${Actions.mbps(now.first.toInt())} ↑ ${Actions.mbps(now.second.toInt())}",
                 fontSize = 13.sp, color = MaterialTheme.colorScheme.onBackground, textAlign = TextAlign.Center)
             SessionStats(min, rx, tx, cfg.turbo)
@@ -365,11 +369,23 @@ private fun pick(c: String, onChange: () -> Unit) {
 @Composable
 private fun PowerButton(on: Boolean, busy: Boolean, color: Color, onClick: () -> Unit) {
     val c by androidx.compose.animation.animateColorAsState(color, androidx.compose.animation.core.tween(400), label = "c")
-    val inf = androidx.compose.animation.core.rememberInfiniteTransition(label = "p")
-    val pulse by inf.animateFloat(1f, 1.07f, androidx.compose.animation.core.infiniteRepeatable(androidx.compose.animation.core.tween(800),
-        androidx.compose.animation.core.RepeatMode.Reverse), label = "s")
-    val k = if (busy) pulse else 1f
-    val turn by inf.animateFloat(0f, 360f, androidx.compose.animation.core.infiniteRepeatable(androidx.compose.animation.core.tween(1400, easing = androidx.compose.animation.core.LinearEasing)), label = "r")
+    val owner = LocalLifecycleOwner.current
+    val power by com.vlesscardvpn.core.PhonePower.state.collectAsState()
+    var foreground by remember { mutableStateOf(owner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) }
+    DisposableEffect(owner) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, _ -> foreground = owner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED) }
+        owner.lifecycle.addObserver(observer)
+        onDispose { owner.lifecycle.removeObserver(observer) }
+    }
+    var pulseValue = 1f; var turn = 0f
+    if (com.vlesscardvpn.core.TransportPolicy.animateStatus(busy, foreground, power.allowLight)) {
+        val inf = androidx.compose.animation.core.rememberInfiniteTransition(label = "p")
+        val pulse by inf.animateFloat(1f, 1.07f, androidx.compose.animation.core.infiniteRepeatable(androidx.compose.animation.core.tween(800),
+            androidx.compose.animation.core.RepeatMode.Reverse), label = "s")
+        val rotation by inf.animateFloat(0f, 360f, androidx.compose.animation.core.infiniteRepeatable(androidx.compose.animation.core.tween(1400, easing = androidx.compose.animation.core.LinearEasing)), label = "r")
+        pulseValue = pulse; turn = rotation
+    }
+    val k = pulseValue
     val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
     Spacer(Modifier.height(18.dp))
     Box(Modifier.size(220.dp), contentAlignment = Alignment.Center) {

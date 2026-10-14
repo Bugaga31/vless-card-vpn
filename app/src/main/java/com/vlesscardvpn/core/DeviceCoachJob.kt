@@ -10,7 +10,7 @@ class DeviceCoachJob : JobService() {
     private var task: Job? = null
     override fun onStartJob(params: JobParameters): Boolean {
         task = scope.launch {
-            try { if (DeviceCoach.backgroundEnabled(this@DeviceCoachJob)) runCatching { DeviceCoach.sample(this@DeviceCoachJob) } }
+            try { if (DeviceCoach.backgroundEnabled(this@DeviceCoachJob) && !GameSession.active() && PhonePower.refresh(this@DeviceCoachJob).allowLight) runCatching { DeviceCoach.sample(this@DeviceCoachJob) } }
             finally { if (isActive) withContext(Dispatchers.Main) { jobFinished(params, false) } }
         }
         return true

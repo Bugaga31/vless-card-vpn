@@ -13,6 +13,9 @@ import com.vlesscardvpn.core.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.repeatOnLifecycle
+import androidx.compose.ui.platform.LocalLifecycleOwner
 
 /** Actual root-free capabilities, never a fake RAM cleaner or force-stop button. */
 @Composable
@@ -20,6 +23,10 @@ fun DeviceScreen() {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     val snapshot by DeviceCoach.state.collectAsState()
+    val phone by DeviceCoach.phone.collectAsState()
+    val gameDeadline by GameSession.deadline.collectAsState()
+    val owner = LocalLifecycleOwner.current
+    val gaming = GameSession.valid(gameDeadline, android.os.SystemClock.elapsedRealtime())
     val tips by DeviceCoach.advice.collectAsState()
     val brain by PhoneBrain.status.collectAsState()
     val settings by Store.settings.collectAsState()
@@ -29,9 +36,17 @@ fun DeviceScreen() {
     fun sample() { scope.launch { withContext(Dispatchers.IO) { runCatching { DeviceCoach.sample(ctx) } }; message = "Показаны доступные системные данные. Чужие приложения не изменены." } }
     fun open(action: String, pkg: String? = null) { if (!DeviceCoach.open(ctx, action, pkg)) message = "Этот экран настроек недоступен на устройстве" }
     fun refreshApps() { scope.launch { apps = withContext(Dispatchers.IO) { DeviceCoach.recentApps(ctx) } } }
-    LaunchedEffect(Unit) {
-        refreshApps()
-        while (true) { withContext(Dispatchers.IO) { runCatching { DeviceCoach.sample(ctx) } }; kotlinx.coroutines.delay(10000) }
+    LaunchedEffect(owner) {
+        owner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            refreshApps()
+            while (true) { withContext(Dispatchers.IO) { runCatching { DeviceCoach.sample(ctx) } }; kotlinx.coroutines.delay(10000) }
+        }
+    }
+    LaunchedEffect(gameDeadline) {
+        if (gameDeadline > 0) {
+            kotlinx.coroutines.delay((gameDeadline - android.os.SystemClock.elapsedRealtime()).coerceAtLeast(0))
+            if (GameSession.deadline.value == gameDeadline) { GameSession.set(false); PhonePower.refresh(ctx) }
+        }
     }
     fun gb(bytes: Long) = if (bytes > 0) "%.1f ГБ".format(bytes / 1e9) else "нет данных"
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -59,6 +74,26 @@ fun DeviceScreen() {
                 }
             }
         }
+        Text("Игровая сессия · до 60 минут", fontSize = 18.sp)
+        Row(Modifier.fillMaxWidth()) {
+            Switch(checked = gaming, onCheckedChange = { enabled ->
+                GameSession.set(enabled); PhonePower.refresh(ctx)
+                message = if (enabled) "Фоновое обслуживание приостановлено. Новые автоматические подключения учитывают задержку и джиттер." else "Обычная политика восстановлена"
+            })
+            Text("Меньше фоновой работы", Modifier.padding(12.dp))
+        }
+        Text("Временно откладывает облачные обновления, резервные проверки и фоновое наблюдение. Выбор учитывает EMA задержки/джиттера HTTPS, а не выдуманные потери UDP. Текущая связь не рвётся. Приоритет процессов других приложений и частоты CPU не меняются; режим сбрасывается при завершении процесса.", fontSize = 12.sp)
+        Text("Непрерывность VPN и сеть", fontSize = 18.sp)
+        phone?.let { p ->
+            Text(if (p.batteryOptimized) "Оптимизация батареи для VPN включена. На некоторых устройствах это ограничивает фоновую работу." else "Для VPN разрешено исключение из оптимизации батареи.", fontSize = 13.sp)
+            OutlinedButton(onClick = { open("vpnBattery") }, modifier = Modifier.fillMaxWidth()) { Text("Проверить разрешение работы VPN в фоне") }
+            Text(if (p.sdk < 28) "Private DNS: API недоступно до Android 9" else if (p.privateDnsActive)
+                "Private DNS активен${p.privateDnsHost.takeIf { it.isNotEmpty() }?.let { ": $it" }.orEmpty()}. Это не доказательство конфликта. При задержках DNS проверьте системные настройки вручную."
+                else "Private DNS на доступной основной сети не активен", fontSize = 13.sp)
+            OutlinedButton(onClick = { open("network") }, modifier = Modifier.fillMaxWidth()) { Text("Настройки сети и Private DNS") }
+        }
+        Text("Исключения из VPN: ${if (!settings.perApp) "отключены" else if (settings.onlyApps) "только выбранные приложения" else "${settings.apps.size} выбранных; локальные приложения: ${if (settings.ruAppsDirect) "прямо" else "через VPN"}"}. Изменяются в Настройках → Приложения. Исключённый трафик не защищён VPN; игровой режим не добавляет исключения автоматически.", fontSize = 12.sp)
+        Text("При системном lowMemory новые необязательные задачи откладываются, проверки ограничены двумя кандидатами. Правила безопасности и базы маршрутизации не вырезаются автоматически; очистка RAM и чужого кэша не выполняется.", fontSize = 12.sp)
         Text("Отдельная обучающаяся нейросеть", fontSize = 18.sp)
         Row(Modifier.fillMaxWidth()) {
             Switch(checked = settings.phoneLearning, onCheckedChange = { enabled ->

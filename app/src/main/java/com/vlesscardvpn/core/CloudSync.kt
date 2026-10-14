@@ -122,7 +122,7 @@ object CloudSync {
     /** From the autopilot: at most every 3 h, only when something changed. */
     fun auto(ctx: Context) {
         val now = System.currentTimeMillis()
-        if (now - lastAuto < 3 * 3600_000L || !configured(ctx)) return
+        if (GameSession.active() || !PhonePower.refresh(ctx).allowed || now - lastAuto < 3 * 3600_000L || !configured(ctx)) return
         lastAuto = now; upload(ctx)
     }
 }

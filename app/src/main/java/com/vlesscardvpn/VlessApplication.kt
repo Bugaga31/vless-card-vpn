@@ -12,6 +12,7 @@ class VlessApplication : Application() {
         super.onCreate()
         Store.init(this)
         Actions.init(this)
+        com.vlesscardvpn.core.PhonePower.start(this)
         runCatching { com.vlesscardvpn.core.DeviceCoach.restoreBackground(this) }
         com.vlesscardvpn.core.Tester.installAuthenticator()
         // widget + quick tile follow the VPN state

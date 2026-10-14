@@ -81,6 +81,7 @@ object CloudSpeed {
     }
 
     @Synchronized fun refresh(ctx: Context) {
+        if (!PhonePower.refresh(ctx).allowLight) return
         runCatching { loadNet(ctx) }
         val p = ctx.getSharedPreferences("cloud_speed", Context.MODE_PRIVATE)
         val cached = p.getString("json", null)

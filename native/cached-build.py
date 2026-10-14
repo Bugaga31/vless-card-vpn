@@ -11,7 +11,10 @@ h.update((ndk/'source.properties').read_bytes());key=h.hexdigest()
 abis=['armeabi-v7a','arm64-v8a']+([] if mode=='arm' else ['x86','x86_64'])
 primary='libbyedpi.so' if 'byedpi' in script else 'libhev-socks5-tunnel.so'
 machines={'armeabi-v7a':40,'arm64-v8a':183,'x86':3,'x86_64':62}
-manifest=out/'native-cache.json'
+# JNI source roots must contain ABI libraries only; manifests here collide during Android merge.
+manifest=out.parent/(out.name+'-cache.json')
+legacy=out/'native-cache.json'
+if legacy.is_file():legacy.unlink()
 def valid():
  try:
   m=json.loads(manifest.read_text())

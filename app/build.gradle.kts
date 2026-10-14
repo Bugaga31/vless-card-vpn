@@ -116,6 +116,7 @@ val buildByeDpi by tasks.registering(Exec::class) {
     inputs.file(rootProject.file("native/cached-build.py"))
     inputs.property("ndkVersion", "27.2.12479018")
     outputs.dir(layout.buildDirectory.dir("generated/byedpi"))
+    outputs.file(layout.buildDirectory.file("generated/byedpi-cache.json"))
     commandLine("python3", rootProject.file("native/cached-build.py").absolutePath, "build-byedpi.sh",
         "${sdkDir()}/ndk/27.2.12479018", layout.buildDirectory.dir("generated/byedpi").get().asFile.absolutePath,
         if (armOnly) "arm" else "all")
@@ -127,6 +128,7 @@ val buildHev by tasks.registering(Exec::class) {
     inputs.file(rootProject.file("native/cached-build.py"))
     inputs.property("ndkVersion", "27.2.12479018")
     outputs.dir(layout.buildDirectory.dir("generated/hev"))
+    outputs.file(layout.buildDirectory.file("generated/hev-cache.json"))
     commandLine("python3", rootProject.file("native/cached-build.py").absolutePath, "build-hev.sh",
         "${sdkDir()}/ndk/27.2.12479018", layout.buildDirectory.dir("generated/hev").get().asFile.absolutePath,
         if (armOnly) "arm" else "all")

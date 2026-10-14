@@ -8,7 +8,7 @@ import org.junit.Test
 
 class R84Test {
     private val f = com.vlesscardvpn.core.Assistant.Facts("Wi-Fi", emptyMap(), true, "r", "ok", 3, 2, emptyList(), Mode.AUTO, null, false, null,
-        com.vlesscardvpn.core.PhoneInfo("Xiaomi 13", "14", 34, 8, 8.0, 0.3, 20.0, 12, false, true, true, false, "hostname", "Wi-Fi", false, 50, 10))
+        com.vlesscardvpn.core.PhoneInfo("Xiaomi 13", "14", 34, 8, 8.0, 0.3, 20.0, 12, false, true, true, false, "hostname", "Wi-Fi", false, 50, 10, privateDnsActive = true, lowMemory = true))
     private fun cmd(q: String) = com.vlesscardvpn.core.Assistant.answer(q, f).let { if (it.auto) it.buttons.first().cmd else "" }
 
     @Test fun ordersAreExecuted() {

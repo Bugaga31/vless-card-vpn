@@ -69,7 +69,7 @@ object Tester {
 
     /** Bounded TCP hint, never an authenticated Reality/TLS verdict. Timeout is unknown, not a blacklist. */
     suspend fun fastFilter(servers: List<Server>, budgetMs: Long = 600): Map<String, Int> = coroutineScope {
-        val sem = Semaphore(6)
+        val sem = Semaphore(PowerPolicy.cap(6, PhonePower.state.value.tcpParallel))
         servers.map { server -> async(Bg.io) { sem.withPermit {
             val result = if (!server.isTcpBased) -1 else try {
                 kotlinx.coroutines.withTimeoutOrNull(budgetMs) {
@@ -340,7 +340,9 @@ object Tester {
             val successes = java.util.concurrent.atomic.AtomicInteger()
             fun skipped(i: Int) = successes.get() >= stopAfter.coerceAtLeast(1) || skip(i)
             fun report(i: Int, p: Probe) { if (p.works) successes.incrementAndGet(); onEach(i, p) }
-            for (all in chunks(variants, batch)) {
+            // Bound config/socket footprint too, not merely simultaneous HTTP calls.
+            val effectiveBatch = PowerPolicy.cap(batch, if (PhonePower.state.value.realParallel <= 2) 4 else batch)
+            for (all in chunks(variants, effectiveBatch)) {
                 val idx = all.filter { i -> if (skipped(i)) { onEach(i, SKIPPED); false } else true }
                 if (idx.isEmpty()) continue
                 val chunk = idx.map { variants[it] }

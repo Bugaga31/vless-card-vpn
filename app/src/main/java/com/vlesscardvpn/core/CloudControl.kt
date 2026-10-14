@@ -66,7 +66,8 @@ object CloudControl {
         ctx.getSharedPreferences("cloud_control",0).getString("json",null)?.let { runCatching { apply(ctx,parse(it,System.currentTimeMillis())) } }
     }
     @Synchronized fun refresh(ctx: Context) {
-        loadCached(ctx);val now=System.currentTimeMillis()
+        loadCached(ctx);if (!PhonePower.refresh(ctx).allowLight) return
+        val now=System.currentTimeMillis()
         if (now>=attempted && now-attempted<600000) return
         attempted=now;val p=ctx.getSharedPreferences("cloud_control",0)
         runCatching {

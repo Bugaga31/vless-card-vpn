@@ -40,6 +40,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -56,8 +57,8 @@ class TunnelService : VpnService() {
         const val PAUSE_MS = 5 * 60_000L
         val WARM = listOf("www.youtube.com", "i.ytimg.com", "yt3.ggpht.com", "rr1---sn-4g5e6nzz.googlevideo.com", "www.google.com",
             "play.googleapis.com", "web.telegram.org", "www.instagram.com", "scontent.cdninstagram.com", "discord.com", "chatgpt.com", "x.com")
-        /** «Ускорение»: a big TUN MTU — 5-6 times fewer packets for the phone to move for the same traffic (less CPU, less battery). */
-        const val TURBO_MTU = 8500
+        /** Compatibility ceiling; actual MTU is selected per underlying network. */
+        const val TURBO_MTU = 1400
         private const val CHANNEL = "vpn"
         private const val TAG = "TunnelService"
         const val MTU = 1500
@@ -231,7 +232,8 @@ class TunnelService : VpnService() {
             val config = XrayConfigBuilder.vpnConfig(used, settings, bdPort, socks, set.ports,
                 listen = if (proxy && settings.lanShare) "0.0.0.0" else "127.0.0.1", httpPort = if (proxy) settings.httpPort else null, warpHop = warpHop,
                 heavy = XrayConfigBuilder.heavyOf(used.map { st.state(it.first).kbps }, used.map { st.state(it.first).ytOk }),
-                serviceRoutes = com.vlesscardvpn.core.ServiceRoutes.snapshot(network, android.os.SystemClock.elapsedRealtime()))
+                serviceRoutes = com.vlesscardvpn.core.ServiceRoutes.snapshot(network, android.os.SystemClock.elapsedRealtime()),
+                quietLogs = !com.vlesscardvpn.core.PhonePower.refresh(this).allowLight)
             val c = XrayCore.Instance("vpn"); core = c
             c.start(config)
             check(c.running) { "Xray не запустился: ${c.lastStatus}" }
@@ -280,7 +282,11 @@ class TunnelService : VpnService() {
 
     private fun startTun(settings: com.vlesscardvpn.model.Settings, socks: SocksAuth) {
         val v4 = if (settings.randomTun) com.vlesscardvpn.core.Disguise.tunV4() else IPV4
-        val mtu = if (settings.turbo) TURBO_MTU else MTU
+        val cm = getSystemService(ConnectivityManager::class.java)
+        val network = Net.underlying(this)
+        val caps = cm?.getNetworkCapabilities(network)
+        val mtu = com.vlesscardvpn.core.TransportPolicy.mtu(caps?.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) == true,
+            warpChained || usedServers.any { Masks.isWarp(it) }, cm?.getLinkProperties(network)?.mtu ?: 0)
         val b = Builder().setSession(if (settings.randomTun || settings.quietNotification) "Sync" else "VLESS Card").setMtu(mtu)
             .addAddress(v4, 30).addRoute("0.0.0.0", 0)
             // No IPv6 in the tunnel: Android then refuses IPv6 at once and apps (Chrome) fall back to IPv4 instantly.
@@ -302,7 +308,8 @@ class TunnelService : VpnService() {
         if (Build.VERSION.SDK_INT >= 29) b.setMetered(false)
         val fd = b.establish() ?: error("Система не дала создать VPN (нет разрешения)")
         tun = fd
-        TProxyService.start(filesDir, fd, socks.port, mtu, v4, null, socks.user, socks.pass)
+        TProxyService.start(filesDir, fd, socks.port, mtu, v4, null, socks.user, socks.pass,
+            !com.vlesscardvpn.core.PhonePower.refresh(this).allowLight)
     }
 
     private fun lanIp(): String? = runCatching {
@@ -463,7 +470,7 @@ class TunnelService : VpnService() {
             while (Tunnel.status.value.state == Tunnel.State.CONNECTED) {
                 // wait 45 s (10 s offline), but check right away when the screen turns back on — that's when apps are opened
                 var waited = 0L; val period = if (offline) 10_000L else if (miss > 0) 3_000L else com.vlesscardvpn.core.PhonePower.refresh(this@TunnelService).healthyMs
-                while (waited < period) { val d = minOf(5000L, period - waited); delay(d); waited += d; val a = asleep(); if (wasAsleep && !a) { wasAsleep = false; delay(1500); break }; wasAsleep = a }
+                while (waited < period) { val d = if (asleep()) maxOf(60000L, period - waited) else minOf(5000L, period - waited); delay(d); waited += d; val a = asleep(); if (wasAsleep && !a) { wasAsleep = false; delay(1500); break }; wasAsleep = a }
                 com.vlesscardvpn.core.Traffic.tick()
                 if (healJob?.isActive == true || asleep()) continue
                 val auth = Tunnel.socks ?: break
@@ -508,6 +515,13 @@ class TunnelService : VpnService() {
         scoutJob = scope.launch {
             var previous = TProxyService.stats(); var windows = 0; var lastAttempt = 0L
             while (kotlinx.coroutines.currentCoroutineContext().isActive) {
+                if (!com.vlesscardvpn.core.PhonePower.refresh(this@TunnelService).screenInteractive) {
+                    com.vlesscardvpn.core.PhonePower.state.first { it.screenInteractive }
+                    previous = TProxyService.stats(); windows = 0
+                }
+                if (!com.vlesscardvpn.core.PhonePower.refresh(this@TunnelService).allowLight) {
+                    windows = 0; previous = null; delay(60000); continue
+                }
                 delay(5000)
                 val current = TProxyService.stats()
                 val a=previous;previous=current
@@ -730,7 +744,11 @@ class TunnelService : VpnService() {
             var rx = android.net.TrafficStats.getUidRxBytes(uid); var tx = android.net.TrafficStats.getUidTxBytes(uid); var t = System.nanoTime()
             while (Tunnel.status.value.state == Tunnel.State.CONNECTED) {
                 delay(10_000)
-                if (asleep() || Tunnel.pausedUntil.value > 0) { rx = android.net.TrafficStats.getUidRxBytes(uid); tx = android.net.TrafficStats.getUidTxBytes(uid); t = System.nanoTime(); continue }
+                if (!(getSystemService(android.os.PowerManager::class.java)?.isInteractive ?: true)) {
+                    com.vlesscardvpn.core.PhonePower.state.first { it.screenInteractive }
+                    rx = android.net.TrafficStats.getUidRxBytes(uid); tx = android.net.TrafficStats.getUidTxBytes(uid); t = System.nanoTime(); continue
+                }
+                if (Tunnel.pausedUntil.value > 0) continue
                 val r2 = android.net.TrafficStats.getUidRxBytes(uid); val t2x = android.net.TrafficStats.getUidTxBytes(uid); val now = System.nanoTime()
                 val ms = ((now - t) / 1_000_000).coerceAtLeast(1)
                 val down = ((r2 - rx) * 8 / ms).toInt().coerceAtLeast(0); val up = ((t2x - tx) * 8 / ms).toInt().coerceAtLeast(0)
