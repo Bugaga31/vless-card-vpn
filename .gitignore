@@ -34,3 +34,7 @@ app/debug/
 .gradle-local/
 app/libs/*.jar
 !app/libs/libv2ray.aar
+
+# Python bytecode caches
+__pycache__/
+*.py[cod]
