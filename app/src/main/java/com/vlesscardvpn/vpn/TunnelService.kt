@@ -39,6 +39,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -352,7 +353,7 @@ class TunnelService : VpnService() {
                 if (sinceNet < 90_000L && !netHardDone) { netHardDone = true; hardRestart("новая сеть, а интернет не пошёл", force = true); return@launch }
                 if (System.currentTimeMillis() - lastHard > 5 * 60_000L) { hardRestart("после переподключения интернет не пошёл"); return@launch }
             }
-            if (p.works) { healStep = 0; dpiHeals = 0; connectFails = 0; warmUp(); scheduleOptimize(if (com.vlesscardvpn.core.Actions.deepPending) 20_000 else 60_000); com.vlesscardvpn.core.AppWatch.start(this@TunnelService) { scope.launch { lock.withLock { connect(soft = true) } } }; watchdog(); coverTraffic(); serviceRoutes(); if (serverless()) rescueLater() } else heal()
+            if (p.works) { healStep = 0; dpiHeals = 0; connectFails = 0; warmUp(); scheduleOptimize(if (com.vlesscardvpn.core.Actions.deepPending) 20_000 else 60_000); com.vlesscardvpn.core.AppWatch.start(this@TunnelService) { scope.launch { lock.withLock { connect(soft = true) } } }; watchdog(); standbyScout(); coverTraffic(); serviceRoutes(); if (serverless()) rescueLater() } else heal()
         }
     }
 
@@ -497,6 +498,34 @@ class TunnelService : VpnService() {
                     if (dnsMiss >= 2) { hardRestart("DNS перестал отвечать"); break }
                     if (stall >= 3) { hardRestart("трафик приложений завис"); break }
                 }
+            }
+        }
+    }
+
+    private var scoutJob: Job? = null
+    private fun standbyScout() {
+        scoutJob?.cancel()
+        scoutJob = scope.launch {
+            var previous = TProxyService.stats(); var windows = 0; var lastAttempt = 0L
+            while (kotlinx.coroutines.currentCoroutineContext().isActive) {
+                delay(5000)
+                val current = TProxyService.stats()
+                val a=previous;previous=current
+                if (asleep() || Store.state.value.settings.mode != com.vlesscardvpn.model.Mode.AUTO ||
+                    !com.vlesscardvpn.core.PhonePower.refresh(this@TunnelService).allowLight || healJob?.isActive == true) { windows=0;continue }
+                val suspicious = a != null && current != null && a.size>=4 && current.size>=4 && current[1]-a[1]>=4096 && current[3]==a[3]
+                windows=if (suspicious) windows+1 else 0
+                val now=System.currentTimeMillis()
+                if (windows<2 || now-lastAttempt<120000) continue
+                windows=0;lastAttempt=now
+                val original=Tunnel.socks ?: continue;val network=Net.key(this@TunnelService)
+                val healthy=Tester.probeSocks(original.port,Store.state.value.settings.testUrl,big=false,youtube=false,attempts=1,budgetMs=1200).works
+                if (healthy) continue
+                val spare=runCatching { Actions.prepareStandby(usedServers) }.getOrElse { if (it is kotlinx.coroutines.CancellationException) throw it else null } ?: continue
+                if (Tunnel.socks != original || Net.key(this@TunnelService)!=network || asleep()) continue
+                Actions.selectBest(1,among=listOf(spare),close=true)
+                scope.launch { lock.withLock { connect(soft=true) } }
+                break
             }
         }
     }
@@ -657,6 +686,7 @@ class TunnelService : VpnService() {
     private fun teardown(error: String?, keepTun: Boolean = false) {
         if (!keepTun) runCatching { com.vlesscardvpn.core.Traffic.tick() }
         liveJob?.cancel()
+        scoutJob?.cancel(); scoutJob=null
         checkJob?.cancel(); watchJob?.cancel(); coverJob?.cancel(); serviceJob?.cancel(); if (error != null) netJob?.cancel()
         if (error != null) { healJob?.cancel(); rescueJob?.cancel() }
         if (error != null) optJob?.cancel()

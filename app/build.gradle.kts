@@ -96,6 +96,7 @@ dependencies {
     implementation("androidx.compose.material:material-icons-extended")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation("com.squareup.okhttp3:okhttp-dnsoverhttps:4.12.0")
     implementation("com.google.zxing:core:3.5.3") // QR codes of server links (no camera, no Play services)
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20240303")
@@ -112,8 +113,10 @@ val buildByeDpi by tasks.registering(Exec::class) {
     inputs.file(rootProject.file("native/build-byedpi.sh"))
     inputs.file(rootProject.file("native/launcher.c"))
     inputs.property("armOnly", armOnly)
+    inputs.file(rootProject.file("native/cached-build.py"))
+    inputs.property("ndkVersion", "27.2.12479018")
     outputs.dir(layout.buildDirectory.dir("generated/byedpi"))
-    commandLine("bash", rootProject.file("native/build-byedpi.sh").absolutePath,
+    commandLine("python3", rootProject.file("native/cached-build.py").absolutePath, "build-byedpi.sh",
         "${sdkDir()}/ndk/27.2.12479018", layout.buildDirectory.dir("generated/byedpi").get().asFile.absolutePath,
         if (armOnly) "arm" else "all")
 }
@@ -121,8 +124,10 @@ val buildHev by tasks.registering(Exec::class) {
     inputs.dir(rootProject.file("native/hev-socks5-tunnel"))
     inputs.file(rootProject.file("native/build-hev.sh"))
     inputs.property("armOnly", armOnly)
+    inputs.file(rootProject.file("native/cached-build.py"))
+    inputs.property("ndkVersion", "27.2.12479018")
     outputs.dir(layout.buildDirectory.dir("generated/hev"))
-    commandLine("bash", rootProject.file("native/build-hev.sh").absolutePath,
+    commandLine("python3", rootProject.file("native/cached-build.py").absolutePath, "build-hev.sh",
         "${sdkDir()}/ndk/27.2.12479018", layout.buildDirectory.dir("generated/hev").get().asFile.absolutePath,
         if (armOnly) "arm" else "all")
 }

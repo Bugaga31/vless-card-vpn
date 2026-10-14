@@ -8,15 +8,16 @@ import java.util.concurrent.atomic.AtomicInteger
 /** Cancel siblings after enough successes; cancelled probes are not negative training examples. */
 object ProbeRace {
     suspend fun run(indices: List<Int>, parallel: Int, stopAfter: Int,
-                    skip: (Int) -> Boolean = { false }, probe: suspend (Int) -> Probe,
+                    skip: (Int) -> Boolean = { false }, staggerMs: Long = 0, probe: suspend (Int) -> Probe,
                     onEach: (Int, Probe) -> Unit) = coroutineScope {
         val parent = currentCoroutineContext()
         val sem = Semaphore(parallel.coerceAtLeast(1))
         val successes = AtomicInteger()
         val jobs = mutableListOf<Job>()
-        indices.forEach { i ->
+        indices.forEachIndexed { position, i ->
             jobs += launch(start = CoroutineStart.LAZY) {
                 try {
+                    if (staggerMs > 0) delay((position / 2) * staggerMs.coerceIn(0, 500))
                     sem.withPermit {
                         if (successes.get() >= stopAfter.coerceAtLeast(1) || skip(i)) onEach(i, Tester.SKIPPED)
                         else {

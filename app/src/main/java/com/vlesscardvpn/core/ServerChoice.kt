@@ -29,4 +29,14 @@ object ServerChoice {
 
     /** Small hysteresis for a working server already in use. A clearly faster spare still wins. */
     fun stayFactor(selected: Boolean): Double = if (selected) 0.92 else 1.0
+    /** Gradual Bayesian warm start, exact-network local evidence wins as genuine successes accumulate. */
+    fun blended(cloud: Double?, local: com.vlesscardvpn.model.RouteEvidence, now: Long): Double {
+        val freshness = if (local.at <= 0 || now < local.at) 0.0 else kotlin.math.exp(-(now - local.at) / 86_400_000.0)
+        val alpha = (.85 * local.successes.coerceIn(0, 5) / 5.0) * freshness
+        val prior = cloud?.takeIf { it.isFinite() && it in 0.0..1.0 } ?: .5
+        return ((1 - alpha) * prior + alpha * local.ema - local.latency.coerceAtLeast(0.0) / 10000 - local.jitter.coerceAtLeast(0.0) / 20000).coerceIn(0.0, 1.0)
+    }
+    /** Honest upper-confidence exploration bonus; use on background candidates, not forced live switches. */
+    fun exploration(checks: Int, total: Int): Double = kotlin.math.sqrt(2 * kotlin.math.ln((total.coerceAtLeast(0) + 2).toDouble()) / (checks.coerceAtLeast(0) + 1))
+
 }

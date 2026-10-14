@@ -67,6 +67,25 @@ object Tester {
         kotlinx.coroutines.withContext(Bg.io) { nioPing(ok.map { InetSocketAddress(ips.getValue(it.address), it.port) }, timeoutMs, limit) { i, ms -> onEach(ok[i], ms) } }
     }
 
+    /** Bounded TCP hint, never an authenticated Reality/TLS verdict. Timeout is unknown, not a blacklist. */
+    suspend fun fastFilter(servers: List<Server>, budgetMs: Long = 600): Map<String, Int> = coroutineScope {
+        val sem = Semaphore(6)
+        servers.map { server -> async(Bg.io) { sem.withPermit {
+            val result = if (!server.isTcpBased) -1 else try {
+                kotlinx.coroutines.withTimeoutOrNull(budgetMs) {
+                    CancellableProbe.run { bind ->
+                        val socket = Socket(); bind { socket.close() }; val t = System.nanoTime()
+                        socket.use { it.connect(InetSocketAddress(InetAddress.getByName(server.address), server.port), budgetMs.toInt()) }
+                        ((System.nanoTime() - t) / 1_000_000).toInt().coerceAtLeast(1)
+                    }
+                } ?: -1
+            } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+              catch (e: java.net.SocketTimeoutException) { -1 }
+              catch (e: Exception) { 0 }
+            server.id to result
+        } } }.awaitAll().toMap()
+    }
+
     /** Connects to all [targets] with up to [window] sockets open at once; [onEach] (index, ms or 0). Blocking. */
     fun nioPing(targets: List<InetSocketAddress>, timeoutMs: Int, window: Int = 512, onEach: (Int, Int) -> Unit) {
         if (targets.isEmpty()) return
@@ -344,7 +363,7 @@ object Tester {
                 try {
                     coroutineScope {
                         ProbeRace.run(chunk.indices.toList(), PowerPolicy.cap(parallel, PhonePower.state.value.realParallel), stopAfter,
-                            skip = { i -> skipped(idx[i]) },
+                            skip = { i -> skipped(idx[i]) }, staggerMs = if (stopAfter == 1) 120 else 0,
                             probe = { i -> CancellableProbe.run { bind -> probeSocks(ports[i], testUrl, big = big, youtube = youtube,
                                 attempts = attempts, budgetMs = budgetMs, onCall = { call -> bind { call.cancel() } }) } },
                             onEach = { i, p -> report(idx[i], p) })

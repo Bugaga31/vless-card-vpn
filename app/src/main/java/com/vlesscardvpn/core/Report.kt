@@ -13,13 +13,8 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 
-/**
- * «Общее облако автора»: every phone sends a short anonymous report (no numbers, accounts, IP or visited sites) as an
- * issue to the author's private repository — what broke, which masks / DPI strategies won on which operator, the mini
- * model's weights and public servers that worked. The cloud job merges them (one model, one network setup per
- * operator, phone-verified servers, deduplicated problems) and publishes the result; phones pull it and start with
- * what the others already learned. The write key (Issues only, that one repository) is put in by the release build.
- */
+/** Public aggregate hints are read-only by default. Upload stays disabled without a scoped authenticated intake.
+ * Never ship a shared privileged write token in APK; public control plane is separate from private CloudSync backups. */
 object Report {
     const val REPO = "Bugaga31/vless-card-cloud"
     const val DATA = "https://raw.githubusercontent.com/Bugaga31/vless-card-vpn/servers/cloud.json"

@@ -74,6 +74,7 @@ object CloudSpeed {
 
     /** Memory/disk only: never make «Подключить» wait for a cloud HTTP timeout. */
     fun loadCached(ctx: Context) {
+        CloudControl.loadCached(ctx)
         runCatching { loadNet(ctx) }
         if (kbps.isEmpty()) ctx.getSharedPreferences("cloud_speed", Context.MODE_PRIVATE).getString("json", null)?.let { kbps = parse(it) }
         status.value = if (kbps.isNotEmpty() || net.isNotEmpty()) "Облако: используются сохранённые рейтинги; подтверждение на телефоне" else "Облако: кэша рейтингов нет; используем локальное обучение"
@@ -89,29 +90,19 @@ object CloudSpeed {
         if (!refreshDue(now, fetchedAt, attemptedAt, cached != null)) return
         attemptedAt = now
         runCatching {
-            val c = java.net.URL(URL).openConnection() as java.net.HttpURLConnection
-            c.connectTimeout = 2500; c.readTimeout = 2500
-            if (cached != null) p.getString("etag", null)?.let { c.setRequestProperty("If-None-Match", it) }
-            try {
-                when (c.responseCode) {
-                    304 -> if (cached != null) {
-                        fetchedAt = now; p.edit().putLong("fetched", now).apply()
-                        status.value = "Облако: сохранённый рейтинг подтверждён сервером"
-                    }
-                    200 -> {
-                        val text = c.inputStream.use { String(BoundedInput.read(it, 2 * 1024 * 1024)) }
-                        // Validate before saving the ETag: a bad response must not poison the cache.
-                        JSONObject(text).getJSONObject("kbps")
-                        kbps = parse(text); fetchedAt = now
-                        status.value = if (kbps.isNotEmpty()) "Облако: свежий рейтинг загружен" else "Облако: свежий рейтинг пока пуст; локальные результаты остаются"
-                        p.edit().putString("json", text).putString("etag", c.getHeaderField("ETag"))
-                            .putLong("fetched", now).apply()
-                    }
-                    else -> error("HTTP ${c.responseCode}")
-                }
-            } finally { c.disconnect() }
+            val d = CloudTransport.fetch(ctx,"speed.json",if (cached != null) p.getString("etag",null) else null) { JSONObject(it).getJSONObject("kbps") }
+            if (d.unchanged && cached != null) {
+                fetchedAt=now;p.edit().putLong("fetched",now).apply()
+                status.value="Облако: сохранённый рейтинг подтверждён"
+            } else if (d.text != null) {
+                kbps=parse(d.text);fetchedAt=now
+                p.edit().putString("json",d.text).putString("etag",d.etag).putLong("fetched",now).apply()
+                status.value="Облако: свежий рейтинг загружен"
+            }
         }.onFailure { status.value = "Облако недоступно: используем кэш и локальное обучение" }
     }
+
+    fun prior(s: Server): Double? = CloudControl.prior(s) ?: speedOf(Report.serverKey(s)).takeIf { it > 0 }?.let { (it / 30000.0).coerceIn(.3,.9) }
 
     /** Up to [n] servers from [pinged] (not in [skip]) the cloud saw download ≥ [min] kbit/s, fastest first. */
     fun pick(pinged: List<Server>, skip: Collection<Server>, n: Int = 10, min: Int = 3000, speeds: Map<String, Int> = kbps,
