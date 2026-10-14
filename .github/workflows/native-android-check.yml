@@ -39,6 +39,8 @@ jobs:
           path: |
             app/build/generated/byedpi
             app/build/generated/hev
+            app/build/generated/byedpi-cache.json
+            app/build/generated/hev-cache.json
           key: native-${{ runner.os }}-${{ runner.arch }}-ndk27.2.12479018-api24-all-${{ hashFiles('native/**', 'app/build.gradle.kts') }}
       - name: Install pinned NDK
         run: sdkmanager 'ndk;27.2.12479018'

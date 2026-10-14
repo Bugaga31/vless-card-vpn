@@ -17,6 +17,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 object DeviceCoach {
     val state = MutableStateFlow<DeviceAdvice.Snapshot?>(null)
     val advice = MutableStateFlow<List<DeviceAdvice.Tip>>(emptyList())
+    val phone = MutableStateFlow<PhoneInfo?>(null)
     private var bytes = -1L
     private var at = -1L
     private const val JOB = 13401
@@ -36,6 +37,7 @@ object DeviceCoach {
             disk.totalBytes, bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY), pm.isPowerSaveMode)
         val predict = PhoneBrain.update(ctx, signals, Store.settings.value.phoneLearning)
         state.value = snapshot; advice.value = DeviceAdvice.tips(snapshot, predict)
+        phone.value = runCatching { PhoneInfo.collect(ctx) }.getOrNull()
         at = now; bytes = total
     }
     fun backgroundEnabled(ctx: Context) = ctx.getSharedPreferences("phone_coach", 0).getBoolean("background", false)
@@ -58,6 +60,11 @@ object DeviceCoach {
     }
     fun open(ctx: Context, action: String, packageName: String? = null): Boolean {
         val intent = when (action) {
+            "network" -> Intent(android.provider.Settings.ACTION_WIRELESS_SETTINGS)
+            "vpnBattery" -> if (android.os.Build.VERSION.SDK_INT >= 23 &&
+                !(ctx.getSystemService(Context.POWER_SERVICE) as PowerManager).isIgnoringBatteryOptimizations(ctx.packageName))
+                Intent(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, android.net.Uri.parse("package:${ctx.packageName}"))
+                else Intent(android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
             "display" -> Intent(android.provider.Settings.ACTION_DISPLAY_SETTINGS)
             "storage" -> Intent(android.provider.Settings.ACTION_INTERNAL_STORAGE_SETTINGS)
             "battery" -> Intent("android.intent.action.POWER_USAGE_SUMMARY")

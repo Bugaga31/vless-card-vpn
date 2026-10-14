@@ -36,6 +36,11 @@ object ServerChoice {
         val prior = cloud?.takeIf { it.isFinite() && it in 0.0..1.0 } ?: .5
         return ((1 - alpha) * prior + alpha * local.ema - local.latency.coerceAtLeast(0.0) / 10000 - local.jitter.coerceAtLeast(0.0) / 20000).coerceIn(0.0, 1.0)
     }
+    /** Latency-mode estimate; no claim of UDP loss measurement. Unknown evidence gets a conservative penalty. */
+    fun latencyScore(local: com.vlesscardvpn.model.RouteEvidence, fallbackMs: Int): Double =
+        (if (local.latency > 0) local.latency else fallbackMs.takeIf { it > 0 }?.toDouble() ?: 3000.0) +
+            2 * local.jitter.coerceAtLeast(0.0) + (1 - local.ema.coerceIn(0.0,1.0)) * 1000 +
+            (if (local.checks < 2) 200 else 0)
     /** Honest upper-confidence exploration bonus; use on background candidates, not forced live switches. */
     fun exploration(checks: Int, total: Int): Double = kotlin.math.sqrt(2 * kotlin.math.ln((total.coerceAtLeast(0) + 2).toDouble()) / (checks.coerceAtLeast(0) + 1))
 

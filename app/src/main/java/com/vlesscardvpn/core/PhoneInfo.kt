@@ -12,23 +12,24 @@ data class PhoneInfo(
     val model: String, val android: String, val sdk: Int, val cores: Int, val ramGb: Double, val ramFreeGb: Double, val storageFreeGb: Double,
     val battery: Int, val charging: Boolean, val powerSave: Boolean, val batteryOptimized: Boolean, val dataSaver: Boolean,
     val privateDns: String, val network: String, val metered: Boolean, val downMbps: Int, val upMbps: Int,
+    val privateDnsActive: Boolean = false, val privateDnsHost: String = "", val lowMemory: Boolean = false,
 ) {
     /** Problems that slow down or kill the VPN, with what to do. */
     fun problems(): List<String> = buildList {
         if (batteryOptimized) add("Оптимизация батареи для VLESS Card включена — система может усыплять VPN в фоне. Нажмите «Разрешить работу в фоне».")
         if (powerSave) add("Включён режим энергосбережения — он режет фоновую сеть и скорость.")
         if (dataSaver) add("Включена «Экономия трафика» — фоновые приложения работают медленнее.")
-        if (privateDns == "hostname") add("Включён «Частный DNS» — часть запросов может идти мимо VPN; лучше «Автоматически» или выключить.")
-        if (ramFreeGb in 0.01..0.4) add("Свободной памяти мало (${"%.1f".format(ramFreeGb)} ГБ) — система может выгружать VPN.")
+        if (privateDnsActive) add("Частный DNS активен. Само по себе это не ошибка. Если приложения долго открываются или диагностика DNS не проходит, проверьте его в настройках сети; изменение выполняется только вручную.")
+        if (lowMemory) add("Свободной памяти мало (${"%.1f".format(ramFreeGb)} ГБ) — система может выгружать VPN.")
         if (storageFreeGb in 0.01..1.0) add("Мало места (${"%.1f".format(storageFreeGb)} ГБ).")
         if (battery in 1..15 && !charging) add("Батарея ${battery}% — телефон может ограничивать фоновую работу.")
     }
 
     fun text(): String = "Телефон: $model, Android $android (API $sdk), $cores ядер, ОЗУ ${"%.1f".format(ramGb)} ГБ (свободно ${"%.1f".format(ramFreeGb)}), " +
         "свободно места ${"%.1f".format(storageFreeGb)} ГБ. Батарея $battery%" + (if (charging) " (заряжается)" else "") +
-        (if (powerSave) ", энергосбережение ВКЛ" else "") + ". Оптимизация батареи для приложения: " + (if (batteryOptimized) "включена (плохо для VPN)" else "выключена ✓") +
+        (if (powerSave) ", энергосбережение ВКЛ" else "") + ". Оптимизация батареи для приложения: " + (if (batteryOptimized) "включена (может ограничивать фон)" else "выключена ✓") +
         ". Сеть: $network" + (if (metered) " (лимитная)" else "") + (if (downMbps > 0) ", канал по оценке системы ↓$downMbps ↑$upMbps Мбит/с" else "") +
-        ". Частный DNS: " + when (privateDns) { "hostname" -> "свой сервер"; "off" -> "выключен"; else -> "автоматически" } + (if (dataSaver) ". Экономия трафика ВКЛ" else "") + "."
+        ". Частный DNS: " + when (privateDns) { "hostname" -> "свой сервер"; "off" -> "не активен"; "unsupported" -> "не поддерживается"; else -> "автоматически" } + (if (dataSaver) ". Экономия трафика ВКЛ" else "") + "."
 
     companion object {
         fun collect(c: Context): PhoneInfo {
@@ -39,6 +40,9 @@ data class PhoneInfo(
             val cm = c.getSystemService(ConnectivityManager::class.java)
             // the real network under the VPN (the active one is the VPN itself while connected)
             val under = runCatching { cm.allNetworks.mapNotNull { n -> cm.getNetworkCapabilities(n)?.takeIf { !it.hasTransport(NetworkCapabilities.TRANSPORT_VPN) && it.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) } }.firstOrNull() }.getOrNull()
+            val link = Net.underlying(c)?.let { cm.getLinkProperties(it) }
+            val dnsActive = Build.VERSION.SDK_INT >= 28 && link?.isPrivateDnsActive == true
+            val dnsHost = if (Build.VERSION.SDK_INT >= 28) link?.privateDnsServerName.orEmpty() else ""
             val stat = android.os.StatFs(c.filesDir.path)
             return PhoneInfo(
                 model = "${Build.MANUFACTURER.replaceFirstChar { it.uppercase() }} ${Build.MODEL}", android = Build.VERSION.RELEASE ?: "?", sdk = Build.VERSION.SDK_INT,
@@ -49,9 +53,10 @@ data class PhoneInfo(
                 powerSave = runCatching { pm.isPowerSaveMode }.getOrDefault(false),
                 batteryOptimized = runCatching { !pm.isIgnoringBatteryOptimizations(c.packageName) }.getOrDefault(false),
                 dataSaver = runCatching { cm.restrictBackgroundStatus == ConnectivityManager.RESTRICT_BACKGROUND_STATUS_ENABLED }.getOrDefault(false),
-                privateDns = runCatching { android.provider.Settings.Global.getString(c.contentResolver, "private_dns_mode") }.getOrNull() ?: "opportunistic",
+                privateDns = if (Build.VERSION.SDK_INT < 28) "unsupported" else if (!dnsActive) "off" else if (dnsHost.isNotEmpty()) "hostname" else "opportunistic",
                 network = Net.key(c), metered = runCatching { cm.isActiveNetworkMetered }.getOrDefault(false),
                 downMbps = (under?.linkDownstreamBandwidthKbps ?: 0) / 1000, upMbps = (under?.linkUpstreamBandwidthKbps ?: 0) / 1000,
+                privateDnsActive = dnsActive, privateDnsHost = dnsHost, lowMemory = mi.lowMemory,
             )
         }
     }

@@ -207,16 +207,17 @@ object XrayConfigBuilder {
      */
     fun vpnConfig(servers: List<Pair<Server, Mask?>>, settings0: Settings, byeDpiPort: Int?, socks: SocksAuth = SocksAuth(settings0.socksPort),
                   dpiPorts: Map<String, Int> = emptyMap(), listen: String = "127.0.0.1", httpPort: Int? = null, warpHop: Server? = null,
-                  heavy: Set<Int> = emptySet(), serviceRoutes: Map<String, List<String>> = emptyMap()): String {
+                  heavy: Set<Int> = emptySet(), serviceRoutes: Map<String, List<String>> = emptyMap(), quietLogs: Boolean = false): String {
         // Auto: servers when there are working ones, otherwise the DPI engine alone.
         val settings = if (settings0.mode == Mode.AUTO) settings0.copy(mode = if (servers.isEmpty()) Mode.BYEDPI else Mode.SERVERS) else settings0
         require(settings.mode == Mode.BYEDPI || servers.isNotEmpty()) { "Не выбран ни один сервер" }
         require(settings.mode == Mode.SERVERS || byeDpiPort != null) { "ByeDPI не запущен" }
         val c = base()
+        if (quietLogs) c.getJSONObject("log").put("loglevel", "error")
         val inSettings = JSONObject().put("udp", true).put("ip", "127.0.0.1")
         if (socks.auth) inSettings.put("auth", "password").put("accounts", arr(JSONObject().put("user", socks.user).put("pass", socks.pass)))
         else inSettings.put("auth", "noauth")
-        fun sniff() = JSONObject().put("enabled", true).put("destOverride", arr("http", "tls", "quic")).put("routeOnly", true)
+        fun sniff() = JSONObject().put("enabled", true).put("destOverride", JSONArray(com.vlesscardvpn.core.TransportPolicy.sniff(!settings.blockQuic))).put("routeOnly", true)
         val inbounds = arr(JSONObject().put("tag", "socks").put("listen", listen).put("port", socks.port)
             .put("protocol", "socks").put("settings", inSettings).put("sniffing", sniff()))
         // Proxy mode: an HTTP proxy next to SOCKS for apps/browsers that only know HTTP proxies.

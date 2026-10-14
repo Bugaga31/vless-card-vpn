@@ -24,6 +24,9 @@ PYTEST
  def test_abi_mismatch_is_rebuilt_even_with_matching_digest(self):
   import hashlib
   self.run_cache();p=self.r/'out/x86_64/libhev-socks5-tunnel.so';d=bytearray(p.read_bytes());d[18:20]=struct.pack('<H',183);p.write_bytes(d)
-  m=self.r/'out/native-cache.json';v=json.loads(m.read_text());v['files']['x86_64/libhev-socks5-tunnel.so']=hashlib.sha256(d).hexdigest();m.write_text(json.dumps(v))
+  m=self.r/'out-cache.json';v=json.loads(m.read_text());v['files']['x86_64/libhev-socks5-tunnel.so']=hashlib.sha256(d).hexdigest();m.write_text(json.dumps(v))
   self.run_cache();self.assertEqual('2',(self.r/'counter').read_text())
+ def test_manifest_is_outside_jni_root_and_legacy_manifest_removed(self):
+  self.run_cache();self.assertTrue((self.r/'out-cache.json').is_file());self.assertFalse((self.r/'out/native-cache.json').exists())
+  (self.r/'out/native-cache.json').write_text('{}');self.run_cache();self.assertFalse((self.r/'out/native-cache.json').exists());self.assertEqual('1',(self.r/'counter').read_text())
 if __name__=='__main__':unittest.main()

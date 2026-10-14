@@ -21,6 +21,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.repeatOnLifecycle
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import com.vlesscardvpn.core.Actions
 import com.vlesscardvpn.core.Apps
 import com.vlesscardvpn.core.ByeDpiArgs
@@ -205,7 +208,8 @@ fun SettingsScreen() {
         Group("Нагрузка VPN и батарея") {
         val power by com.vlesscardvpn.core.PhonePower.state.collectAsState()
         val sensors by com.vlesscardvpn.core.PhonePower.sensors.collectAsState()
-        LaunchedEffect(Unit) { while (true) { com.vlesscardvpn.core.PhonePower.refresh(ctx); kotlinx.coroutines.delay(10000) } }
+        val owner = LocalLifecycleOwner.current
+        LaunchedEffect(owner) { owner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) { while (true) { com.vlesscardvpn.core.PhonePower.refresh(ctx); kotlinx.coroutines.delay(10000) } } }
         Text(power.reason, color = MaterialTheme.colorScheme.primary)
         Hint(sensors)
         Hint("Лимиты проверок: TCP ${power.tcpParallel}, реальные ${power.realParallel}. VPN и аварийное восстановление не отключаются. Это не физическое охлаждение и не ускоритель других приложений.")
@@ -237,7 +241,7 @@ fun SettingsScreen() {
         Toggle("Мультиплексирование (mux)", "Меньше новых соединений — меньше рукопожатий, которые видит DPI. Не для Vision/XHTTP", s.mux) { v -> set { it.copy(mux = v) } }
         Toggle("Менять маскировку при каждом подключении", "Случайная из рабочих, найденных «Подобрать маскировку», — у трафика нет постоянного отпечатка", s.rotateMasks) { v -> set { it.copy(rotateMasks = v) } }
         Toggle("Блокировать рекламу и трекеры", "Страницы грузятся быстрее, меньше трафика и батареи. Если какой-то сайт сломается — выключите", s.blockAds) { v -> set { it.copy(blockAds = v) } }
-        Toggle("Ускорение телефона", "Крупные пакеты внутри VPN и кэш DNS могут уменьшать накладные расходы. Результат зависит от устройства и сети; экономия батареи не гарантируется", s.turbo) { v -> set { it.copy(turbo = v) } }
+        Toggle("Ускорение телефона", "Кэш DNS снижает повторные ожидания. MTU выбирается по сети (1280–1400), без гигантских пакетов. Это оптимизация VPN, не ускорение других приложений", s.turbo) { v -> set { it.copy(turbo = v) } }
         var lim by remember(s.monthLimitGb) { mutableStateOf(if (s.monthLimitGb > 0) s.monthLimitGb.toString() else "") }
         OutlinedTextField(lim, { v -> lim = v.filter { it.isDigit() }.take(5); set { it.copy(monthLimitGb = lim.toIntOrNull() ?: 0) } }, singleLine = true,
             label = { Text("Лимит трафика в месяц, ГБ (пусто — без лимита)") }, modifier = Modifier.fillMaxWidth(),

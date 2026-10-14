@@ -1118,7 +1118,10 @@ object Actions {
         val net = Net.key(app)
         val remembered = (st.settings.netServers[net] ?: st.settings.netServers[Net.family(net)]).orEmpty().toSet()
         val time = System.currentTimeMillis()
-        val learned = eligible.sortedWith(compareByDescending<Server> { ServerChoice.blended(CloudSpeed.prior(it), st.state(it).evidenceFor(net), time) }
+        val gaming = GameSession.active()
+        val learned = eligible.sortedWith(compareByDescending<Server> {
+            if (gaming) -ServerChoice.latencyScore(st.state(it).evidenceFor(net), st.state(it).realMs)
+            else ServerChoice.blended(CloudSpeed.prior(it), st.state(it).evidenceFor(net), time) }
             .thenByDescending { Brain.p(net, it, st.state(it)) }).mapIndexed { i, server -> server.id to i }.toMap()
         val first = ConnectPolicy.candidates(eligible, cloud, remembered, cooling = { server ->
             val e = st.state(server).evidenceFor(net)
@@ -1263,11 +1266,14 @@ object Actions {
             // (only in «Авто»: in «Серверы» the user's own choice stays as it is)
             val all = if (st.settings.mode == com.vlesscardvpn.model.Mode.AUTO) tgCapable(works) { st.state(it).tgOk } else works
             val me = runCatching { Report.loadFrom(app); Report.phoneId(app) }.getOrDefault("")
-            val spread = { sv: Server -> spreadScore(st.state(sv), sv, me) }
+            val gaming = GameSession.active()
+            val netKey = Net.key(app)
+            val spread = { sv: Server -> if (gaming) ServerChoice.latencyScore(st.state(sv).evidenceFor(netKey), st.state(sv).realMs).toInt()
+                else spreadScore(st.state(sv), sv, me) }
             val sorted = preferred(st, all).sortedBy(spread)
-                .distinctBy { if (it.protocol == "wireguard") "wg:" + it.secret else it.id }.take(n)
-            val favs = if (close) all.filter { it.id in st.settings.favorites } else emptyList()
-            val best = ((if (close) closeOnes(sorted.map(spread)).let { k -> sorted.take(k) } else sorted) + favs).map { it.id }.toSet()
+                .distinctBy { if (it.protocol == "wireguard") "wg:" + it.secret else it.id }.take(if (gaming) 1 else n)
+            val favs = if (close && !gaming) all.filter { it.id in st.settings.favorites } else emptyList()
+            val best = ((if (close && !gaming) closeOnes(sorted.map(spread)).let { k -> sorted.take(k) } else sorted) + favs).map { it.id }.toSet()
             c = best.size
             st.copy(states = st.servers.associate { s -> s.id to st.state(s).copy(selected = s.id in best) } )
         }
