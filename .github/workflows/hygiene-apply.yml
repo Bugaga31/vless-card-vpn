@@ -1,0 +1,53 @@
+name: Apply repository hygiene to scoped branch
+on:
+  push:
+    branches: ['hygiene-apply-127']
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: chore/repository-hygiene-127
+          persist-credentials: false
+      - name: Preserve all contents, change executable modes and remove Python bytecode only
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          python3 - <<'PY'
+          import subprocess,json,pathlib
+          head=subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip()
+          base=subprocess.check_output(['git','rev-parse','HEAD^{tree}'],text=True).strip()
+          rows=subprocess.check_output(['git','ls-files','-s','-z']).decode().split('\0')
+          executable={'gradlew','native/build-byedpi.sh','native/build-hev.sh','ci/android-stability-qa.sh'}
+          seen=set();entries=[]
+          for row in filter(None,rows):
+              metadata,path=row.split('\t',1);mode,sha,stage=metadata.split()
+              if path in executable:
+                  entries.append({'path':path,'mode':'100755','type':'blob','sha':sha});seen.add(path)
+              elif '__pycache__' in pathlib.PurePosixPath(path).parts and path.endswith(('.pyc','.pyo')):
+                  entries.append({'path':path,'mode':mode,'type':'blob','sha':None})
+          assert seen==executable, 'Missing expected build script'
+          assert all(x['path'] in executable or ('__pycache__' in pathlib.PurePosixPath(x['path']).parts and x['sha'] is None) for x in entries)
+          pathlib.Path('/tmp/hygiene-tree.json').write_text(json.dumps({'base_tree':base,'tree':entries}))
+          pathlib.Path('/tmp/hygiene-head.txt').write_text(head)
+          print('Executable paths:',len(seen),'Python cache removals:',sum(x['sha'] is None for x in entries))
+          PY
+          HEAD=$(cat /tmp/hygiene-head.txt)
+          CURRENT=$(gh api "repos/$GH_REPO/git/ref/heads/chore/repository-hygiene-127" --jq .object.sha)
+          [ "$HEAD" = "$CURRENT" ] || { echo 'Target changed; stopping without overwrite'; exit 1; }
+          TREE=$(gh api --method POST "repos/$GH_REPO/git/trees" --input /tmp/hygiene-tree.json --jq .sha)
+          python3 - "$HEAD" "$TREE" <<'PY'
+          import sys,json,pathlib
+          pathlib.Path('/tmp/hygiene-commit.json').write_text(json.dumps({'message':'chore: remove tracked Python caches and preserve executable build scripts','parents':[sys.argv[1]],'tree':sys.argv[2]}))
+          PY
+          COMMIT=$(gh api --method POST "repos/$GH_REPO/git/commits" --input /tmp/hygiene-commit.json --jq .sha)
+          python3 - "$COMMIT" <<'PY'
+          import sys,json,pathlib
+          pathlib.Path('/tmp/hygiene-ref.json').write_text(json.dumps({'sha':sys.argv[1],'force':False}))
+          PY
+          gh api --method PATCH "repos/$GH_REPO/git/refs/heads/chore/repository-hygiene-127" --input /tmp/hygiene-ref.json --jq .object.sha
