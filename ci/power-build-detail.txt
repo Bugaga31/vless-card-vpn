@@ -1,0 +1,40 @@
+2026-10-14T13:47:33.4003799Z > Task :app:extractDeepLinksDebug
+2026-10-14T13:47:33.4974166Z > Task :app:parseDebugLocalResources
+2026-10-14T13:47:33.7009771Z > Task :app:processDebugMainManifest
+2026-10-14T13:47:33.7974648Z > Task :app:processDebugManifest
+2026-10-14T13:47:33.7975301Z > Task :app:javaPreCompileDebug
+2026-10-14T13:47:33.7976110Z > Task :app:processDebugManifestForPackage
+2026-10-14T13:47:34.4993781Z > Task :app:preDebugUnitTestBuild
+2026-10-14T13:47:34.5023829Z > Task :app:javaPreCompileDebugUnitTest
+2026-10-14T13:47:34.5043614Z > Task :app:mergeDebugNativeDebugMetadata NO-SOURCE
+2026-10-14T13:47:34.5049297Z > Task :app:mergeDebugShaders
+2026-10-14T13:47:34.5073604Z > Task :app:compileDebugShaders NO-SOURCE
+2026-10-14T13:47:34.5103566Z > Task :app:generateDebugAssets UP-TO-DATE
+2026-10-14T13:47:34.6995310Z > Task :app:mergeDebugAssets
+2026-10-14T13:47:34.8973530Z > Task :app:processDebugResources
+2026-10-14T13:47:34.9983672Z > Task :app:compressDebugAssets
+2026-10-14T13:47:42.9973094Z > Task :app:checkDebugDuplicateClasses
+2026-10-14T13:47:44.7973640Z > Task :app:desugarDebugFileDependencies
+2026-10-14T13:47:44.8004132Z > Task :app:mergeDebugStartupProfile
+2026-10-14T13:48:04.8983866Z > Task :app:compileDebugKotlin
+2026-10-14T13:48:14.7973726Z > Task :app:mergeExtDexDebug
+2026-10-14T13:49:10.7000008Z > Task :app:compileDebugKotlin
+2026-10-14T13:49:36.3013524Z > Task :app:compileDebugJavaWithJavac
+2026-10-14T13:49:36.3975307Z > Task :app:bundleDebugClassesToRuntimeJar
+2026-10-14T13:49:36.3976685Z > Task :app:bundleDebugClassesToCompileJar
+2026-10-14T13:49:36.4972719Z > Task :app:processDebugJavaRes
+2026-10-14T13:49:38.9983506Z > Task :app:mergeDebugJavaResource
+2026-10-14T13:49:38.9984480Z > Task :app:mergeLibDexDebug
+2026-10-14T13:49:46.4983757Z > Task :app:dexBuilderDebug
+2026-10-14T13:49:46.9974450Z > Task :app:mergeProjectDexDebug
+2026-10-14T13:49:47.0986290Z ERROR: /home/runner/work/vless-card-vpn/vless-card-vpn/app/build/generated/byedpi/native-cache.json /home/runner/work/vless-card-vpn/vless-card-vpn/app/build/generated/hev/native-cache.json: Resource and asset merger: Duplicate resources
+2026-10-14T13:49:47.1015801Z > Task :app:mergeDebugJniLibFolders FAILED
+2026-10-14T13:50:00.8053548Z > Task :app:compileDebugUnitTestKotlin
+2026-10-14T13:50:00.8996354Z Execution failed for task ':app:mergeDebugJniLibFolders'.
+2026-10-14T13:50:00.9027326Z > /home/runner/work/vless-card-vpn/vless-card-vpn/app/build/generated/byedpi/native-cache.json	/home/runner/work/vless-card-vpn/vless-card-vpn/app/build/generated/hev/native-cache.json: Error: Duplicate resources
+2026-10-14T13:50:00.9031007Z > Run with --stacktrace option to get the stack trace.
+2026-10-14T13:50:00.9031934Z > Run with --info or --debug option to get more log output.
+2026-10-14T13:50:00.9032991Z > Run with --scan to get full insights.
+2026-10-14T13:50:00.9033739Z > Get more help at [URL]
+2026-10-14T13:50:00.9034555Z BUILD FAILED in 4m 8s
+2026-10-14T13:50:01.3653797Z ##[error]Process completed with exit code 1.
