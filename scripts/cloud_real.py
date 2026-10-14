@@ -210,6 +210,8 @@ def learn(hist, res, now):
         h = hist.get(l) or {"ok": 0.0, "n": 0.0, "ms": 0, "t": now}
         h["ok"] = round(h["ok"] * 0.9 + (1 if ms else 0), 3); h["n"] = round(h["n"] * 0.9 + 1, 3)
         if ms: h["ms"] = ms if not h["ms"] else int(h["ms"] * 0.6 + ms * 0.4)
+        samples = [s for s in h.get("samples", []) if isinstance(s, list) and len(s) == 2 and now - 86400 <= s[0] <= now]
+        h["samples"] = (samples + [[now, bool(ms)]])[-288:]
         h["t"] = now
         hist[l] = h
     for l in [l for l, h in hist.items() if now - h.get("t", now) > 2 * 86400 or (h["n"] > 3 and h["ok"] / h["n"] < 0.05)]:

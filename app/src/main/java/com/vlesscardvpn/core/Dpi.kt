@@ -134,6 +134,7 @@ object DpiStrategies {
         custom(s.byeDpiArgs, s.byeDpiSni)?.let { add(it) }
         (byId(s.dpiRemembered[network], s) ?: byId(s.dpiRemembered[Net.family(network)], s))?.let { add(it) }
         (s.dpiRanking[network] ?: s.dpiRanking[Net.family(network)]).orEmpty().forEach { id -> byId(id, s)?.let { add(it) } }
+        CloudControl.dpiHints(Net.family(network)).forEach { id -> BUILT_IN.firstOrNull { it.id == id }?.let { add(it) } }
         // bred strategies that won on other networks: a new network starts from what already beat the TSPU elsewhere
         s.dpiEvoPool.take(6).forEach { id -> DpiEvo.decode(id)?.let { add(it) } }
         addAll(BUILT_IN)

@@ -33,6 +33,13 @@ jobs:
           packages: platform-tools platforms;android-34 build-tools;34.0.0
           log-accepted-android-sdk-licenses: false
       - uses: gradle/actions/setup-gradle@v3
+      - name: Restore native libraries (validated before use)
+        uses: actions/cache@v4
+        with:
+          path: |
+            app/build/generated/byedpi
+            app/build/generated/hev
+          key: native-${{ runner.os }}-${{ runner.arch }}-ndk27.2.12479018-api24-all-${{ hashFiles('native/**', 'app/build.gradle.kts') }}
       - name: Install pinned NDK
         run: sdkmanager 'ndk;27.2.12479018'
       - name: Build and JVM regression tests
@@ -58,6 +65,7 @@ jobs:
           target: google_apis
           arch: x86_64
           disable-animations: true
+          emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
           script: bash tools/run-native-android-check.sh
       - name: Upload diagnostics, not a release APK
         if: always()

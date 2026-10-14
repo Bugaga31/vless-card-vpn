@@ -387,10 +387,12 @@ object Actions {
                 if (p == Tester.SKIPPED) return@real
                 val s = variants[i].first
                 val firstSuccess = p.works && ok.incrementAndGet() == 1
+                // A deliberately short attempt is inconclusive when it times out; confirm with the normal budget.
+                if (!p.works && budgetMs in 1 until ConnectPolicy.QUICK_BUDGET_MS) return@real
                 probeMemory.record(net, s.id, st.state(s).maskFor(net), p.works, System.currentTimeMillis())
                 runCatching { Brain.learn(net, s, st.state(s), p.works) }
                 states.put(s.id) {
-                    it.copy(realMs = p.realMs, bigOk = p.bigOk ?: it.bigOk?.takeIf { old -> old }, ytOk = p.ytOk ?: it.ytOk, tgOk = p.tgOk ?: it.tgOk, checkedAt = System.currentTimeMillis(), kbps = if (p.kbps > 0) p.kbps else it.kbps,
+                    it.copy(netEvidence = (it.netEvidence + ((net + "|" + st.state(s).maskFor(net)) to it.evidenceFor(net).observe(p.works, p.realMs, System.currentTimeMillis()))).entries.sortedByDescending { e -> e.value.at }.take(8).associate { e -> e.toPair() }, realMs = p.realMs, bigOk = p.bigOk ?: it.bigOk?.takeIf { old -> old }, ytOk = p.ytOk ?: it.ytOk, tgOk = p.tgOk ?: it.tgOk, checkedAt = System.currentTimeMillis(), kbps = if (p.kbps > 0) p.kbps else it.kbps,
                         okCount = it.okCount + if (p.works) 1 else 0, failCount = it.failCount + if (p.works) 0 else 1)
                 }
                 if (firstSuccess && onFirst != null) { states.flush(); onFirst(s) }
@@ -429,7 +431,7 @@ object Actions {
         val order = { s: Server ->
             val ok = { m: Mask -> Masks.compatible(m, s) && (dpiOk || !m.viaByeDpi) }
             val fresh = evoCand.filter(ok).shuffled().take(slots)
-            val base = (Masks.searchOrder(dpiOk, s, cfg.maskFamilies, cfg.maskFps) + kept.filter(ok)).distinctBy { it.id }
+            val base = (CloudControl.maskHints(Net.family(net0)).mapNotNull { Masks.byId(it) }.filter(ok) + Masks.searchOrder(dpiOk, s, cfg.maskFamilies, cfg.maskFps) + kept.filter(ok)).distinctBy { it.id }
                 .filter { (tpwsOk || !it.dpi.startsWith("TPWS#")) && it !in fresh }
                 .sortedWith(compareBy<Mask>({ bucket(it) }, { Masks.cost(it) }, { -(stats[it.id]?.takeIf { s -> s.ok > 0 }?.score ?: 0.0) })).take((perServer - fresh.size).coerceAtLeast(1))
             // proven ones first, then one of every kind of trick (not a dozen variants of the same one)
@@ -442,7 +444,6 @@ object Actions {
         // that already has [enough] working masks stops early instead of trying all of them.
         val lists = pinned.map { s -> order(s).map { s to it } }
         val variants: List<Pair<Server, Mask?>> = (0 until (lists.maxOfOrNull { it.size } ?: 0)).flatMap { r -> lists.mapNotNull { it.getOrNull(r) } }
-        val (own, port) = dpiForTests(variants.map { it.second })
         val best = HashMap<String, Pair<Mask, Probe>>()
         val good = HashMap<String, MutableList<Pair<Mask, Int>>>()
         val found = HashMap<String, Int>()
@@ -454,10 +455,23 @@ object Actions {
         fun dead(m: Mask?): Boolean = m != null && synchronized(best) { val k = Masks.kind(m); (kindOk[k] ?: 0) == 0 && (kindFail[k] ?: 0) >= dropAfter && kindOk.values.any { it > 0 } }
         fun eff(m: Mask, p: Probe) = p.realMs + Masks.cost(m) * 150 + (if (p.kbps > 0) com.vlesscardvpn.model.ServerState.speedPenalty(p.kbps) else 0)
         progress.value = progress.value.copy(title = "Подбор маскировки")
-        try {
-            Tester.real(variants, cfg.testUrl, port, own.ports, youtube = false, batch = 64, parallel = 12, attempts = 1,
-                skip = { i -> System.currentTimeMillis() > deadline || synchronized(best) { (found[group(variants[i].first)] ?: 0) >= enough } || dead(variants[i].second) }) { i, p ->
-                val (s, m) = variants[i]
+        val phases = variants.indices.groupBy { i -> val m = variants[i].second; when {
+            m == null -> 0
+            bucket(m) == 0 -> 0 // already proven here; no need to rediscover it from scratch
+            m.viaByeDpi -> 2
+            Masks.isWarp(variants[i].first) || m.hasNoise -> 3
+            m.packets.isNotEmpty() || m.signature -> 1
+            else -> 0
+        } }.toSortedMap()
+        for ((phase, indices) in phases) {
+            if (System.currentTimeMillis() > deadline || pinned.all { (found[group(it)] ?: 0) >= enough }) break
+            val current = indices.map { variants[it] }
+            val (own, port) = dpiForTests(current.map { it.second })
+            progress.value = progress.value.copy(title = "Подбор обхода: этап ${phase + 1}")
+            try {
+            Tester.real(current, cfg.testUrl, port, own.ports, youtube = false, batch = 64, parallel = 12, attempts = 1,
+                skip = { i -> System.currentTimeMillis() > deadline || synchronized(best) { (found[group(variants[indices[i]].first)] ?: 0) >= enough } || dead(variants[indices[i]].second) }) { i, p ->
+                val (s, m) = variants[indices[i]]
                 synchronized(best) {
                     val cur = best[s.id]
                     if (m != null && p !== Tester.SKIPPED) (if (p.works) kindOk else kindFail).merge(Masks.kind(m), 1, Int::plus)
@@ -467,7 +481,8 @@ object Actions {
                 }
                 step(done.incrementAndGet(), variants.size)
             }
-        } finally { own.close() }
+            } finally { own.close() }
+        }
         // Double check: a mask that passed once can be a fluke (the TSPU sometimes lets the first connection through).
         // The 2 fastest of every server are probed again, now with YouTube; the one that passes again wins.
         val confirm = pinned.flatMap { s -> good[s.id].orEmpty().let { g -> (g.sortedBy { it.second }.take(2) + g.sortedWith(compareBy({ Masks.cost(it.first) }, { it.second })).take(1)) }
@@ -560,7 +575,7 @@ object Actions {
      */
     fun warmup() {
         runCatching { Report.prime(app); CloudSpeed.loadCached(app) }
-        scope.launch(Bg.io) { runCatching { CloudSpeed.refresh(app) } }
+        scope.launch(Bg.io) { runCatching { CloudControl.refresh(app); CloudSpeed.refresh(app) } }
         val st = Store.state.value
         if (!PhonePower.refresh(app).allowLight || !st.settings.autoOptimize || job?.isActive == true || Tunnel.status.value.state != Tunnel.State.IDLE) return
         if (st.servers.any { st.state(it).works }) return
@@ -885,7 +900,7 @@ object Actions {
         val ticket = autoGeneration.incrementAndGet()
         val ready = { if (autoGeneration.get() == ticket) onReady() }
         runCatching { Report.prime(app); CloudSpeed.loadCached(app) }
-        scope.launch(Bg.io) { runCatching { CloudSpeed.refresh(app) } }
+        scope.launch(Bg.io) { runCatching { CloudControl.refresh(app); CloudSpeed.refresh(app) } }
         val st = Store.state.value
         val working = st.servers.filter { st.state(it).works }
         val busy = job
@@ -1078,7 +1093,7 @@ object Actions {
         }
         if (fresh().isEmpty()) {
             val st = Store.state.value
-            val candidates = st.servers.filter { st.state(it).tcpMs > 0 && !st.state(it).works }.sortedBy { st.state(it).tcpMs }.take(10)
+            val candidates = ServerChoice.diverse(st.servers.filter { st.state(it).tcpMs > 0 && !st.state(it).works }.sortedWith(compareByDescending<Server> { CloudSpeed.prior(it) ?: .0 }.thenBy { st.state(it).tcpMs }), 3)
             progress.value = progress.value.copy(title = "Авто: подбираю маскировку")
             if (candidates.isNotEmpty()) notes += doFindMasks(candidates, 24, enough = 1, budgetMs = 60_000)
         }
@@ -1102,10 +1117,23 @@ object Actions {
         val cloud = CloudSpeed.pick(eligible, emptyList(), n = ConnectPolicy.FIRST)
         val net = Net.key(app)
         val remembered = (st.settings.netServers[net] ?: st.settings.netServers[Net.family(net)]).orEmpty().toSet()
-        val learned = Brain.order(Net.key(app), eligible) { st.state(it) }.mapIndexed { i, s -> s.id to i }.toMap()
-        val first = ConnectPolicy.candidates(eligible, cloud, remembered, cooling = { probeMemory.cooling(net, it.id, st.state(it).maskFor(net), System.currentTimeMillis()) }) { s -> learned[s.id] ?: Int.MAX_VALUE }
+        val time = System.currentTimeMillis()
+        val learned = eligible.sortedWith(compareByDescending<Server> { ServerChoice.blended(CloudSpeed.prior(it), st.state(it).evidenceFor(net), time) }
+            .thenByDescending { Brain.p(net, it, st.state(it)) }).mapIndexed { i, server -> server.id to i }.toMap()
+        val first = ConnectPolicy.candidates(eligible, cloud, remembered, cooling = { server ->
+            val e = st.state(server).evidenceFor(net)
+            probeMemory.cooling(net, server.id, st.state(server).maskFor(net), time) ||
+                (e.streak > 0 && time >= e.at && time - e.at < ProbeMemory.cooldownMs(e.streak))
+        }) { s -> learned[s.id] ?: Int.MAX_VALUE }
+        val cachedGood = first.filter { st.state(it).evidenceFor(net).let { e -> e.successes > 0 && e.streak == 0 && time >= e.at && time - e.at < 1800000 } }.map { it.id }.toSet()
+        val reachable = Tester.fastFilter(first.filter { it.id !in cachedGood })
+        val available = first.filter { (reachable[it.id] ?: -1) != 0 }.ifEmpty { first }
+        val ordered = available.sortedBy { if (it.id in cachedGood || (reachable[it.id] ?: -1) > 0) 0 else 1 }
+        val fastOk = realTest(ordered.take(2), "Авто: два приоритетных маршрута", big = false, youtube = false,
+            attempts = 1, stopAfter = 1, budgetMs = 1200, onFirst = onFirst)
+        if (fastOk > 0) { deepPending = true; return "Быстрый HTTPS-маршрут готов; проверка качества продолжится в фоне" }
         attempted.addAll(first.map { it.id })
-        val ok = realTest(first, "Авто: первые ${first.size} маршрутов (облако: ${cloud.size})", big = false,
+        val ok = realTest(ordered, "Авто: первые ${first.size} маршрутов (облако: ${cloud.size})", big = false,
             youtube = false, attempts = 1, stopAfter = 1, budgetMs = ConnectPolicy.QUICK_BUDGET_MS, onFirst = onFirst)
         if (ok > 0) { deepPending = true; return "Первый HTTPS-маршрут готов; облачные подсказки ${cloud.size}, полный поиск в фоне" }
         // Only if the first wave failed: bound DNS/TCP work to a small diverse wave, not thousands of subscriptions.
@@ -1119,6 +1147,29 @@ object Actions {
             attempts = 1, stopAfter = 1, budgetMs = ConnectPolicy.QUICK_BUDGET_MS, onFirst = onFirst)
         if (second > 0) deepPending = true
         return "Короткая проверка: работают ${ok + second}; остальные серверы не задерживают первый успех"
+    }
+
+    /** Find a VERIFIED spare while the existing TUN stays up. Selection changes only after returning success. */
+    suspend fun prepareStandby(used: List<Server>): Server? {
+        if (job?.isActive == true) return null
+        val st = Store.state.value; val ids = used.map { it.id }.toSet(); val net = Net.key(app)
+        val pool = preferred(st, st.servers.filter { it.id !in ids })
+        val now = System.currentTimeMillis()
+        val total = pool.sumOf { st.state(it).evidenceFor(net).checks.coerceIn(0, 10000) }.coerceAtMost(1_000_000)
+        val ranked = pool.sortedByDescending { ServerChoice.blended(CloudSpeed.prior(it), st.state(it).evidenceFor(net), now) }
+        val exploit = ServerChoice.diverse(ranked, 5)
+        // One exploration slot, only for background verification; never an unverified live switch.
+        val explore = pool.filter { s -> exploit.none { it.id == s.id } }.maxByOrNull {
+            ServerChoice.blended(CloudSpeed.prior(it), st.state(it).evidenceFor(net), now) +
+                .08 * ServerChoice.exploration(st.state(it).evidenceFor(net).checks, total)
+        }
+        val candidates = exploit + listOfNotNull(explore)
+        var found: Server? = null
+        val previous = progress.value
+        try { realTest(candidates,"Фоновый запасной маршрут",big=false,youtube=false,attempts=1,stopAfter=1,
+            budgetMs=ConnectPolicy.QUICK_BUDGET_MS,onFirst={ found=it }) }
+        finally { progress.value=previous }
+        return found
     }
 
     /** Subscriptions older than 12 h are refreshed in the background on app start. */

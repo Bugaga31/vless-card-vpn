@@ -232,7 +232,9 @@ object Masks {
         set(v) { field = v; customById = (v + custom).associateBy { it.id } }
     @Volatile private var customById: Map<String, Mask> = emptyMap()
 
-    fun byId(id: String?): Mask? = if (id.isNullOrEmpty()) null else byId[id] ?: customById[id]
+    @Volatile private var cloudById: Map<String, Mask> = emptyMap()
+    fun setCloud(masks: List<Mask>) { cloudById = masks.take(12).associateBy { it.id } }
+    fun byId(id: String?): Mask? = if (id.isNullOrEmpty()) null else byId[id] ?: customById[id] ?: cloudById[id]
 
     /** Noise items of a mask: its own JSON («Мои маскировки») or the preset. */
     fun noiseFor(m: Mask): String? = m.noiseJson.ifEmpty { null } ?: m.noise.takeIf { it.isNotEmpty() }?.let { noiseItems(it) }
@@ -299,7 +301,7 @@ object Masks {
             "safari.d:TPWS#HOST_DISORDER", "chrome.d:BYEDPI#MULTI_DISORDER", "chrome.d:TPWS#TLSREC_OOB", "firefox.d:BYEDPI#MASK_AUTO_FAKE")
         // own masks right after the plain baseline: the user made them for this network
         // light masks first (stable: the curated order stays inside each weight); own masks keep their place up front
-        val ordered = (listOfNotNull(byId["chrome.n"]) + custom + (first.mapNotNull { byId[it] } + ALL).distinct().filter { !it.custom }.sortedBy { cost(it) }).distinct()
+        val ordered = (listOfNotNull(byId["chrome.n"]) + custom + cloudById.values + (first.mapNotNull { byId[it] } + ALL).distinct().filter { !it.custom }.sortedBy { cost(it) }).distinct()
         return ordered.filter { (byeDpiAvailable || !it.viaByeDpi) && (server == null || compatible(it, server)) }
     }
 }

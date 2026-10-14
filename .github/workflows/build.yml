@@ -25,6 +25,13 @@ jobs:
           packages: platform-tools platforms;android-34 build-tools;34.0.0
           log-accepted-android-sdk-licenses: false
       - uses: gradle/actions/setup-gradle@v3
+      - name: Restore native libraries (validated before use)
+        uses: actions/cache@v4
+        with:
+          path: |
+            app/build/generated/byedpi
+            app/build/generated/hev
+          key: native-${{ runner.os }}-${{ runner.arch }}-ndk27.2.12479018-api24-all-${{ hashFiles('native/**', 'app/build.gradle.kts') }}
       - name: Install pinned NDK
         run: sdkmanager 'ndk;27.2.12479018'
       # Releases are published only by beta-release.yml with the persistent signing key.
@@ -32,5 +39,5 @@ jobs:
         run: |
           chmod +x gradlew
           bash tools/test-security-result-parser.sh
-          PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p 'test_cloud_learning.py'
+          PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p 'test_cloud_*.py'
           ./gradlew --no-daemon --max-workers=2 :app:testDebugUnitTest :app:assembleDebug
