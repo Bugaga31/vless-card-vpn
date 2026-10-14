@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
-    paths: ['scripts/cloud_servers.py', 'scripts/cloud_reports.py', 'scripts/cloud_real.py', '.github/workflows/cloud-servers.yml']
+    paths: ['scripts/cloud_servers.py', 'scripts/cloud_reports.py', 'scripts/cloud_real.py', 'scripts/cloud_manifest.py', 'config/cloud-recipes.json', '.github/workflows/cloud-servers.yml']
 permissions:
   contents: write
   actions: write  # the run starts the next one itself: GitHub's cron here did not fire at all
@@ -17,7 +17,7 @@ jobs:
       - run: echo "START=$(date +%s)" >> "$GITHUB_ENV"
       - uses: actions/checkout@v4
       - name: Validate cloud-learning policies
-        run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p 'test_cloud_learning.py'
+        run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p 'test_cloud_*.py'
       - name: Collect and ping
         run: mkdir -p out && python3 scripts/cloud_servers.py
       - name: Real check through Xray (HTTPS through every top server)
@@ -29,6 +29,8 @@ jobs:
         env:
           REPORT_TOKEN: ${{ secrets.REPORT_TOKEN }}
         run: python3 scripts/cloud_reports.py || echo "::warning::reports merge failed"
+      - name: Build measured tier manifest and safe recipe hints
+        run: python3 scripts/cloud_manifest.py
       - name: Publish to the «servers» branch
         run: |
           cd out
