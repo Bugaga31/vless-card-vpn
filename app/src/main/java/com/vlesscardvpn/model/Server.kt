@@ -97,6 +97,7 @@ data class ServerState(
     /** Download speed of the 256 KB test file through the server (kbit/s), 0 = not measured. */
     val kbps: Int = 0,
     val netEvidence: Map<String, RouteEvidence> = emptyMap(),
+    val speedNetwork: String = "", val speedMask: String = "", val speedCheckedAt: Long = 0,
 ) {
     /**
      * Rank for «самый быстрый»: lower is better. Not ping alone — a server that answers in 60 ms but downloads at
@@ -108,6 +109,7 @@ data class ServerState(
     val works: Boolean get() = realMs > 0 && bigOk != false
     fun toJson(): JSONObject = JSONObject().apply {
         if (netEvidence.isNotEmpty()) put("netEvidence", JSONObject().apply { netEvidence.forEach { (k, v) -> put(k, v.toJson()) } })
+        if (speedCheckedAt > 0) { put("speedNetwork",speedNetwork);put("speedMask",speedMask);put("speedAt",speedCheckedAt) }
         if (selected) put("sel", true); put("tcp", tcpMs); put("real", realMs); bigOk?.let { put("big", it) }; ytOk?.let { put("yt", it) }
         if (maskId.isNotEmpty()) put("mask", maskId); put("at", checkedAt); put("ok", okCount); put("fail", failCount)
         if (goodMasks.isNotEmpty()) put("good", org.json.JSONArray(goodMasks))
@@ -121,9 +123,10 @@ data class ServerState(
             goodMasks = o.optJSONArray("good")?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: emptyList(),
             netMasks = o.optJSONObject("net")?.let { m -> m.keys().asSequence().associateWith { m.getString(it) } } ?: emptyMap(),
             tgOk = if (o.has("tg")) o.optBoolean("tg") else null, kbps = o.optInt("kbps"),
+            speedNetwork = o.optString("speedNetwork"), speedMask = o.optString("speedMask"), speedCheckedAt = o.optLong("speedAt"),
             netEvidence = o.optJSONObject("netEvidence")?.let { m -> m.keys().asSequence().take(8).mapNotNull { k -> m.optJSONObject(k)?.let { RouteEvidence.parse(it) }?.let { k to it } }.toMap() } ?: emptyMap(),
         )
-        /** 20 Mbit/s ≈ +100 ms, 5 ≈ +400, 1 ≈ +1500 (capped); unknown = a middle guess so measured fast servers win. */
-        fun speedPenalty(kbps: Int): Int = if (kbps <= 0) 300 else minOf(1500, 2_000_000 / kbps)
+        /** 20 Mbit/s ≈ +200 ms, 5 ≈ +800, 1 ≈ +4000; unknown is NOT proof of speed and receives a conservative penalty. */
+        fun speedPenalty(kbps: Int): Int = if (kbps <= 0) 5000 else minOf(6000, 4_000_000 / kbps)
     }
 }

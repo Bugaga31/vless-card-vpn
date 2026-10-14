@@ -13,13 +13,13 @@ class CloudLoadRegressionR121Test {
 
     @Test fun phonesSpreadOverNearEqualServers() {
         Report.load = emptyMap()
-        val st = ServerState(realMs = 200, bigOk = true)
+        val st = ServerState(realMs = 200, bigOk = true, kbps = 20000)
         val servers = (1..6).map { srv(it) }
         // 40 phones, 6 servers with the same measurement: the favourite must differ between phones
         val picks = (1..40).map { p -> servers.minByOrNull { Actions.spreadScore(st, it, "phone$p") }!!.id }.toSet()
         assertTrue("phones all chose one server", picks.size >= 3)
         // a clearly faster server still wins on every phone (taste is at most +20%)
-        val fast = ServerState(realMs = 100, bigOk = true)
+        val fast = st.copy(realMs = 100)
         (1..20).forEach { p -> assertTrue(Actions.spreadScore(fast, servers[0], "p$p") < Actions.spreadScore(st, servers[1], "p$p")) }
     }
 
