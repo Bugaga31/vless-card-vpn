@@ -1,0 +1,57 @@
+name: Apply verified archive and test renames
+on:
+  push:
+    branches: ['apply-archive-128']
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: adaptive-cloud-128
+          persist-credentials: false
+      - name: Remove only originals with verified preserved replacements
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          python3 - <<'PY'
+          import json,pathlib,subprocess,re
+          expected="c8f3149ad4e6695b25b39c495bc9f5a03a8b12f3"
+          head=subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip()
+          assert head==expected, 'Target changed; refusing edit'
+          base=subprocess.check_output(['git','rev-parse','HEAD^{tree}'],text=True).strip()
+          paths=['app/src/test/java/com/vlesscardvpn/R120Test.kt', 'app/src/test/java/com/vlesscardvpn/R121Test.kt', 'app/src/test/java/com/vlesscardvpn/R122Test.kt', 'app/src/test/java/com/vlesscardvpn/R124Test.kt', 'app/src/test/java/com/vlesscardvpn/R125Test.kt', 'app/src/test/java/com/vlesscardvpn/R127Test.kt', 'app/src/test/java/com/vlesscardvpn/R128Test.kt', 'app/src/test/java/com/vlesscardvpn/R130Test.kt', 'app/src/test/java/com/vlesscardvpn/R131Test.kt', 'app/src/test/java/com/vlesscardvpn/R132Test.kt', 'app/src/test/java/com/vlesscardvpn/R133Test.kt', 'app/src/test/java/com/vlesscardvpn/R134Test.kt', 'app/src/test/java/com/vlesscardvpn/R135Test.kt', 'app/src/test/java/com/vlesscardvpn/R136Test.kt', 'app/src/test/java/com/vlesscardvpn/R137Test.kt', 'app/src/test/java/com/vlesscardvpn/R138Test.kt', 'app/src/test/java/com/vlesscardvpn/R62Test.kt', 'app/src/test/java/com/vlesscardvpn/R66Test.kt', 'app/src/test/java/com/vlesscardvpn/R67Test.kt', 'app/src/test/java/com/vlesscardvpn/R69Test.kt', 'app/src/test/java/com/vlesscardvpn/R70Test.kt', 'app/src/test/java/com/vlesscardvpn/R71Test.kt', 'app/src/test/java/com/vlesscardvpn/R72Test.kt', 'app/src/test/java/com/vlesscardvpn/R73Test.kt', 'app/src/test/java/com/vlesscardvpn/R74Test.kt', 'app/src/test/java/com/vlesscardvpn/R75Test.kt', 'app/src/test/java/com/vlesscardvpn/R76Test.kt', 'app/src/test/java/com/vlesscardvpn/R77Test.kt', 'app/src/test/java/com/vlesscardvpn/R78Test.kt', 'app/src/test/java/com/vlesscardvpn/R79Test.kt', 'app/src/test/java/com/vlesscardvpn/R82Test.kt', 'docs/beta-1.0.52.md', 'docs/release-1.0.100.md', 'docs/release-1.0.53.md', 'docs/release-1.0.54.md', 'docs/release-1.0.55.md', 'docs/release-1.0.56.md', 'docs/release-1.0.57.md', 'docs/release-1.0.58.md', 'docs/release-1.0.59.md', 'docs/release-1.0.60.md', 'docs/release-1.0.61.md', 'docs/release-1.0.62.md', 'docs/release-1.0.63.md', 'docs/release-1.0.64.md', 'docs/release-1.0.65.md', 'docs/release-1.0.66.md', 'docs/release-1.0.67.md', 'docs/release-1.0.68.md', 'docs/release-1.0.69.md', 'docs/release-1.0.70.md', 'docs/release-1.0.71.md', 'docs/release-1.0.72.md', 'docs/release-1.0.73.md', 'docs/release-1.0.74.md', 'docs/release-1.0.75.md', 'docs/release-1.0.76.md', 'docs/release-1.0.77.md', 'docs/release-1.0.78.md', 'docs/release-1.0.79.md', 'docs/release-1.0.80.md', 'docs/release-1.0.81.md', 'docs/release-1.0.82.md', 'docs/release-1.0.83.md', 'docs/release-1.0.84.md', 'docs/release-1.0.85.md', 'docs/release-1.0.86.md', 'docs/release-1.0.87.md', 'docs/release-1.0.88.md', 'docs/release-1.0.89.md', 'docs/release-1.0.90.md', 'docs/release-1.0.91.md', 'docs/release-1.0.92.md', 'docs/release-1.0.93.md', 'docs/release-1.0.94.md', 'docs/release-1.0.95.md', 'docs/release-1.0.96.md', 'docs/release-1.0.97.md', 'docs/release-1.0.98.md', 'docs/release-1.0.99.md', 'docs/release-1.1.0.md', 'docs/release-1.1.1.md', 'docs/release-1.1.2.md', 'docs/release-1.1.3.md', 'docs/release-1.1.4.md', 'docs/release-1.1.5.md', 'docs/release-1.1.6.md', 'docs/release-1.1.7.md', 'docs/release-1.1.8.md', 'docs/release-1.1.9.md', 'docs/release-1.2.0.md', 'docs/release-1.2.1.md', 'docs/release-1.2.10.md', 'docs/release-1.2.11.md', 'docs/release-1.2.12.md', 'docs/release-1.2.13.md', 'docs/release-1.2.14.md', 'docs/release-1.2.2.md', 'docs/release-1.2.3.md', 'docs/release-1.2.4.md', 'docs/release-1.2.5.md', 'docs/release-1.2.6.md', 'docs/release-1.2.7.md', 'docs/release-1.2.8.md', 'docs/release-1.2.9.md']
+          tracked=set(subprocess.check_output(['git','ls-files','-z']).decode().split('\0'))
+          for path in paths:
+              assert path in tracked
+              if path.startswith('docs/'):
+                  replacement='docs/archive/releases/'+pathlib.PurePosixPath(path).name
+              else:
+                  code=re.search(r'R\d+',path).group(0)
+                  matches=[p for p in tracked if p.endswith('Regression'+code+'Test.kt')]
+                  assert len(matches)==1
+                  replacement=matches[0]
+              assert replacement in tracked
+              if path.startswith('docs/'):
+                  assert pathlib.Path(path).read_bytes()==pathlib.Path(replacement).read_bytes()
+          entries=[{'path':p,'mode':'100644','type':'blob','sha':None} for p in paths]
+          pathlib.Path('/tmp/archive-tree.json').write_text(json.dumps({'base_tree':base,'tree':entries}))
+          print('Verified preserved replacements:',len(paths))
+          PY
+          CURRENT=$(gh api "repos/$GH_REPO/git/ref/heads/adaptive-cloud-128" --jq .object.sha)
+          [ "$CURRENT" = "c8f3149ad4e6695b25b39c495bc9f5a03a8b12f3" ] || exit 1
+          TREE=$(gh api --method POST "repos/$GH_REPO/git/trees" --input /tmp/archive-tree.json --jq .sha)
+          python3 - "$CURRENT" "$TREE" <<'PY'
+          import json,pathlib,sys
+          pathlib.Path('/tmp/archive-commit.json').write_text(json.dumps({'message':'chore: complete preserved release archive and descriptive test renames','parents':[sys.argv[1]],'tree':sys.argv[2]}))
+          PY
+          COMMIT=$(gh api --method POST "repos/$GH_REPO/git/commits" --input /tmp/archive-commit.json --jq .sha)
+          python3 - "$COMMIT" <<'PY'
+          import json,pathlib,sys
+          pathlib.Path('/tmp/archive-ref.json').write_text(json.dumps({'sha':sys.argv[1],'force':False}))
+          PY
+          gh api --method PATCH "repos/$GH_REPO/git/refs/heads/adaptive-cloud-128" --input /tmp/archive-ref.json --jq .object.sha
