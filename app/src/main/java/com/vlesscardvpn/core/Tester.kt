@@ -138,6 +138,11 @@ object Tester {
 
     /** Requests through a local SOCKS port (the tester's or the running VPN's). */
     fun probeSocks(port: Int, testUrl: String, big: Boolean = true, youtube: Boolean = true, attempts: Int = 2, budgetMs: Long = 0, onCall: ((okhttp3.Call) -> Unit)? = null): Probe {
+        val budgetDeadline = if (budgetMs > 0) System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(budgetMs.coerceAtMost(60000)) else Long.MAX_VALUE
+        fun boundedCall(client: OkHttpClient, request: Request): okhttp3.Call = client.newCall(request).also { call ->
+            if (budgetDeadline != Long.MAX_VALUE) call.timeout().timeout(TimeUnit.NANOSECONDS.toMillis((budgetDeadline-System.nanoTime()).coerceAtLeast(1)).coerceAtLeast(1),TimeUnit.MILLISECONDS)
+            onCall?.invoke(call)
+        }
         val client = (if (attempts == 1) fast else base).newBuilder().apply {
             if (budgetMs > 0) { callTimeout(budgetMs, TimeUnit.MILLISECONDS); connectTimeout(minOf(budgetMs, 2500), TimeUnit.MILLISECONDS); readTimeout(budgetMs, TimeUnit.MILLISECONDS) }
         }.dispatcher(okhttp3.Dispatcher()).connectionPool(okhttp3.ConnectionPool(2, 30, TimeUnit.SECONDS))
@@ -149,7 +154,7 @@ object Tester {
                 if (Thread.currentThread().isInterrupted) throw java.io.InterruptedIOException("Проверка отменена")
                 val t0 = System.nanoTime()
                 runCatching {
-                    client.newCall(Request.Builder().url(testUrl).header("User-Agent", UA).build()).also { onCall?.invoke(it) }.execute().use { r ->
+                    boundedCall(client,Request.Builder().url(testUrl).header("User-Agent", UA).build()).execute().use { r ->
                         check(r.code in 200..399) { "HTTP ${r.code}" }
                         r.body?.byteStream()?.use { it.read(ByteArray(4096)) }
                     }
@@ -157,9 +162,9 @@ object Tester {
                 }.onFailure { err = Errors.human(it) }
             }
             if (best == Long.MAX_VALUE) return Probe(0, null, null, err)
-            val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(40)
+            val deadline = if (budgetDeadline == Long.MAX_VALUE) System.nanoTime() + TimeUnit.SECONDS.toNanos(40) else budgetDeadline
             fun remaining() = TimeUnit.NANOSECONDS.toMillis((deadline - System.nanoTime()).coerceAtLeast(1)).coerceAtLeast(1)
-            val bigF = if (big) pool.submit<Pair<Boolean, Int>> { bigDownload(client) }.also { tasks += it } else null
+            val bigF = if (big) pool.submit<Pair<Boolean, Int>> { bigDownload(client,budgetDeadline,onCall) }.also { tasks += it } else null
             val ytF = if (youtube) pool.submit<Boolean> { runCatching {
                 client.newCall(Request.Builder().url(YT_URL).header("User-Agent", UA).build()).execute().use { it.code in 200..399 } }.getOrDefault(false) }.also { tasks += it } else null
             val tgF = if (youtube) pool.submit<Boolean> { runCatching {
@@ -178,11 +183,12 @@ object Tester {
     private val pool = java.util.concurrent.Executors.newFixedThreadPool(12) { r -> Thread(r, "probe").apply { isDaemon = true } }
 
     /** 256 KB through the server: (passed, kbit/s). A freeze (read timeout — the TSPU "16 KB" cut) fails at once, no second mirror. */
-    private fun bigDownload(client: OkHttpClient): Pair<Boolean, Int> {
+    private fun bigDownload(client: OkHttpClient, deadline: Long = Long.MAX_VALUE, onCall: ((okhttp3.Call) -> Unit)? = null): Pair<Boolean, Int> {
         for (url in BIG_URLS) {
             val t0 = System.nanoTime()
             try {
-                val n = download(client, url)
+                if (System.nanoTime() >= deadline) return false to 0
+                val n = download(client, url, deadline, onCall)
                 if (n >= BIG_BYTES) return true to (n * 8L * 1_000_000 / ((System.nanoTime() - t0) / 1000).coerceAtLeast(1) / 1000).toInt().coerceAtLeast(1)
             } catch (e: java.io.InterruptedIOException) { return false to 0 } catch (e: Exception) { /* mirror down: next */ }
         }
@@ -319,8 +325,11 @@ object Tester {
         }
     }
 
-    private fun download(client: OkHttpClient, url: String): Int =
-        client.newCall(Request.Builder().url(url).header("User-Agent", UA).build()).execute().use { r ->
+    private fun download(client: OkHttpClient, url: String, deadline: Long = Long.MAX_VALUE, onCall: ((okhttp3.Call) -> Unit)? = null): Int =
+        client.newCall(Request.Builder().url(url).header("User-Agent", UA).build()).also { call ->
+            if (deadline != Long.MAX_VALUE) call.timeout().timeout(TimeUnit.NANOSECONDS.toMillis((deadline-System.nanoTime()).coerceAtLeast(1)).coerceAtLeast(1),TimeUnit.MILLISECONDS)
+            onCall?.invoke(call)
+        }.execute().use { r ->
             check(r.isSuccessful); val src = r.body!!.byteStream(); val buf = ByteArray(16384); var total = 0
             while (total < BIG_BYTES) { val n = src.read(buf); if (n < 0) break; total += n }
             total

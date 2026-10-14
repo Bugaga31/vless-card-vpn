@@ -41,6 +41,18 @@ object ServerChoice {
         (if (local.latency > 0) local.latency else fallbackMs.takeIf { it > 0 }?.toDouble() ?: 3000.0) +
             2 * local.jitter.coerceAtLeast(0.0) + (1 - local.ema.coerceIn(0.0,1.0)) * 1000 +
             (if (local.checks < 2) 200 else 0)
+    /** A throughput sample applies only to its measured network, mask and recent window. */
+    fun measuredSpeed(s: com.vlesscardvpn.model.ServerState, net: String, now: Long): Int =
+        s.kbps.takeIf { it > 0 && s.speedNetwork == net && s.speedMask == s.maskFor(net) &&
+            s.speedCheckedAt > 0 && now >= s.speedCheckedAt && now-s.speedCheckedAt <= 30 * 60000L } ?: 0
+    fun qualityScore(s: com.vlesscardvpn.model.ServerState, net: String, now: Long): Int = if (!s.works) Int.MAX_VALUE
+        else s.realMs.coerceAtMost(60000) + com.vlesscardvpn.model.ServerState.speedPenalty(measuredSpeed(s,net,now)) + if (s.ytOk == false) 700 else 0
+    /** Legacy/foreign speed is a candidate hint only, never a current-network live rating. */
+    fun candidateScore(s: com.vlesscardvpn.model.ServerState, net: String, now: Long): Int =
+        if (s.works && measuredSpeed(s,net,now)==0 && s.kbps>0)
+            s.realMs.coerceIn(0,60000) + com.vlesscardvpn.model.ServerState.speedPenalty(s.kbps) + 1500
+        else qualityScore(s,net,now)
+    fun automaticPrimary(auto: Boolean, leastPing: Boolean, gaming: Boolean) = gaming || auto && leastPing
     /** Honest upper-confidence exploration bonus; use on background candidates, not forced live switches. */
     fun exploration(checks: Int, total: Int): Double = kotlin.math.sqrt(2 * kotlin.math.ln((total.coerceAtLeast(0) + 2).toDouble()) / (checks.coerceAtLeast(0) + 1))
 
