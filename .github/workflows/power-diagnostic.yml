@@ -23,7 +23,7 @@ jobs:
               if 'JVM tests and debug build' not in name:continue
               text=zipfile.ZipFile('/tmp/logs.zip').read(name).decode(errors='replace')
               for line in text.splitlines():
-                  if re.search(r'Native output validation failed|FileNotFoundError|Permission denied|Could not resolve|FAILED|Execution failed for task|Process .+exit|error:| e: |Caused by:|tests completed|Traceback|ValueError|KeyError|NotADirectoryError',line):
+                  if re.search(r'^.* > |native-cache|same path|\.json|not a directory|Native output validation failed|FileNotFoundError|Permission denied|Could not resolve|FAILED|Execution failed for task|Process .+exit|error:| e: |Caused by:|tests completed|Traceback|ValueError|KeyError|NotADirectoryError',line):
                       line=re.sub(r'https?://\S+','[URL]',line)
                       if re.search(r'token|password|secret|authorization|private.key',line,re.I):continue
                       rows.append(line[:500])
@@ -31,4 +31,4 @@ jobs:
           pathlib.Path('/tmp/diagnostic.json').write_text(json.dumps({'message':'ci: record bounded compiler/native failure diagnostics','branch':'diagnose-power-128','content':base64.b64encode(data).decode()}))
           print('Bounded diagnostic lines:',len(rows))
           PY
-          gh api --method PUT "repos/$GH_REPO/contents/ci/power-build-diagnostic.txt" --input /tmp/diagnostic.json --jq .commit.sha
+          gh api --method PUT "repos/$GH_REPO/contents/ci/power-build-detail.txt" --input /tmp/diagnostic.json --jq .commit.sha
