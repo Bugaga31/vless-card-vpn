@@ -1,0 +1,68 @@
+package com.vlesscardvpn.core
+
+import com.vlesscardvpn.model.Server
+import com.vlesscardvpn.model.ServerState
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.withTimeoutOrNull
+
+/** Bounded foreground comparison. Cloud/old measurements suggest candidates, never certify a winner. */
+object AutoSelection {
+    const val REFRESH_MS = 5 * 60000L
+    const val TOTAL_MS = 7000L
+    const val PROBE_MS = 2500L
+    const val MIN_PROBE_MS = 800L
+
+    fun needsSample(s: ServerState, net: String, now: Long): Boolean =
+        ServerChoice.measuredSpeed(s, net, now) == 0 || now - s.speedCheckedAt >= REFRESH_MS
+
+    /** Keep the measured leader, reserve a challenger slot, then prefer other hosts over link clones. */
+    fun finalists(candidates: List<Server>, state: (Server) -> ServerState, net: String, now: Long): List<Server> {
+        val ranked = candidates.distinctBy { it.id }.filter { state(it).works }
+            .sortedBy { ServerChoice.candidateScore(state(it), net, now) }
+        val leader = ranked.minByOrNull { ServerChoice.qualityScore(state(it), net, now) } ?: return emptyList()
+        val others = ranked.filter { it.id != leader.id }
+        val challengers = ServerChoice.diverse(others.filter { needsSample(state(it), net, now) }, others.size)
+        val challenger = challengers.firstOrNull { !it.address.equals(leader.address, ignoreCase = true) }
+            ?: challengers.firstOrNull()
+        return ServerChoice.diverse(listOfNotNull(leader, challenger) + ranked, 3)
+    }
+
+    /** One download at a time, including core startup/mutex waiting in the total deadline.
+     * A timeout is inconclusive, not a negative training sample. Parent cancellation still propagates.
+     */
+    suspend fun compare(candidates: List<Server>, state: (Server) -> ServerState, net: String,
+                        now: () -> Long, elapsed: () -> Long, validNetwork: () -> Boolean,
+                        allowDownload: () -> Boolean, gaming: Boolean,
+                        probe: suspend (Server, Long) -> Unit): Server? {
+        val valid = if (gaming) candidates.distinctBy { it.id }.filter { state(it).works }
+            .sortedBy { ServerChoice.latencyScore(state(it).evidenceFor(net), state(it).realMs) }.take(3)
+        else finalists(candidates, state, net, now())
+        val started = elapsed()
+        val attemptedAt = HashMap<String, Long>()
+        if (!gaming) for (server in valid) {
+            currentCoroutineContext().ensureActive()
+            if (!validNetwork()) return null
+            if (!allowDownload()) break
+            if (!needsSample(state(server), net, now())) continue
+            val remaining = TOTAL_MS - (elapsed() - started).coerceAtLeast(0)
+            if (remaining < MIN_PROBE_MS) break
+            val budget = minOf(PROBE_MS, remaining)
+            attemptedAt[server.id] = state(server).speedCheckedAt
+            withTimeoutOrNull(budget) { probe(server, budget) }
+        }
+        currentCoroutineContext().ensureActive()
+        if (!validNetwork()) return null
+        return valid.filter { state(it).works }.minByOrNull {
+            if (gaming) ServerChoice.latencyScore(state(it).evidenceFor(net), state(it).realMs)
+            else {
+                val result = state(it)
+                // A timed-out refresh cannot win using the old bandwidth it failed to reproduce.
+                // Keep the history for future hints; this is not a server failure or a training penalty.
+                val effective = if (attemptedAt[it.id]?.let { at -> result.speedCheckedAt <= at } == true)
+                    result.copy(speedCheckedAt = 0) else result
+                ServerChoice.qualityScore(effective, net, now()).toDouble()
+            }
+        }
+    }
+}
