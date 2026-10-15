@@ -379,6 +379,7 @@ object Actions {
         val pinned = pinCertificates(servers)
         val st = Store.state.value
         val net = Net.key(app)
+        val underlying = Net.underlying(app)?.toString()
         val variants = pinned.map { it to (Masks.byId(st.state(it).maskFor(net))) }
         val (own, port) = dpiForTests(variants.map { it.second })
         val done = AtomicInteger(); val ok = AtomicInteger()
@@ -386,6 +387,8 @@ object Actions {
         try {
             Tester.real(variants, st.settings.testUrl, port, own.ports, batch = if (onFirst != null) ConnectPolicy.FIRST else 64, parallel = parallel, big = big, youtube = youtube, attempts = attempts, stopAfter = stopAfter, budgetMs = budgetMs) { i, p ->
                 if (p == Tester.SKIPPED) return@real
+                // Do not train the old profile with a result completed after Wi-Fi/cellular handoff.
+                if (Net.key(app) != net || Net.underlying(app)?.toString() != underlying) return@real
                 val s = variants[i].first
                 val firstSuccess = p.works && ok.incrementAndGet() == 1
                 if (p.works) onSuccess?.invoke(s)
@@ -904,7 +907,13 @@ object Actions {
     private val autoGeneration = AtomicInteger()
     fun autoConnect(onReady: () -> Unit) {
         val ticket = autoGeneration.incrementAndGet()
-        val ready = { if (autoGeneration.get() == ticket) onReady() }
+        val initialNetwork = Net.key(app) to Net.underlying(app)?.toString()
+        val ready = {
+            if (autoGeneration.get() == ticket) {
+                if (initialNetwork == (Net.key(app) to Net.underlying(app)?.toString())) onReady()
+                else { selectionNetworkChanged(); Unit }
+            }
+        }
         runCatching { Report.prime(app); CloudSpeed.loadCached(app) }
         scope.launch(Bg.io) { runCatching { CloudControl.refresh(app); CloudSpeed.refresh(app) } }
         val st = Store.state.value
@@ -921,10 +930,13 @@ object Actions {
             // a network we know (its servers worked here and were checked within 3 h): connect at once, the tunnel re-checks itself
             val known = Store.state.value.let { s -> s.settings.netServers[net]?.let { ids -> s.servers.any { it.id in ids && s.state(it).works && now - s.state(it).checkedAt < 3 * 3600_000L } } } == true
             val stale = !known && (working.isNotEmpty() && working.none { now - st.state(it).checkedAt < 30 * 60_000L } || st.settings.netServers[net] == null && working.isNotEmpty() && st.settings.netServers.isNotEmpty())
-            val needsComparison = !GameSession.active() && PhonePower.refresh(app).allowLight && working.size > 1 &&
-                (working.none { ServerChoice.measuredSpeed(st.state(it),net,now) > 0 } || working.any {
+            val power = PhonePower.refresh(app)
+            val comparisonPool = preferred(st, working)
+            val needsComparison = !GameSession.active() && power.allowLight && !power.deferTraffic && comparisonPool.size > 1 &&
+                (comparisonPool.minByOrNull { ServerChoice.qualityScore(st.state(it),net,now) }?.let {
+                    AutoSelection.needsSample(st.state(it),net,now) } == true || comparisonPool.any {
                     ServerChoice.measuredSpeed(st.state(it),net,now)==0 && ServerChoice.candidateScore(st.state(it),net,now) <
-                        (working.filter { s -> ServerChoice.measuredSpeed(st.state(s),net,now)>0 }.minOfOrNull { s -> ServerChoice.qualityScore(st.state(s),net,now) } ?: Int.MAX_VALUE) * .8
+                        (comparisonPool.filter { s -> ServerChoice.measuredSpeed(st.state(s),net,now)>0 }.minOfOrNull { s -> ServerChoice.qualityScore(st.state(s),net,now) } ?: Int.MAX_VALUE) * .8
                 })
             if (needsComparison && job?.isActive != true) {
                 if (Tunnel.status.value.state != Tunnel.State.CONNECTED) Tunnel.status.value = Tunnel.Status(Tunnel.State.CONNECTING,
@@ -1050,25 +1062,32 @@ object Actions {
         } finally { progress.value = prev }
     }
 
+    private fun selectionNetworkChanged(): String {
+        if (Tunnel.status.value.state == Tunnel.State.CONNECTING)
+            Tunnel.status.value = Tunnel.Status(Tunnel.State.ERROR, "Сеть изменилась", check = "Нажмите Авто для проверки новой сети")
+        return "Сеть изменилась: повторите Авто"
+    }
+
     /** Instant start on old results: the selected + best known servers checked once (no big download), then connect. */
     private suspend fun preflight(onReady: () -> Unit, connected: Boolean = false): String {
         val st = Store.state.value
-        val net = Net.key(app);val stamp = System.currentTimeMillis()
+        val net = Net.key(app);val network = Net.underlying(app)?.toString();val stamp = System.currentTimeMillis()
         val cand = preferred(st, st.servers.filter { st.state(it).works }).sortedBy { ServerChoice.candidateScore(st.state(it),net,stamp) }
             .distinctBy { it.id }.take(12)
         // the 6 best first: usually enough — connect right away instead of waiting for all 12
         val passed = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
         realTest(cand.take(6), "Авто: проверяю серверы", big = false, attempts = 1, youtube = false, budgetMs = ConnectPolicy.QUICK_BUDGET_MS,onSuccess={ passed.add(it.id) })
         if (passed.isEmpty() && cand.size > 6) realTest(cand.drop(6), "Авто: проверяю серверы", big = false, attempts = 1, youtube = false, budgetMs = ConnectPolicy.QUICK_BUDGET_MS,onSuccess={ passed.add(it.id) })
+        if (Net.key(app) != net || Net.underlying(app)?.toString() != network) return selectionNetworkChanged()
         val ok = cand.filter { it.id in passed }
         if (ok.isNotEmpty()) {
             deepPending = true
             val before = Store.state.value.selected.map { it.id }.toSet()
-            val compared = chooseCompared(ok,null)
+            val compared = chooseCompared(ok,null) ?: return "Сравнение прервано: повторите Авто"
             val primary = ServerChoice.automaticPrimary(st.settings.mode == Mode.AUTO,st.settings.balance == com.vlesscardvpn.model.Balance.LEAST_PING,GameSession.active())
-            selectBest(5, close = true, among = if (primary && compared != null) listOf(compared) else ok)
+            selectBest(5, close = true, among = if (primary) listOf(compared) else ok)
             val after = Store.state.value.selected.map { it.id }.toSet()
-            // already connected: switch (without a break) only when the fastest set really changed
+            // Reconnect only when selection changed; existing TCP sessions may restart.
             if (!connected || after != before) withContext(Dispatchers.Main) { onReady() }
             return if (connected) "Авто: лучший из проверенных — ${after.size} из ${ok.size} рабочих" + (if (after != before) ", обновил маршрут" else "")
                 else "Авто: работают ${ok.size} из ${cand.size} — подключаюсь"
@@ -1134,7 +1153,7 @@ object Actions {
         if (untried.isEmpty()) return "Эти маршруты уже проверены в текущем поиске"
         val eligible = preferred(st, untried).filterNot { CloudSpeed.blocked(it) }.ifEmpty { preferred(st, untried) }
         val cloud = CloudSpeed.pick(eligible, emptyList(), n = ConnectPolicy.FIRST)
-        val net = Net.key(app)
+        val net = Net.key(app); val network = Net.underlying(app)?.toString()
         val remembered = (st.settings.netServers[net] ?: st.settings.netServers[Net.family(net)]).orEmpty().toSet()
         val time = System.currentTimeMillis()
         val gaming = GameSession.active()
@@ -1152,10 +1171,12 @@ object Actions {
         val reachable = Tester.fastFilter(first.filter { it.id !in cachedGood })
         val available = first.filter { (reachable[it.id] ?: -1) != 0 }.ifEmpty { first }
         val ordered = available.sortedBy { if (it.id in cachedGood || (reachable[it.id] ?: -1) > 0) 0 else 1 }
-        val shortlist = ordered.take(2)
+        // Four HTTPS candidates avoid a two-entry cache monopoly; downloads remain sequential.
+        val shortlist = ServerChoice.diverse(ordered, 4)
         val passed = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
-        val fastOk = realTest(shortlist, "Авто: сравниваю два маршрута", big = false, youtube = false,
-            attempts = 1, parallel = 2, budgetMs = 1200,onSuccess={ passed.add(it.id) })
+        val fastOk = realTest(shortlist, "Авто: проверяю четыре маршрута", big = false, youtube = false,
+            attempts = 1, parallel = 4, budgetMs = 1200,onSuccess={ passed.add(it.id) })
+        if (Net.key(app) != net || Net.underlying(app)?.toString() != network) return selectionNetworkChanged()
         if (fastOk > 0) {
             chooseCompared(shortlist.filter { it.id in passed },onFirst)
             deepPending = true; return "Выбран лучший из проверенных маршрутов; не просто первый ответивший"
@@ -1163,6 +1184,7 @@ object Actions {
         attempted.addAll(first.map { it.id });passed.clear()
         val ok = realTest(ordered, "Авто: первые ${first.size} маршрутов (облако: ${cloud.size})", big = false,
             youtube = false, attempts = 1, stopAfter = 2, budgetMs = ConnectPolicy.QUICK_BUDGET_MS,onSuccess={ passed.add(it.id) })
+        if (Net.key(app) != net || Net.underlying(app)?.toString() != network) return selectionNetworkChanged()
         if (ok > 0) { chooseCompared(ordered.filter { it.id in passed },onFirst); deepPending = true; return "Маршруты сравнены; облачные подсказки ${cloud.size}, полный поиск в фоне" }
         // Only if the first wave failed: bound DNS/TCP work to a small diverse wave, not thousands of subscriptions.
         val rest = ServerChoice.diverse(eligible.filter { it.id !in attempted }, ConnectPolicy.NEXT)
@@ -1174,25 +1196,27 @@ object Actions {
         passed.clear()
         val second = realTest(candidates, "Авто: запасные ${candidates.size} маршрутов", big = false, youtube = false,
             attempts = 1, stopAfter = 2, budgetMs = ConnectPolicy.QUICK_BUDGET_MS,onSuccess={ passed.add(it.id) })
+        if (Net.key(app) != net || Net.underlying(app)?.toString() != network) return selectionNetworkChanged()
         if (second > 0) { chooseCompared(candidates.filter { it.id in passed },onFirst); deepPending = true }
         return "Короткая проверка: работают ${ok + second}; остальные серверы не задерживают первый успех"
     }
 
     private suspend fun chooseCompared(candidates: List<Server>, onReady: ((Server) -> Unit)?): Server? {
-        val net=Net.key(app);val now=System.currentTimeMillis();val before=Store.state.value
-        val working=candidates.filter { before.state(it).works }
-        val acceptable=if (before.settings.mode == Mode.AUTO) tgCapable(working) { before.state(it).tgOk } else working
-        val valid=acceptable.sortedBy { ServerChoice.candidateScore(before.state(it),net,now) }.take(2)
-        if (!GameSession.active() && PhonePower.refresh(app).allowLight) {
-            val unknown=valid.filter { ServerChoice.measuredSpeed(before.state(it),net,now)==0 }
-            if (unknown.isNotEmpty()) realTest(unknown,"Авто: короткое сравнение скачивания",big=true,youtube=false,
-                attempts=1,parallel=1,budgetMs=2500)
-        }
-        val st=Store.state.value
-        val winner=valid.filter { st.state(it).works }.minByOrNull {
-            if (GameSession.active()) ServerChoice.latencyScore(st.state(it).evidenceFor(net),st.state(it).realMs)
-            else ServerChoice.qualityScore(st.state(it),net,System.currentTimeMillis()).toDouble()
-        } ?: return null
+        val net = Net.key(app); val network = Net.underlying(app)?.toString()
+        val before = Store.state.value
+        val working = candidates.filter { before.state(it).works }
+        val acceptable = if (before.settings.mode == Mode.AUTO) tgCapable(working) { before.state(it).tgOk } else working
+        val winner = AutoSelection.compare(acceptable, { Store.state.value.state(it) }, net,
+            now = { System.currentTimeMillis() }, elapsed = { android.os.SystemClock.elapsedRealtime() },
+            validNetwork = { Net.key(app) == net && Net.underlying(app)?.toString() == network },
+            allowDownload = { PhonePower.refresh(app).let { it.allowLight && !it.deferTraffic } },
+            gaming = GameSession.active()) { server, budget ->
+                realTest(listOf(server), "Авто: сравниваю скорость трёх финалистов", big = true, youtube = false,
+                    attempts = 1, parallel = 1, budgetMs = budget)
+            } ?: run {
+                if (Net.key(app) != net || Net.underlying(app)?.toString() != network) selectionNetworkChanged()
+                return null
+            }
         if (onReady != null) onReady(winner)
         return winner
     }
