@@ -390,6 +390,7 @@ object Actions {
                 // Do not train the old profile with a result completed after Wi-Fi/cellular handoff.
                 if (Net.key(app) != net || Net.underlying(app)?.toString() != underlying) return@real
                 val s = variants[i].first
+                val speedSample = ServerChoice.acceptsSpeedSample(p.kbps, parallel)
                 val firstSuccess = p.works && ok.incrementAndGet() == 1
                 if (p.works) onSuccess?.invoke(s)
                 // A deliberately short attempt is inconclusive when it times out; confirm with the normal budget.
@@ -397,10 +398,10 @@ object Actions {
                 probeMemory.record(net, s.id, st.state(s).maskFor(net), p.works, System.currentTimeMillis())
                 runCatching { Brain.learn(net, s, st.state(s), p.works) }
                 states.put(s.id) {
-                    it.copy(netEvidence = (it.netEvidence + ((net + "|" + st.state(s).maskFor(net)) to it.evidenceFor(net).observe(p.works, p.realMs, System.currentTimeMillis()))).entries.sortedByDescending { e -> e.value.at }.take(8).associate { e -> e.toPair() }, realMs = p.realMs, bigOk = p.bigOk ?: it.bigOk?.takeIf { old -> old }, ytOk = p.ytOk ?: it.ytOk, tgOk = p.tgOk ?: it.tgOk, checkedAt = System.currentTimeMillis(), kbps = if (p.kbps > 0) p.kbps else it.kbps,
-                        speedNetwork = if (p.kbps > 0) net else it.speedNetwork,
-                        speedMask = if (p.kbps > 0) st.state(s).maskFor(net) else it.speedMask,
-                        speedCheckedAt = if (p.kbps > 0) System.currentTimeMillis() else it.speedCheckedAt,
+                    it.copy(netEvidence = (it.netEvidence + ((net + "|" + st.state(s).maskFor(net)) to it.evidenceFor(net).observe(p.works, p.realMs, System.currentTimeMillis()))).entries.sortedByDescending { e -> e.value.at }.take(8).associate { e -> e.toPair() }, realMs = p.realMs, bigOk = p.bigOk ?: it.bigOk?.takeIf { old -> old }, ytOk = p.ytOk ?: it.ytOk, tgOk = p.tgOk ?: it.tgOk, checkedAt = System.currentTimeMillis(), kbps = if (speedSample) p.kbps else it.kbps,
+                        speedNetwork = if (speedSample) net else it.speedNetwork,
+                        speedMask = if (speedSample) st.state(s).maskFor(net) else it.speedMask,
+                        speedCheckedAt = if (speedSample) System.currentTimeMillis() else it.speedCheckedAt,
                         okCount = it.okCount + if (p.works) 1 else 0, failCount = it.failCount + if (p.works) 0 else 1)
                 }
                 if (firstSuccess && onFirst != null) { states.flush(); onFirst(s) }
@@ -526,7 +527,7 @@ object Actions {
             Store.setState(s.id) {
                 if (b == null) it.copy(realMs = 0, checkedAt = System.currentTimeMillis())
                 else it.copy(maskId = b.first.id, netMasks = it.netMasks + (net to b.first.id), realMs = b.second.realMs, bigOk = b.second.bigOk,
-                    kbps = if (b.second.kbps > 0) b.second.kbps else it.kbps, ytOk = b.second.ytOk ?: it.ytOk,
+                    kbps = if (b.second.kbps > 0) b.second.kbps else it.kbps, speedCheckedAt = 0, ytOk = b.second.ytOk ?: it.ytOk,
                     checkedAt = System.currentTimeMillis(),
                     goodMasks = good[s.id].orEmpty().sortedBy { g -> g.second }.map { g -> g.first.id }.filter { g -> g != b.first.id }.take(8))
             }
@@ -601,12 +602,16 @@ object Actions {
      */
     private suspend fun realSpeed(servers: List<Server>) {
         if (servers.isEmpty()) return
-        val net = Net.key(app); val st = Store.state.value
+        val net = Net.key(app); val network = Net.underlying(app)?.toString(); val st = Store.state.value
         val variants = pinCertificates(servers).map { it to Masks.byId(st.state(it).maskFor(net)) }
         val (own, port) = dpiForTests(variants.map { it.second })
         try {
             val r = Tester.speedMany(variants, port, own.ports)
-            Store.setStates(variants.indices.filter { r[it] > 0 }.associate { i -> variants[i].first.id to { x: com.vlesscardvpn.model.ServerState -> x.copy(kbps = r[i],speedNetwork=net,speedMask=x.maskFor(net),speedCheckedAt=System.currentTimeMillis()) } })
+            if (Net.key(app) != net || Net.underlying(app)?.toString() != network) return
+            Store.setStates(variants.indices.filter { r[it] > 0 }.associate { i -> variants[i].first.id to { x: com.vlesscardvpn.model.ServerState ->
+                if (x.maskFor(net) != st.state(variants[i].first).maskFor(net)) x
+                else x.copy(kbps = r[i],speedNetwork=net,speedMask=x.maskFor(net),speedCheckedAt=System.currentTimeMillis())
+            } })
         } finally { own.close() }
     }
 
@@ -646,7 +651,7 @@ object Actions {
             val win = v2.indices.filter { v2[it].first.id == s.id && res[it]?.works == true && res[it]?.ytOk != false }.minByOrNull { res.getValue(it).realMs } ?: return@forEach
             val m = v2[win].second!!; val p = res.getValue(win)
             if (cur.kbps > 0 && p.kbps in 1 until cur.kbps) return@forEach // the heavy one is still faster here: keep it
-            Store.setState(s.id) { it.copy(maskId = m.id, netMasks = it.netMasks + (net to m.id), realMs = p.realMs, bigOk = p.bigOk, kbps = p.kbps, speedNetwork = net, speedMask = m.id, speedCheckedAt = System.currentTimeMillis(), checkedAt = System.currentTimeMillis()) }
+            Store.setState(s.id) { it.copy(maskId = m.id, netMasks = it.netMasks + (net to m.id), realMs = p.realMs, bigOk = p.bigOk, kbps = p.kbps, speedNetwork = net, speedMask = m.id, speedCheckedAt = 0, checkedAt = System.currentTimeMillis()) }
             Store.recordMasks(net, listOf(m.id to true))
         }
     }
@@ -730,9 +735,17 @@ object Actions {
         states.flush()
         if (!PhonePower.refresh(app).allowed) return
         val test = wave.filter { (alive[it.id] ?: 0) > 0 }.sortedBy { alive[it.id] }.take(6)
+        var checked = 0
         val prev = progress.value
-        try { realTest(test, "Фон: проверяю запасные маршруты", big = true, attempts = 1) } finally { progress.value = prev }
-        AppWatch.note("Фон: просмотрены ${wave.size} запасных маршрутов, через Xray проверены ${test.size}; основной туннель не ждёт этот поиск")
+        try {
+            for (server in test) {
+                if (!PhonePower.refresh(app).allowed) break
+                realTest(listOf(server), "Фон: измеряю скорость запасных маршрутов", big = true, youtube = false,
+                    attempts = 1, parallel = 1, budgetMs = ConnectPolicy.QUICK_BUDGET_MS)
+                checked++
+            }
+        } finally { progress.value = prev }
+        AppWatch.note("Фон: просмотрены ${wave.size} запасных маршрутов, через Xray проверены $checked; основной туннель не ждёт этот поиск")
     }
 
     private var serviceCursor = 0; private var serviceAt = -300000L
@@ -759,6 +772,13 @@ object Actions {
         return changed && selected.size > 1
     }
 
+    private fun automaticOrder(st: AppState, servers: List<Server>): List<Server> {
+        val net = Net.key(app); val now = System.currentTimeMillis()
+        return if (st.settings.mode == Mode.AUTO && !GameSession.active())
+            servers.sortedWith(ServerChoice.downloadOrder({ st.state(it) },net,now))
+        else servers.sortedBy { st.state(it).score }
+    }
+
     /** Whether the last [optimize] pass switched servers (TunnelService checks again sooner then). */
     @Volatile var lastOptimizeSwitched = false
 
@@ -783,15 +803,15 @@ object Actions {
             if (!PhonePower.refresh(app).allowed) { deepPending = true; progress.value = prev0; return false }
             lightenMasks(wifi)
             // Wi-Fi: a real 3-second download through the 5 best (≈ what YouTube gets), not a 256 KB guess
-            if (wifi) Store.state.value.let { s1 -> realSpeed(s1.servers.filter { s1.state(it).works }.sortedBy { s1.state(it).score }.take(5)) }
+            if (wifi) Store.state.value.let { s1 -> realSpeed(automaticOrder(s1, s1.servers.filter { s1.state(it).works }).take(5)) }
             if (PhonePower.refresh(app).allowed) ytSwitch = runCatching { decideYoutube() }.getOrDefault(false)
             progress.value = prev0
         }
         if (!PhonePower.refresh(app).allowed) return ytSwitch
         st = Store.state.value
         // Auto with nothing selected connects to the 5 best: compare against those.
-        val sel = st.selected.ifEmpty { st.servers.filter { st.state(it).works }.sortedBy { st.state(it).score }.take(5) }
-        val others = st.servers.filter { it !in sel && st.state(it).works }.sortedBy { st.state(it).score }.take(if (wifi) 12 else 6)
+        val sel = st.selected.ifEmpty { automaticOrder(st, st.servers.filter { st.state(it).works }).take(5) }
+        val others = automaticOrder(st, st.servers.filter { it !in sel && st.state(it).works }).take(if (wifi) 12 else 6)
         val cand = (sel + others).distinctBy { it.id }
         if (cand.isEmpty()) return ytSwitch
         val prev = progress.value
@@ -799,7 +819,7 @@ object Actions {
         progress.value = prev
         val now = Store.state.value
         val selOk = sel.filter { now.state(it).works }
-        val best = cand.filter { now.state(it).works }.sortedBy { now.state(it).score }
+        val best = automaticOrder(now, cand.filter { now.state(it).works })
         if (best.isEmpty()) {
             val alive = now.servers.filter { now.state(it).tcpMs > 0 }.sortedBy { now.state(it).tcpMs }.take(8)
             if (alive.isNotEmpty()) doFindMasks(alive, 24)
@@ -810,7 +830,12 @@ object Actions {
         val bestMs = now.state(best.first()).score
         // Ping is not everything: a server that answers fast but breaks big downloads (256 KB) feels slow — video stalls.
         val selBroken = wifi && selOk.isNotEmpty() && selOk.all { now.state(it).bigOk == false } && best.any { now.state(it).bigOk == true }
-        val switch = selOk.size < sel.size || selOk.size < (if (ServerChoice.automaticPrimary(st.settings.mode == Mode.AUTO,st.settings.balance == com.vlesscardvpn.model.Balance.LEAST_PING,GameSession.active())) 1 else minOf(3,best.size)) || selBroken || (median > bestMs * 1.6 && median - bestMs > 150)
+        val speedMode = now.settings.mode == Mode.AUTO && !GameSession.active()
+        val net = Net.key(app); val stamp = System.currentTimeMillis()
+        val currentFastest = selOk.minWithOrNull(ServerChoice.downloadOrder({ now.state(it) },net,stamp))
+        val fasterDownload = ServerChoice.downloadUpgrade(currentFastest?.let { now.state(it) },now.state(best.first()),net,stamp)
+        val qualityGain = if (speedMode) fasterDownload else median > bestMs * 1.6 && median - bestMs > 150
+        val switch = selOk.size < sel.size || selOk.size < (if (ServerChoice.automaticPrimary(st.settings.mode == Mode.AUTO,st.settings.balance == com.vlesscardvpn.model.Balance.LEAST_PING,GameSession.active())) 1 else minOf(3,best.size)) || selBroken || qualityGain
         lastOptimizeSwitched = switch
         android.util.Log.i("E2E", "optimize sel=${sel.size} ok=${selOk.size} median=$median best=$bestMs switch=$switch")
         val pick = if (selBroken) best.filter { now.state(it).bigOk == true } else best
@@ -933,7 +958,7 @@ object Actions {
             val power = PhonePower.refresh(app)
             val comparisonPool = preferred(st, working)
             val needsComparison = !GameSession.active() && power.allowLight && !power.deferTraffic && comparisonPool.size > 1 &&
-                (comparisonPool.minByOrNull { ServerChoice.qualityScore(st.state(it),net,now) }?.let {
+                (comparisonPool.minWithOrNull(ServerChoice.downloadOrder({ st.state(it) },net,now))?.let {
                     AutoSelection.needsSample(st.state(it),net,now) } == true || comparisonPool.any {
                     ServerChoice.measuredSpeed(st.state(it),net,now)==0 && ServerChoice.candidateScore(st.state(it),net,now) <
                         (comparisonPool.filter { s -> ServerChoice.measuredSpeed(st.state(s),net,now)>0 }.minOfOrNull { s -> ServerChoice.qualityScore(st.state(s),net,now) } ?: Int.MAX_VALUE) * .8
@@ -1072,7 +1097,8 @@ object Actions {
     private suspend fun preflight(onReady: () -> Unit, connected: Boolean = false): String {
         val st = Store.state.value
         val net = Net.key(app);val network = Net.underlying(app)?.toString();val stamp = System.currentTimeMillis()
-        val cand = preferred(st, st.servers.filter { st.state(it).works }).sortedBy { ServerChoice.candidateScore(st.state(it),net,stamp) }
+        val cand = preferred(st, st.servers.filter { st.state(it).works })
+            .sortedWith(ServerChoice.downloadOrder({ st.state(it) },net,stamp))
             .distinctBy { it.id }.take(12)
         // the 6 best first: usually enough — connect right away instead of waiting for all 12
         val passed = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
@@ -1157,9 +1183,11 @@ object Actions {
         val remembered = (st.settings.netServers[net] ?: st.settings.netServers[Net.family(net)]).orEmpty().toSet()
         val time = System.currentTimeMillis()
         val gaming = GameSession.active()
+        val speedRank = eligible.sortedWith(ServerChoice.downloadOrder({ st.state(it) },net,time))
+            .mapIndexed { index,server -> server.id to index }.toMap()
         val learned = eligible.sortedWith(compareByDescending<Server> {
             if (gaming) -ServerChoice.latencyScore(st.state(it).evidenceFor(net), st.state(it).realMs)
-            else if (ServerChoice.measuredSpeed(st.state(it),net,time) > 0) 2.0 - ServerChoice.qualityScore(st.state(it),net,time) / 100000.0
+            else if (ServerChoice.measuredSpeed(st.state(it),net,time) > 0) 2.0 - (speedRank[it.id] ?: eligible.size).toDouble() / (eligible.size + 1)
             else ServerChoice.blended(CloudSpeed.prior(it), st.state(it).evidenceFor(net), time) }
             .thenByDescending { Brain.p(net, it, st.state(it)) }).mapIndexed { i, server -> server.id to i }.toMap()
         val first = ConnectPolicy.candidates(eligible, cloud, remembered, cooling = { server ->
@@ -1338,8 +1366,11 @@ object Actions {
                 else if (st.settings.mode == Mode.AUTO) ServerChoice.qualityScore(st.state(sv),netKey,System.currentTimeMillis())
                 else spreadScore(st.state(sv), sv, me) }
             val primary = ServerChoice.automaticPrimary(st.settings.mode == Mode.AUTO, st.settings.balance == com.vlesscardvpn.model.Balance.LEAST_PING, gaming)
-            val sorted = preferred(st, all).sortedBy(spread)
-                .distinctBy { if (it.protocol == "wireguard") "wg:" + it.secret else it.id }.take(if (primary) 1 else n)
+            val rankTime = System.currentTimeMillis()
+            val pool = preferred(st, all)
+            val ranked = if (st.settings.mode == Mode.AUTO && !gaming)
+                pool.sortedWith(ServerChoice.downloadOrder({ st.state(it) },netKey,rankTime)) else pool.sortedBy(spread)
+            val sorted = ranked.distinctBy { if (it.protocol == "wireguard") "wg:" + it.secret else it.id }.take(if (primary) 1 else n)
             val favs = if (close && !primary) all.filter { it.id in st.settings.favorites } else emptyList()
             val best = ((if (close && !primary) closeOnes(sorted.map(spread)).let { k -> sorted.take(k) } else sorted) + favs).map { it.id }.toSet()
             c = best.size

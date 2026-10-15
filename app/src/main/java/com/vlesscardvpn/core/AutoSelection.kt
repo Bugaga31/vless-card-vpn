@@ -19,10 +19,11 @@ object AutoSelection {
     /** Keep the measured leader, reserve a challenger slot, then prefer other hosts over link clones. */
     fun finalists(candidates: List<Server>, state: (Server) -> ServerState, net: String, now: Long): List<Server> {
         val ranked = candidates.distinctBy { it.id }.filter { state(it).works }
-            .sortedBy { ServerChoice.candidateScore(state(it), net, now) }
-        val leader = ranked.minByOrNull { ServerChoice.qualityScore(state(it), net, now) } ?: return emptyList()
+            .sortedWith(ServerChoice.downloadOrder(state,net,now))
+        val leader = ranked.minWithOrNull(ServerChoice.downloadOrder(state, net, now)) ?: return emptyList()
         val others = ranked.filter { it.id != leader.id }
-        val challengers = ServerChoice.diverse(others.filter { needsSample(state(it), net, now) }, others.size)
+        val challengers = ServerChoice.diverse(others.filter { needsSample(state(it), net, now) }
+            .sortedBy { ServerChoice.candidateScore(state(it),net,now) }, others.size)
         val challenger = challengers.firstOrNull { !it.address.equals(leader.address, ignoreCase = true) }
             ?: challengers.firstOrNull()
         return ServerChoice.diverse(listOfNotNull(leader, challenger) + ranked, 3)
@@ -53,16 +54,15 @@ object AutoSelection {
         }
         currentCoroutineContext().ensureActive()
         if (!validNetwork()) return null
-        return valid.filter { state(it).works }.minByOrNull {
-            if (gaming) ServerChoice.latencyScore(state(it).evidenceFor(net), state(it).realMs)
-            else {
-                val result = state(it)
-                // A timed-out refresh cannot win using the old bandwidth it failed to reproduce.
-                // Keep the history for future hints; this is not a server failure or a training penalty.
-                val effective = if (attemptedAt[it.id]?.let { at -> result.speedCheckedAt <= at } == true)
-                    result.copy(speedCheckedAt = 0) else result
-                ServerChoice.qualityScore(effective, net, now()).toDouble()
-            }
+        val results = valid.associate { it.id to state(it) }
+        fun effective(server: Server): ServerState {
+            val result = results.getValue(server.id)
+            return if (attemptedAt[server.id]?.let { at -> result.speedCheckedAt <= at } == true)
+                result.copy(speedCheckedAt = 0) else result
         }
+        val working = valid.filter { results.getValue(it.id).works }
+        return if (gaming) working.minByOrNull {
+            ServerChoice.latencyScore(results.getValue(it.id).evidenceFor(net), results.getValue(it.id).realMs)
+        } else working.minWithOrNull(ServerChoice.downloadOrder(::effective, net, now()))
     }
 }

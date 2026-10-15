@@ -52,6 +52,26 @@ object ServerChoice {
         if (s.works && measuredSpeed(s,net,now)==0 && s.kbps>0)
             s.realMs.coerceIn(0,60000) + com.vlesscardvpn.model.ServerState.speedPenalty(s.kbps) + 1500
         else qualityScore(s,net,now)
+    /** Throughput-first Auto: a lower ping cannot outweigh a higher verified download rate. */
+    fun compareDownload(a: com.vlesscardvpn.model.ServerState, b: com.vlesscardvpn.model.ServerState,
+                        net: String, now: Long): Int {
+        if (a.works != b.works) return if (a.works) -1 else 1
+        val speed = measuredSpeed(b,net,now).compareTo(measuredSpeed(a,net,now))
+        if (speed != 0) return speed
+        return qualityScore(a,net,now).compareTo(qualityScore(b,net,now))
+    }
+    fun downloadOrder(state: (Server) -> com.vlesscardvpn.model.ServerState, net: String, now: Long): Comparator<Server> =
+        Comparator { a,b -> compareDownload(state(a),state(b),net,now) }
+    /** Background handovers need a material gain; explicit Auto still chooses the highest measured rate. */
+    fun downloadUpgrade(current: com.vlesscardvpn.model.ServerState?, candidate: com.vlesscardvpn.model.ServerState,
+                        net: String, now: Long): Boolean {
+        if (!candidate.works) return false
+        val speed = measuredSpeed(candidate,net,now)
+        if (speed <= 0) return false
+        val old = current?.takeIf { it.works }?.let { measuredSpeed(it,net,now) } ?: 0
+        return old <= 0 || speed.toLong() >= old.toLong() * 120 / 100 && speed.toLong() - old >= 500
+    }
+    fun acceptsSpeedSample(kbps: Int, parallel: Int) = kbps > 0 && parallel == 1
     fun automaticPrimary(auto: Boolean, leastPing: Boolean, gaming: Boolean) = gaming || auto && leastPing
     /** Honest upper-confidence exploration bonus; use on background candidates, not forced live switches. */
     fun exploration(checks: Int, total: Int): Double = kotlin.math.sqrt(2 * kotlin.math.ln((total.coerceAtLeast(0) + 2).toDouble()) / (checks.coerceAtLeast(0) + 1))
