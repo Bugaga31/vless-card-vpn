@@ -21,12 +21,19 @@ LIMIT_ALL, LIMIT_RU = 6000, 3000
 
 
 def catalog():
-    src = open("app/src/main/java/com/vlesscardvpn/model/Subs.kt", encoding="utf-8").read()
+    with open("app/src/main/java/com/vlesscardvpn/model/Subs.kt", encoding="utf-8") as source:
+        src = source.read()
     ig = re.search(r'IG = "([^"]+)"', src).group(1)
     out = []
     for m in re.finditer(r'SubSource\(gh\("([^"]+)"\),\s*"[^"]*",\s*(\w+)', src):
         out.append((m.group(1).replace("$IG", ig), m.group(2) in ("RU", "WL")))
-    return out
+    # Literal HTTPS sources and named HTTPS constants (e.g. a Gist) are not gh(...) paths.
+    constants = dict(re.findall(r'const val (\w+) = "(https://[^"\s]+)"', src))
+    for m in re.finditer(r'SubSource\(("https://[^"\s]+"|[A-Z][A-Z_0-9]*),\s*"[^"]*",\s*(\w+)', src):
+        token, group = m.groups()
+        url = token.strip('"') if token.startswith('"') else constants.get(token)
+        if url: out.append((url, group in ("RU", "WL")))
+    return list(dict.fromkeys(out))
 
 
 CYBER = "https://warp-gen.cyb-portal.org/api/subscriptions"
@@ -134,4 +141,5 @@ async def main():
     write("out/alive_ru.txt", [a for a in alive if a[1][3]], LIMIT_RU)
     json.dump({"at": stamp, "unique": len(links), "alive": len(alive)}, open("out/stats.json", "w"))
 
-asyncio.run(main())
+if __name__ == "__main__":
+    asyncio.run(main())

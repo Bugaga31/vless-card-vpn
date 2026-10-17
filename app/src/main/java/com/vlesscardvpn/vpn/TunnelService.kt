@@ -182,15 +182,25 @@ class TunnelService : VpnService() {
             val st = Store.state.value
             val network = Net.key(this)
             var settings = st.settings
+            val automatic = settings.mode == Mode.AUTO
             var selected = st.selected
             if (settings.mode != Mode.BYEDPI && selected.isEmpty()) {
                 // Nothing chosen: take the best servers that passed the last test.
-                selected = Actions.preferred(st, st.servers.filter { st.state(it).works }).sortedBy { st.state(it).score }.take(5)
+                val candidates = Actions.preferred(st, st.servers.filter { st.state(it).works })
+                selected = if (automatic && !com.vlesscardvpn.core.GameSession.active()) candidates.sortedWith(
+                    com.vlesscardvpn.core.ServerChoice.downloadOrder({ st.state(it) },network,System.currentTimeMillis())).take(5)
+                else candidates.sortedBy { st.state(it).score }.take(5)
                     .let { l -> l.take(Actions.closeOnes(l.map { st.state(it).score })) }
             }
             if (settings.mode == Mode.AUTO) {
-                // Auto: connections are spread over the best servers (leastLoad) instead of all going to the single lowest ping
-                if (settings.balance == com.vlesscardvpn.model.Balance.LEAST_PING) settings = settings.copy(balance = com.vlesscardvpn.model.Balance.LEAST_LOAD)
+                // Keep the measured primary; never silently replace it with leastLoad reserves.
+                if (com.vlesscardvpn.core.ServerChoice.automaticPrimary(true,
+                        settings.balance == com.vlesscardvpn.model.Balance.LEAST_PING, com.vlesscardvpn.core.GameSession.active())) {
+                    selected = (if (com.vlesscardvpn.core.GameSession.active()) selected.sortedBy {
+                        com.vlesscardvpn.core.ServerChoice.latencyScore(st.state(it).evidenceFor(network),st.state(it).realMs)
+                    } else selected.sortedWith(com.vlesscardvpn.core.ServerChoice.downloadOrder(
+                        { st.state(it) }, network, System.currentTimeMillis()))).take(1)
+                }
                 settings = settings.copy(mode = if (selected.isEmpty() || autoDpiOnly) Mode.BYEDPI else Mode.SERVERS)
                 if (settings.mode == Mode.BYEDPI) selected = emptyList()
             }
@@ -210,7 +220,7 @@ class TunnelService : VpnService() {
                 // rotate only among masks no heavier than the measured one (a tiny-packet mask would slow YouTube down)
                 val limit = Masks.byId(mine)?.let { Masks.cost(it) } ?: 0
                 val pool = (ss.goodMasks + mine).filter { it.isNotEmpty() && (Masks.byId(it)?.let { m -> Masks.cost(m) } ?: 0) <= limit }
-                val id = if (rotate && pool.isNotEmpty()) pool.random() else mine
+                val id = com.vlesscardvpn.core.AutoRoutePolicy.launchMask(automatic, rotate, mine, pool) { it.random() }
                 srv to if (safeMasks) null else Masks.byId(id)
             }
             val needCurrent = settings.mode != Mode.SERVERS || withMasks.any { it.second?.dpi == Masks.CURRENT_DPI }

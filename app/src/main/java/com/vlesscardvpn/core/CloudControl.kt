@@ -14,6 +14,7 @@ object CloudControl {
     data class Snapshot(val stamp: Long, val expires: Long, val entries: List<Entry>, val recipes: JSONObject, val ispTags: JSONObject)
     @Volatile private var snapshot: Snapshot? = null
     @Volatile private var attempted = 0L
+    @Volatile private var fetched = 0L
     fun parse(text: String, now: Long): Snapshot {
         require(text.length <= 2 * 1024 * 1024)
         val o = JSONObject(text); require(o.getInt("schema") == 1)
@@ -68,11 +69,12 @@ object CloudControl {
     @Synchronized fun refresh(ctx: Context) {
         loadCached(ctx);if (!PhonePower.refresh(ctx).allowLight) return
         val now=System.currentTimeMillis()
-        if (now>=attempted && now-attempted<600000) return
+        if (!CloudSpeed.refreshDue(now,fetched,attempted,snapshot != null && fetched > 0)) return
         attempted=now;val p=ctx.getSharedPreferences("cloud_control",0)
         runCatching {
             val d=CloudTransport.fetch(ctx,"cloud-manifest.json",p.getString("etag",null)) { parse(it,now) }
-            if (d.text != null) { val s=parse(d.text,now);apply(ctx,s);p.edit().putString("json",d.text).putString("etag",d.etag).apply() }
+            if (d.text != null) { val s=parse(d.text,now);apply(ctx,s);p.edit().putString("json",d.text).putString("etag",d.etag).apply();fetched=now }
+            else if (d.unchanged) fetched=now
         }
     }
 }

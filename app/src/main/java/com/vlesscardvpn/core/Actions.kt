@@ -13,6 +13,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -43,9 +44,12 @@ object Actions {
     private var job: Job? = null
     private lateinit var app: Context
     private val probeMemory = ProbeMemory()
+    private var requestedSourceJob: Job? = null
+    private var requestedSourceAttempt = -60000L
 
     fun init(context: Context) {
         app = context.applicationContext
+        maybeLoadRequestedSource()
         runCatching { Brain.load(app) } // load before the first probe can initialize fresh weights
         // 1.0.81–1.0.83 left a mask neural network and maybe a 0.5–1.8 GB language model on the phone: removed, space freed
         runCatching { java.io.File(app.filesDir, "mask_brain.json").delete(); java.io.File(app.filesDir, "llm").deleteRecursively() }
@@ -584,7 +588,8 @@ object Actions {
      */
     fun warmup() {
         runCatching { Report.prime(app); CloudSpeed.loadCached(app) }
-        scope.launch(Bg.io) { runCatching { CloudControl.refresh(app); CloudSpeed.refresh(app) } }
+        scope.launch(Bg.io) { runCatching { CloudControl.refresh(app) } }
+        scope.launch(Bg.io) { runCatching { CloudSpeed.refresh(app) } }
         val st = Store.state.value
         if (!PhonePower.refresh(app).allowLight || !st.settings.autoOptimize || job?.isActive == true || Tunnel.status.value.state != Tunnel.State.IDLE) return
         if (st.servers.any { st.state(it).works }) return
@@ -940,7 +945,8 @@ object Actions {
             }
         }
         runCatching { Report.prime(app); CloudSpeed.loadCached(app) }
-        scope.launch(Bg.io) { runCatching { CloudControl.refresh(app); CloudSpeed.refresh(app) } }
+        scope.launch(Bg.io) { runCatching { CloudControl.refresh(app) } }
+        scope.launch(Bg.io) { runCatching { CloudSpeed.refresh(app) } }
         val st = Store.state.value
         val working = st.servers.filter { st.state(it).works }
         val busy = job
@@ -957,9 +963,9 @@ object Actions {
             val stale = !known && (working.isNotEmpty() && working.none { now - st.state(it).checkedAt < 30 * 60_000L } || st.settings.netServers[net] == null && working.isNotEmpty() && st.settings.netServers.isNotEmpty())
             val power = PhonePower.refresh(app)
             val comparisonPool = preferred(st, working)
-            val needsComparison = !GameSession.active() && power.allowLight && !power.deferTraffic && comparisonPool.size > 1 &&
+            val needsComparison = !GameSession.active() && power.allowLight && !power.deferTraffic && comparisonPool.isNotEmpty() &&
                 (comparisonPool.minWithOrNull(ServerChoice.downloadOrder({ st.state(it) },net,now))?.let {
-                    AutoSelection.needsSample(st.state(it),net,now) } == true || comparisonPool.any {
+                    AutoRoutePolicy.needsFaster(st.state(it),net,now) } == true || comparisonPool.any {
                     ServerChoice.measuredSpeed(st.state(it),net,now)==0 && ServerChoice.candidateScore(st.state(it),net,now) <
                         (comparisonPool.filter { s -> ServerChoice.measuredSpeed(st.state(s),net,now)>0 }.minOfOrNull { s -> ServerChoice.qualityScore(st.state(s),net,now) } ?: Int.MAX_VALUE) * .8
                 })
@@ -1108,11 +1114,18 @@ object Actions {
         val ok = cand.filter { it.id in passed }
         if (ok.isNotEmpty()) {
             deepPending = true
-            val before = Store.state.value.selected.map { it.id }.toSet()
-            val compared = chooseCompared(ok,null) ?: return "Сравнение прервано: повторите Авто"
+            val before = Store.state.value.let { snapshot -> snapshot.selected.map {
+                AutoRoutePolicy.configuration(it,snapshot.state(it),net)
+            }.toSet() }
+            val extra = preferred(st, st.servers.filter { server -> cand.none { it.id == server.id } })
+                .sortedWith(compareByDescending<Server> { CloudSpeed.speedOf(Report.serverKey(it)) }
+                    .thenByDescending { CloudSpeed.prior(it) })
+            val compared = chooseCompared(ok,null,extra) ?: return "Сравнение прервано: повторите Авто"
             val primary = ServerChoice.automaticPrimary(st.settings.mode == Mode.AUTO,st.settings.balance == com.vlesscardvpn.model.Balance.LEAST_PING,GameSession.active())
             selectBest(5, close = true, among = if (primary) listOf(compared) else ok)
-            val after = Store.state.value.selected.map { it.id }.toSet()
+            val after = Store.state.value.let { snapshot -> snapshot.selected.map {
+                AutoRoutePolicy.configuration(it,snapshot.state(it),net)
+            }.toSet() }
             // Reconnect only when selection changed; existing TCP sessions may restart.
             if (!connected || after != before) withContext(Dispatchers.Main) { onReady() }
             return if (connected) "Авто: лучший из проверенных — ${after.size} из ${ok.size} рабочих" + (if (after != before) ", обновил маршрут" else "")
@@ -1166,7 +1179,11 @@ object Actions {
             val st = Store.state.value.settings
             if (Net.key(app).let { k -> st.dpiRemembered[k] ?: st.dpiRemembered[Net.family(k)] } == null) { progress.value = progress.value.copy(title = "Авто: подбираю обход DPI"); notes += doFindDpi() }
         }
-        val n = selectBest(5, close = true, among = working)
+        // A mask found only by connectivity/ping still needs an isolated throughput comparison.
+        val compared = if (working.isNotEmpty()) chooseCompared(working,null) else null
+        val primary = Store.state.value.settings.let { ServerChoice.automaticPrimary(
+            it.mode == Mode.AUTO,it.balance == com.vlesscardvpn.model.Balance.LEAST_PING,GameSession.active()) }
+        val n = selectBest(5, close = true, among = if (primary && compared != null) listOf(compared) else working)
         withContext(Dispatchers.Main) { onReady() }
         return if (n > 0) "Авто: выбрано $n лучших серверов — подключаюсь" else "Авто: рабочих серверов нет — подключаюсь через обход DPI без сервера"
     }
@@ -1206,14 +1223,14 @@ object Actions {
             attempts = 1, parallel = 4, budgetMs = 1200,onSuccess={ passed.add(it.id) })
         if (Net.key(app) != net || Net.underlying(app)?.toString() != network) return selectionNetworkChanged()
         if (fastOk > 0) {
-            chooseCompared(shortlist.filter { it.id in passed },onFirst)
+            chooseCompared(shortlist.filter { it.id in passed },onFirst, eligible.filter { s -> shortlist.none { it.id == s.id } })
             deepPending = true; return "Выбран лучший из проверенных маршрутов; не просто первый ответивший"
         }
         attempted.addAll(first.map { it.id });passed.clear()
         val ok = realTest(ordered, "Авто: первые ${first.size} маршрутов (облако: ${cloud.size})", big = false,
             youtube = false, attempts = 1, stopAfter = 2, budgetMs = ConnectPolicy.QUICK_BUDGET_MS,onSuccess={ passed.add(it.id) })
         if (Net.key(app) != net || Net.underlying(app)?.toString() != network) return selectionNetworkChanged()
-        if (ok > 0) { chooseCompared(ordered.filter { it.id in passed },onFirst); deepPending = true; return "Маршруты сравнены; облачные подсказки ${cloud.size}, полный поиск в фоне" }
+        if (ok > 0) { chooseCompared(ordered.filter { it.id in passed },onFirst, eligible.filter { it.id !in attempted }); deepPending = true; return "Маршруты сравнены; облачные подсказки ${cloud.size}, полный поиск в фоне" }
         // Only if the first wave failed: bound DNS/TCP work to a small diverse wave, not thousands of subscriptions.
         val rest = ServerChoice.diverse(eligible.filter { it.id !in attempted }, ConnectPolicy.NEXT)
         attempted.addAll(rest.map { it.id })
@@ -1225,28 +1242,92 @@ object Actions {
         val second = realTest(candidates, "Авто: запасные ${candidates.size} маршрутов", big = false, youtube = false,
             attempts = 1, stopAfter = 2, budgetMs = ConnectPolicy.QUICK_BUDGET_MS,onSuccess={ passed.add(it.id) })
         if (Net.key(app) != net || Net.underlying(app)?.toString() != network) return selectionNetworkChanged()
-        if (second > 0) { chooseCompared(candidates.filter { it.id in passed },onFirst); deepPending = true }
+        if (second > 0) { chooseCompared(candidates.filter { it.id in passed },onFirst, eligible.filter { it.id !in attempted }); deepPending = true }
         return "Короткая проверка: работают ${ok + second}; остальные серверы не задерживают первый успех"
     }
 
-    private suspend fun chooseCompared(candidates: List<Server>, onReady: ((Server) -> Unit)?): Server? {
+    private suspend fun chooseCompared(candidates: List<Server>, onReady: ((Server) -> Unit)?,
+                                       explore: List<Server> = emptyList()): Server? {
         val net = Net.key(app); val network = Net.underlying(app)?.toString()
-        val before = Store.state.value
-        val working = candidates.filter { before.state(it).works }
-        val acceptable = if (before.settings.mode == Mode.AUTO) tgCapable(working) { before.state(it).tgOk } else working
-        val winner = AutoSelection.compare(acceptable, { Store.state.value.state(it) }, net,
-            now = { System.currentTimeMillis() }, elapsed = { android.os.SystemClock.elapsedRealtime() },
-            validNetwork = { Net.key(app) == net && Net.underlying(app)?.toString() == network },
-            allowDownload = { PhonePower.refresh(app).let { it.allowLight && !it.deferTraffic } },
-            gaming = GameSession.active()) { server, budget ->
-                realTest(listOf(server), "Авто: сравниваю скорость трёх финалистов", big = true, youtube = false,
-                    attempts = 1, parallel = 1, budgetMs = budget)
-            } ?: run {
-                if (Net.key(app) != net || Net.underlying(app)?.toString() != network) selectionNetworkChanged()
-                return null
+        val deadline = android.os.SystemClock.elapsedRealtime() + AutoRoutePolicy.SEARCH_MS
+        fun remaining() = (deadline - android.os.SystemClock.elapsedRealtime()).coerceAtLeast(0)
+        fun valid() = Net.key(app) == net && Net.underlying(app)?.toString() == network
+        fun allowed() = !GameSession.active() && PhonePower.refresh(app).let { it.allowLight && !it.deferTraffic }
+        suspend fun compare(pool: List<Server>): Server? {
+            val before = Store.state.value
+            val working = pool.filter { before.state(it).works }
+            val acceptable = if (before.settings.mode == Mode.AUTO) tgCapable(working) { before.state(it).tgOk } else working
+            if (remaining() < AutoSelection.MIN_PROBE_MS) return acceptable.minWithOrNull(
+                ServerChoice.downloadOrder({ before.state(it) },net,System.currentTimeMillis()))
+            return AutoSelection.compare(acceptable, { Store.state.value.state(it) }, net,
+                now = { System.currentTimeMillis() }, elapsed = { android.os.SystemClock.elapsedRealtime() },
+                validNetwork = { valid() },
+                allowDownload = { allowed() && remaining() >= AutoSelection.MIN_PROBE_MS }, gaming = GameSession.active()) { server, budget ->
+                val bounded = minOf(budget,remaining())
+                if (bounded >= AutoSelection.MIN_PROBE_MS) kotlinx.coroutines.withTimeoutOrNull(bounded) {
+                    realTest(listOf(server), "Авто: сравниваю скорость финалистов", big = true, youtube = false,
+                        attempts = 1, parallel = 1, budgetMs = bounded)
+                }
             }
+        }
+        var winner = compare(candidates) ?: run {
+            if (!valid()) selectionNetworkChanged()
+            return null
+        }
+        // A working 100 kbit/s route is a fallback, not grounds to stop looking.
+        // Only one additional diverse wave; no whole-catalog scan or unbounded masks.
+        if (allowed() && valid() && AutoRoutePolicy.needsFaster(Store.state.value.state(winner),net,System.currentTimeMillis()) && remaining() >= 2000) {
+            val wave = ServerChoice.diverse(explore.filter { s -> candidates.none { it.id == s.id } },4)
+            val passed = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+            if (wave.isNotEmpty()) {
+                kotlinx.coroutines.withTimeoutOrNull(minOf(3500L,remaining())) {
+                    realTest(wave,"Авто: ищу быстрее, не только рабочий",big=false,youtube=false,
+                        attempts=1,parallel=4,budgetMs=1200,onSuccess={ passed.add(it.id) })
+                }
+                if (!valid()) { selectionNetworkChanged(); return null }
+                if (passed.isNotEmpty() && remaining() >= AutoSelection.MIN_PROBE_MS)
+                    winner = compare(listOf(winner) + wave.filter { it.id in passed }) ?: winner
+            }
+        }
+        if (allowed() && valid() && remaining() >= AutoSelection.MIN_PROBE_MS &&
+            AutoRoutePolicy.shouldCompareMasks(Store.state.value.state(winner),net,System.currentTimeMillis())) {
+            kotlinx.coroutines.withTimeoutOrNull(minOf(AutoRoutePolicy.MASK_MS,remaining())) { tuneAutoMask(winner,net,network) }
+        }
+        kotlinx.coroutines.currentCoroutineContext().ensureActive()
+        if (!valid()) { selectionNetworkChanged(); return null }
         if (onReady != null) onReady(winner)
         return winner
+    }
+
+    /** Keep the working route unless an isolated HTTPS + download trial proves a faster mask here. */
+    private suspend fun tuneAutoMask(server: Server, net: String, network: String?) {
+        val start = Store.state.value
+        if (start.settings.mode != Mode.AUTO) return
+        val original = start.state(server).maskFor(net)
+        val pinned = start.servers.firstOrNull { it.id == server.id } ?: server
+        val trials = AutoRoutePolicy.maskTrials(pinned,original,start.settings)
+        var expected = original
+        for (id in trials) {
+            kotlinx.coroutines.currentCoroutineContext().ensureActive()
+            if (GameSession.active() || !PhonePower.refresh(app).let { it.allowLight && !it.deferTraffic }) return
+            if (Net.key(app) != net || Net.underlying(app)?.toString() != network) return
+            var sample: Probe? = null
+            kotlinx.coroutines.withTimeoutOrNull(2000L) {
+                Tester.real(listOf(pinned to Masks.byId(id)),start.settings.testUrl,null,
+                    youtube=false,batch=1,parallel=1,attempts=1,big=true,budgetMs=1900) { _,p -> sample=p }
+            }
+            val p = sample ?: continue
+            if (Net.key(app) != net || Net.underlying(app)?.toString() != network) return
+            val stamp = System.currentTimeMillis()
+            var applied = false
+            Store.setState(server.id) { current ->
+                applied = current.maskFor(net) == expected && AutoRoutePolicy.improved(current,net,stamp,p)
+                if (applied) {
+                    AutoRoutePolicy.apply(current,net,id,stamp,p)
+                } else current
+            }
+            if (applied) expected = id
+        }
     }
 
     /** Find a VERIFIED spare while the existing TUN stays up. Selection changes only after returning success. */
@@ -1270,6 +1351,27 @@ object Actions {
             budgetMs=ConnectPolicy.QUICK_BUDGET_MS,onFirst={ found=it }) }
         finally { progress.value=previous }
         return found
+    }
+
+    /** New migration source loads on launch even if the old subscriptions were refreshed recently.
+     * Never delays a working VPN, resets the all-source refresh timestamp, or restores a removed source.
+     */
+    private fun maybeLoadRequestedSource() {
+        val st = Store.state.value
+        val source = com.vlesscardvpn.model.Subs.DIMAN
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (!st.settings.autoUpdateSubs || source !in st.settings.subscriptions ||
+            st.servers.any { it.source == source } || requestedSourceJob?.isActive == true ||
+            now - requestedSourceAttempt < 60000L) return
+        requestedSourceAttempt = now
+        requestedSourceJob = scope.launch(Bg.io) {
+            val got = fetchFull(source) ?: return@launch
+            val list = LinkParser.parseMany(got.first,source).take(MAX_PER_SUB)
+            if (list.isNotEmpty() && source in Store.state.value.settings.subscriptions) {
+                Store.replaceSource(source,list)
+                got.second?.let { info -> Store.update { it.copy(settings = it.settings.copy(subInfo = it.settings.subInfo + (source to info))) } }
+            }
+        }
     }
 
     /** Subscriptions older than 12 h are refreshed in the background on app start. */

@@ -163,7 +163,9 @@ def check(links):
 
 
 SPEED_URL = "https://speed.cloudflare.com/__down?bytes=4000000"
-SPEED_TOP, SPEED_PAR = int(os.environ.get("SPEED_TOP", "60")), 12
+# Isolated downloads: parallel speed tests divide runner bandwidth and distort the ranking.
+SPEED_TOP, SPEED_PAR = int(os.environ.get("SPEED_TOP", "24")), 1
+SPEED_TTL = 3600
 
 
 def fetch_speed(port):
@@ -219,12 +221,43 @@ def learn(hist, res, now):
     return hist
 
 
-def learn_speed(hist, sp):
-    for l, kb in sp.items():
-        h = hist.get(l)
-        if not h: continue
-        old = h.get("kb", 0)
-        h["kb"] = kb if not old else int(old * 0.6 + kb * 0.4)
+def measured_kbps(h, now):
+    """Only recent isolated samples; a later failed real check revokes the cloud speed hint."""
+    if not isinstance(h,dict): return 0
+    at = h.get("kb_t",0); samples = h.get("samples",[])
+    if not isinstance(samples,list) or not samples: return 0
+    last = samples[-1]
+    if not isinstance(last,list) or len(last) != 2 or last[1] is not True: return 0
+    if (h.get("kb_isolated") is not True or type(at) not in (int,float) or
+        type(last[0]) not in (int,float) or not now-SPEED_TTL <= at <= now or
+        not now-SPEED_TTL <= last[0] <= now): return 0
+    try: return max(0,int(h.get("kb",0)))
+    except (ValueError,TypeError,OverflowError): return 0
+
+
+def learn_speed(hist, sp, now=None):
+    now = int(time.time()) if now is None else now
+    for link, kb in sp.items():
+        if link in hist:
+            hist[link].update(kb=max(0, kb), kb_t=now, kb_isolated=True)
+
+
+def speed_trials(res, hist, now, limit=SPEED_TOP):
+    """Exploit fast measured routes, but reserve half the slots for unmeasured/old routes."""
+    if limit <= 0: return []
+    working = [link for link, ms in res.items() if ms > 0]
+    ranked = sorted(working, key=lambda link: (-measured_kbps(hist[link], now), score(hist[link])))
+    keep = ranked[:max(1, limit // 2)]
+    rest = sorted((link for link in working if link not in keep),
+                  key=lambda link: (hist[link].get("kb_t", 0), res[link]))
+    # Different hosts before multiple configurations on the same endpoint.
+    selected = []; hosts = set()
+    for link in keep + rest + ranked:
+        host = key(link)
+        if link not in selected and host not in hosts:
+            selected.append(link); hosts.add(host)
+        if len(selected) >= limit: return selected
+    return (selected + [link for link in keep + rest if link not in selected])[:limit]
 
 
 def key(link):
@@ -234,15 +267,19 @@ def key(link):
     return hashlib.sha256(f"{str(p[10]).lower()}:{p[11]}".encode()).hexdigest()[:8]
 
 
-def write_speed(hist):
-    """out/speed.json: server key -> cloud download kbit/s, the 300 fastest stable ones. Auto on phones also tests these."""
-    fast = sorted(((h["kb"], l) for l, h in hist.items() if h.get("kb", 0) > 0 and (h["ok"] + 0.5) / (h["n"] + 1) > 0.5), reverse=True)
-    out = {}
-    for kb, l in fast:
-        k = key(l)
-        if k and k not in out: out[k] = kb
+def write_speed(hist, now=None):
+    """Fresh configuration samples only; endpoint keys remain candidate hints, never local proof."""
+    now = int(time.time()) if now is None else now
+    fast = sorted(((measured_kbps(h,now), link) for link,h in hist.items()
+                   if measured_kbps(h,now) > 0 and (h["ok"]+.5)/(h["n"]+1) > .5), reverse=True)
+    out = {}; measured = {}
+    for kb, link in fast:
+        k = key(link)
+        if k and k not in out:
+            out[k] = kb; measured[k] = hist[link]["kb_t"]
         if len(out) >= 300: break
-    json.dump({"stamp": int(time.time()), "kbps": out}, open("out/speed.json", "w"), separators=(",", ":"))
+    with open("out/speed.json", "w") as target:
+        json.dump({"stamp":now,"isolated":True,"kbps":out,"measured_at":measured},target,separators=(",",":"))
 
 
 def score(h):
@@ -267,10 +304,10 @@ def main():
     t = time.time()
     res = check(todo)
     hist = learn(hist, res, now)
-    top = sorted((l for l, ms in res.items() if ms), key=lambda l: score(hist[l]))[:SPEED_TOP]
+    top = speed_trials(res,hist,now)
     ts = time.time()
     sp = speeds(top)
-    learn_speed(hist, sp)
+    learn_speed(hist, sp, int(time.time()))
     fast = sorted((kb for kb in sp.values() if kb), reverse=True)
     print(f"speed: {len(fast)}/{len(top)} downloaded in {int(time.time() - ts)} s, best {fast[:5]} kbit/s", flush=True)
     json.dump(hist, open("out/history.json", "w"), separators=(",", ":"))
@@ -278,7 +315,7 @@ def main():
     stamp = time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime())
     for name, ls in lists.items():
         body = head[name]
-        works = sorted((l for l in body if res.get(l)), key=lambda l: score(hist[l]))
+        works = sorted((l for l in body if res.get(l)), key=lambda l: (-measured_kbps(hist[l],int(time.time())),score(hist[l])))
         rest = [l for l in body if not res.get(l)]
         rest = [l for l in rest if l not in res] + [l for l in rest if l in res]  # pinged but carried nothing: last
         with open("out/" + name, "w", encoding="utf-8") as f:

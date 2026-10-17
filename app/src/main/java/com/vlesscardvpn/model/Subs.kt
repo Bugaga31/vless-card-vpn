@@ -6,6 +6,7 @@ data class SubSource(val url: String, val title: String, val group: String, val 
 object Subs {
     private fun gh(path: String) = "https://raw.githubusercontent.com/$path"
     private const val IG = "igareck/vpn-configs-for-russia/main"
+    const val DIMAN = "https://gist.githubusercontent.com/Diman331/8c868070c0b5a5ec0c7d94507717b67b/raw/subscription.txt"
     const val RU = "Для России"
     const val WL = "Белые списки (мобильный интернет)"
     const val WORLD = "Мировые сборники (много, но слабее)"
@@ -13,6 +14,7 @@ object Subs {
     val CATALOG: List<SubSource> = listOf(
         // «Облачная проверка»: GitHub pings tens of thousands of servers every 6 h and keeps the ones that answer
         SubSource(gh("Bugaga31/vless-card-vpn/servers/alive_ru.txt"), "VLESS Card · облачная проверка (для России)", RU, default = true),
+        SubSource(DIMAN, "Diman331 · подписка", WORLD, default = true),
         SubSource(gh("$IG/BLACK_VLESS_RUS_mobile.txt"), "igareck · VLESS для мобильного", RU, default = true),
         SubSource(gh("$IG/BLACK_VLESS_RUS.txt"), "igareck · VLESS", RU, default = true),
         SubSource(gh("$IG/BLACK_SS+All_RUS.txt"), "igareck · Shadowsocks и все", RU, default = true),
