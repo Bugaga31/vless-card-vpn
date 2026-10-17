@@ -22,6 +22,15 @@ object CloudSpeed {
         JSONObject(json).getJSONObject("kbps").let { o -> o.keys().asSequence().associateWith { o.optInt(it) }.filterValues { it > 0 } }
     }.getOrDefault(emptyMap())
 
+    /** Legacy parallel/undated or expired cloud speeds are not certified measurements. */
+    fun parseFresh(json: String, now: Long): Map<String, Int> = runCatching {
+        val o = JSONObject(json); val seconds = now / 1000
+        val stamp = o.getLong("stamp")
+        if (!o.optBoolean("isolated") || stamp !in (seconds-3600)..(seconds+300)) return@runCatching emptyMap()
+        val dates = o.getJSONObject("measured_at")
+        parse(json).filter { (key,_) -> dates.optLong(key,0) in (seconds-3600)..seconds }
+    }.getOrDefault(emptyMap())
+
     /**
      * From phones on the current operator (cloud.json "net"): server key → [kbit/s, % of checks that worked, checks].
      * Fresher and more relevant than the GitHub speed: a server fast in a datacenter may be blocked on mobile.
@@ -76,7 +85,9 @@ object CloudSpeed {
     fun loadCached(ctx: Context) {
         CloudControl.loadCached(ctx)
         runCatching { loadNet(ctx) }
-        if (kbps.isEmpty()) ctx.getSharedPreferences("cloud_speed", Context.MODE_PRIVATE).getString("json", null)?.let { kbps = parse(it) }
+        ctx.getSharedPreferences("cloud_speed", Context.MODE_PRIVATE).getString("json", null)?.let {
+            kbps = parseFresh(it,System.currentTimeMillis())
+        }
         status.value = if (kbps.isNotEmpty() || net.isNotEmpty()) "Облако: используются сохранённые рейтинги; подтверждение на телефоне" else "Облако: кэша рейтингов нет; используем локальное обучение"
     }
 
@@ -85,7 +96,7 @@ object CloudSpeed {
         runCatching { loadNet(ctx) }
         val p = ctx.getSharedPreferences("cloud_speed", Context.MODE_PRIVATE)
         val cached = p.getString("json", null)
-        if (kbps.isEmpty()) cached?.let { kbps = parse(it) }
+        cached?.let { kbps = parseFresh(it,System.currentTimeMillis()) }
         if (fetchedAt == 0L) fetchedAt = p.getLong("fetched", 0)
         val now = System.currentTimeMillis()
         if (!refreshDue(now, fetchedAt, attemptedAt, cached != null)) return
@@ -96,9 +107,9 @@ object CloudSpeed {
                 fetchedAt=now;p.edit().putLong("fetched",now).apply()
                 status.value="Облако: сохранённый рейтинг подтверждён"
             } else if (d.text != null) {
-                kbps=parse(d.text);fetchedAt=now
+                kbps=parseFresh(d.text,now);fetchedAt=now
                 p.edit().putString("json",d.text).putString("etag",d.etag).putLong("fetched",now).apply()
-                status.value="Облако: свежий рейтинг загружен"
+                status.value=if (kbps.isNotEmpty()) "Облако: свежие замеры скорости загружены" else "Облако: нет свежих изолированных замеров; сравниваем на телефоне"
             }
         }.onFailure { status.value = "Облако недоступно: используем кэш и локальное обучение" }
     }

@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """Measured cloud hints, not a claim that a GitHub server passes any ISP's DPI."""
 import json,math,pathlib,time,urllib.parse
-from cloud_real import key
+from cloud_real import key, measured_kbps
 
 def build(history, now, operator_stats=None, recipes=None):
     nodes=[];quarantine=[]
     for link,h in history.items():
         if not isinstance(link,str) or not isinstance(h,dict):continue
         try:
-            n=float(h.get('n',0));ok=float(h.get('ok',0));ms=int(h.get('ms',0));kb=int(h.get('kb',0));at=int(h.get('t',0))
+            n=float(h.get('n',0));ok=float(h.get('ok',0));ms=int(h.get('ms',0));kb=measured_kbps(h,now);at=int(h.get('t',0))
         except (TypeError,ValueError,OverflowError):continue
         if not all(math.isfinite(v) for v in [n,ok,ms,kb]) or n<0 or ok<0 or ok>n or at>now+300 or now-at>86400:continue
         raw_samples=h.get('samples',[])
@@ -28,7 +28,7 @@ def build(history, now, operator_stats=None, recipes=None):
         cloud_score=max(0,min(1,.6*prior+.2*(1-min(ms if ms>0 else 3000,3000)/3000)+.2*min(max(kb,0),30000)/30000))
         nodes.append({'link':link,'key':k,'tier':'gold' if gold else 'silver','cloudScore':round(cloud_score,5),
                       'checks':round(n,3),'https_ms':ms,'kbps':kb,'measured_at':at,'daily_success_rate':round(day_rate,5) if coverage else None})
-    nodes.sort(key=lambda x:(x['tier']!='gold',-x['cloudScore']))
+    nodes.sort(key=lambda x:(-x['kbps'],-x['cloudScore']))
     # Operator tags come ONLY from existing measured phone aggregates, never inferred from GitHub geography.
     return {'schema':1,'stamp':now,'expires':now+86400,'vantage':'github-not-user-isp','nodes':nodes[:300],
             'quarantine':quarantine[:300],'isp_tags':operator_stats or {},'recipes':recipes or {'version':1,'families':{},'all':{}}}
