@@ -50,3 +50,29 @@ jobs:
           name: VLESS-Card-Xray-Windows-Preview-0.1.0-x64
           path: VLESS-Card-Xray-Windows-Preview-0.1.0-x64.zip
           if-no-files-found: error
+  publish-preview:
+    needs: windows
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: VLESS-Card-Xray-Windows-Preview-0.1.0-x64
+          path: preview-release
+      - name: Publish separately from Android updates
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PREVIEW_COMMIT: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          # A distinct prerelease never replaces Android's latest stable release.
+          # Existing preview assets are never silently replaced by a rerun.
+          gh release create windows-preview-0.1.0 preview-release/*.zip \
+            --target "$PREVIEW_COMMIT" --prerelease --latest=false \
+            --title 'VLESS Card Xray · Windows preview 0.1.0 (SOCKS5, not TUN)' \
+            --notes-file desktop/README.md
