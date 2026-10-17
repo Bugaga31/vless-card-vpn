@@ -15,4 +15,11 @@ class CloudManifestTest(unittest.TestCase):
   self.assertEqual([],build(self.history([[99000,True],[100000,False]]),100000)['nodes'])
  def test_operator_data_only_copied_from_measured_aggregate(self):
   data={'Моб.: test':{'a':[10,90,5]}};self.assertEqual(data,build({},100000,data)['isp_tags'])
+ def test_speed_date_is_not_https_date(self):
+  h=self.history([[100000,True]]);h[L].update(kb_t=99990,kb_isolated=True)
+  node=build(h,100000)['nodes'][0]
+  self.assertEqual(99990,node['speed_measured_at']);self.assertEqual(100000,node['measured_at'])
+ def test_undated_speed_is_not_certified_by_manifest(self):
+  node=build(self.history([[100000,True]]),100000)['nodes'][0]
+  self.assertEqual(0,node['kbps']);self.assertEqual(0,node['speed_measured_at'])
 if __name__=='__main__':unittest.main()

@@ -1,0 +1,52 @@
+name: Windows Xray preview
+on:
+  push:
+    branches: ['windows-preview-build-*']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Core parser and security regressions
+        run: dotnet run --project desktop/Tests/VlessCard.Tests.csproj -c Release
+      - name: Build portable Windows x64 EXE
+        run: dotnet publish desktop/Windows/VlessCard.Windows.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o windows-preview
+      - name: Verify pinned official Xray and configuration
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          Invoke-WebRequest https://github.com/XTLS/Xray-core/releases/download/v26.9.30/Xray-windows-64.zip -OutFile xray.zip
+          if ((Get-FileHash xray.zip -Algorithm SHA256).Hash.ToLower() -ne 'b17a619343c11b89d8faf36278298856749b15c52277d875d32051b33dcda617') { throw 'Xray archive SHA256 mismatch' }
+          Expand-Archive xray.zip xray-download
+          Copy-Item xray-download/xray.exe windows-preview/xray.exe
+          (Get-FileHash windows-preview/xray.exe -Algorithm SHA256).Hash.ToLower() | Set-Content windows-preview/xray.exe.sha256
+          & windows-preview/xray.exe run -test -c test-output/xray-smoke.json
+          if ($LASTEXITCODE -ne 0) { throw 'Xray configuration rejected' }
+          Copy-Item desktop/README.md windows-preview/README.md
+          Copy-Item xray-download/LICENSE windows-preview/Xray-LICENSE -ErrorAction SilentlyContinue
+      - name: Window launch smoke test and package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $p=Start-Process windows-preview/VLESS-Card-Xray-Preview.exe -PassThru
+          Start-Sleep 8
+          $p.Refresh()
+          if ($p.HasExited -or $p.MainWindowHandle -eq 0) { throw 'Preview window did not start' }
+          $p.CloseMainWindow() | Out-Null
+          if (!$p.WaitForExit(5000)) { $p.Kill(); throw 'Preview did not close cleanly' }
+          Compress-Archive windows-preview/* VLESS-Card-Xray-Windows-Preview-0.1.0-x64.zip
+          Get-FileHash VLESS-Card-Xray-Windows-Preview-0.1.0-x64.zip -Algorithm SHA256 | Format-List
+      - uses: actions/upload-artifact@v4
+        with:
+          name: VLESS-Card-Xray-Windows-Preview-0.1.0-x64
+          path: VLESS-Card-Xray-Windows-Preview-0.1.0-x64.zip
+          if-no-files-found: error

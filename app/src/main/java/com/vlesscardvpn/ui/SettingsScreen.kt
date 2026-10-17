@@ -62,10 +62,12 @@ fun SettingsScreen() {
         Group("Общее облако") {
             val rctx = androidx.compose.ui.platform.LocalContext.current
             var ron by remember { mutableStateOf(com.vlesscardvpn.core.Report.enabled(rctx)) }
-            Toggle("Получать обучение из общего облака", "Каждые 20 минут телефон забирает из облака то, что выучили все: мини-нейросеть и маски/обход DPI для вашего оператора. " +
-                "Отправка отчётов в этой версии отключена: общий ключ больше не встраивается в APK. Обучение на ваших проверках остаётся локальным.", ron) {
+            Toggle("Публичные подсказки Xray", "Проверенные облаком конфигурации, свежие замеры скорости и ограниченные рецепты обхода. Два облачных кандидата получают места в очереди, но доступность и скорость подтверждает телефон. Это не личный GitHub-backup и не гарантия скорости у вашего оператора.", ron) {
                 ron = it; com.vlesscardvpn.core.Report.setEnabled(rctx, it)
             }
+            val publicStatus by com.vlesscardvpn.core.CloudSpeed.status.collectAsState()
+            Text(publicStatus, fontSize = 12.sp)
+            OutlinedButton(onClick = { com.vlesscardvpn.core.Actions.refreshPublicCloud() }, enabled = ron) { Text("Обновить публичные подсказки") }
             if (!com.vlesscardvpn.core.Report.available()) Text("В этой сборке отправка отчётов отключена — только приём общего облака.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             com.vlesscardvpn.core.Report.lastText(rctx).takeIf { it.isNotEmpty() }?.let { Text(it, fontSize = 12.sp) }
         }
