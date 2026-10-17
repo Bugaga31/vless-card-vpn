@@ -10,7 +10,7 @@ import org.json.JSONObject
 /** Bounded, data-only manifest; no remote code, shared credentials or claimed local successes. */
 object CloudControl {
     const val SOURCE = "cloud-manifest"
-    data class Entry(val server: Server, val score: Double, val tier: String)
+    data class Entry(val server: Server, val score: Double, val tier: String, val kbps: Int = 0, val speedAt: Long = 0)
     data class Snapshot(val stamp: Long, val expires: Long, val entries: List<Entry>, val recipes: JSONObject, val ispTags: JSONObject)
     @Volatile private var snapshot: Snapshot? = null
     @Volatile private var attempted = 0L
@@ -29,11 +29,15 @@ object CloudControl {
             val score = row.getDouble("cloudScore"); require(score.isFinite() && score in 0.0..1.0)
             val server = LinkParser.parse(row.getString("link"), SOURCE) ?: return@mapNotNull null
             if (server.protocol !in setOf("vless", "vmess", "trojan", "shadowsocks")) return@mapNotNull null
-            Entry(server,score,tier)
+            Entry(server,score,tier,row.optInt("kbps",0).coerceIn(0,10000000),row.optLong("speed_measured_at",0))
         }.distinctBy { it.server.id }
         return Snapshot(stamp,expires,entries,o.optJSONObject("recipes") ?: JSONObject(),o.optJSONObject("isp_tags") ?: JSONObject())
     }
     fun prior(server: Server, now: Long = System.currentTimeMillis()): Double? = snapshot?.takeIf { it.expires > now }?.entries?.firstOrNull { it.server.id == server.id }?.score
+    fun clear() { snapshot=null;attempted=0;fetched=0;Masks.setCloud(emptyList()) }
+    fun count(now: Long = System.currentTimeMillis()): Int = snapshot?.takeIf { it.expires > now }?.entries?.size ?: 0
+    fun speed(server: Server, now: Long = System.currentTimeMillis()): Int = snapshot?.takeIf { it.expires > now }?.entries
+        ?.firstOrNull { it.server.id == server.id && it.speedAt in (now/1000-3600)..(now/1000) }?.kbps ?: 0
     fun maskHints(family: String): List<String> = hints("masks",family).filter { Masks.byId(it) != null }
     fun dpiHints(family: String): List<String> = hints("dpi",family).filter { id -> DpiStrategies.BUILT_IN.any { it.id == id } }.take(3)
     private fun hints(kind: String, family: String): List<String> {
@@ -53,6 +57,7 @@ object CloudControl {
         }.getOrNull() }
     }
     private fun apply(ctx: Context, s: Snapshot) {
+        if (!Report.enabled(ctx)) return
         snapshot=s;Masks.setCloud(fragments(s.recipes))
         CloudSpeed.cacheNet(ctx,s.ispTags.toString(),Net.family(Net.key(ctx)))
         Store.update { st ->
@@ -62,12 +67,13 @@ object CloudControl {
         }
     }
     fun loadCached(ctx: Context) {
+        if (!Report.enabled(ctx)) { clear(); return }
         if (snapshot?.expires?.let { it <= System.currentTimeMillis() } == true) { snapshot=null;Masks.setCloud(emptyList()) }
         if (snapshot != null) return
         ctx.getSharedPreferences("cloud_control",0).getString("json",null)?.let { runCatching { apply(ctx,parse(it,System.currentTimeMillis())) } }
     }
     @Synchronized fun refresh(ctx: Context) {
-        loadCached(ctx);if (!PhonePower.refresh(ctx).allowLight) return
+        loadCached(ctx);if (!Report.enabled(ctx) || !PhonePower.refresh(ctx).allowLight) return
         val now=System.currentTimeMillis()
         if (!CloudSpeed.refreshDue(now,fetched,attempted,snapshot != null && fetched > 0)) return
         attempted=now;val p=ctx.getSharedPreferences("cloud_control",0)

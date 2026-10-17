@@ -37,6 +37,7 @@ import java.util.concurrent.atomic.AtomicInteger
 object Actions {
     data class Progress(val title: String = "", val done: Int = 0, val total: Int = 0, val running: Boolean = false, val message: String = "")
     val progress = MutableStateFlow(Progress())
+    private val cloudRefreshing = java.util.concurrent.atomic.AtomicBoolean()
     private val scope = CoroutineScope(SupervisorJob() + Bg.cpu + kotlinx.coroutines.CoroutineExceptionHandler { _, e -> android.util.Log.w("VLESS", "background job failed", e) })
     /** Only "is something running": buttons don't redraw the whole screen on every progress step. */
     val running: kotlinx.coroutines.flow.StateFlow<Boolean> = progress.map { it.running }.distinctUntilChanged()
@@ -56,6 +57,15 @@ object Actions {
     }
 
     fun cancel() { job?.cancel(); progress.value = progress.value.copy(running = false, message = "Остановлено") }
+
+    /** One in-flight public refresh; never block the connect button on mirror timeouts. */
+    fun refreshPublicCloud() {
+        if (!Report.enabled(app) || !cloudRefreshing.compareAndSet(false,true)) return
+        scope.launch(Bg.io) {
+            try { CloudControl.refresh(app); CloudSpeed.refresh(app) }
+            finally { cloudRefreshing.set(false) }
+        }
+    }
 
     private fun launch(title: String, block: suspend () -> String) {
         if (job?.isActive == true) return
@@ -588,8 +598,7 @@ object Actions {
      */
     fun warmup() {
         runCatching { Report.prime(app); CloudSpeed.loadCached(app) }
-        scope.launch(Bg.io) { runCatching { CloudControl.refresh(app) } }
-        scope.launch(Bg.io) { runCatching { CloudSpeed.refresh(app) } }
+        refreshPublicCloud()
         val st = Store.state.value
         if (!PhonePower.refresh(app).allowLight || !st.settings.autoOptimize || job?.isActive == true || Tunnel.status.value.state != Tunnel.State.IDLE) return
         if (st.servers.any { st.state(it).works }) return
@@ -734,12 +743,15 @@ object Actions {
         if (now - catalogAt < 5 * 60000 || !PhonePower.refresh(app).allowed || progress.value.running) return
         catalogAt = now
         val st = Store.state.value
-        val wave = ServerChoice.diverse(st.servers.filter { !st.state(it).selected }.sortedBy { st.state(it).checkedAt }, ConnectPolicy.BACKGROUND)
+        val available = st.servers.filter { !st.state(it).selected }
+        val cloud = CloudSpeed.pick(available,emptyList(),n=2)
+        val wave = PublicCloudQueue.merge(available.sortedBy { st.state(it).checkedAt },cloud,available,ConnectPolicy.BACKGROUND)
         val states = StateBatch(); val alive = java.util.concurrent.ConcurrentHashMap<String, Int>()
         Tester.tcp(wave, parallel = 32, timeoutMs = 1500) { s, ms -> alive[s.id] = ms; states.put(s.id) { it.copy(tcpMs = ms, checkedAt = System.currentTimeMillis()) } }
         states.flush()
         if (!PhonePower.refresh(app).allowed) return
-        val test = wave.filter { (alive[it.id] ?: 0) > 0 }.sortedBy { alive[it.id] }.take(6)
+        val reachable = wave.filter { (alive[it.id] ?: 0) > 0 }
+        val test = PublicCloudQueue.merge(reachable.sortedBy { alive[it.id] },cloud,reachable,6)
         var checked = 0
         val prev = progress.value
         try {
@@ -945,8 +957,7 @@ object Actions {
             }
         }
         runCatching { Report.prime(app); CloudSpeed.loadCached(app) }
-        scope.launch(Bg.io) { runCatching { CloudControl.refresh(app) } }
-        scope.launch(Bg.io) { runCatching { CloudSpeed.refresh(app) } }
+        refreshPublicCloud()
         val st = Store.state.value
         val working = st.servers.filter { st.state(it).works }
         val busy = job
@@ -1103,9 +1114,12 @@ object Actions {
     private suspend fun preflight(onReady: () -> Unit, connected: Boolean = false): String {
         val st = Store.state.value
         val net = Net.key(app);val network = Net.underlying(app)?.toString();val stamp = System.currentTimeMillis()
-        val cand = preferred(st, st.servers.filter { st.state(it).works })
+        val local = preferred(st, st.servers.filter { st.state(it).works })
             .sortedWith(ServerChoice.downloadOrder({ st.state(it) },net,stamp))
-            .distinctBy { it.id }.take(12)
+        val eligible = preferred(st,st.servers).filter { !probeMemory.cooling(net,it.id,st.state(it).maskFor(net),stamp) }
+        val cloud = CloudSpeed.pick(eligible,emptyList(),n=2)
+        val cand = PublicCloudQueue.merge(local,cloud,(local+eligible).distinctBy { it.id },12)
+        if (cloud.isNotEmpty()) CloudSpeed.status.value = "Облако: ${CloudControl.count()} конфигураций; ${cloud.size} кандидата в сравнении на телефоне"
         // the 6 best first: usually enough — connect right away instead of waiting for all 12
         val passed = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
         realTest(cand.take(6), "Авто: проверяю серверы", big = false, attempts = 1, youtube = false, budgetMs = ConnectPolicy.QUICK_BUDGET_MS,onSuccess={ passed.add(it.id) })

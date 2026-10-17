@@ -83,6 +83,7 @@ object CloudSpeed {
 
     /** Memory/disk only: never make «Подключить» wait for a cloud HTTP timeout. */
     fun loadCached(ctx: Context) {
+        if (!Report.enabled(ctx)) { clear(); CloudControl.clear(); status.value="Публичное облако отключено"; return }
         CloudControl.loadCached(ctx)
         runCatching { loadNet(ctx) }
         ctx.getSharedPreferences("cloud_speed", Context.MODE_PRIVATE).getString("json", null)?.let {
@@ -92,7 +93,7 @@ object CloudSpeed {
     }
 
     @Synchronized fun refresh(ctx: Context) {
-        if (!PhonePower.refresh(ctx).allowLight) return
+        if (!Report.enabled(ctx) || !PhonePower.refresh(ctx).allowLight) return
         runCatching { loadNet(ctx) }
         val p = ctx.getSharedPreferences("cloud_speed", Context.MODE_PRIVATE)
         val cached = p.getString("json", null)
@@ -107,6 +108,7 @@ object CloudSpeed {
                 fetchedAt=now;p.edit().putLong("fetched",now).apply()
                 status.value="Облако: сохранённый рейтинг подтверждён"
             } else if (d.text != null) {
+                if (!Report.enabled(ctx)) return
                 kbps=parseFresh(d.text,now);fetchedAt=now
                 p.edit().putString("json",d.text).putString("etag",d.etag).putLong("fetched",now).apply()
                 status.value=if (kbps.isNotEmpty()) "Облако: свежие замеры скорости загружены" else "Облако: нет свежих изолированных замеров; сравниваем на телефоне"
@@ -119,9 +121,8 @@ object CloudSpeed {
     /** Up to [n] servers from [pinged] (not in [skip]) the cloud saw download ≥ [min] kbit/s, fastest first. */
     fun pick(pinged: List<Server>, skip: Collection<Server>, n: Int = 10, min: Int = 3000, speeds: Map<String, Int> = kbps,
              here: Map<String, IntArray> = net): List<Server> {
-        if (speeds.isEmpty() && here.isEmpty()) return emptyList()
         val ids = skip.map { it.id }.toHashSet()
-        return pinged.filter { it.id !in ids && !blocked(it, here) }.map { it to speedOf(Report.serverKey(it), speeds, here) }
+        return pinged.filter { it.id !in ids && !blocked(it, here) }.map { it to maxOf(speedOf(Report.serverKey(it), speeds, here), CloudControl.speed(it)) }
             .filter { it.second >= min }.sortedByDescending { it.second }.map { it.first }
             .let { ServerChoice.diverse(it, n) }
     }

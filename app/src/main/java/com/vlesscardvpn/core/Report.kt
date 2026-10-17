@@ -35,7 +35,7 @@ object Report {
     }.getOrDefault("")
     fun available() = token().startsWith("github_pat_") || token().startsWith("ghp_")
     fun enabled(ctx: Context) = prefs(ctx).getBoolean("on", true)
-    fun setEnabled(ctx: Context, on: Boolean) { prefs(ctx).edit().putBoolean("on", on).apply(); if (!on) stop() }
+    fun setEnabled(ctx: Context, on: Boolean) { prefs(ctx).edit().putBoolean("on", on).apply(); if (!on) { stop(); CloudSpeed.clear(); CloudControl.clear(); CloudSpeed.status.value="Публичное облако отключено" } }
     fun lastText(ctx: Context): String = prefs(ctx).getString("status", "").orEmpty()
 
     fun phoneId(ctx: Context): String = anonId(ctx)

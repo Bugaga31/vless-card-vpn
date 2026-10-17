@@ -20,6 +20,7 @@ object ConnectPolicy {
         val unique = list.distinctBy { it.id }.sortedWith(compareBy<Server> { score(it) }
             .thenBy { if (it.id in remembered) 0 else 1 }.thenBy { if (it.id in cloudIds) 0 else 1 })
         val (deferred, ready) = unique.partition(cooling)
-        return ServerChoice.diverse(ready + deferred, FIRST)
+        val eligibleCloud = cloud.filter { hint -> ready.any { it.id == hint.id } }
+        return PublicCloudQueue.merge(ready + deferred, eligibleCloud, list, FIRST)
     }
 }
