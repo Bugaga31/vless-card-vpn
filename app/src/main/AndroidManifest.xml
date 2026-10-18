@@ -16,6 +16,8 @@
 
     <!-- Split tunneling: list launcher apps (Android 11+ package visibility). -->
     <queries>
+        <!-- Installed TTS engines only; no voice download or microphone permission. -->
+        <intent><action android:name="android.intent.action.TTS_SERVICE" /></intent>
         <intent><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent>
     </queries>
 

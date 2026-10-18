@@ -10,6 +10,9 @@ import android.content.pm.ServiceInfo
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
+import android.net.NetworkRequest
+import android.net.LinkProperties
+import com.vlesscardvpn.core.NetworkHandoff
 import android.net.VpnService
 import android.os.Build
 import android.os.ParcelFileDescriptor
@@ -83,6 +86,10 @@ class TunnelService : VpnService() {
     private var dpi: DpiSet? = null
     private var checkJob: Job? = null
     private var netCallback: ConnectivityManager.NetworkCallback? = null
+    private val handoff = NetworkHandoff()
+    private var networkRefreshJob: Job? = null
+    private val networkSignal = java.util.concurrent.atomic.AtomicLong()
+
     /** Self-healing step after failed checks (0 = healthy); reset by a successful check or a user (re)connect. */
     private var healStep = 0
     /** Auto mode gave up on servers for this connection: ByeDPI only (the search goes on in the background). */
@@ -180,6 +187,7 @@ class TunnelService : VpnService() {
         try {
             kotlinx.coroutines.withContext(Dispatchers.IO) { XrayCore.init(this@TunnelService) }
             val st = Store.state.value
+            watchNetwork()
             val network = Net.key(this)
             var settings = st.settings
             val automatic = settings.mode == Mode.AUTO
@@ -334,23 +342,30 @@ class TunnelService : VpnService() {
             delay(delayMs)
             val st = Store.state.value.settings
             val port = Tunnel.socks?.port ?: return@launch
+            val sampledNet = Net.key(this@TunnelService)
+            val sampledHandle = Net.underlying(this@TunnelService)?.toString()
+            val sampledServers = usedServers.toList()
+            val sampledCore = core
             var p = Tester.probeSocks(port, st.testUrl, big = false, youtube = false, attempts = 1, budgetMs = 3500)
             // right after connecting the first packets may still be on their way (WireGuard/WARP handshake, a slow
             // mobile network): one calm second try before calling the route bad and starting a heal or a reconnect
             if (!p.works) { delay(3000); if (Tunnel.socks?.port == port) p = Tester.probeSocks(port, st.testUrl, big = false, youtube = false, attempts = 1, budgetMs = 3500) }
             val cur = Tunnel.status.value
-            if (cur.state != Tunnel.State.CONNECTED) return@launch
+            if (cur.state != Tunnel.State.CONNECTED || core !== sampledCore || Net.key(this@TunnelService) != sampledNet ||
+                Net.underlying(this@TunnelService)?.toString() != sampledHandle) return@launch
             // WARP: ask Cloudflare itself whether the traffic comes through WARP (warp=on / plus), so it's clear it works.
             val warp = if (p.realMs > 0 && (warpChained || usedServers.any { Masks.isWarp(it) }))
                 when (Tester.warpTrace(port).let { t -> if (t == "plus" || t == "on" || t == "off") t else { delay(2000); Tester.warpTrace(port) } }) {
                 "plus" -> " · WARP+: включён ✓"; "on" -> " · WARP: включён ✓"; "off" -> " · WARP: не через Cloudflare ✗"; else -> " · WARP: Cloudflare не ответил"
             } else ""
+            if (Tunnel.status.value.state != Tunnel.State.CONNECTED || core !== sampledCore ||
+                Net.key(this@TunnelService) != sampledNet || Net.underlying(this@TunnelService)?.toString() != sampledHandle) return@launch
             val text = if (p.realMs > 0) "HTTPS работает · ${p.realMs} мс · скорость и сервисы проверяются в фоне$warp"
                 else "Нет ответа через выбранный маршрут (${p.error}). " + if (st.mode == Mode.AUTO && st.autoHeal) "Ищу рабочий вариант сам…" else "Проверьте серверы или включите маскировку."
             Tunnel.status.value = cur.copy(check = text, checkOk = p.works)
-            runCatching { val stv = Store.state.value; com.vlesscardvpn.core.Brain.lived(Net.key(this@TunnelService), usedServers, { stv.state(it) }, p.works); com.vlesscardvpn.core.Brain.save(this@TunnelService) }
+            runCatching { val stv = Store.state.value; com.vlesscardvpn.core.Brain.lived(sampledNet, sampledServers, { stv.state(it) }, p.works); com.vlesscardvpn.core.Brain.save(this@TunnelService) }
             Log.i("E2E", "check ok=${p.works} ms=${p.realMs} big=${p.bigOk} yt=${p.ytOk} tg=${p.tgOk} err=${p.error} warp=$warp")
-            if (p.works && st.mode == Mode.AUTO) Actions.rememberNet(Net.key(this@TunnelService))
+            if (p.works && st.mode == Mode.AUTO) Actions.rememberNet(sampledNet)
             // «Умный YouTube» broke YouTube here (the bypass stopped working): back to the servers for YouTube
             if (p.realMs > 0 && p.ytOk == false && Tunnel.ytViaDpi) {
                 val net = Net.key(this@TunnelService)
@@ -664,47 +679,67 @@ class TunnelService : VpnService() {
         }
     }
 
-    /** Registered once while the VPN is on (not on every internal reconnect — that left gaps where a switch was missed). */
+    /** Observe physical networks, not only the VPN default. Wi-Fi→Wi-Fi can also change link properties. */
     private fun watchNetwork() {
         if (netCallback != null) return
         val cm = getSystemService(ConnectivityManager::class.java) ?: return
-        var lost = false
+        val initial = Net.underlying(this)
+        curNet = initial
+        handoff.seed(initial?.let { NetworkHandoff.Snapshot(it.toString(), Net.key(this, it)) })
         val cb = object : ConnectivityManager.NetworkCallback() {
-            override fun onAvailable(network: Network) {
-                val caps = cm.getNetworkCapabilities(network)
-                if (caps?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) == true) return
-                val changed = curNet != null && (curNet != network || lost)
-                curNet = network; lost = false
-                setUnderlyingNetworks(arrayOf(network))
-                if (!changed) return
-                netChangedAt = System.currentTimeMillis(); netHardDone = false
-                // Another network (Wi-Fi ↔ mobile) or the same one back: connections to the server died with the old
-                // network (apps used to hang for minutes). Restart Xray at once — its DPI strategy and masks for this network too.
-                netJob?.cancel()
-                netJob = scope.launch {
-                    delay(1500)
-                    Log.i("E2E", "network changed → soft restart")
-                    if (Store.state.value.settings.mode == Mode.AUTO && Actions.recallNet(Net.key(this@TunnelService))) Log.i("E2E", "network changed → remembered servers")
-                    // check the servers in the new network before reconnecting: a dead one would cost a whole heal cycle
-                    if (Store.state.value.settings.mode == Mode.AUTO && !autoDpiOnly && usedServers.isNotEmpty()) {
-                        healStatus("Новая сеть — проверяю серверы…")
-                        Log.i("E2E", "network changed → recheck ok=${runCatching { Actions.quickRecheck() }.getOrDefault(false)}")
-                    }
-                    lock.withLock { connect(soft = true) }
-                }
-                if (Store.state.value.settings.autoOptimize) optimizeSoon()
-            }
+            override fun onAvailable(network: Network) = queueNetworkRefresh()
+            override fun onLost(network: Network) = queueNetworkRefresh()
+            override fun onCapabilitiesChanged(network: Network, caps: NetworkCapabilities) = queueNetworkRefresh()
+            override fun onLinkPropertiesChanged(network: Network, links: LinkProperties) = queueNetworkRefresh()
+        }
+        val request = NetworkRequest.Builder().addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+            .addCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN).build()
+        runCatching { cm.registerNetworkCallback(request, cb); netCallback = cb }
+            .onFailure { Log.w(TAG, "physical network observer registration failed", it) }
+    }
 
-            override fun onLost(network: Network) {
-                if (network != curNet) return
-                lost = true
-                setUnderlyingNetworks(null) // follow whatever becomes the default — a lost network must not stay «under» the VPN
-                netJob?.cancel()
-                val cur = Tunnel.status.value
-                if (cur.state == Tunnel.State.CONNECTED) Tunnel.status.value = cur.copy(check = "Сеть пропала — VPN ждёт её и восстановится сам", checkOk = null)
+    private fun queueNetworkRefresh() {
+        val signal = networkSignal.incrementAndGet()
+        networkRefreshJob?.cancel()
+        networkRefreshJob = scope.launch {
+            delay(500) // wait for DHCP/capabilities, coalesce a burst of Android callbacks
+            if (networkSignal.get() != signal || netCallback == null) return@launch
+            val network = Net.underlying(this@TunnelService)
+            val profile = network?.let { Net.key(this@TunnelService, it) }
+            val snapshot = network?.let { NetworkHandoff.Snapshot(it.toString(), profile!!) }
+            val change = handoff.update(snapshot) ?: return@launch
+            curNet = network
+            runCatching { setUnderlyingNetworks(network?.let { arrayOf(it) }) }
+            netJob?.cancel(); checkJob?.cancel(); healJob?.cancel(); optJob?.cancel(); scoutJob?.cancel(); rescueJob?.cancel()
+            watchJob?.cancel(); coverJob?.cancel(); serviceJob?.cancel(); liveJob?.cancel()
+            Actions.cancelForNetworkChange()
+            if (!change.online) {
+                val current = Tunnel.status.value
+                if (current.state == Tunnel.State.CONNECTED) Tunnel.status.value = current.copy(
+                    check = "Сеть пропала — жду новую, её отсутствие не портит обучение серверов", checkOk = null)
+                return@launch
+            }
+            netChangedAt = System.currentTimeMillis(); netHardDone = false
+            netJob = scope.launch reconnect@ {
+                delay(700)
+                if (!handoff.valid(change.revision)) return@reconnect
+                val state = Tunnel.status.value.state
+                if (state != Tunnel.State.CONNECTED && state != Tunnel.State.CONNECTING) return@reconnect
+                healStep = 0; dpiHeals = 0; connectFails = 0; safeMasks = false; autoDpiOnly = false
+                healStatus("Новая сеть — подстраиваю сервер, маскировку и локальный профиль…")
+                if (Store.state.value.settings.mode == Mode.AUTO) {
+                    Actions.recallNet(profile!!)
+                    runCatching { Actions.quickRecheck() }.onFailure { if (it is kotlinx.coroutines.CancellationException) throw it }
+                }
+                if (!handoff.valid(change.revision)) return@reconnect
+                lock.withLock {
+                    if (handoff.valid(change.revision)) {
+                        Log.i("E2E", "physical network changed → applying new profile")
+                        connect(soft = true)
+                    }
+                }
             }
         }
-        runCatching { cm.registerDefaultNetworkCallback(cb); netCallback = cb }
     }
 
     private fun teardown(error: String?, keepTun: Boolean = false) {
@@ -717,6 +752,7 @@ class TunnelService : VpnService() {
         if (error != null) {
             netCallback?.let { cb -> runCatching { getSystemService(ConnectivityManager::class.java)?.unregisterNetworkCallback(cb) } }
             netCallback = null; curNet = null
+            networkRefreshJob?.cancel(); networkSignal.incrementAndGet(); handoff.reset()
         }
         if (!keepTun) TProxyService.stop()
         core?.stop(); core = null
