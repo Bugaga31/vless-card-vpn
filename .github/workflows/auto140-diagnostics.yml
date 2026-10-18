@@ -15,7 +15,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           for JOB in 117750671919 117750672120; do
-            gh api "repos/$GITHUB_REPOSITORY/actions/jobs/$JOB/logs" > "/tmp/$JOB.log"
+            if ! gh api "repos/$GITHUB_REPOSITORY/actions/jobs/$JOB/logs" > "/tmp/$JOB.log" 2> /tmp/diag-error; then
+              echo "::notice title=Diagnostic-read-error-$(echo $JOB)::$(head -c 700 /tmp/diag-error)"
+            fi
           done
           python3 - <<'PY'
           import pathlib,re
