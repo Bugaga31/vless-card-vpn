@@ -768,16 +768,17 @@ object Actions {
     private var catalogAt = -300000L
     private suspend fun catalogWave() {
         val now = android.os.SystemClock.elapsedRealtime()
-        if (now - catalogAt < 60000 || !PhonePower.refresh(app).allowed || progress.value.running) return
+        if (now - catalogAt < 30000 || !PhonePower.refresh(app).allowLight || progress.value.running) return
         catalogAt = now
         val st = Store.state.value
         val available = preferred(st,st.servers.filter { !st.state(it).selected })
-        val cloud = (CloudControl.ranked(available,8) + CloudSpeed.pick(available,emptyList(),n=8)).distinctBy { it.id }.take(8)
+        val affinity = SourceAffinity.order(available,st.servers,{st.state(it)},Net.key(app),System.currentTimeMillis()) { CloudControl.sources(it) }
+        val cloud = (CloudSpeed.pick(available,emptyList(),n=4) + affinity.take(4) + CloudControl.ranked(available,8)).distinctBy { it.id }.take(16)
         val wave = PublicCloudQueue.merge(available.sortedBy { st.state(it).checkedAt },cloud,available,ConnectPolicy.BACKGROUND,slots=8)
         val states = StateBatch(); val alive = java.util.concurrent.ConcurrentHashMap<String, Int>()
         Tester.tcp(wave, parallel = 32, timeoutMs = 1500) { s, ms -> alive[s.id] = ms; states.put(s.id) { it.copy(tcpMs = ms, checkedAt = System.currentTimeMillis()) } }
         states.flush()
-        if (!PhonePower.refresh(app).allowed) return
+        if (!PhonePower.refresh(app).allowLight) return
         val reachable = wave.filter { (alive[it.id] ?: 0) > 0 }
         val test = PublicCloudQueue.merge(reachable.sortedBy { alive[it.id] },cloud,reachable,ConnectPolicy.BACKGROUND,slots=8)
         var checked = 0
@@ -791,6 +792,7 @@ object Actions {
             if (valid()) AutoSelection.compare(test,{Store.state.value.state(it)},net,
                 now={System.currentTimeMillis()},elapsed={android.os.SystemClock.elapsedRealtime()},validNetwork={valid()},
                 allowDownload={PhonePower.refresh(app).let { it.allowed && !it.deferTraffic }},gaming=GameSession.active(),
+                hint={maxOf(CloudControl.speed(it),CloudSpeed.speedOf(Report.serverKey(it)))},
                 onInconclusive={s,at->expireUnreproducedSpeed(s,net,at)}) { server,budget ->
                 realTest(listOf(server),"Фон: сравниваю скорость",big=true,youtube=false,attempts=1,parallel=1,budgetMs=budget)
             }
@@ -834,15 +836,18 @@ object Actions {
 
     suspend fun optimize(): Boolean {
         lastOptimizeSwitched = false
-        if (!PhonePower.refresh(app).allowed) return false
+        val lightPlan = PhonePower.refresh(app)
+        if (!lightPlan.allowLight) return false
         var st = Store.state.value
-        if (!st.settings.autoOptimize || job?.isActive == true) return false
+        if ((!st.settings.autoOptimize && st.settings.mode != Mode.AUTO) || job?.isActive == true) return false
+        val originalNet = Net.key(app)
+        val originalSelection = st.selected.map { AutoRoutePolicy.configuration(it,st.state(it),originalNet) }.toSet()
         if (st.settings.mode == com.vlesscardvpn.model.Mode.BYEDPI) return false
         val wifi = unmetered()
         catalogWave()
         st = Store.state.value
         var ytSwitch = false
-        if (deepPending) {
+        if (deepPending && PhonePower.refresh(app).allowed) {
             // connected right after the quick check: now test the rest calmly (outside the tunnel) and lighten heavy masks
             deepPending = false
             val prev0 = progress.value
@@ -857,10 +862,10 @@ object Actions {
             if (PhonePower.refresh(app).allowed) ytSwitch = runCatching { decideYoutube() }.getOrDefault(false)
             progress.value = prev0
         }
-        if (!PhonePower.refresh(app).allowed) return ytSwitch
+        if (!PhonePower.refresh(app).allowLight) return ytSwitch
         st = Store.state.value
-        // Auto with nothing selected connects to the 5 best: compare against those.
-        val sel = st.selected.ifEmpty { automaticOrder(st, st.servers.filter { st.state(it).works }).take(5) }
+        // An empty Auto selection is recovered from the best working pool.
+        val sel = st.selected.ifEmpty { automaticOrder(st, st.servers.filter { st.state(it).works }).take(AutoEligibility.TOP) }
         val others = automaticOrder(st, st.servers.filter { it !in sel && st.state(it).works }).take(if (wifi) 12 else 6)
         val cand = (sel + others).distinctBy { it.id }
         if (cand.isEmpty()) return ytSwitch
@@ -870,13 +875,14 @@ object Actions {
         try {
             val throughputMode = st.settings.mode == Mode.AUTO && !GameSession.active()
             // Concurrent downloads share the line and cannot rank throughput. First check HTTPS only.
-            realTest(cand, "Фоновая проверка", big = wifi && !throughputMode, youtube = throughputMode,
+            realTest(cand, "Фоновая проверка", big = wifi && !throughputMode && PhonePower.refresh(app).allowed, youtube = throughputMode,
                 attempts = 1, parallel = 4, budgetMs = ConnectPolicy.QUICK_BUDGET_MS)
             if (!sameNetwork()) return false
             if (throughputMode) AutoSelection.compare(cand, { Store.state.value.state(it) }, sampleNet,
                 now = { System.currentTimeMillis() }, elapsed = { android.os.SystemClock.elapsedRealtime() },
                 validNetwork = { sameNetwork() }, gaming = false,
                 allowDownload = { PhonePower.refresh(app).let { it.allowed && it.allowLight && !it.deferTraffic } },
+                hint = { maxOf(CloudControl.speed(it),CloudSpeed.speedOf(Report.serverKey(it))) },
                 onInconclusive = { server, at -> expireUnreproducedSpeed(server,sampleNet,at) }) { server, budget ->
                 realTest(listOf(server), "Фон: сравниваю скорость по очереди", big = true, youtube = false,
                     attempts = 1, parallel = 1, budgetMs = budget)
@@ -903,11 +909,13 @@ object Actions {
         val fasterDownload = ServerChoice.downloadUpgrade(currentFastest?.let { now.state(it) },now.state(best.first()),net,stamp)
         val qualityGain = if (speedMode) fasterDownload else median > bestMs * 1.6 && median - bestMs > 150
         val switch = selOk.size < sel.size || selOk.size < (if (ServerChoice.automaticPrimary(st.settings.mode == Mode.AUTO,st.settings.balance == com.vlesscardvpn.model.Balance.LEAST_PING,GameSession.active())) 1 else minOf(3,best.size)) || selBroken || qualityGain
-        lastOptimizeSwitched = switch
-        android.util.Log.i("E2E", "optimize sel=${sel.size} ok=${selOk.size} median=$median best=$bestMs switch=$switch")
         val pick = if (selBroken) best.filter { now.state(it).bigOk == true } else best
-        if (switch || now.settings.mode == Mode.AUTO) selectBest(10, close = true, among = pick)
-        return ytSwitch || (switch && sel.map { it.id }.toSet() != Store.state.value.selected.map { it.id }.toSet())
+        if (switch || now.settings.mode == Mode.AUTO) selectBest(AutoEligibility.TOP, close = true, among = pick)
+        val applied = Store.state.value
+        val changed = originalSelection != applied.selected.map { AutoRoutePolicy.configuration(it,applied.state(it),originalNet) }.toSet()
+        lastOptimizeSwitched = changed
+        android.util.Log.i("E2E", "optimize sel=${sel.size} ok=${selOk.size} median=$median best=$bestMs switch=$switch changed=$changed")
+        return ytSwitch || changed
     }
 
     // ---------- WARP ----------
@@ -1158,6 +1166,7 @@ object Actions {
             val winner = AutoSelection.compare(ok, { Store.state.value.state(it) }, net,
                 now = { System.currentTimeMillis() }, elapsed = { android.os.SystemClock.elapsedRealtime() },
                 validNetwork = { valid() }, gaming = GameSession.active(),
+                hint = { maxOf(CloudControl.speed(it),CloudSpeed.speedOf(Report.serverKey(it))) },
                 onInconclusive = { server, at -> expireUnreproducedSpeed(server,net,at) },
                 allowDownload = { PhonePower.refresh(app).let { it.allowLight && !it.deferTraffic } }) { server, budget ->
                 realTest(listOf(server), "Новая сеть: сравниваю скорость", big = true, youtube = false,
@@ -1182,13 +1191,14 @@ object Actions {
         val local = preferred(st, st.servers.filter { st.state(it).works })
             .sortedWith(ServerChoice.downloadOrder({ st.state(it) },net,stamp))
         val eligible = preferred(st,st.servers).filter { !probeMemory.cooling(net,it.id,st.state(it).maskFor(net),stamp) }
-        val cloud = (CloudControl.ranked(eligible,12) + CloudSpeed.pick(eligible,emptyList(),n=12)).distinctBy { it.id }.take(12)
+        val affinity = SourceAffinity.order(eligible,st.servers,{st.state(it)},net,stamp) { CloudControl.sources(it) }
+        val cloud = (CloudSpeed.pick(eligible,emptyList(),n=4) + affinity.take(4) + CloudControl.ranked(eligible,8)).distinctBy { it.id }.take(20)
         val cand = PublicCloudQueue.merge(local,cloud,(local+eligible).distinctBy { it.id },24,slots=8)
         CloudSpeed.status.value = "Облако: ${CloudControl.count()} конфигураций; каталог ${eligible.size}; очередь волны ${cand.size}, остальные проверяются в фоне"
-        // the 6 best first: usually enough — connect right away instead of waiting for all 12
+        // Check the first bounded wave; continue if fewer than eight routes passed.
         val passed = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
         realTest(cand.take(12), "Авто: проверяю серверы", big = false, attempts = 1, youtube = false, budgetMs = ConnectPolicy.QUICK_BUDGET_MS,onSuccess={ passed.add(it.id) })
-        if (cand.size > 12 && passed.size < 10) realTest(cand.drop(12).take(12), "Авто: проверяю серверы", big = false, attempts = 1, youtube = false, budgetMs = ConnectPolicy.QUICK_BUDGET_MS,onSuccess={ passed.add(it.id) })
+        if (cand.size > 12 && passed.size < AutoEligibility.TOP) realTest(cand.drop(12).take(12), "Авто: проверяю серверы", big = false, attempts = 1, youtube = false, budgetMs = ConnectPolicy.QUICK_BUDGET_MS,onSuccess={ passed.add(it.id) })
         if (Net.key(app) != net || Net.underlying(app)?.toString() != network) return selectionNetworkChanged()
         val ok = cand.filter { it.id in passed }
         if (ok.isNotEmpty()) {
@@ -1273,9 +1283,10 @@ object Actions {
         val st = Store.state.value
         val untried = list.filter { it.id !in attempted }
         if (untried.isEmpty()) return "Эти маршруты уже проверены в текущем поиске"
-        val eligible = preferred(st, untried).filterNot { CloudSpeed.blocked(it) }.ifEmpty { preferred(st, untried) }
-        val cloud = (CloudControl.ranked(eligible,ConnectPolicy.FIRST) + CloudSpeed.pick(eligible, emptyList(), n = ConnectPolicy.FIRST)).distinctBy { it.id }.take(ConnectPolicy.FIRST)
         val net = Net.key(app); val network = Net.underlying(app)?.toString()
+        val eligible = preferred(st, untried).filterNot { CloudSpeed.blocked(it) }.ifEmpty { preferred(st, untried) }
+        val affinity = SourceAffinity.order(eligible,Store.state.value.servers,{Store.state.value.state(it)},net,System.currentTimeMillis()) { CloudControl.sources(it) }
+        val cloud = (CloudSpeed.pick(eligible, emptyList(), n = 4) + affinity.take(4) + CloudControl.ranked(eligible,8)).distinctBy { it.id }.take(ConnectPolicy.FIRST)
         val remembered = (st.settings.netServers[net] ?: st.settings.netServers[Net.family(net)]).orEmpty().toSet()
         val time = System.currentTimeMillis()
         val gaming = GameSession.active()
@@ -1295,11 +1306,11 @@ object Actions {
         val reachable = Tester.fastFilter(first.filter { it.id !in cachedGood })
         val available = first.filter { (reachable[it.id] ?: -1) != 0 }.ifEmpty { first }
         val ordered = available.sortedBy { if (it.id in cachedGood || (reachable[it.id] ?: -1) > 0) 0 else 1 }
-        // Four HTTPS candidates avoid a two-entry cache monopoly; downloads remain sequential.
-        val shortlist = ServerChoice.diverse(ordered, 4)
+        // Check up to eight real routes; parallelism stays bounded and downloads remain sequential.
+        val shortlist = ServerChoice.diverse(ordered, AutoEligibility.TOP)
         val passed = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
-        val fastOk = realTest(shortlist, "Авто: проверяю четыре маршрута", big = false, youtube = false,
-            attempts = 1, parallel = 4, budgetMs = 1200,onSuccess={ passed.add(it.id) })
+        val fastOk = realTest(shortlist, "Авто: проверяю до восьми маршрутов", big = false, youtube = false,
+            attempts = 1, parallel = 4, budgetMs = ConnectPolicy.QUICK_BUDGET_MS,onSuccess={ passed.add(it.id) })
         if (Net.key(app) != net || Net.underlying(app)?.toString() != network) return selectionNetworkChanged()
         if (fastOk > 0) {
             chooseCompared(shortlist.filter { it.id in passed },onFirst, eligible.filter { s -> shortlist.none { it.id == s.id } })
@@ -1356,6 +1367,7 @@ object Actions {
                 now = { System.currentTimeMillis() }, elapsed = { android.os.SystemClock.elapsedRealtime() },
                 validNetwork = { valid() },
                 allowDownload = { allowed() && remaining() >= AutoSelection.MIN_PROBE_MS }, gaming = GameSession.active(),
+                hint = { maxOf(CloudControl.speed(it),CloudSpeed.speedOf(Report.serverKey(it))) },
                 onInconclusive = { server, at -> expireUnreproducedSpeed(server,net,at) }) { server, budget ->
                 val bounded = minOf(budget,remaining())
                 if (bounded >= AutoSelection.MIN_PROBE_MS) kotlinx.coroutines.withTimeoutOrNull(bounded) {

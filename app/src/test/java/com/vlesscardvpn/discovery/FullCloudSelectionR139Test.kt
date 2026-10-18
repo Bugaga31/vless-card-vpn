@@ -24,7 +24,7 @@ class FullCloudSelectionR139Test {
         val clean=AutoEligibility.clean(st)
         assertEquals(listOf(de),clean.servers);assertFalse(ru.id in clean.states)
         assertEquals(listOf(de.id),clean.settings.netServers["wifi"])
-        assertEquals(clean,AutoEligibility.clean(clean));assertEquals(10,AutoEligibility.TOP)
+        assertEquals(clean,AutoEligibility.clean(clean));assertEquals(8,AutoEligibility.TOP)
     }
     @Test fun legacyOrDifferentNetworkMaskAndExpiredProofAreUnknown() {
         val s=state()
@@ -41,16 +41,16 @@ class FullCloudSelectionR139Test {
         assertTrue(ServerChoice.downloadUpgrade(bad,good,"wifi",now))
         assertEquals(listOf(good),AutoEligibility.servicePool(listOf(bad,good),{it},"wifi",now))
     }
-    @Test fun tenWorkingRoutesActuallyReachTheConnectedPoolNotJustOnePrimary() {
+    @Test fun eightWorkingRoutesActuallyReachTheConnectedPoolNotJustOnePrimary() {
         val routes=(1..14).map { server("DE-$it") };val states=routes.mapIndexed { i,s -> s.id to state((i+1)*1000) }.toMap()
         val connected=AutoEligibility.connectedPool(routes,{states.getValue(it.id)},"wifi",now,false)
-        assertEquals(10,connected.size);assertEquals(routes.last(),connected.first())
-        assertEquals(routes.takeLast(10).reversed(),connected)
+        assertEquals(8,connected.size);assertEquals(routes.last(),connected.first())
+        assertEquals(routes.takeLast(8).reversed(),connected)
         assertEquals(3,AutoEligibility.connectedPool(routes.take(3),{states.getValue(it.id)},"wifi",now,false).size)
         assertTrue(AutoEligibility.connectedPool(listOf(server("🇷🇺 blocked")),{state()},"wifi",now,false).isEmpty())
         val config=org.json.JSONObject(XrayConfigBuilder.vpnConfig(connected.map { it to null },Settings(mode=Mode.SERVERS),null))
         val out=config.getJSONArray("outbounds")
-        assertEquals(10,(0 until out.length()).count { out.getJSONObject(it).optString("tag").startsWith("proxy-") })
+        assertEquals(8,(0 until out.length()).count { out.getJSONObject(it).optString("tag").startsWith("proxy-") })
         assertTrue(config.getJSONObject("routing").getJSONArray("balancers").length()>0)
     }
     @Test fun serviceProvenanceSurvivesDiskRoundTrip() {

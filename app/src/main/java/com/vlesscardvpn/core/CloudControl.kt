@@ -10,7 +10,7 @@ import org.json.JSONObject
 /** Bounded, data-only manifest; no remote code, shared credentials or claimed local successes. */
 object CloudControl {
     const val SOURCE = "cloud-manifest"
-    data class Entry(val server: Server, val score: Double, val tier: String, val kbps: Int = 0, val speedAt: Long = 0)
+    data class Entry(val server: Server, val score: Double, val tier: String, val kbps: Int = 0, val speedAt: Long = 0, val sources: List<String> = emptyList())
     data class Snapshot(val stamp: Long, val expires: Long, val entries: List<Entry>, val recipes: JSONObject, val ispTags: JSONObject) { val byId: Map<String,Entry> = entries.associateBy { it.server.id } }
     @Volatile private var snapshot: Snapshot? = null
     @Volatile private var attempted = 0L
@@ -29,15 +29,20 @@ object CloudControl {
             val score = row.getDouble("cloudScore"); require(score.isFinite() && score in 0.0..1.0)
             val server = LinkParser.parse(row.getString("link"), SOURCE) ?: return@mapNotNull null
             if (server.protocol !in setOf("vless", "vmess", "trojan", "shadowsocks")) return@mapNotNull null
-            Entry(server,score,tier,row.optInt("kbps",0).coerceIn(0,10000000),row.optLong("speed_measured_at",0))
+            Entry(server,score,tier,row.optInt("kbps",0).coerceIn(0,10000000),row.optLong("speed_measured_at",0),
+                row.optJSONArray("sources")?.let { urls -> (0 until minOf(urls.length(),16)).mapNotNull { j ->
+                    urls.optString(j).takeIf { it.length<=2048 && it.startsWith("https://") &&
+                        runCatching { java.net.URI(it).let { u -> u.host != null && u.rawUserInfo == null && u.rawFragment == null } }.getOrDefault(false) }
+                }.distinct() } ?: emptyList())
         }.distinctBy { it.server.id }
         return Snapshot(stamp,expires,entries,o.optJSONObject("recipes") ?: JSONObject(),o.optJSONObject("isp_tags") ?: JSONObject())
     }
+    fun sources(server: Server): List<String> = snapshot?.takeIf { it.expires > System.currentTimeMillis() }?.byId?.get(server.id)?.sources.orEmpty()
     fun prior(server: Server, now: Long = System.currentTimeMillis()): Double? = snapshot?.takeIf { it.expires > now }?.byId?.get(server.id)?.score
     fun ranked(servers: List<Server>, n: Int): List<Server> {
         val entries = snapshot?.takeIf { it.expires > System.currentTimeMillis() }?.byId.orEmpty()
         return ServerChoice.diverse(servers.filter { it.id in entries && AutoEligibility.allowed(it) }
-            .sortedWith(compareByDescending<Server> { entries.getValue(it.id).score }.thenByDescending { entries.getValue(it.id).kbps }),n)
+            .sortedWith(compareByDescending<Server> { speed(it) }.thenByDescending { entries.getValue(it.id).score }),n)
     }
     fun clear() { snapshot=null;attempted=0;fetched=0;Masks.setCloud(emptyList()) }
     fun count(now: Long = System.currentTimeMillis()): Int = snapshot?.takeIf { it.expires > now }?.entries?.size ?: 0

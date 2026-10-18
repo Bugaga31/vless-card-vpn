@@ -98,7 +98,9 @@ adb logcat -d -s E2E:I | grep "socks port=" | tail -1 | grep -q "dpi=VLESS Card 
 
 : > $W/access.log
 run_case services services.json
-yt=$(grep "email: u8443" $W/access.log | grep -c "youtube"); gs=$(grep "email: u8443" $W/access.log | grep -c "gstatic\|cloudflare")
+# Access logs keep the original IP even after SNI sniffing. Host-side route tags prove the requested
+# domain without relying on IP-to-name guesses; unrelated control-plane DNS has its own qa-other tag.
+yt=$(grep "email: u8443" $W/access.log | grep -c "qa-youtube"); gs=$(grep "email: u8443" $W/access.log | grep -c "qa-gstatic\|qa-speed\|qa-google")
 echo "services: through server youtube=$yt other=$gs"
 [ "$yt" -gt 0 ] || fail "services: YouTube did not go through the server"
 [ "$gs" -eq 0 ] || fail "services: other sites went through the server (must be direct)"
@@ -108,6 +110,12 @@ run_case auto auto.json 180
 adb logcat -d -s E2E:I | grep "socks port=" | tail -1 | grep -q "mode=SERVERS" || fail "auto: did not pick the working server"
 c=$(grep -c "email: u8443" $W/access.log); echo "auto: server :8443 accepted $c"
 [ "$c" -gt 0 ] || fail "auto: traffic did not go through the auto-picked server"
+
+# Do not merely assert the selected checkboxes: this log is emitted after the real Xray core starts.
+: > $W/access.log
+run_case auto-eight auto-eight.json 180
+P=$(waitlog "pool size=8 " 150) || fail "auto-eight: real Xray pool never reached eight outbounds"
+echo "eight: $P"
 
 echo "=== case proxy (no VPN: SOCKS5 10808 + HTTP 10809 for other apps)"
 adb shell am start -n $PKG/.MainActivity --ez e2e_disconnect true >/dev/null; sleep 3; : > $W/access.log
