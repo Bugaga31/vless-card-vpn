@@ -265,6 +265,10 @@ def speed_trials(res, hist, now, limit=SPEED_TOP):
     return (selected + [link for link in keep + rest if link not in selected])[:limit]
 
 
+def source_key(link):
+    return hashlib.sha256(link.split('#',1)[0].strip().encode()).hexdigest()
+
+
 def key(link):
     """Same as the app's Report.serverKey: first 4 bytes of sha256("host:port"), hex."""
     p = outbound(link)

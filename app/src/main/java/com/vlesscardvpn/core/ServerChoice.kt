@@ -56,11 +56,13 @@ object ServerChoice {
     fun compareDownload(a: com.vlesscardvpn.model.ServerState, b: com.vlesscardvpn.model.ServerState,
                         net: String, now: Long): Int {
         if (a.works != b.works) return if (a.works) -1 else 1
-        val service = AutoEligibility.serviceRank(a,net,now).compareTo(AutoEligibility.serviceRank(b,net,now))
-        if (service != 0) return service
+        val aService = AutoEligibility.serviceRank(a,net,now)
+        val bService = AutoEligibility.serviceRank(b,net,now)
+        if ((aService == 2) != (bService == 2)) return if (aService == 2) 1 else -1
         val speed = measuredSpeed(b,net,now).compareTo(measuredSpeed(a,net,now))
         if (speed != 0) return speed
-        return qualityScore(a,net,now).compareTo(qualityScore(b,net,now))
+        val service = aService.compareTo(bService)
+        return if (service != 0) service else qualityScore(a,net,now).compareTo(qualityScore(b,net,now))
     }
     fun downloadOrder(state: (Server) -> com.vlesscardvpn.model.ServerState, net: String, now: Long): Comparator<Server> =
         Comparator { a,b -> compareDownload(state(a),state(b),net,now) }

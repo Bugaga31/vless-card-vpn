@@ -50,8 +50,12 @@ def cyber():
         print("skip cyber catalog", e, file=sys.stderr); return []
 
 
+def source_url(path):
+    return path if path.startswith("http") else "https://raw.githubusercontent.com/" + path
+
+
 def fetch(path):
-    url = path if path.startswith("http") else "https://raw.githubusercontent.com/" + path
+    url = source_url(path)
     try:
         with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "vless-card-cloud"}), timeout=40) as r:
             text = r.read(60_000_000).decode("utf-8", "ignore")
@@ -114,6 +118,8 @@ async def ping(host, port, sni, sem):
 async def main():
     try: resource.setrlimit(resource.RLIMIT_NOFILE, (65536, 65536))
     except Exception: pass
+    provenance = {}
+    from cloud_real import source_key as route_key
     links = {}  # ident -> (link, host, port, ru)
     import concurrent.futures as cf
     srcs = catalog() + cyber() + [(p, False) for p in EXTRA]
@@ -124,8 +130,11 @@ async def main():
         for l in got:
             e = endpoint(l)
             if not e or e[1] <= 0 or e[1] > 65535: continue
+            k = route_key(l)
+            if k: provenance.setdefault(k, set()).add(source_url(path))
             old = links.get(e[2])
             if old is None or (ru and not old[3]): links[e[2]] = (l, e[0], e[1], ru or (old[3] if old else False), e[3])
+    json.dump({k: sorted(v)[:16] for k,v in provenance.items()}, open("out/source-map.json", "w"), separators=(",", ":"))
     print("unique:", len(links))
     sem = asyncio.Semaphore(256)
     items = list(links.values())

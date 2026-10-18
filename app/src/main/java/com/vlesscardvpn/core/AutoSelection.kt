@@ -17,13 +17,13 @@ object AutoSelection {
         ServerChoice.measuredSpeed(s, net, now) == 0 || now - s.speedCheckedAt >= REFRESH_MS
 
     /** Keep the measured leader, reserve a challenger slot, then prefer other hosts over link clones. */
-    fun finalists(candidates: List<Server>, state: (Server) -> ServerState, net: String, now: Long): List<Server> {
+    fun finalists(candidates: List<Server>, state: (Server) -> ServerState, net: String, now: Long, hint: (Server) -> Int = { 0 }): List<Server> {
         val ranked = candidates.distinctBy { it.id }.filter { state(it).works }
             .sortedWith(ServerChoice.downloadOrder(state,net,now))
         val leader = ranked.minWithOrNull(ServerChoice.downloadOrder(state, net, now)) ?: return emptyList()
         val others = ranked.filter { it.id != leader.id }
         val challengers = ServerChoice.diverse(others.filter { needsSample(state(it), net, now) }
-            .sortedBy { ServerChoice.candidateScore(state(it),net,now) }, others.size)
+            .sortedWith(compareByDescending<Server> { hint(it) }.thenBy { ServerChoice.candidateScore(state(it),net,now) }), others.size)
         val challenger = challengers.firstOrNull { !it.address.equals(leader.address, ignoreCase = true) }
             ?: challengers.firstOrNull()
         return ServerChoice.diverse(listOfNotNull(leader, challenger) + ranked, 3)
@@ -35,11 +35,11 @@ object AutoSelection {
     suspend fun compare(candidates: List<Server>, state: (Server) -> ServerState, net: String,
                         now: () -> Long, elapsed: () -> Long, validNetwork: () -> Boolean,
                         allowDownload: () -> Boolean, gaming: Boolean,
-                        onInconclusive: (Server, Long) -> Unit = { _, _ -> },
+                        onInconclusive: (Server, Long) -> Unit = { _, _ -> }, hint: (Server) -> Int = { 0 },
                         probe: suspend (Server, Long) -> Unit): Server? {
         val valid = if (gaming) candidates.distinctBy { it.id }.filter { state(it).works }
             .sortedBy { ServerChoice.latencyScore(state(it).evidenceFor(net), state(it).realMs) }.take(3)
-        else finalists(candidates, state, net, now())
+        else finalists(candidates, state, net, now(),hint)
         val started = elapsed()
         val attemptedAt = HashMap<String, Long>()
         if (!gaming) for (server in valid) {

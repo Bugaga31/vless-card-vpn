@@ -96,6 +96,7 @@ class TunnelService : VpnService() {
     private var autoDpiOnly = false
     /** Servers of the running connection (selected or the best ones taken automatically). */
     @Volatile private var usedServers: List<com.vlesscardvpn.model.Server> = emptyList()
+    @Volatile private var appliedAutoWeights = ""
     @Volatile private var warpChained = false
     /** DPI-strategy repairs in a row (reset by a good check). */
     private var dpiHeals = 0
@@ -201,9 +202,11 @@ class TunnelService : VpnService() {
                     .let { l -> l.take(Actions.closeOnes(l.map { st.state(it).score })) }
             }
             if (settings.mode == Mode.AUTO) {
-                // The user chose a connected multi-server pool: retain up to ten ranked outbounds.
+                // Retain eight working outbounds, including routes discovered after the first success.
                 // Xray's selected balancer distributes connections; this is not bandwidth bonding.
-                selected = com.vlesscardvpn.core.AutoEligibility.connectedPool(selected,{st.state(it)},network,
+                val candidates = Actions.preferred(st, (selected + st.servers.filter { st.state(it).works }).distinctBy { it.id })
+                val usable = com.vlesscardvpn.core.AutoEligibility.servicePool(candidates,{st.state(it)},network,System.currentTimeMillis())
+                selected = com.vlesscardvpn.core.AutoEligibility.connectedPool(usable,{st.state(it)},network,
                     System.currentTimeMillis(),com.vlesscardvpn.core.GameSession.active())
                 settings = settings.copy(mode = if (selected.isEmpty() || autoDpiOnly) Mode.BYEDPI else Mode.SERVERS)
                 if (settings.mode == Mode.BYEDPI) selected = emptyList()
@@ -243,15 +246,23 @@ class TunnelService : VpnService() {
             val warpHop = if (settings.warpChain && withMasks.any { it.first.protocol != "wireguard" }) st.servers.firstOrNull { Masks.isWarp(it) } else null
             warpChained = warpHop != null
             val used = if (warpHop != null) withMasks.filter { it.first.protocol != "wireguard" } else withMasks
+            val downloadSpeeds = if (automatic && !com.vlesscardvpn.core.GameSession.active()) used.map {
+                com.vlesscardvpn.core.ServerChoice.measuredSpeed(st.state(it.first),network,System.currentTimeMillis()) } else emptyList()
+            val downloadLatencies = used.map { st.state(it.first).realMs }
             val config = XrayConfigBuilder.vpnConfig(used, settings, bdPort, socks, set.ports,
                 listen = if (proxy && settings.lanShare) "0.0.0.0" else "127.0.0.1", httpPort = if (proxy) settings.httpPort else null, warpHop = warpHop,
-                heavy = XrayConfigBuilder.heavyOf(used.map { st.state(it.first).kbps }, used.map { st.state(it.first).ytOk }),
+                heavy = XrayConfigBuilder.heavyOf(used.map { if (automatic) com.vlesscardvpn.core.ServerChoice.measuredSpeed(st.state(it.first),network,System.currentTimeMillis()) else st.state(it.first).kbps },
+                    used.map { if (automatic && com.vlesscardvpn.core.AutoEligibility.serviceRank(st.state(it.first),network,System.currentTimeMillis()) == 1) null else st.state(it.first).ytOk }),
                 serviceRoutes = com.vlesscardvpn.core.ServiceRoutes.snapshot(network, android.os.SystemClock.elapsedRealtime()),
-                quietLogs = !com.vlesscardvpn.core.PhonePower.refresh(this).allowLight)
+                quietLogs = !com.vlesscardvpn.core.PhonePower.refresh(this).allowLight,
+                downloadSpeeds = downloadSpeeds, downloadLatencies = downloadLatencies)
             val c = XrayCore.Instance("vpn"); core = c
             c.start(config)
             check(c.running) { "Xray не запустился: ${c.lastStatus}" }
+            usedServers = used.map { it.first }
+            appliedAutoWeights = com.vlesscardvpn.core.SpeedBalance.fingerprint(downloadSpeeds,downloadLatencies)
             Tunnel.socks = socks
+            if (BuildConfig.DEBUG) Log.i("E2E", "pool size=${used.size} ids=${used.map { it.first.id }}")
             Log.i("E2E", "socks port=${socks.port} auth=${socks.auth} dpi=${dpiLabel.ifEmpty { "-" }} fixed=${set.ports.keys} mode=${settings.mode} services=${settings.services} proxy=$proxy")
             if (!proxy && !keepTun) startTun(settings, socks)
 
@@ -382,7 +393,7 @@ class TunnelService : VpnService() {
                 if (sinceNet < 90_000L && !netHardDone) { netHardDone = true; hardRestart("новая сеть, а интернет не пошёл", force = true); return@launch }
                 if (System.currentTimeMillis() - lastHard > 5 * 60_000L) { hardRestart("после переподключения интернет не пошёл"); return@launch }
             }
-            if (p.works) { healStep = 0; dpiHeals = 0; connectFails = 0; warmUp(); scheduleOptimize(if (com.vlesscardvpn.core.Actions.deepPending) 20_000 else 60_000); com.vlesscardvpn.core.AppWatch.start(this@TunnelService) { scope.launch { lock.withLock { connect(soft = true) } } }; watchdog(); standbyScout(); coverTraffic(); serviceRoutes(); if (serverless()) rescueLater() } else heal()
+            if (p.works) { healStep = 0; dpiHeals = 0; connectFails = 0; warmUp(); scheduleOptimize(if (com.vlesscardvpn.core.Actions.deepPending || usedServers.size < com.vlesscardvpn.core.AutoEligibility.TOP) 5_000 else 60_000); com.vlesscardvpn.core.AppWatch.start(this@TunnelService) { scope.launch { lock.withLock { connect(soft = true) } } }; watchdog(); standbyScout(); coverTraffic(); serviceRoutes(); if (serverless()) rescueLater() } else heal()
         }
     }
 
@@ -446,9 +457,22 @@ class TunnelService : VpnService() {
             var calm = 0
             while (Tunnel.status.value.state == Tunnel.State.CONNECTED) {
                 while (asleep() && Tunnel.status.value.state == Tunnel.State.CONNECTED) delay(60_000) // no re-tests while the phone sleeps
-                if (!com.vlesscardvpn.core.PhonePower.refresh(this@TunnelService).allowed) { delay(60_000); continue }
-                if (Store.state.value.settings.protectActiveTraffic && userActive()) { delay(60_000); continue } // hot phone: no background re-tests
-                val reconnect = runCatching { Store.busy { Actions.optimize() } }.getOrDefault(false)
+                if (!com.vlesscardvpn.core.PhonePower.refresh(this@TunnelService).allowLight) { delay(60_000); continue }
+                if (Store.state.value.settings.protectActiveTraffic && userActive() &&
+                    !(Store.state.value.settings.mode == Mode.AUTO && usedServers.size < com.vlesscardvpn.core.AutoEligibility.TOP)) { delay(60_000); continue } // hot phone: no background re-tests
+                val result = runCatching { Store.busy { Actions.optimize() } }.getOrElse {
+                    if (it is kotlinx.coroutines.CancellationException) throw it
+                    false
+                }
+                // An earlier pass may have deferred applying a changed pool during a call/download.
+                // Compare with the running engine, not only with the already-updated Store selection.
+                val pending = Store.state.value.let { s -> s.settings.mode == Mode.AUTO &&
+                    (s.selected.map { it.id }.toSet() != usedServers.map { it.id }.toSet() ||
+                    appliedAutoWeights != com.vlesscardvpn.core.SpeedBalance.fingerprint(
+                        if (!com.vlesscardvpn.core.GameSession.active()) usedServers.map {
+                            com.vlesscardvpn.core.ServerChoice.measuredSpeed(s.state(it),Net.key(this@TunnelService),System.currentTimeMillis()) } else emptyList(),
+                        usedServers.map { s.state(it).realMs })) }
+                val reconnect = result || pending
                 // the user is in a call / watching video: wait a minute; still busy → skip, the next pass decides again
                 val busyNow = reconnect && userActive() && run { Log.i("E2E", "optimize: user is busy — switch postponed"); delay(60_000); userActive() }
                 if (reconnect && !busyNow && Tunnel.status.value.state == Tunnel.State.CONNECTED) {
@@ -457,7 +481,9 @@ class TunnelService : VpnService() {
                 }
                 calm = if (Actions.lastOptimizeSwitched) 0 else minOf(calm + 1, 3)
                 // sleep until the next pass, or wake early (45 s) when the network changes
-                if (kotlinx.coroutines.withTimeoutOrNull(longArrayOf(5, 10, 20, 30)[calm] * 60_000L) { optKick.receive() } != null) { calm = 0; delay(45_000) }
+                val incomplete = Store.state.value.settings.mode == Mode.AUTO && usedServers.size < com.vlesscardvpn.core.AutoEligibility.TOP
+                val next = if (incomplete) 30_000L else longArrayOf(60_000L,120_000L,180_000L,300_000L)[calm]
+                if (kotlinx.coroutines.withTimeoutOrNull(next) { optKick.receive() } != null) { calm = 0; delay(5_000) }
             }
         }
     }

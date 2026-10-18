@@ -207,7 +207,7 @@ object XrayConfigBuilder {
      */
     fun vpnConfig(servers: List<Pair<Server, Mask?>>, settings0: Settings, byeDpiPort: Int?, socks: SocksAuth = SocksAuth(settings0.socksPort),
                   dpiPorts: Map<String, Int> = emptyMap(), listen: String = "127.0.0.1", httpPort: Int? = null, warpHop: Server? = null,
-                  heavy: Set<Int> = emptySet(), serviceRoutes: Map<String, List<String>> = emptyMap(), quietLogs: Boolean = false): String {
+                  heavy: Set<Int> = emptySet(), serviceRoutes: Map<String, List<String>> = emptyMap(), quietLogs: Boolean = false, downloadSpeeds: List<Int> = emptyList(), downloadLatencies: List<Int> = emptyList()): String {
         // Auto: servers when there are working ones, otherwise the DPI engine alone.
         val settings = if (settings0.mode == Mode.AUTO) settings0.copy(mode = if (servers.isEmpty()) Mode.BYEDPI else Mode.SERVERS) else settings0
         require(settings.mode == Mode.BYEDPI || servers.isNotEmpty()) { "Не выбран ни один сервер" }
@@ -297,7 +297,8 @@ object XrayConfigBuilder {
         }
         val only = com.vlesscardvpn.core.Services.domains(settings.services)
         // video goes to the 1–2 servers that really downloaded fastest (balancer «heavy»), the rest is spread over all
-        val heavyOn = many && hopIdx < 0 && servers.size <= 10 && heavy.isNotEmpty() && heavy.size < servers.size && heavy.all { it in servers.indices } &&
+        val speedAware = downloadSpeeds.size == servers.size && downloadSpeeds.any { it > 0 }
+        val heavyOn = !speedAware && many && hopIdx < 0 && servers.size <= 10 && heavy.isNotEmpty() && heavy.size < servers.size && heavy.all { it in servers.indices } &&
             (only.isEmpty() || "youtube" in settings.services)
         if (heavyOn) rules.put(JSONObject().put("domain", JSONArray(HEAVY_DOMAINS)).put("balancerTag", "heavy"))
         if (only.isNotEmpty()) {
@@ -308,7 +309,8 @@ object XrayConfigBuilder {
         } else rules.put(toMain(JSONObject().put("network", "tcp,udp")))
         val routing = JSONObject().put("domainStrategy", "AsIs").put("rules", rules)
         if (many) {
-            fun strategy() = JSONObject().put("type", settings.balance.xray).apply {
+            fun strategy() = if (speedAware) com.vlesscardvpn.core.SpeedBalance.strategy(downloadSpeeds,downloadLatencies)
+            else JSONObject().put("type", settings.balance.xray).apply {
                 // spread connections over the 3 best that are within 30% of each other (not everything on one server)
                 if (settings.balance == Balance.LEAST_LOAD) put("settings", JSONObject().put("expected", 3).put("maxRTT", "1500ms")
                     .put("tolerance", 0.3).put("baselines", JSONArray().put("400ms").put("1s")))
@@ -323,7 +325,7 @@ object XrayConfigBuilder {
             }
             routing.put("balancers", bals)
             val probe = settings.testUrl
-            if (settings.balance == Balance.LEAST_LOAD) {
+            if (settings.balance == Balance.LEAST_LOAD && !speedAware) {
                 c.put("burstObservatory", JSONObject().put("subjectSelector", arr(PROXY_PREFIX)).put("pingConfig", JSONObject()
                     .put("destination", probe).put("interval", "30s").put("connectivity", "").put("timeout", "10s").put("sampling", 3)))
             } else {

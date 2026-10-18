@@ -37,3 +37,7 @@ write(f"{out}/auto.json", [reality, dead], [], {}, mode="AUTO", autoUpdateSubs=F
 # 1.0.62: proxy mode (no TUN: SOCKS 10808 + HTTP 10809), built-in WARP (registers itself, finds endpoint + noise mask).
 write(f"{out}/proxy.json", [reality], ["e2e-reality"], {}, proxyOnly=True)
 write(f"{out}/warp.json", [], [], {}, autoUpdateSubs=False, lastSubRefresh=4102444800000)
+
+# Eight real authenticated outbounds; the foreground may start early but background must fill the pool.
+pool=[dict(reality,name=f"e2e-pool-{i}",secret=f"00000000-0000-0000-0000-{i+2:012d}") for i in range(8)]
+write(f"{out}/auto-eight.json",pool,[],{},mode="AUTO",autoUpdateSubs=False,lastSubRefresh=4102444800000)
