@@ -218,7 +218,7 @@ class TunnelService : VpnService() {
             Tunnel.ytViaDpi = ytDpi
             if (settings.mode != Mode.BYEDPI && selected.isEmpty())
                 error("Нет выбранных серверов. Откройте «Серверы», нажмите «Проверить» и отметьте рабочие.")
-            selected = Actions.pinCertificates(selected)
+            selected = Actions.pinCertificates(com.vlesscardvpn.core.AutoEligibility.independent(selected))
             usedServers = selected
             val rotate = settings.rotateMasks
             val withMasks = selected.map { srv ->
@@ -257,6 +257,7 @@ class TunnelService : VpnService() {
                 quietLogs = !com.vlesscardvpn.core.PhonePower.refresh(this).allowLight,
                 downloadSpeeds = downloadSpeeds, downloadLatencies = downloadLatencies)
             val c = XrayCore.Instance("vpn"); core = c
+            Tunnel.wireguardKeys = (used.map { it.first } + listOfNotNull(warpHop)).filter { it.protocol == "wireguard" }.map { it.secret }.toSet()
             c.start(config)
             check(c.running) { "Xray не запустился: ${c.lastStatus}" }
             usedServers = used.map { it.first }
@@ -778,7 +779,7 @@ class TunnelService : VpnService() {
             networkRefreshJob?.cancel(); networkSignal.incrementAndGet(); handoff.reset()
         }
         if (!keepTun) TProxyService.stop()
-        core?.stop(); core = null
+        core?.stop(); core = null; Tunnel.wireguardKeys = emptySet()
         dpi?.close(); dpi = null; Tunnel.byeDpiPort = null
         if (!keepTun) { Tunnel.socks = null; runCatching { tun?.close() }; tun = null }
         if (error != null) {

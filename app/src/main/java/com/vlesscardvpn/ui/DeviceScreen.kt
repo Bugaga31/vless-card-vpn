@@ -65,6 +65,17 @@ fun DeviceScreen() {
                 }
             }
         } ?: Text("Получаем показатели…")
+        Card(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Меньше нагрузки от VLESS Card", fontSize = 18.sp)
+                Text("Отключает движение волн, включает экономный профиль и откладывает необязательную работу при активном трафике. VPN, шифрование и приложения телефона не изменяются.", fontSize = 14.sp)
+                Button(onClick = {
+                    Store.update { it.copy(settings = DeviceEfficiency.apply(it.settings)) }
+                    PhonePower.refresh(ctx)
+                    message = "Экономный профиль приложения включён. Изменить его можно в Настройках → Нагрузка VPN и батарея."
+                }, modifier = Modifier.fillMaxWidth()) { Text("Снизить нагрузку приложения") }
+            }
+        }
         Button(onClick = { sample() }, modifier = Modifier.fillMaxWidth()) { Text("Проверить телефон и составить план") }
         tips.forEach { tip ->
             Card(Modifier.fillMaxWidth()) {

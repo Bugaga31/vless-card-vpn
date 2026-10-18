@@ -47,7 +47,7 @@ object XrayConfigBuilder {
      *  servers as the video itself — no VPN can cut those without breaking video. */
     val YT_ADS = listOf("full:ads.youtube.com", "full:pagead2.googlesyndication.com", "full:googleads.g.doubleclick.net",
         "full:pubads.g.doubleclick.net", "full:securepubads.g.doubleclick.net", "full:ad.doubleclick.net", "full:static.doubleclick.net",
-        "full:imasdk.googleapis.com", "full:googleadservices.com", "full:www.googleadservices.com", "full:tpc.googlesyndication.com")
+        "domain:doubleclick.net", "domain:googlesyndication.com", "domain:googleadservices.com", "full:imasdk.googleapis.com", "full:googleadservices.com", "full:www.googleadservices.com", "full:tpc.googlesyndication.com")
     private fun arr(vararg v: Any): JSONArray = JSONArray().apply { v.forEach { put(it) } }
     private fun csv(s: String) = s.split(',').map { it.trim() }.filter { it.isNotEmpty() }
 

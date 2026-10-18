@@ -388,7 +388,7 @@ private fun CountryPicker(onChange: () -> Unit) {
 
 private fun pick(c: String, onChange: () -> Unit) {
     Store.update { it.copy(settings = it.settings.copy(country = c)) }
-    if (Store.state.value.settings.mode == Mode.AUTO) Actions.selectBest(5, close = true)
+    if (Store.state.value.settings.mode == Mode.AUTO) Actions.selectBest(com.vlesscardvpn.core.AutoEligibility.TOP, close = false)
     onChange()
 }
 
@@ -416,7 +416,9 @@ private fun PowerButton(on: Boolean, busy: Boolean, color: Color, onClick: () ->
     val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
     Spacer(Modifier.height(18.dp))
     BoxWithConstraints(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-        val diameter = minOf(232.dp, maxWidth)
+        val compact = maxWidth < 280.dp || androidx.compose.ui.platform.LocalDensity.current.fontScale > 1.2f
+        val diameter = minOf(if (compact) 180.dp else 232.dp, maxWidth)
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Box(Modifier.size(diameter), contentAlignment = Alignment.Center) {
         Box(Modifier.size(diameter).scale(k).clip(CircleShape).background(Brush.radialGradient(listOf(c.copy(alpha = .18f), Color.Transparent))))
         androidx.compose.foundation.Canvas(Modifier.size(diameter * (206f / 232f))) {
@@ -433,10 +435,15 @@ private fun PowerButton(on: Boolean, busy: Boolean, color: Color, onClick: () ->
             }, contentAlignment = Alignment.Center) {
             Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Icon(Icons.Filled.PowerSettingsNew, null, tint = c, modifier = Modifier.size(54.dp))
-                Text(when { on -> "Отключить"; busy -> "Отменить поиск"; else -> "Подключить" }, color = MaterialTheme.colorScheme.onSurface,
+                if (!compact) Text(when { on -> "Отключить"; busy -> "Отменить поиск"; else -> "Подключить" }, color = MaterialTheme.colorScheme.onSurface,
                     fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 2, textAlign = TextAlign.Center,
                     modifier = Modifier.padding(horizontal = 8.dp))
             }
+        }
+        }
+        if (compact) TextButton(onClick = onClick, modifier = Modifier.fillMaxWidth()) {
+            Text(when { on -> "Отключить"; busy -> "Отменить поиск"; else -> "Подключить" },
+                fontSize = 18.sp, textAlign = TextAlign.Center, fontWeight = FontWeight.SemiBold)
         }
         }
     }

@@ -352,7 +352,7 @@ object Tester {
     ) = mutex.withLock {
         withContext(Bg.io) {
             val successes = java.util.concurrent.atomic.AtomicInteger()
-            fun skipped(i: Int) = successes.get() >= stopAfter.coerceAtLeast(1) || skip(i)
+            fun skipped(i: Int) = successes.get() >= stopAfter.coerceAtLeast(1) || skip(i) || (variants[i].first.protocol == "wireguard" && variants[i].first.secret in Tunnel.wireguardKeys)
             fun report(i: Int, p: Probe) { if (p.works) successes.incrementAndGet(); onEach(i, p) }
             // Bound config/socket footprint too, not merely simultaneous HTTP calls.
             val effectiveBatch = PowerPolicy.cap(batch, if (PhonePower.state.value.realParallel <= 2) 4 else batch)

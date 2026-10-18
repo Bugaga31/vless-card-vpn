@@ -1,3 +1,7 @@
+## 1.2.30
+
+WARP session isolation, lightweight VK/Yandex masks, measured cloud recipes, responsive silent intro and own-app energy controls. See [release notes](docs/release-1.2.30.md).
+
 # Changelog
 
 ## 1.2.21

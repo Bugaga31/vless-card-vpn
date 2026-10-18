@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
-    paths: ['scripts/cloud_servers.py', 'scripts/cloud_reports.py', 'scripts/cloud_real.py', 'scripts/cloud_manifest.py', 'config/cloud-recipes.json', '.github/workflows/cloud-servers.yml']
+    paths: ['scripts/cloud_servers.py', 'scripts/cloud_reports.py', 'scripts/cloud_real.py', 'scripts/cloud_manifest.py', 'scripts/cloud_masks.py', 'config/cloud-recipes.json', '.github/workflows/cloud-servers.yml']
 permissions:
   contents: write
   actions: write
@@ -80,6 +80,10 @@ jobs:
         env:
           REPORT_TOKEN: ${{ secrets.REPORT_TOKEN }}
         run: python3 scripts/cloud_reports.py || echo "::warning::reports merge failed"
+      - name: Learn bounded safe mask recipes from working routes (independent of APK)
+        env:
+          XRAY: /tmp/xray/xray
+        run: python3 scripts/cloud_masks.py
       - name: Build measured tier manifest
         run: python3 scripts/cloud_manifest.py
       - name: Publish to the servers branch only after all checks succeeded

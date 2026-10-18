@@ -16,6 +16,7 @@ object PhonePower {
     private var memory = PowerPolicy.Memory()
     private var sample = PowerPolicy.Input(0)
     private var sampledAt = -10000L
+    private var dirty = true
     private var bytes = -1L
     private var pauseUntil = 0L
     private var started = false
@@ -27,7 +28,7 @@ object PhonePower {
         started = true
         val app = ctx.applicationContext
         fun changed() {
-            synchronized(this) { sampledAt = -10000L }
+            synchronized(this) { dirty = true }
             if (eventRefresh == null) eventRefresh = Runnable { runCatching { refresh(app) } }
             events.removeCallbacks(eventRefresh!!); events.post(eventRefresh!!)
         }
@@ -50,7 +51,7 @@ object PhonePower {
     @Synchronized fun resume() { pauseUntil = 0 }
     @Synchronized fun refresh(ctx: Context): PowerPolicy.Plan {
         val now = SystemClock.elapsedRealtime()
-        if (now - sampledAt >= 10000) {
+        if (dirty || now - sampledAt >= 10000) {
             val pm = ctx.getSystemService(Context.POWER_SERVICE) as PowerManager
             val bm = ctx.getSystemService(Context.BATTERY_SERVICE) as BatteryManager
             val cm = ctx.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
@@ -59,13 +60,14 @@ object PhonePower {
                 runCatching { (ctx.getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager).getMemoryInfo(it) }
             }
             val total = TrafficStats.getTotalRxBytes().let { r -> TrafficStats.getTotalTxBytes().let { t -> if (r < 0 || t < 0) -1 else r + t } }
-            val active = bytes >= 0 && total >= bytes && now > sampledAt && (total - bytes) * 1000 / (now - sampledAt) > 40000
+            val active = if (now - sampledAt in 0..999) sample.activeTraffic else
+                bytes >= 0 && total >= bytes && now > sampledAt && (total - bytes).toDouble() * 1000 / (now - sampledAt) > 40000
             bytes = total
             sample = PowerPolicy.Input(now, bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY), bm.isCharging,
                 pm.isPowerSaveMode, pm.isInteractive, Thermal.tempC(ctx), Thermal.status(ctx),
                 caps?.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED) != true,
                 android.os.Build.VERSION.SDK_INT >= 24 && cm.restrictBackgroundStatus == ConnectivityManager.RESTRICT_BACKGROUND_STATUS_ENABLED, active, memoryInfo.lowMemory)
-            sampledAt = now
+            sampledAt = now; dirty = false
             sensors.value = "Батарея: ${sample.battery.takeIf { it in 1..100 }?.let { "$it%" } ?: "неизвестно"} · ${if (sample.charging) "заряжается" else "без зарядки"}\nТемпература батареи / Android: ${Thermal.label(sample.temp, sample.thermal).ifEmpty { "нет данных" }}"
         }
         val s = Store.state.value.settings

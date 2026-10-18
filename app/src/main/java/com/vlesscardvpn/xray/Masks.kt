@@ -187,6 +187,9 @@ object Masks {
         }
         // VLESS Card signature masks: not splitting by Xray, but other things the TSPU looks at.
         for (d in WHITE_SNI) add(Mask("vc.sni.$d", "Фирменная: белый SNI $d", "chrome", sni = d))
+        for (d in listOf("vk.com", "ya.ru", "yandex.ru", "vkvideo.ru"))
+            add(Mask("vc.sni.$d.fast", "SNI $d · лёгкое Hello", "chrome", packets = "tlshello",
+                length = "100-200", delay = "0-1", sni = d))
         for (d in WHITE_SNI.take(2)) add(Mask("vc.sni.$d.l2", "Фирменная: белый SNI $d + шредер SNI", "firefox", "tlshello", "", "", "0",
             lengths = "90-120,1-2,1-2,1-2,1-2,1-3,1-3,200-400", delays = "1-3,1-2,1-2,1-2,1-2,1-2,1-2,1-3", sni = d))
         add(Mask("vc.mss536", "Фирменная: узкий канал MSS 536 (как старый 3G)", "chrome", mss = 536))
@@ -292,7 +295,7 @@ object Masks {
         }
 
     fun searchOrder(byeDpiAvailable: Boolean, server: com.vlesscardvpn.model.Server? = null): List<Mask> {
-        val first = listOf("chrome.n", "vc.sni.vk.com", "vc.sni.yandex.ru", "vc.sni.vkvideo.ru", "vc.mss300", "vc.ghost", "vc.sni.ya.ru.l2", "vc.mss120", "vc.alpn.br", "vc.mux", "vc.ghost.sni", "vc.mss120.l6", "vc.ghost.v6", "vc.sni.vk.com.mss120", "vc.tfo", "vc.v6", "vc.ghost.tfo", "vc.alpn.br.h1", "vc.mux.l5", "chrome.z5", "chrome.z10", "chrome.z1", "chrome.z5.hw", "chrome.z6.hw", "chrome.z9", "chrome.z1.hl", "chrome.z11.hw", "chrome.z12", "chrome.z7", "chrome.hw", "chrome.z2", "chrome.z3", "chrome.z4", "chrome.h4", "chrome.l1", "firefox.l2", "chrome.l4", "safari.l5", "firefox.l6", "chrome.p6", "firefox.l7", "chrome.h7", "safari.p7", "chrome.p2", "firefox.h2", "safari.p3", "edge.h5", "chrome.h1", "ios.p1", "safari.l3", "chrome.l2.b",
+        val first = listOf("chrome.n", "vc.sni.vk.com.fast", "vc.sni.ya.ru.fast", "vc.sni.yandex.ru.fast", "vc.sni.vkvideo.ru.fast", "vc.sni.vk.com", "vc.sni.yandex.ru", "vc.sni.vkvideo.ru", "vc.mss300", "vc.ghost", "vc.sni.ya.ru.l2", "vc.mss120", "vc.alpn.br", "vc.mux", "vc.ghost.sni", "vc.mss120.l6", "vc.ghost.v6", "vc.sni.vk.com.mss120", "vc.tfo", "vc.v6", "vc.ghost.tfo", "vc.alpn.br.h1", "vc.mux.l5", "chrome.z5", "chrome.z10", "chrome.z1", "chrome.z5.hw", "chrome.z6.hw", "chrome.z9", "chrome.z1.hl", "chrome.z11.hw", "chrome.z12", "chrome.z7", "chrome.hw", "chrome.z2", "chrome.z3", "chrome.z4", "chrome.h4", "chrome.l1", "firefox.l2", "chrome.l4", "safari.l5", "firefox.l6", "chrome.p6", "firefox.l7", "chrome.h7", "safari.p7", "chrome.p2", "firefox.h2", "safari.p3", "edge.h5", "chrome.h1", "ios.p1", "safari.l3", "chrome.l2.b",
             "android.h3", "firefox.h4", "chrome.n.b", "chrome.h4.b", "firefox.p4", "chrome.p5", "chrome.h6", "qq.h2",
             "safari.n", "firefox.n", "edge.p2", "ios.h4", "android.p3", "safari.h1", "chrome.p1.b", "firefox.h3.b",
             // own VLESS Card masking and zapret in front of the server connection
