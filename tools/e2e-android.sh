@@ -98,7 +98,9 @@ adb logcat -d -s E2E:I | grep "socks port=" | tail -1 | grep -q "dpi=VLESS Card 
 
 : > $W/access.log
 run_case services services.json
-yt=$(grep "email: u8443" $W/access.log | grep -c "youtube"); gs=$(grep "email: u8443" $W/access.log | grep -c "gstatic\|cloudflare")
+# Access logs keep the original IP even after SNI sniffing. Host-side route tags prove the requested
+# domain without relying on IP-to-name guesses; unrelated control-plane DNS has its own qa-other tag.
+yt=$(grep "email: u8443" $W/access.log | grep -c "qa-youtube"); gs=$(grep "email: u8443" $W/access.log | grep -c "qa-gstatic\|qa-speed\|qa-google")
 echo "services: through server youtube=$yt other=$gs"
 [ "$yt" -gt 0 ] || fail "services: YouTube did not go through the server"
 [ "$gs" -eq 0 ] || fail "services: other sites went through the server (must be direct)"
