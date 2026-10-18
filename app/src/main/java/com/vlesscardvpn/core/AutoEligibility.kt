@@ -7,6 +7,12 @@ import com.vlesscardvpn.model.ServerState
 object AutoEligibility {
     fun allowed(server: Server): Boolean = !server.name.contains("🇷🇺") && Countries.of(server.name) != "RU"
     const val TOP = 10
+    /** Every returned route is handed to Xray's multi-outbound pool, not held as a hidden spare. */
+    fun connectedPool(servers: List<Server>, state: (Server) -> ServerState, net: String, now: Long, gaming: Boolean): List<Server> =
+        servers.distinctBy { it.id }.filter { allowed(it) && state(it).works }.let { routes ->
+            if (gaming) routes.sortedBy { ServerChoice.latencyScore(state(it).evidenceFor(net),state(it).realMs) }
+            else routes.sortedWith(ServerChoice.downloadOrder(state,net,now))
+        }.take(TOP)
     fun clean(st: AppState): AppState {
         val keep = st.servers.filter(::allowed)
         if (keep.size == st.servers.size) return st

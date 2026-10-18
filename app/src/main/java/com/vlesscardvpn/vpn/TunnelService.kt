@@ -196,19 +196,15 @@ class TunnelService : VpnService() {
                 // Nothing chosen: take the best servers that passed the last test.
                 val candidates = Actions.preferred(st, st.servers.filter { st.state(it).works })
                 selected = if (automatic && !com.vlesscardvpn.core.GameSession.active()) candidates.sortedWith(
-                    com.vlesscardvpn.core.ServerChoice.downloadOrder({ st.state(it) },network,System.currentTimeMillis())).take(5)
-                else candidates.sortedBy { st.state(it).score }.take(5)
+                    com.vlesscardvpn.core.ServerChoice.downloadOrder({ st.state(it) },network,System.currentTimeMillis())).take(10)
+                else candidates.sortedBy { st.state(it).score }.take(10)
                     .let { l -> l.take(Actions.closeOnes(l.map { st.state(it).score })) }
             }
             if (settings.mode == Mode.AUTO) {
-                // Keep the measured primary; never silently replace it with leastLoad reserves.
-                if (com.vlesscardvpn.core.ServerChoice.automaticPrimary(true,
-                        settings.balance == com.vlesscardvpn.model.Balance.LEAST_PING, com.vlesscardvpn.core.GameSession.active())) {
-                    selected = (if (com.vlesscardvpn.core.GameSession.active()) selected.sortedBy {
-                        com.vlesscardvpn.core.ServerChoice.latencyScore(st.state(it).evidenceFor(network),st.state(it).realMs)
-                    } else selected.sortedWith(com.vlesscardvpn.core.ServerChoice.downloadOrder(
-                        { st.state(it) }, network, System.currentTimeMillis()))).take(1)
-                }
+                // The user chose a connected multi-server pool: retain up to ten ranked outbounds.
+                // Xray's selected balancer distributes connections; this is not bandwidth bonding.
+                selected = com.vlesscardvpn.core.AutoEligibility.connectedPool(selected,{st.state(it)},network,
+                    System.currentTimeMillis(),com.vlesscardvpn.core.GameSession.active())
                 settings = settings.copy(mode = if (selected.isEmpty() || autoDpiOnly) Mode.BYEDPI else Mode.SERVERS)
                 if (settings.mode == Mode.BYEDPI) selected = emptyList()
             }
