@@ -106,6 +106,12 @@ data class ServerState(
     val score: Int get() = if (!works) Int.MAX_VALUE else realMs + speedPenalty(kbps) + (if (ytOk == false) 700 else 0)
     fun evidenceFor(network: String): RouteEvidence = netEvidence[network + "|" + maskFor(network)] ?: RouteEvidence()
     fun maskFor(network: String): String = netMasks[network] ?: netMasks[network.substringBefore(" · ")] ?: maskId
+    /** Auto only: an old learned Wi-Fi mask is not proof that it works on a new Wi-Fi.
+     * Keep manual global masks and legacy family-only choices; retain other profiles for the return trip.
+     */
+    fun forAutomaticNetwork(network: String): ServerState =
+        if (network.contains(" · ") && network !in netMasks && netMasks.keys.any { it.contains(" · ") })
+            copy(netMasks = netMasks + (network to "")) else this
     val works: Boolean get() = realMs > 0 && bigOk != false
     fun toJson(): JSONObject = JSONObject().apply {
         if (netEvidence.isNotEmpty()) put("netEvidence", JSONObject().apply { netEvidence.forEach { (k, v) -> put(k, v.toJson()) } })

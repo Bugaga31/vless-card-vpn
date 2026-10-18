@@ -56,6 +56,12 @@ object Actions {
         runCatching { java.io.File(app.filesDir, "mask_brain.json").delete(); java.io.File(app.filesDir, "llm").deleteRecursively() }
     }
 
+    fun cancelForNetworkChange() {
+        autoGeneration.incrementAndGet()
+        job?.cancel()
+        progress.value = progress.value.copy(running = false, message = "Сеть изменилась — старые проверки отменены")
+    }
+
     fun cancel() { job?.cancel(); progress.value = progress.value.copy(running = false, message = "Остановлено") }
 
     /** One in-flight public refresh; never block the connect button on mirror timeouts. */
@@ -390,10 +396,11 @@ object Actions {
                                  stopAfter: Int = Int.MAX_VALUE, budgetMs: Long = 0, onFirst: ((Server) -> Unit)? = null, onSuccess: ((Server) -> Unit)? = null): Int {
         if (servers.isEmpty()) return 0
         progress.value = progress.value.copy(title = title, done = 0, total = servers.size)
-        val pinned = pinCertificates(servers)
-        val st = Store.state.value
         val net = Net.key(app)
         val underlying = Net.underlying(app)?.toString()
+        val pinned = pinCertificates(servers)
+        if (Net.key(app) != net || Net.underlying(app)?.toString() != underlying) return 0
+        val st = Store.state.value
         val variants = pinned.map { it to (Masks.byId(st.state(it).maskFor(net))) }
         val (own, port) = dpiForTests(variants.map { it.second })
         val done = AtomicInteger(); val ok = AtomicInteger()
@@ -412,6 +419,7 @@ object Actions {
                 probeMemory.record(net, s.id, st.state(s).maskFor(net), p.works, System.currentTimeMillis())
                 runCatching { Brain.learn(net, s, st.state(s), p.works) }
                 states.put(s.id) {
+                    if (Net.key(app) != net || Net.underlying(app)?.toString() != underlying) it else
                     it.copy(netEvidence = (it.netEvidence + ((net + "|" + st.state(s).maskFor(net)) to it.evidenceFor(net).observe(p.works, p.realMs, System.currentTimeMillis()))).entries.sortedByDescending { e -> e.value.at }.take(8).associate { e -> e.toPair() }, realMs = p.realMs, bigOk = p.bigOk ?: it.bigOk?.takeIf { old -> old }, ytOk = p.ytOk ?: it.ytOk, tgOk = p.tgOk ?: it.tgOk, checkedAt = System.currentTimeMillis(), kbps = if (speedSample) p.kbps else it.kbps,
                         speedNetwork = if (speedSample) net else it.speedNetwork,
                         speedMask = if (speedSample) st.state(s).maskFor(net) else it.speedMask,
@@ -437,6 +445,7 @@ object Actions {
         val tpwsOk = probe.available(DpiEngine.TPWS)
         val cfg = Store.state.value.settings
         val net0 = Net.key(app)
+        val maskNetwork = Net.underlying(app)?.toString()
         val stats = Store.state.value.maskStats.let { it[net0] ?: it[Net.family(net0)] }.orEmpty()
         // Learned order: masks that passed on this network (on any server) first, untested next, proven failures last.
         fun bucket(m: Mask): Int { val st = stats[m.id] ?: return 1; return if (st.ok > 0) 0 else if (st.fail >= 4) 2 else 1 }
@@ -494,6 +503,7 @@ object Actions {
             try {
             Tester.real(current, cfg.testUrl, port, own.ports, youtube = false, batch = 64, parallel = 12, attempts = 1,
                 skip = { i -> System.currentTimeMillis() > deadline || synchronized(best) { (found[group(variants[indices[i]].first)] ?: 0) >= enough } || dead(variants[indices[i]].second) }) { i, p ->
+                if (Net.key(app) != net0 || Net.underlying(app)?.toString() != maskNetwork) return@real
                 val (s, m) = variants[indices[i]]
                 synchronized(best) {
                     val cur = best[s.id]
@@ -526,7 +536,8 @@ object Actions {
                 mine.forEach { i -> if (res[i]?.works == false) synchronized(best) { tried += Triple(s.id, confirm[i].second.id, false) } }
             }
         }
-        val net = Net.key(app)
+        if (Net.key(app) != net0 || Net.underlying(app)?.toString() != maskNetwork) return "Сеть изменилась — результаты старой маскировки отброшены"
+        val net = net0
         // Passed mutants join the auto masks (before any server points at them); failed fresh ones are forgotten.
         val keptIds = kept.map { it.id }.toSet()
         val winners = tried.filter { it.third && it.second.startsWith(MaskLab.PREFIX) }.map { it.second }.distinct()
@@ -1080,28 +1091,42 @@ object Actions {
     }
 
     /**
-     * Network changed (Auto): the selected servers checked once in the new network (1–3 s, outside the tunnel); the dead
-     * ones are dropped, and if none passes, the 12 best known are checked. True = something working is selected.
+     * Network changed (Auto): compare up to eight remembered/cloud/diverse routes outside the tunnel,
+     * then sequentially sample downloads on up to three finalists. Results are guarded by physical network identity.
      */
     suspend fun quickRecheck(): Boolean {
+        val net = Net.key(app); val handle = Net.underlying(app)?.toString()
+        Store.update { state -> state.copy(states = state.states.mapValues { (_, value) -> value.forAutomaticNetwork(net) }) }
+        fun valid() = Net.key(app) == net && Net.underlying(app)?.toString() == handle
         val st = Store.state.value
-        val sel = st.selected
-        if (sel.isEmpty() || job?.isActive == true) return false
+        val local = st.settings.netServers[net].orEmpty().toSet()
+        val remembered = st.servers.filter { it.id in local }
+        val ranked = preferred(st, st.servers).sortedWith(compareByDescending<Server> {
+            Brain.p(net, it, st.state(it))
+        }.thenByDescending { CloudSpeed.prior(it) ?: .5 })
+        val candidates = ServerChoice.diverse(remembered + st.selected + CloudSpeed.pick(ranked, emptyList(), n = 2) + ranked, 8)
+        if (candidates.isEmpty()) return false
+        val passed = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
         val prev = progress.value
         try {
-            realTest(sel, "Проверка после смены сети", big = false, attempts = 1)
-            var now = Store.state.value
-            val okSel = sel.filter { now.state(it).works }
-            if (okSel.isNotEmpty()) { if (okSel.size < sel.size) selectBest(okSel.size, close = true, among = okSel); return true }
-            val ids = sel.map { it.id }.toSet()
-            val cand = preferred(now, now.servers.filter { it.id !in ids && now.state(it).works }).sortedBy { now.state(it).score }.take(12)
-            if (cand.isEmpty()) return false
-            realTest(cand, "Проверка после смены сети", big = false, attempts = 1)
-            now = Store.state.value
-            val ok = cand.filter { now.state(it).works }
-            if (ok.isEmpty()) return false
-            selectBest(5, close = true, among = ok); return true
-        } finally { progress.value = prev }
+            kotlinx.coroutines.withTimeoutOrNull(5000) {
+                realTest(candidates, "Новая сеть: проверяю маршруты", big = false, youtube = false,
+                    attempts = 1, parallel = 4, budgetMs = 1800, onSuccess = { passed.add(it.id) })
+            }
+            if (!valid()) return false
+            val ok = candidates.filter { it.id in passed }
+            if (ok.isEmpty()) { deepPending = true; return false }
+            val winner = AutoSelection.compare(ok, { Store.state.value.state(it) }, net,
+                now = { System.currentTimeMillis() }, elapsed = { android.os.SystemClock.elapsedRealtime() },
+                validNetwork = { valid() }, gaming = GameSession.active(),
+                allowDownload = { PhonePower.refresh(app).let { it.allowLight && !it.deferTraffic } }) { server, budget ->
+                realTest(listOf(server), "Новая сеть: сравниваю скорость", big = true, youtube = false,
+                    attempts = 1, parallel = 1, budgetMs = budget)
+            } ?: return false
+            if (!valid()) return false
+            selectBest(1, close = true, among = listOf(winner)); deepPending = true
+            return true
+        } finally { progress.value = prev.copy(running = false) }
     }
 
     private fun selectionNetworkChanged(): String {

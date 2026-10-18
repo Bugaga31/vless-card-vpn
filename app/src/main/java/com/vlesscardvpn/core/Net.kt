@@ -21,9 +21,8 @@ object Net {
                     NetworkCapabilities.TRANSPORT_ETHERNET).any { caps.hasTransport(it) && current.hasTransport(it) }) 1 else 0)
         }.firstOrNull()
     }.getOrNull()
-    fun key(context: Context): String = runCatching {
+    fun key(context: Context, network: android.net.Network? = underlying(context)): String = runCatching {
         val cm = context.getSystemService(ConnectivityManager::class.java)
-        val network = underlying(context)
         val caps = cm.getNetworkCapabilities(network)
         when {
             caps == null -> "Нет сети"
@@ -35,7 +34,7 @@ object Net {
                 val ssid = runCatching { (context.applicationContext.getSystemService(Context.WIFI_SERVICE) as android.net.wifi.WifiManager).connectionInfo?.ssid }
                     .getOrNull()?.takeUnless { it == "<unknown ssid>" || it == "\"<unknown ssid>\"" }.orEmpty()
                 val dns = link?.dnsServers.orEmpty().mapNotNull { it.hostAddress }.sorted().joinToString(",")
-                "Wi-Fi · WIFI_" + fingerprint(salt(context), ssid, gateway, dns)
+                wifiKey(salt(context), ssid, gateway, dns, network.toString())
             }
             caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> {
                 val tm = context.getSystemService(TelephonyManager::class.java)
@@ -47,6 +46,14 @@ object Net {
             else -> "Другая сеть"
         }
     }.getOrDefault("Сеть")
+
+    /** Hidden SSIDs + identical router/DNS must not merge unrelated Wi-Fi sessions.
+     * The fallback is deliberately session-scoped; no location permission or raw identifiers are stored.
+     */
+    fun wifiKey(salt: String, ssid: String, gateway: String, dns: String, session: String): String {
+        val visible = ssid.trim().removeSurrounding("\"").takeUnless { it.isBlank() || it == "<unknown ssid>" || it == "0x" }.orEmpty()
+        return "Wi-Fi · WIFI_" + fingerprint(salt, visible, gateway, dns, if (visible.isEmpty()) session else "")
+    }
 
     /** Local salted identifier; raw SSID/gateway never becomes the persisted profile key. */
     fun fingerprint(salt: String, vararg fields: String): String = java.security.MessageDigest.getInstance("SHA-256")
