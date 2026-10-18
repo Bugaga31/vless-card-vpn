@@ -42,7 +42,7 @@ class ReleaseQualityR141Test {
     }
     @Test fun adBlockDoesNotBlockYouTubePlaybackHosts() {
         val rules=XrayConfigBuilder.YT_ADS
-        assertTrue(rules.contains("domain:doubleclick.net"))
+        assertTrue(rules.contains("full:adservice.google.com"))
         assertFalse(rules.any { it=="domain:youtube.com" || it.contains("googlevideo") || it.contains("ytimg") || it.contains("youtubei.googleapis") })
     }
     @Test fun efficiencyChangesOnlyOptionalOwnAppWork() {
