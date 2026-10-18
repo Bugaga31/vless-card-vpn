@@ -18,6 +18,7 @@ import com.vlesscardvpn.vpn.TunnelService
 class MainActivity : ComponentActivity() {
     private var welcome: com.vlesscardvpn.core.WelcomeAudio? = null
     override fun onResume() { super.onResume(); welcome?.start() }
+    override fun onPause() { welcome?.pause(); super.onPause() }
     override fun onStop() { welcome?.close(); welcome = null; super.onStop() }
 
     private val vpnPermission = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { r ->
