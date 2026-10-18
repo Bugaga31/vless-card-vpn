@@ -101,4 +101,28 @@ class AutoSelectionTest {
         assertEquals(50000,states.getValue(a).kbps) // historical hint preserved, no false ban
     }
 
+    @Test fun inconclusiveSampleIsInvalidatedForLaterLaunchesToo() = runBlocking {
+        val states=mutableMapOf(a to sample(10,50000,now-300000),b to sample(100,3000))
+        var invalidations=0
+        val winner=AutoSelection.compare(listOf(a,b),{states.getValue(it)},"wifi",{now},{0L},{true},{true},false,
+            onInconclusive={server,at->invalidations++;states[server]=ServerChoice.invalidateSpeed(states.getValue(server),"wifi",at)}) {_,_->}
+        assertEquals(b,winner);assertEquals(1,invalidations)
+        assertEquals(0,ServerChoice.measuredSpeed(states.getValue(a),"wifi",now))
+        assertEquals(50000,states.getValue(a).kbps)
+        assertEquals(b,listOf(a,b).minWithOrNull(ServerChoice.downloadOrder({states.getValue(it)},"wifi",now)))
+    }
+    @Test fun invalidationDoesNotEraseANewerConcurrentOrForeignSample() {
+        val current=sample(at=now)
+        assertEquals(current,ServerChoice.invalidateSpeed(current,"wifi",now-1))
+        assertEquals(current,ServerChoice.invalidateSpeed(current,"cell",now))
+        assertEquals(current,ServerChoice.invalidateSpeed(current,"wifi",0))
+        assertEquals(0L,ServerChoice.invalidateSpeed(current,"wifi",now).speedCheckedAt)
+    }
+    @Test fun cancellationOrNetworkLossDoesNotInvalidateHistoricalHints() = runBlocking {
+        var valid=true;var invalidations=0
+        assertNull(AutoSelection.compare(listOf(a),{sample(at=now-300000)},"wifi",{now},{0L},{valid},{true},false,
+            onInconclusive={_,_->invalidations++}) {_,_->valid=false})
+        assertEquals(0,invalidations)
+    }
+
 }

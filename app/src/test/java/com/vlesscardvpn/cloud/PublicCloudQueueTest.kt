@@ -26,4 +26,16 @@ class PublicCloudQueueTest {
         assertTrue(PublicCloudQueue.merge(listOf(a),listOf(a),listOf(a),0).isEmpty())
         assertEquals(listOf(a),PublicCloudQueue.merge(emptyList(),listOf(a,a),listOf(a),8))
     }
+    @Test fun emptyLocalAndCloudStillFillFromPermittedCatalog() {
+        val list=(0..15).map(::node)
+        assertEquals(list.take(6),PublicCloudQueue.merge(emptyList(),emptyList(),list,6))
+        val got=PublicCloudQueue.merge(listOf(node(99)),listOf(list[10],node(98)),list,6)
+        assertEquals(list[10],got.first());assertEquals(6,got.size)
+        assertTrue(got.all { it in list });assertEquals(got.size,got.distinctBy { it.id }.size)
+    }
+    @Test fun fallbackPrefersDifferentHostsOverCatalogClones() {
+        val a=node(1);val clone=a.copy(secret="other");val b=node(2)
+        assertEquals(listOf(a,b),PublicCloudQueue.merge(listOf(a),emptyList(),listOf(a,clone,b),2))
+    }
+
 }

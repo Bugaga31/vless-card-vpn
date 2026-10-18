@@ -84,4 +84,13 @@ class AutoRoutePolicyTest {
         assertFalse(Subs.isWhitelist(Subs.DIMAN))
         assertEquals(listOf(Subs.DIMAN),Subs.mirrors(Subs.DIMAN))
     }
+    @Test fun smallBandwidthNoiseCannotFlipTheMask() {
+        assertFalse(AutoRoutePolicy.improved(state(10000),"wifi",now,Probe(30,true,null,kbps=10001)))
+        assertFalse(AutoRoutePolicy.improved(state(10000),"wifi",now,Probe(30,true,null,kbps=11999)))
+        assertTrue(AutoRoutePolicy.improved(state(10000),"wifi",now,Probe(30,true,null,kbps=12000)))
+        assertFalse(AutoRoutePolicy.improved(state(100),"wifi",now,Probe(30,true,null,kbps=120)))
+        assertTrue(AutoRoutePolicy.improved(state(100),"wifi",now,Probe(30,true,null,kbps=356)))
+        assertTrue(AutoRoutePolicy.improved(state(0),"wifi",now,Probe(30,true,null,kbps=100)))
+    }
+
 }

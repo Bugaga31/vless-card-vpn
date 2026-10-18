@@ -38,7 +38,10 @@ object AutoRoutePolicy {
 
     /** Only an isolated, full successful download can replace the current mask. */
     fun improved(current: ServerState, net: String, now: Long, sample: Probe): Boolean =
-        sample.works && sample.bigOk == true && sample.kbps > ServerChoice.measuredSpeed(current, net, now)
+        sample.works && sample.bigOk == true && sample.kbps > 0 &&
+            ServerChoice.measuredSpeed(current, net, now).let { old ->
+                old <= 0 || sample.kbps.toLong() >= old.toLong() * 120 / 100 && sample.kbps.toLong() - old >= 256
+            }
 
     fun apply(current: ServerState, net: String, mask: String, now: Long, sample: Probe): ServerState = current.copy(
         maskId = mask, netMasks = current.netMasks + (net to mask),
