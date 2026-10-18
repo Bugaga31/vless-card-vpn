@@ -71,6 +71,11 @@ object ServerChoice {
         val old = current?.takeIf { it.works }?.let { measuredSpeed(it,net,now) } ?: 0
         return old <= 0 || speed.toLong() >= old.toLong() * 120 / 100 && speed.toLong() - old >= 500
     }
+    /** Keep a historical hint, but never reuse an unconfirmed speed as a live rating.
+     * A newer concurrent sample or another network is never invalidated.
+     */
+    fun invalidateSpeed(s: com.vlesscardvpn.model.ServerState, net: String, attemptedAt: Long): com.vlesscardvpn.model.ServerState =
+        if (attemptedAt > 0 && s.speedNetwork == net && s.speedCheckedAt == attemptedAt) s.copy(speedCheckedAt = 0) else s
     fun acceptsSpeedSample(kbps: Int, parallel: Int) = kbps > 0 && parallel == 1
     fun automaticPrimary(auto: Boolean, leastPing: Boolean, gaming: Boolean) = gaming || auto && leastPing
     /** Honest upper-confidence exploration bonus; use on background candidates, not forced live switches. */

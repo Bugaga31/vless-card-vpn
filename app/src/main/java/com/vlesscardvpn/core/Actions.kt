@@ -843,14 +843,31 @@ object Actions {
         val cand = (sel + others).distinctBy { it.id }
         if (cand.isEmpty()) return ytSwitch
         val prev = progress.value
-        realTest(cand, "Фоновая проверка", big = wifi)
-        progress.value = prev
+        val sampleNet = Net.key(app); val sampleHandle = Net.underlying(app)?.toString()
+        fun sameNetwork() = Net.key(app) == sampleNet && Net.underlying(app)?.toString() == sampleHandle
+        try {
+            val throughputMode = st.settings.mode == Mode.AUTO && !GameSession.active()
+            // Concurrent downloads share the line and cannot rank throughput. First check HTTPS only.
+            realTest(cand, "Фоновая проверка", big = wifi && !throughputMode, youtube = false,
+                attempts = 1, parallel = 4, budgetMs = ConnectPolicy.QUICK_BUDGET_MS)
+            if (!sameNetwork()) return false
+            if (throughputMode) AutoSelection.compare(cand, { Store.state.value.state(it) }, sampleNet,
+                now = { System.currentTimeMillis() }, elapsed = { android.os.SystemClock.elapsedRealtime() },
+                validNetwork = { sameNetwork() }, gaming = false,
+                allowDownload = { PhonePower.refresh(app).let { it.allowed && it.allowLight && !it.deferTraffic } },
+                onInconclusive = { server, at -> expireUnreproducedSpeed(server,sampleNet,at) }) { server, budget ->
+                realTest(listOf(server), "Фон: сравниваю скорость по очереди", big = true, youtube = false,
+                    attempts = 1, parallel = 1, budgetMs = budget)
+            }
+        } finally { progress.value = prev }
+        if (!sameNetwork()) return false
         val now = Store.state.value
         val selOk = sel.filter { now.state(it).works }
         val best = automaticOrder(now, cand.filter { now.state(it).works })
         if (best.isEmpty()) {
             val alive = now.servers.filter { now.state(it).tcpMs > 0 }.sortedBy { now.state(it).tcpMs }.take(8)
             if (alive.isNotEmpty()) doFindMasks(alive, 24)
+            if (!sameNetwork()) return false
             val after = Store.state.value
             return if (alive.any { after.state(it).works }) { selectBest(5, close = true, among = alive.filter { after.state(it).works }); true } else ytSwitch
         }
@@ -1119,6 +1136,7 @@ object Actions {
             val winner = AutoSelection.compare(ok, { Store.state.value.state(it) }, net,
                 now = { System.currentTimeMillis() }, elapsed = { android.os.SystemClock.elapsedRealtime() },
                 validNetwork = { valid() }, gaming = GameSession.active(),
+                onInconclusive = { server, at -> expireUnreproducedSpeed(server,net,at) },
                 allowDownload = { PhonePower.refresh(app).let { it.allowLight && !it.deferTraffic } }) { server, budget ->
                 realTest(listOf(server), "Новая сеть: сравниваю скорость", big = true, youtube = false,
                     attempts = 1, parallel = 1, budgetMs = budget)
@@ -1285,6 +1303,10 @@ object Actions {
         return "Короткая проверка: работают ${ok + second}; остальные серверы не задерживают первый успех"
     }
 
+    private fun expireUnreproducedSpeed(server: Server, net: String, at: Long) {
+        Store.setState(server.id) { ServerChoice.invalidateSpeed(it, net, at) }
+    }
+
     private suspend fun chooseCompared(candidates: List<Server>, onReady: ((Server) -> Unit)?,
                                        explore: List<Server> = emptyList()): Server? {
         val net = Net.key(app); val network = Net.underlying(app)?.toString()
@@ -1301,7 +1323,8 @@ object Actions {
             return AutoSelection.compare(acceptable, { Store.state.value.state(it) }, net,
                 now = { System.currentTimeMillis() }, elapsed = { android.os.SystemClock.elapsedRealtime() },
                 validNetwork = { valid() },
-                allowDownload = { allowed() && remaining() >= AutoSelection.MIN_PROBE_MS }, gaming = GameSession.active()) { server, budget ->
+                allowDownload = { allowed() && remaining() >= AutoSelection.MIN_PROBE_MS }, gaming = GameSession.active(),
+                onInconclusive = { server, at -> expireUnreproducedSpeed(server,net,at) }) { server, budget ->
                 val bounded = minOf(budget,remaining())
                 if (bounded >= AutoSelection.MIN_PROBE_MS) kotlinx.coroutines.withTimeoutOrNull(bounded) {
                     realTest(listOf(server), "Авто: сравниваю скорость финалистов", big = true, youtube = false,

@@ -12,6 +12,6 @@ object PublicCloudQueue {
         val head = ranked.take(1)
         val reserved = ServerChoice.diverse(challengers.filter { s -> head.none { it.id == s.id } }, minOf(slots.coerceAtLeast(0),limit-head.size))
         // Diversity keeps bounded work useful even with many clones of one endpoint.
-        return ServerChoice.diverse((head + reserved + ranked).distinctBy { it.id }, limit)
+        return ServerChoice.diverse((head + reserved + ranked + catalog.mapNotNull { allowed[it.id] }).distinctBy { it.id }, limit)
     }
 }

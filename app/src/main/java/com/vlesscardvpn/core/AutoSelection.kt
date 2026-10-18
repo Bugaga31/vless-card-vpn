@@ -35,6 +35,7 @@ object AutoSelection {
     suspend fun compare(candidates: List<Server>, state: (Server) -> ServerState, net: String,
                         now: () -> Long, elapsed: () -> Long, validNetwork: () -> Boolean,
                         allowDownload: () -> Boolean, gaming: Boolean,
+                        onInconclusive: (Server, Long) -> Unit = { _, _ -> },
                         probe: suspend (Server, Long) -> Unit): Server? {
         val valid = if (gaming) candidates.distinctBy { it.id }.filter { state(it).works }
             .sortedBy { ServerChoice.latencyScore(state(it).evidenceFor(net), state(it).realMs) }.take(3)
@@ -54,6 +55,11 @@ object AutoSelection {
         }
         currentCoroutineContext().ensureActive()
         if (!validNetwork()) return null
+        // Persist provenance invalidation too: later ranking/launches must not resurrect an old speed.
+        attemptedAt.forEach { (id, at) ->
+            val server = valid.first { it.id == id }
+            if (state(server).speedCheckedAt <= at) onInconclusive(server, at)
+        }
         val results = valid.associate { it.id to state(it) }
         fun effective(server: Server): ServerState {
             val result = results.getValue(server.id)

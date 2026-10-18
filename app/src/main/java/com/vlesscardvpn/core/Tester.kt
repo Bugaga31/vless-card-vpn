@@ -155,7 +155,7 @@ object Tester {
                 val t0 = System.nanoTime()
                 runCatching {
                     boundedCall(client,Request.Builder().url(testUrl).header("User-Agent", UA).build()).execute().use { r ->
-                        check(r.code in 200..399) { "HTTP ${r.code}" }
+                        check(ProbeResponsePolicy.connectivity(r.code, testUrl)) { "Unexpected connectivity HTTP ${r.code}" }
                         r.body?.byteStream()?.use { it.read(ByteArray(4096)) }
                     }
                     best = minOf(best, (System.nanoTime() - t0) / 1_000_000)
@@ -326,11 +326,13 @@ object Tester {
     }
 
     private fun download(client: OkHttpClient, url: String, deadline: Long = Long.MAX_VALUE, onCall: ((okhttp3.Call) -> Unit)? = null): Int =
-        client.newCall(Request.Builder().url(url).header("User-Agent", UA).build()).also { call ->
+        client.newCall(Request.Builder().url(url).header("User-Agent", UA)
+            .header("Accept-Encoding", "identity").header("Cache-Control", "no-cache, no-store").build()).also { call ->
             if (deadline != Long.MAX_VALUE) call.timeout().timeout(TimeUnit.NANOSECONDS.toMillis((deadline-System.nanoTime()).coerceAtLeast(1)).coerceAtLeast(1),TimeUnit.MILLISECONDS)
             onCall?.invoke(call)
         }.execute().use { r ->
-            check(r.isSuccessful); val src = r.body!!.byteStream(); val buf = ByteArray(16384); var total = 0
+            check(ProbeResponsePolicy.download(r.code, r.header("Content-Type"), r.header("Content-Encoding"))) { "Invalid speed-test response" }
+            val src = r.body!!.byteStream(); val buf = ByteArray(16384); var total = 0
             while (total < BIG_BYTES) { val n = src.read(buf); if (n < 0) break; total += n }
             total
         }
