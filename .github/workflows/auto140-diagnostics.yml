@@ -14,16 +14,16 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          for JOB in 117750671919 117750672120; do
+          for JOB in 117755278730 117755279004; do
             if ! gh api --allow-escape-sequences "repos/$GITHUB_REPOSITORY/actions/jobs/$JOB/logs" > "/tmp/$JOB.log" 2> /tmp/diag-error; then
               echo "::notice title=Diagnostic-read-error-$(echo $JOB)::$(head -c 700 /tmp/diag-error)"
             fi
           done
           python3 - <<'PY'
           import pathlib,re
-          for job in ['117750671919','117750672120']:
+          for job in ['117755278730','117755279004']:
               lines=pathlib.Path('/tmp/'+job+'.log').read_text(errors='replace').splitlines()
-              hits=[i for i,line in enumerate(lines) if any(s in line for s in ['services: through','eight:','optimize result='])]
+              hits=[i for i,line in enumerate(lines) if any(s in line for s in ['services: through','eight:','optimize result=','BAD {','warp: probe'])]
               selected=hits
               text=re.sub(r'\x1b\[[0-9;]*[A-Za-z]','',' | '.join(lines[i] for i in selected))[-3500:]
               # Only synthetic E2E/test output, no environment dumps or arbitrary repository files.
