@@ -166,9 +166,12 @@ object Tester {
             fun remaining() = TimeUnit.NANOSECONDS.toMillis((deadline - System.nanoTime()).coerceAtLeast(1)).coerceAtLeast(1)
             val bigF = if (big) pool.submit<Pair<Boolean, Int>> { bigDownload(client,budgetDeadline,onCall) }.also { tasks += it } else null
             val ytF = if (youtube) pool.submit<Boolean> { runCatching {
-                client.newCall(Request.Builder().url(YT_URL).header("User-Agent", UA).build()).execute().use { it.code in 200..399 } }.getOrDefault(false) }.also { tasks += it } else null
+                boundedCall(client,Request.Builder().url(YT_URL).header("User-Agent", UA).build()).execute().use { check(it.code == 204) }
+                boundedCall(client,Request.Builder().url("https://i.ytimg.com/vi/jNQXAC9IVRw/hqdefault.jpg").header("User-Agent", UA).build()).execute().use {
+                    it.code == 200 && it.header("Content-Type").orEmpty().startsWith("image/", true) && (it.body?.byteStream()?.read(ByteArray(1024)) ?: 0) > 0
+                } }.getOrDefault(false) }.also { tasks += it } else null
             val tgF = if (youtube) pool.submit<Boolean> { runCatching {
-                client.newCall(Request.Builder().url(TG_URL).header("User-Agent", UA).build()).execute().use { it.code in 200..499 } }.getOrDefault(false) }.also { tasks += it } else null
+                boundedCall(client,Request.Builder().url("https://web.telegram.org/").header("User-Agent", UA).build()).execute().use { it.code == 200 && (it.body?.byteStream()?.read(ByteArray(1024)) ?: 0) > 0 } }.getOrDefault(false) }.also { tasks += it } else null
             val bigResult = ProbeTasks.await(bigF, remaining(), false to 0)
             val ytOk = if (ytF != null) ProbeTasks.await(ytF, remaining(), false) else null
             val tgOk = if (tgF != null) ProbeTasks.await(tgF, remaining(), false) else null
@@ -419,6 +422,7 @@ object Tester {
         val client = base.newBuilder().proxy(Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", port))).readTimeout(6, TimeUnit.SECONDS).callTimeout(12, TimeUnit.SECONDS).build()
         val t0 = System.nanoTime()
         client.newCall(Request.Builder().url(DPI_URL).header("User-Agent", UA).build()).execute().use { r ->
+            check(r.code == 200 && r.header("Content-Type").orEmpty().startsWith("text/html",ignoreCase=true))
             val src = r.body!!.byteStream(); val buf = ByteArray(32768); var total = 0L
             val end = t0 + 4_000_000_000L
             while (System.nanoTime() < end) { val n = src.read(buf); if (n < 0) break; total += n }

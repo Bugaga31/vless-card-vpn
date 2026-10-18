@@ -191,7 +191,7 @@ class TunnelService : VpnService() {
             val network = Net.key(this)
             var settings = st.settings
             val automatic = settings.mode == Mode.AUTO
-            var selected = st.selected
+            var selected = st.selected.filter(com.vlesscardvpn.core.AutoEligibility::allowed)
             if (settings.mode != Mode.BYEDPI && selected.isEmpty()) {
                 // Nothing chosen: take the best servers that passed the last test.
                 val candidates = Actions.preferred(st, st.servers.filter { st.state(it).works })
@@ -346,10 +346,11 @@ class TunnelService : VpnService() {
             val sampledHandle = Net.underlying(this@TunnelService)?.toString()
             val sampledServers = usedServers.toList()
             val sampledCore = core
-            var p = Tester.probeSocks(port, st.testUrl, big = false, youtube = false, attempts = 1, budgetMs = 3500)
+            val checkServices = st.mode == Mode.AUTO || Tunnel.ytViaDpi
+            var p = Tester.probeSocks(port, st.testUrl, big = false, youtube = checkServices, attempts = 1, budgetMs = 5000)
             // right after connecting the first packets may still be on their way (WireGuard/WARP handshake, a slow
             // mobile network): one calm second try before calling the route bad and starting a heal or a reconnect
-            if (!p.works) { delay(3000); if (Tunnel.socks?.port == port) p = Tester.probeSocks(port, st.testUrl, big = false, youtube = false, attempts = 1, budgetMs = 3500) }
+            if (!p.works) { delay(3000); if (Tunnel.socks?.port == port) p = Tester.probeSocks(port, st.testUrl, big = false, youtube = checkServices, attempts = 1, budgetMs = 5000) }
             val cur = Tunnel.status.value
             if (cur.state != Tunnel.State.CONNECTED || core !== sampledCore || Net.key(this@TunnelService) != sampledNet ||
                 Net.underlying(this@TunnelService)?.toString() != sampledHandle) return@launch
@@ -360,7 +361,7 @@ class TunnelService : VpnService() {
             } else ""
             if (Tunnel.status.value.state != Tunnel.State.CONNECTED || core !== sampledCore ||
                 Net.key(this@TunnelService) != sampledNet || Net.underlying(this@TunnelService)?.toString() != sampledHandle) return@launch
-            val text = if (p.realMs > 0) "HTTPS работает · ${p.realMs} мс · скорость и сервисы проверяются в фоне$warp"
+            val text = if (p.realMs > 0) "HTTPS · ${p.realMs} мс · YouTube: ${if(p.ytOk==true) "✓" else if(p.ytOk==false) "нет ответа" else "не проверен"} · Telegram Web: ${if(p.tgOk==true) "✓" else if(p.tgOk==false) "нет ответа" else "не проверен"}$warp"
                 else "Нет ответа через выбранный маршрут (${p.error}). " + if (st.mode == Mode.AUTO && st.autoHeal) "Ищу рабочий вариант сам…" else "Проверьте серверы или включите маскировку."
             Tunnel.status.value = cur.copy(check = text, checkOk = p.works)
             runCatching { val stv = Store.state.value; com.vlesscardvpn.core.Brain.lived(sampledNet, sampledServers, { stv.state(it) }, p.works); com.vlesscardvpn.core.Brain.save(this@TunnelService) }

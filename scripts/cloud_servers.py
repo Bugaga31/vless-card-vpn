@@ -17,7 +17,7 @@ EXTRA = [  # big world collections: too heavy for a phone, fine for a CI runner
     "SoliSpirit/v2ray-configs/main/Protocols/trojan.txt",
 ]
 SCHEMES = ("vless://", "vmess://", "trojan://", "ss://")
-LIMIT_ALL, LIMIT_RU = 6000, 3000
+LIMIT_ALL, LIMIT_RU = None, None  # publish every reachable configuration; no prefix truncation
 
 
 def catalog():
@@ -75,15 +75,15 @@ def endpoint(link):
         if link.startswith("vmess://"):
             o = json.loads(b64(link[8:].split("#")[0]))
             tls = (o.get("sni") or o.get("host") or o["add"]) if o.get("tls") == "tls" else None
-            return o["add"].strip("[]"), int(o["port"]), "vmess|%s|%s|%s|%s" % (o["add"], o["port"], o.get("id"), o.get("net")), tls
+            return o["add"].strip("[]"), int(o["port"]), "vmess|" + json.dumps({k:v for k,v in o.items() if k not in ("ps", "remark")}, sort_keys=True, separators=(",", ":")), tls
         body = link.split("://", 1)[1].split("#")[0]
         if link.startswith("ss://") and "@" not in body:
             body = b64(body.split("?")[0])
         u = urllib.parse.urlsplit("x://" + body)
         if not u.hostname or not u.port: return None
         q = urllib.parse.parse_qs(u.query)
-        ident = "|".join([link.split("://")[0], u.hostname.lower(), str(u.port), u.username or "", q.get("type", [""])[0],
-                          q.get("security", [""])[0], q.get("sni", [""])[0], q.get("pbk", [""])[0], q.get("path", [""])[0]])
+        ident = "|".join([link.split("://")[0], u.hostname.lower(), str(u.port), u.username or "", u.password or "",
+                          json.dumps(q, sort_keys=True, separators=(",", ":"))])
         sec = q.get("security", [""])[0]
         sni = q.get("sni", [""])[0] or q.get("host", [""])[0] or (u.hostname if not re.match(r"^[0-9.:]+$", u.hostname) else "")
         tls = (sni or None) if sec in ("tls", "reality") or link.startswith("trojan://") else None
@@ -127,15 +127,20 @@ async def main():
             old = links.get(e[2])
             if old is None or (ru and not old[3]): links[e[2]] = (l, e[0], e[1], ru or (old[3] if old else False), e[3])
     print("unique:", len(links))
-    sem = asyncio.Semaphore(2000)
+    sem = asyncio.Semaphore(256)
     items = list(links.values())
-    ms = await asyncio.gather(*(ping(h, p, sni, sem) for _, h, p, _, sni in items))
+    # TCP is only a reachability filter. A plain TLS hello can fail on a valid Reality endpoint.
+    # Share one physical ping across all credentials/transports of the endpoint, without dropping variants.
+    endpoints = list(dict.fromkeys((h, p) for _, h, p, _, _ in items))
+    probes = await asyncio.gather(*(ping(h, p, None, sem) for h, p in endpoints))
+    latency = dict(zip(endpoints, probes))
+    ms = [latency[(it[1], it[2])] for it in items]
     alive = sorted((m, it) for m, it in zip(ms, items) if m > 0)
     print("alive:", len(alive))
     stamp = time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime())
     def write(name, rows, limit):
         with open(name, "w", encoding="utf-8") as f:
-            f.write(f"# VLESS Card cloud check {stamp}: {len(rows)} answered (TCP, TLS handshake for TLS/REALITY) from GitHub, fastest first\n")
+            f.write(f"# VLESS Card cloud check {stamp}: {len(rows)} answered (TCP only; not proof of authenticated traffic) from GitHub, fastest first\n")
             for _, it in rows[:limit]: f.write(it[0] + "\n")
     write("out/alive.txt", alive, LIMIT_ALL)
     write("out/alive_ru.txt", [a for a in alive if a[1][3]], LIMIT_RU)

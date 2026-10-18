@@ -7,41 +7,98 @@ on:
     paths: ['scripts/cloud_servers.py', 'scripts/cloud_reports.py', 'scripts/cloud_real.py', 'scripts/cloud_manifest.py', 'config/cloud-recipes.json', '.github/workflows/cloud-servers.yml']
 permissions:
   contents: write
-  actions: write  # the run starts the next one itself: GitHub's cron here did not fire at all
+  actions: write
 concurrency: { group: cloud-servers, cancel-in-progress: false }
 jobs:
+  collect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate cloud policies
+        run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p 'test_cloud_*.py'
+      - name: Collect every public catalog and ping every endpoint
+        run: mkdir -p out && python3 scripts/cloud_servers.py
+      - name: Freeze history and exact shard assignments
+        run: CLOUD_PREPARE=1 python3 scripts/cloud_real.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cloud-catalog
+          path: out/
+          retention-days: 1
   check:
+    needs: collect
     runs-on: ubuntu-latest
     timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3]
     steps:
-      - run: echo "START=$(date +%s)" >> "$GITHUB_ENV"
       - uses: actions/checkout@v4
-      - name: Validate cloud-learning policies
-        run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p 'test_cloud_*.py'
-      - name: Collect and ping
-        run: mkdir -p out && python3 scripts/cloud_servers.py
-      - name: Real check through Xray (HTTPS through every top server)
+      - uses: actions/download-artifact@v4
+        with:
+          name: cloud-catalog
+          path: out/
+      - name: Check one quarter of ALL reachable configurations through Xray
+        env:
+          CLOUD_SHARDS: '4'
+          CLOUD_SHARD: ${{ matrix.shard }}
         run: |
           curl -fsSL -o /tmp/xray.zip https://github.com/XTLS/Xray-core/releases/download/v26.9.30/Xray-linux-64.zip
           mkdir -p /tmp/xray && unzip -qo /tmp/xray.zip -d /tmp/xray
-          XRAY=/tmp/xray/xray python3 scripts/cloud_real.py || echo "::warning::real check failed, ping order kept"
-      - name: Merge phone reports (shared cloud)
+          XRAY=/tmp/xray/xray python3 scripts/cloud_real.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cloud-result-${{ matrix.shard }}
+          path: out/result-*.json
+          if-no-files-found: error
+          retention-days: 1
+  publish:
+    needs: [collect, check]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: cloud-catalog
+          path: out/
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: cloud-result-*
+          merge-multiple: true
+          path: results/
+      - name: Merge all four shards and measure download finalists sequentially
+        env:
+          CLOUD_RESULTS_DIR: results
+        run: |
+          curl -fsSL -o /tmp/xray.zip https://github.com/XTLS/Xray-core/releases/download/v26.9.30/Xray-linux-64.zip
+          mkdir -p /tmp/xray && unzip -qo /tmp/xray.zip -d /tmp/xray
+          XRAY=/tmp/xray/xray python3 scripts/cloud_real.py
+      - name: Merge measured phone reports
         env:
           REPORT_TOKEN: ${{ secrets.REPORT_TOKEN }}
         run: python3 scripts/cloud_reports.py || echo "::warning::reports merge failed"
-      - name: Build measured tier manifest and safe recipe hints
+      - name: Build measured tier manifest
         run: python3 scripts/cloud_manifest.py
-      - name: Publish to the «servers» branch
+      - name: Publish to the servers branch only after all checks succeeded
         run: |
           cd out
+          rm -f check-queue.json
           git init -q -b servers
           git config user.name "cloud-check"; git config user.email "cloud-check@users.noreply.github.com"
           git add -A && git commit -qm "cloud check $(date -u +%F' '%H:%M)"
           git push -qf "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" servers
-      - name: Start the next run in 10 minutes
-        if: always() && github.ref == 'refs/heads/main'
+  next:
+    needs: [collect, check, publish]
+    if: always() && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Retry or refresh in ten minutes (cron is also enabled)
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          left=$(( 600 - ( $(date +%s) - START ) )); [ $left -gt 0 ] && sleep $left
-          gh workflow run cloud-servers.yml --repo "$GITHUB_REPOSITORY" --ref main || echo "::warning::could not schedule the next run"
+          sleep 600
+          gh workflow run cloud-servers.yml --repo "$GITHUB_REPOSITORY" --ref main

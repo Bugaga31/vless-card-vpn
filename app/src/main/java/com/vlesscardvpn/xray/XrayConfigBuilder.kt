@@ -287,6 +287,10 @@ object XrayConfigBuilder {
         if (settings.blockAds) rules.put(JSONObject().put("domain", JSONArray(listOf("geosite:category-ads-all") + YT_ADS)).put("outboundTag", "block"))
         if (settings.mode == Mode.HYBRID && hybridDomains(settings).isNotEmpty())
             rules.put(JSONObject().put("domain", JSONArray(hybridDomains(settings))).put("outboundTag", BYEDPI_TAG))
+        if (useServers && (settings.services.isEmpty() || "telegram" in settings.services)) {
+            rules.put(toMain(JSONObject().put("domain", JSONArray(com.vlesscardvpn.core.Services.domains(listOf("telegram"))))))
+            rules.put(toMain(JSONObject().put("ip", JSONArray(com.vlesscardvpn.core.Services.ips(listOf("telegram"))))))
+        }
         if (settings.ruDirect && useServers) {
             rules.put(JSONObject().put("domain", JSONArray(RU_DOMAINS)).put("outboundTag", "direct"))
             rules.put(JSONObject().put("ip", arr("geoip:ru")).put("outboundTag", "direct"))

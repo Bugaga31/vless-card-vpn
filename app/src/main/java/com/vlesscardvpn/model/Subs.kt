@@ -7,12 +7,14 @@ object Subs {
     private fun gh(path: String) = "https://raw.githubusercontent.com/$path"
     private const val IG = "igareck/vpn-configs-for-russia/main"
     const val DIMAN = "https://gist.githubusercontent.com/Diman331/8c868070c0b5a5ec0c7d94507717b67b/raw/subscription.txt"
+    const val CLOUD_WORKS = "https://raw.githubusercontent.com/Bugaga31/vless-card-vpn/servers/works.txt"
     const val RU = "Для России"
     const val WL = "Белые списки (мобильный интернет)"
     const val WORLD = "Мировые сборники (много, но слабее)"
 
     val CATALOG: List<SubSource> = listOf(
-        // «Облачная проверка»: GitHub pings tens of thousands of servers every 6 h and keeps the ones that answer
+        // Public cloud checks all collected reachable Xray-supported configurations; local ISP checks still decide.
+        SubSource(CLOUD_WORKS, "VLESS Card · проверенные HTTPS, весь мир", WORLD, default = true),
         SubSource(gh("Bugaga31/vless-card-vpn/servers/alive_ru.txt"), "VLESS Card · облачная проверка (для России)", RU, default = true),
         SubSource(DIMAN, "Diman331 · подписка", WORLD, default = true),
         SubSource(gh("$IG/BLACK_VLESS_RUS_mobile.txt"), "igareck · VLESS для мобильного", RU, default = true),
@@ -30,7 +32,7 @@ object Subs {
         SubSource(gh("zieng2/wl/main/vless_universal.txt"), "zieng2 · белые списки universal", WL, whitelist = true),
         SubSource(gh("Maskkost93/kizyak-vpn-4.0/main/kizyaktestru.txt"), "Кизяк · RU-тест", WL, whitelist = true),
         SubSource(gh("FLAT447/v2ray-lists/main/WHITE_LITE.txt"), "FLAT447 · белые списки lite", WL, whitelist = true),
-        SubSource(gh("Bugaga31/vless-card-vpn/servers/alive.txt"), "VLESS Card · облачная проверка (весь мир, 6000)", WORLD),
+        SubSource(gh("Bugaga31/vless-card-vpn/servers/alive.txt"), "VLESS Card · облачная проверка (весь мир)", WORLD),
         SubSource(gh("Epodonios/v2ray-configs/main/All_Configs_Sub.txt"), "Epodonios", WORLD),
         SubSource(gh("mahdibland/V2RayAggregator/master/sub/sub_merge.txt"), "V2RayAggregator", WORLD),
         SubSource(gh("MatinGhanbari/v2ray-configs/main/subscriptions/v2ray/all_sub.txt"), "MatinGhanbari", WORLD),
