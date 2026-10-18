@@ -45,12 +45,29 @@ object Updater {
     private fun <T> anyPath(block: (OkHttpClient) -> T): T =
         try { block(client(false)) } catch (e: Exception) { if (e is CancellationException) throw e; if (Tunnel.socks != null && e is java.io.IOException) block(client(true)) else throw e }
 
-    /** Checks at most every 6 h unless [force]. */
-    @Synchronized fun check(force: Boolean = false, ctx: Context? = null) {
+    fun autoDownload(ctx: Context) = ctx.getSharedPreferences("apk_updates", 0).getBoolean("auto", true)
+    fun setAutoDownload(ctx: Context, enabled: Boolean) {
+        ctx.getSharedPreferences("apk_updates", 0).edit().putBoolean("auto", enabled).apply()
+        schedule(ctx)
+        if (!enabled) cancelBackground()
+        if (enabled) check(ctx = ctx)
+    }
+    fun schedule(ctx: Context) {
+        val js = ctx.getSystemService(Context.JOB_SCHEDULER_SERVICE) as android.app.job.JobScheduler
+        if (!autoDownload(ctx)) { js.cancel(13901); return }
+        val job = android.app.job.JobInfo.Builder(13901, android.content.ComponentName(ctx, UpdateJob::class.java))
+            .setRequiredNetworkType(android.app.job.JobInfo.NETWORK_TYPE_UNMETERED).setRequiresBatteryNotLow(true)
+            .setPeriodic(3600_000L, 15 * 60_000L).setPersisted(true).build()
+        runCatching { js.schedule(job) }
+    }
+
+    /** Checks at most hourly unless [force]; known updates retry prefetch when Wi-Fi becomes available. */
+    @Synchronized fun check(force: Boolean = false, ctx: Context? = null): Job? {
         val now = System.currentTimeMillis()
-        if (checking || state.value.busy || !force && !UpdatePolicy.checkDue(now, lastCheck, lastAttempt)) return
+        if (checking || state.value.busy) return null
+        if (!force && !UpdatePolicy.checkDue(now, lastCheck, lastAttempt)) return ctx?.let { prefetch(it.applicationContext) }
         checking = true; lastAttempt = now
-        scope.launch {
+        return scope.launch {
             try {
             if (force) state.value = state.value.copy(text = "Проверяю обновления…")
             runCatching {
@@ -66,7 +83,7 @@ object Updater {
                 val mine = com.vlesscardvpn.BuildConfig.VERSION_CODE
                 state.value = if (code > mine) State(tag.removePrefix("v"), code, o.optString("body").substringBefore("### Автоматические").trim().take(1500), text = "Доступна версия ${tag.removePrefix("v")}")
                     else State(text = if (force) "У вас последняя версия (${com.vlesscardvpn.BuildConfig.VERSION_NAME})" else "")
-                state.value.let { st -> if (st.latest.isNotEmpty()) { ctx?.let { prefetch(it.applicationContext) }; if (!force && st.latest != noted) { noted = st.latest; AppWatch.note("Вышла версия ${st.latest} — обновить можно на главной одной кнопкой") } } }
+                state.value.let { st -> if (st.latest.isNotEmpty()) { ctx?.let { prefetch(it.applicationContext)?.join() }; if (!force && st.latest != noted) { noted = st.latest; AppWatch.note("Вышла версия ${st.latest} — обновить можно на главной одной кнопкой") } } }
             }.onFailure { if (force) state.value = state.value.copy(text = "Не удалось проверить: ${Errors.human(it)}") }
             } finally { checking = false }
         }
@@ -74,6 +91,8 @@ object Updater {
 
     @Volatile private var ready: String = ""
     private var readyDigest = ""
+    private var prefetchAttempt = 0L
+    private var prefetchVersion = ""
 
     @Suppress("DEPRECATION") private fun signers(info: android.content.pm.PackageInfo): Set<String> {
         val certs = if (android.os.Build.VERSION.SDK_INT >= 28) info.signingInfo?.apkContentsSigners else info.signatures
@@ -129,16 +148,26 @@ object Updater {
     }
 
     /** On Wi-Fi the new version is downloaded in the background, so «Обновить» installs at once. */
-    private fun prefetch(app: Context) {
-        if (!PhonePower.refresh(app).allowed) return
+    @Volatile private var prefetchJob: Job? = null
+    fun cancelBackground() { prefetchJob?.cancel() }
+    @Synchronized private fun prefetch(app: Context): Job? {
+        if (!autoDownload(app)) return null
+        prefetchJob?.takeIf { it.isActive }?.let { return it }
+        // Screen-off is fine for a system-batched download; thermal, saver, battery and game protection remain.
+        val power = PhonePower.refresh(app)
+        val pm = app.getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
+        if (power.memory.hot || power.memory.low || pm.isPowerSaveMode || GameSession.active() || power.deferTraffic) return null
         val s = state.value
-        if (s.latest.isEmpty() || s.busy || ready == s.latest) return
+        if (s.latest.isEmpty() || s.busy || ready == s.latest) return null
         val unmetered = runCatching {
             val cm = app.getSystemService(Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
             cm.getNetworkCapabilities(cm.activeNetwork)?.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_NOT_METERED) == true
         }.getOrDefault(false)
-        if (!unmetered) return
-        scope.launch { runCatching { download(app, s) }.onSuccess { if (state.value.latest == s.latest && !state.value.busy) state.value = state.value.copy(text = "Версия ${s.latest} скачана — нажмите «Обновить», установка займёт секунды") } }
+        if (!unmetered) return null
+        val now = System.currentTimeMillis()
+        if (prefetchVersion == s.latest && now >= prefetchAttempt && now - prefetchAttempt < 15 * 60_000L) return null
+        prefetchAttempt = now; prefetchVersion = s.latest
+        return scope.launch { runCatching { download(app, s) }.onSuccess { if (state.value.latest == s.latest && !state.value.busy) state.value = state.value.copy(text = "Версия ${s.latest} скачана и проверена — нажмите «Обновить» и подтвердите установку Android") } }.also { prefetchJob = it }
     }
 
     /** Downloads the update (if not yet) and opens Android's «Установить?». */

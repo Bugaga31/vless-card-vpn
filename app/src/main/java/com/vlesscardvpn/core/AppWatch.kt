@@ -187,7 +187,7 @@ object AppWatch {
         pilotAt = elapsed
         val plan = appCtx?.let { PhonePower.refresh(it) } ?: return
         powerNote(plan)
-        if (plan.allowed) appCtx?.let { Updater.check(ctx = it); CloudSync.auto(it) } // every 6 h / 3 h at most, also while the app stays closed
+        if (plan.allowed) appCtx?.let { Updater.check(ctx = it); CloudSync.auto(it) } // hourly APK checks / 3 h private sync while VPN monitoring runs
         // battery saver on or < 20 %: only what keeps the internet working (fix, switching) — no evolution, revival,
         // freeze/latency/speed checks; they come back when the phone charges
         val eco = !plan.allowed

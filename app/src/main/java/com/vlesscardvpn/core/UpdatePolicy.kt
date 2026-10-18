@@ -48,6 +48,6 @@ object UpdatePolicy {
         return done
     }
     fun checkDue(now: Long, success: Long, attempt: Long): Boolean =
-        (success == 0L || now < success || now - success >= 6 * 3600_000L) &&
+        (success == 0L || now < success || now - success >= 3600_000L) &&
             (attempt == 0L || now < attempt || now - attempt >= 15 * 60_000L)
 }

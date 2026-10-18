@@ -699,16 +699,22 @@ object Actions {
         val last = prefs.getLong(decisionKey,0)
         val stamp = System.currentTimeMillis()
         if (last > 0 && stamp >= last && stamp-last < 10*60000L) return false
-        if (s.dpiRemembered[net] == null && s.dpiRemembered[Net.family(net)] == null) return false
+        if (s.dpiRemembered[net] == null && s.dpiRemembered[Net.family(net)] == null) {
+            if (!PhonePower.refresh(app).allowed) return false
+            // Optional search runs after connection, never on the one-button critical path.
+            prefs.edit().putLong(decisionKey, stamp).apply()
+            doFindDpi()
+            if (Net.key(app) != net || Net.underlying(app)?.toString() != handle) return false
+        }
         val vpn = Tunnel.socks?.port ?: return false
         val set = DpiSet(app)
         val (srv, dpi) = try {
-            set.start(s, net, true, emptySet(), com.vlesscardvpn.BuildConfig.DEBUG)
+            set.start(Store.state.value.settings, net, true, emptySet(), com.vlesscardvpn.BuildConfig.DEBUG)
             val dp = set.currentPort ?: return false
             var a = 0; var b = 0
             repeat(2) { a = maxOf(a, Tester.ytSpeed(vpn)); b = maxOf(b, Tester.ytSpeed(dp)) }
             a to b
-        } catch (e: Throwable) { return false } finally { set.close() }
+        } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Throwable) { return false } finally { set.close() }
         if (Net.key(app) != net || Net.underlying(app)?.toString() != handle || Tunnel.socks?.port != vpn) return false
         val use = ytDpiWins(srv, dpi)
         prefs.edit().putLong(decisionKey,System.currentTimeMillis()).apply()
@@ -1638,23 +1644,23 @@ object Actions {
                     sem.withPermit {
                         val px = DpiProxy(app)
                         val r = try { test(s, px.start(s, st.byeDpiSni, allowLocal = com.vlesscardvpn.BuildConfig.DEBUG)) }
-                            catch (e: Throwable) { DpiResult(false, 0, Errors.human(e)) } finally { px.close() }
+                            catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Throwable) { DpiResult(false, 0, Errors.human(e)) } finally { px.close() }
                         synchronized(dpiResults) { dpiResults.value = dpiResults.value + (s.id to r) }
                         step(done.incrementAndGet(), progress.value.total)
                     }
                 }
             }.awaitAll()
         }
-        // Stage 1: one attempt each, 12 at a time; after 12 passes the rest is skipped (the final re-checks them twice anyway)
-        val passes = AtomicInteger()
-        run(plan, 12) { _, port ->
-            if (passes.get() >= 12) DpiResult(false, 0, "пропущена: уже хватает рабочих")
-            else Tester.probeDpi(port, attempts = 1).let { if (it.ok) passes.incrementAndGet(); DpiResult(it.ok, it.ms, it.error) }
+        // Every available engine/custom/evolved strategy participates. Bounded by phone pressure.
+        val parallel = PhonePower.refresh(app).realParallel.coerceIn(1, 6)
+        run(plan, parallel) { _, port ->
+            Tester.probeDpi(port, attempts = 1).let { DpiResult(it.ok, it.ms, it.error) }
         }
         val first = dpiResults.value
         val passed = plan.filter { first[it.id]?.ok == true }.sortedBy { first.getValue(it.id).ms }
         // Stage 2: finals + evolution
-        val finals = passed.take(8)
+        // Reserve a final for each working engine; fastest initial ping must not exclude zapret/Xray.
+        val finals = (passed.groupBy { it.engine }.values.map { it.first() } + passed).distinctBy { it.id }.take(8)
         val evoPool = st.dpiEvoPool.mapNotNull { DpiEvo.decode(it) }.take(3)
         val mutants = if (finals.isEmpty()) DpiEvo.breed((evoPool + plan.filter { it.engine == DpiEngine.BYEDPI }).distinctBy { it.id }.take(8), 8)
             else DpiEvo.breed((finals.take(3) + evoPool).distinctBy { it.id }, 12)
@@ -1664,7 +1670,7 @@ object Actions {
             progress.value = progress.value.copy(title = "Финал: YouTube, видео-CDN, Discord", done = 0, total = stage2.size * 2)
             done.set(0)
             repeat(2) {
-                run(stage2, 6) { strat, port ->
+                run(stage2, parallel.coerceAtMost(3)) { strat, port ->
                     var sc = Tester.probeDpiSites(port)
                     // a learning (--auto) strategy may spend the first connections on detection: one more chance
                     if (strat.adaptive && sc.score < Tester.DPI_SITES.size) sc = Tester.probeDpiSites(port).takeIf { it.score > sc.score } ?: sc
@@ -1681,7 +1687,7 @@ object Actions {
         val best = ranked.firstOrNull() ?: passed.firstOrNull()
         val max = Tester.DPI_SITES.size * 2
         dpiResults.value = first + ranked.associate { it.id to DpiResult(true, msOf(it.id).toInt(), "", total(it.id)) }
-        if (best != null) Store.update { a ->
+        if (best != null && Net.key(app) == network) Store.update { a ->
             a.copy(settings = a.settings.copy(dpiRemembered = a.settings.dpiRemembered + (network to best.id) + (Settings.ANY_NETWORK to best.id),
                 dpiRanking = a.settings.dpiRanking + (network to (ranked.ifEmpty { passed }).take(5).map { it.id }),
                 dpiEvoPool = DpiEvo.keep(a.settings.dpiEvoPool, ranked.take(3).map { it.id })))

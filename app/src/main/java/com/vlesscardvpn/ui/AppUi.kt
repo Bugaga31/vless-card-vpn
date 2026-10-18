@@ -38,6 +38,8 @@ fun AppUi(onConnect: () -> Unit, onDisconnect: () -> Unit) {
     }
     MaterialTheme(colorScheme = scheme) {
         var tab by remember { mutableIntStateOf(0) }
+        var intro by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(theme.welcomeSound && com.vlesscardvpn.core.Tunnel.socks == null) }
+        LaunchedEffect(intro) { if (intro) { withFrameNanos { }; withFrameNanos { }; android.util.Log.i("VCIntro", "INTRO_VISIBLE"); kotlinx.coroutines.delay(1400); intro = false } }
         Box(Modifier.fillMaxSize()) {
         val sea = theme.oceanBackground && theme.theme != "amoled"
         if (sea) OceanBackground(theme.oceanMotion)
@@ -73,6 +75,7 @@ fun AppUi(onConnect: () -> Unit, onDisconnect: () -> Unit) {
                 } }
             }
         }
+        if (intro) LaunchIntro(onDismiss = { intro = false })
         }
     }
 }

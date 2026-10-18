@@ -62,12 +62,13 @@ fun SettingsScreen() {
         Group("Общее облако") {
             val rctx = androidx.compose.ui.platform.LocalContext.current
             var ron by remember { mutableStateOf(com.vlesscardvpn.core.Report.enabled(rctx)) }
-            Toggle("Публичные подсказки Xray", "Проверенные облаком конфигурации, свежие замеры скорости и ограниченные рецепты обхода. Два облачных кандидата получают места в очереди, но доступность и скорость подтверждает телефон. Это не личный GitHub-backup и не гарантия скорости у вашего оператора.", ron) {
+            Toggle("Публичные подсказки Xray", "Проверенные облаком конфигурации, свежие замеры скорости и ограниченные рецепты обхода. Облачные кандидаты ранжируются во всём каталоге и получают места в ограниченных волнах проверки, но доступность и скорость подтверждает телефон. Это не личный GitHub-backup и не гарантия скорости у вашего оператора.", ron) {
                 ron = it; com.vlesscardvpn.core.Report.setEnabled(rctx, it)
             }
             val publicStatus by com.vlesscardvpn.core.CloudSpeed.status.collectAsState()
             Text(publicStatus, fontSize = 12.sp)
             OutlinedButton(onClick = { com.vlesscardvpn.core.Actions.refreshPublicCloud() }, enabled = ron) { Text("Обновить публичные подсказки") }
+            OutlinedButton(onClick = { runCatching { ctx.startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse("https://github.com/Bugaga31/vless-card-vpn/blob/servers/devices.md"))) } }) { Text("Сводка устройств в облаке") }
             if (!com.vlesscardvpn.core.Report.available()) Text("В этой сборке отправка отчётов отключена — только приём общего облака.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             com.vlesscardvpn.core.Report.lastText(rctx).takeIf { it.isNotEmpty() }?.let { Text(it, fontSize = 12.sp) }
         }
@@ -96,7 +97,11 @@ fun SettingsScreen() {
         Group("Обновление") {
             val upd by com.vlesscardvpn.core.Updater.state.collectAsState()
             val uctx = androidx.compose.ui.platform.LocalContext.current
-            Text("Версия ${com.vlesscardvpn.BuildConfig.VERSION_NAME}. Новые версии проверяются сами (раз в 6 часов) и ставятся отсюда — без GitHub и браузера.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("Версия ${com.vlesscardvpn.BuildConfig.VERSION_NAME}. Новые версии проверяются при запуске и фоновой задачей Android примерно раз в час. APK скачивается в сети без тарификации, установка — только с вашим подтверждением. Android может отложить фоновую задачу.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            var autoApk by remember { mutableStateOf(com.vlesscardvpn.core.Updater.autoDownload(uctx)) }
+            Toggle("Скачивать APK автоматически", "Только сеть без тарификации, без перегрева и низкого заряда. Проверяются SHA-256, пакет, версия и сертификат. Можно отключить; установка не запускается сама.", autoApk) {
+                autoApk = it; com.vlesscardvpn.core.Updater.setAutoDownload(uctx, it)
+            }
             if (upd.text.isNotEmpty()) Text(upd.text, fontSize = 13.sp)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(onClick = { com.vlesscardvpn.core.Updater.check(force = true, ctx = uctx) }) { Text("Проверить") }
@@ -108,7 +113,7 @@ fun SettingsScreen() {
                 set { it.copy(oceanBackground = v, theme = if (v && it.theme == "amoled") "dark" else it.theme) }
             }
             Toggle("Анимация волн", "Не чаще 20 кадров/с. Замирает в фоне, при экономии энергии, низком заряде, нагреве и выключенной системной анимации; фон остаётся виден", s.oceanMotion) { v -> set { it.copy(oceanMotion = v) } }
-            Toggle("Приветствие при запуске", "Мягкий дзинь при открытии. “Thank you for installing me.” — только при первом запуске, если установлен офлайн-голос English. Без звука в тихом режиме и «Не беспокоить»", s.welcomeSound) { v -> set { it.copy(welcomeSound = v) } }
+            Toggle("Заставка при открытии", "Короткая морская заставка без голоса и звука. Коснитесь, чтобы сразу перейти к приложению. При работающем VPN пропускается", s.welcomeSound) { v -> set { it.copy(welcomeSound = v) } }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 listOf("dark" to "Тёмная", "amoled" to "AMOLED", "you" to "Material You").forEach { (id, t) ->
                     if (id != "you" || Build.VERSION.SDK_INT >= 31) FilterChip(selected = s.theme == id, onClick = { set { it.copy(theme = id) } }, label = { Text(t) })

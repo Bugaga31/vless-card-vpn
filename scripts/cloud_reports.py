@@ -147,6 +147,16 @@ def public(cloud):
     return o
 
 
+def device_summary(cloud, now):
+    def recent(t, window):
+        return isinstance(t, (int, float)) and 0 <= now - t < window
+    reports = sum(recent(t, 30 * 86400) for t in cloud.get("ids", {}).values())
+    routes = sum(recent(u.get("t", 0), 3 * 3600) for u in cloud.get("use", {}).values() if isinstance(u, dict))
+    return {"schema": 1, "generated_at": now, "reporting_devices_30d": reports,
+            "route_reports_devices_3h": routes, "online_devices": None, "apk_intake_enabled": False,
+            "notice": "Aggregate historical reports, not live connections. Current APK has no protected report intake. No individual device identifiers are published."}
+
+
 def problems(reports):
     seen = {}
     for r in reports:
@@ -177,6 +187,14 @@ def main():
     cloud = merge(prev, reports, now)
     with open("out/cloud_state.json", "w") as f: json.dump(cloud, f, ensure_ascii=False, separators=(",", ":"))
     with open("out/cloud.json", "w") as f: json.dump(public(cloud), f, ensure_ascii=False, separators=(",", ":"))
+    summary = device_summary(cloud, now)
+    with open("out/device-summary.json", "w") as f: json.dump(summary, f, ensure_ascii=False, separators=(",", ":"))
+    with open("out/devices.md", "w") as f:
+        f.write("# Сводка устройств\n\nОбновлено: " + time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime(now)) + "\n\n")
+        f.write("| Показатель | Количество |\n|---|---:|\n")
+        f.write(f"| Устройства с отчётами за 30 дней | {summary['reporting_devices_30d']} |\n")
+        f.write(f"| Устройства с отчётами маршрутов за 3 часа | {summary['route_reports_devices_3h']} |\n\n")
+        f.write("Это исторические отчёты, **не список подключённых сейчас устройств**. В текущем APK отправка выключена: требуется защищённый приёмник и отдельное согласие пользователя. IP, аккаунты и идентификаторы устройств здесь не публикуются. При наличии допустимых отчётов агрегаты помогают ранжированию по сети, скорости и успешности.\n")
     # phone-verified servers go first in the cloud lists
     links = [s["l"] for s in cloud["servers"]]
     for name in ("alive_ru.txt", "alive.txt"):

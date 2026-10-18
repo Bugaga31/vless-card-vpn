@@ -16,11 +16,6 @@ import com.vlesscardvpn.ui.AppUi
 import com.vlesscardvpn.vpn.TunnelService
 
 class MainActivity : ComponentActivity() {
-    private var welcome: com.vlesscardvpn.core.WelcomeAudio? = null
-    override fun onResume() { super.onResume(); welcome?.start() }
-    override fun onPause() { welcome?.pause(); super.onPause() }
-    override fun onStop() { welcome?.close(); welcome = null; super.onStop() }
-
     private val vpnPermission = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { r ->
         if (r.resultCode == RESULT_OK) start()
     }
@@ -42,11 +37,11 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        if (savedInstanceState == null) welcome = com.vlesscardvpn.core.WelcomeAudio(this, this)
         if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED)
             notifPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
         com.vlesscardvpn.core.Actions.init(this)
         if (!BuildConfig.DEBUG) com.vlesscardvpn.core.Actions.warmup() // background: subscriptions, tests, masks — ready before «Подключить»
+        com.vlesscardvpn.core.Updater.schedule(this)
         com.vlesscardvpn.core.Updater.check(ctx = this)
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {

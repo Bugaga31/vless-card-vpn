@@ -66,4 +66,33 @@ class FullCloudSelectionR139Test {
         val user=rows.indexOfFirst {it.optJSONArray("domain")?.toString()?.contains("domain:telegram.org")==true && it.optString("outboundTag")=="direct"}
         assertTrue(tg>=0 && ru>tg);assertTrue(user>=0 && user<tg)
     }
+    @Test fun apkChecksAreHourlyAndStillRateLimitedAfterErrors() {
+        val t=100_000_000L
+        assertFalse(UpdatePolicy.checkDue(t+3_599_999L,t,t))
+        assertTrue(UpdatePolicy.checkDue(t+3_600_000L,t,t))
+        assertFalse(UpdatePolicy.checkDue(t+899_999L,0,t))
+    }
+    @Test fun automaticDpiPlanIncludesEveryAvailableEngineAndCustomStrategy() {
+        val settings=Settings(byeDpiArgs="--disorder 1")
+        val all=DpiStrategies.plan(settings,"wifi",true)
+        assertTrue(all.any { it.engine==DpiEngine.BYEDPI })
+        assertTrue(all.any { it.engine==DpiEngine.TPWS })
+        assertTrue(all.any { it.engine==DpiEngine.XRAY })
+        assertTrue(all.any { it.id==DpiStrategies.CUSTOM_ID })
+        assertFalse(DpiStrategies.plan(settings,"wifi",false).any { it.engine==DpiEngine.TPWS })
+    }
+    @Test fun vkYandexProfilesNeverReplaceRealitySni() {
+        val reality=server("🇩🇪 node").copy(security="reality",sni="original.example",pbk="public-key")
+        for (host in listOf("vk.com","yandex.ru","vkvideo.ru")) {
+            val mask=com.vlesscardvpn.xray.Masks.byId("vc.sni.$host")!!
+            assertFalse(com.vlesscardvpn.xray.Masks.compatible(mask,reality))
+            assertFalse(com.vlesscardvpn.xray.Masks.searchOrder(true,reality).any { it.sni.isNotEmpty() })
+        }
+        for (id in listOf("BYEDPI#VK_ADAPTIVE","BYEDPI#YANDEX_ADAPTIVE")) {
+            val strategy=DpiStrategies.byId(id,Settings())!!
+            assertTrue(ByeDpiArgs.parse(strategy.args.joinToString(" "),"ya.ru").isSuccess)
+            assertTrue(strategy.adaptive)
+            assertTrue(strategy.argv(1080,"ya.ru").contains("--fake-sni"))
+        }
+    }
 }
