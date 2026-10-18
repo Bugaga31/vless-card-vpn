@@ -23,6 +23,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.vlesscardvpn.BuildConfig
@@ -45,14 +46,19 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
     val working = busy
     val mode = cfg.mode
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-        Row(Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text("VLESS Card", fontSize = 28.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onBackground)
-                Text("Связь на одной волне", fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
-                Text("XRAY", Modifier.padding(horizontal = 12.dp, vertical = 8.dp), color = MaterialTheme.colorScheme.primary,
-                    fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.sp)
+        BoxWithConstraints(Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 8.dp)) {
+            val compact = maxWidth < 320.dp || androidx.compose.ui.platform.LocalDensity.current.fontScale > 1.2f
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("VLESS Card", Modifier.weight(1f), fontSize = if (compact) 22.sp else 28.sp,
+                        maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis,
+                        fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onBackground)
+                    if (!compact) Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
+                        Text("XRAY", Modifier.padding(horizontal = 12.dp, vertical = 8.dp), color = MaterialTheme.colorScheme.primary,
+                            fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.sp)
+                    }
+                }
+                Text(if (compact) "На одной волне · Xray" else "Связь на одной волне", fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
         Text("${BuildConfig.VERSION_NAME} · " + if (cfg.stealthSocks) "Локальный прокси защищён паролем" else "SOCKS 127.0.0.1:${cfg.socksPort}",
@@ -409,15 +415,17 @@ private fun PowerButton(on: Boolean, busy: Boolean, color: Color, onClick: () ->
     val k = pulseValue
     val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
     Spacer(Modifier.height(18.dp))
-    Box(Modifier.size(232.dp), contentAlignment = Alignment.Center) {
-        Box(Modifier.size(232.dp).scale(k).clip(CircleShape).background(Brush.radialGradient(listOf(c.copy(alpha = .18f), Color.Transparent))))
-        androidx.compose.foundation.Canvas(Modifier.size(206.dp)) {
+    BoxWithConstraints(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+        val diameter = minOf(232.dp, maxWidth)
+        Box(Modifier.size(diameter), contentAlignment = Alignment.Center) {
+        Box(Modifier.size(diameter).scale(k).clip(CircleShape).background(Brush.radialGradient(listOf(c.copy(alpha = .18f), Color.Transparent))))
+        androidx.compose.foundation.Canvas(Modifier.size(diameter * (206f / 232f))) {
             val ring = androidx.compose.ui.graphics.drawscope.Stroke(width = 2.dp.toPx(), cap = androidx.compose.ui.graphics.StrokeCap.Round)
             drawCircle(c.copy(alpha = .22f), style = ring)
             if (busy && !on) drawArc(c, turn, 88f, false, style = androidx.compose.ui.graphics.drawscope.Stroke(4.dp.toPx(), cap = androidx.compose.ui.graphics.StrokeCap.Round))
             else drawArc(Brush.sweepGradient(listOf(c.copy(alpha = .15f), c, c.copy(alpha = .15f))), -90f, 360f, false, style = ring)
         }
-        Box(Modifier.size(176.dp).clip(CircleShape)
+        Box(Modifier.size(diameter * (176f / 232f)).clip(CircleShape)
             .background(Brush.verticalGradient(listOf(MaterialTheme.colorScheme.surfaceVariant, MaterialTheme.colorScheme.surface)))
             .border(1.dp, c.copy(alpha = .35f), CircleShape)
             .clickable(role = Role.Button, onClickLabel = when { on -> "Отключить VPN"; busy -> "Отменить подключение"; else -> "Подключить VPN" }) {
@@ -426,8 +434,10 @@ private fun PowerButton(on: Boolean, busy: Boolean, color: Color, onClick: () ->
             Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Icon(Icons.Filled.PowerSettingsNew, null, tint = c, modifier = Modifier.size(54.dp))
                 Text(when { on -> "Отключить"; busy -> "Отменить поиск"; else -> "Подключить" }, color = MaterialTheme.colorScheme.onSurface,
-                    fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                    fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 2, textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(horizontal = 8.dp))
             }
+        }
         }
     }
     // what the assistant did last (switched servers, revived, fixed…) — visible without opening the chat

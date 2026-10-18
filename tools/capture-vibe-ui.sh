@@ -3,8 +3,12 @@ set -euo pipefail
 PKG=com.vlesscardvpn.beta2
 # Capture actual Compose UI, not an HTML approximation. No imported user secrets on this CI emulator.
 adb shell settings put system font_scale 1.0
-adb shell wm size 1080x2340
-adb shell wm density 440
+# Respect the emulator's real screen and density; overrides can lag SurfaceFlinger.
+adb shell wm size reset
+adb shell wm density reset
+sleep 3
+adb shell wm size
+adb shell wm density
 adb shell am force-stop "$PKG"
 adb shell monkey -p "$PKG" -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1
 sleep 6

@@ -12,6 +12,10 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.sp
 
 val Accent = Color(0xFF78DEEA)
 val Good = Color(0xFF7AE4BA)
@@ -40,12 +44,22 @@ fun AppUi(onConnect: () -> Unit, onDisconnect: () -> Unit) {
         Scaffold(
             containerColor = if (sea) Color.Transparent else scheme.background,
             bottomBar = {
+                // Keep five accessible targets without splitting Russian words on narrow screens.
+                val compact = LocalConfiguration.current.screenWidthDp < 360 || LocalDensity.current.fontScale > 1.2f
+                val tabs = listOf(
+                    Triple(0, "Главная", Icons.Filled.PowerSettingsNew),
+                    Triple(1, "Серверы", Icons.Filled.Dns),
+                    Triple(3, "Помощник", Icons.Filled.Psychology),
+                    Triple(4, "Телефон", Icons.Filled.PhoneAndroid),
+                    Triple(2, "Настройки", Icons.Filled.Settings)
+                )
                 NavigationBar(containerColor = if (sea) scheme.surface.copy(alpha = .95f) else scheme.surface) {
-                    NavigationBarItem(selected = tab == 0, onClick = { tab = 0 }, icon = { Icon(Icons.Filled.PowerSettingsNew, null) }, label = { Text("Главная") })
-                    NavigationBarItem(selected = tab == 1, onClick = { tab = 1 }, icon = { Icon(Icons.Filled.Dns, null) }, label = { Text("Серверы") })
-                    NavigationBarItem(selected = tab == 3, onClick = { tab = 3 }, icon = { Icon(Icons.Filled.Psychology, null) }, label = { Text("Помощник") })
-                    NavigationBarItem(selected = tab == 4, onClick = { tab = 4 }, icon = { Icon(Icons.Filled.PhoneAndroid, null) }, label = { Text("Телефон") })
-                    NavigationBarItem(selected = tab == 2, onClick = { tab = 2 }, icon = { Icon(Icons.Filled.Settings, null) }, label = { Text("Настройки") })
+                    tabs.forEach { (index, title, glyph) ->
+                        NavigationBarItem(selected = tab == index, onClick = { tab = index },
+                            icon = { Icon(glyph, contentDescription = title) },
+                            alwaysShowLabel = !compact,
+                            label = { Text(title, fontSize = 12.sp, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis) })
+                    }
                 }
             }
         ) { pad ->
