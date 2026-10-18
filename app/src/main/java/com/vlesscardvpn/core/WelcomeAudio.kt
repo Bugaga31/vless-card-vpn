@@ -38,12 +38,14 @@ class WelcomeAudio(private val context: Context, private val owner: LifecycleOwn
     fun start() {
         if (closed || job != null) return
         job = owner.lifecycleScope.launch {
+            // A notification/permission dialog may briefly pause the activity on a fresh install.
+            // Only consume the install marker after a stable foreground resume, not underneath that dialog.
+            delay(500)
+            if (!owner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) return@launch
             val firstLaunch = withContext(Dispatchers.IO) {
                 WelcomePolicy.claimFirstLaunch(java.io.File(context.noBackupFilesDir, "welcome-first-launch-v1"))
             }
-            delay(500)
-            if (!owner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED) ||
-                !policy.claim(SystemClock.elapsedRealtime(), Store.state.value.settings.welcomeSound, audible())) return@launch
+            if (!policy.claim(SystemClock.elapsedRealtime(), Store.state.value.settings.welcomeSound, audible())) return@launch
             withContext(Dispatchers.IO) { runCatching { bell() } }
             if (closed || !audible() || !Store.state.value.settings.welcomeSound ||
                 !owner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) return@launch
@@ -89,5 +91,6 @@ class WelcomeAudio(private val context: Context, private val owner: LifecycleOwn
             if (!closed) { track.play(); var waited = 0; while (!closed && waited < 450) { Thread.sleep(25); waited += 25 } }
         } finally { runCatching { track.stop() }; track.release() }
     }
+    fun pause() { job?.cancel(); job = null; runCatching { tts?.stop() } }
     fun close() { closed = true; job?.cancel(); tts?.stop(); tts?.shutdown(); tts = null }
 }
