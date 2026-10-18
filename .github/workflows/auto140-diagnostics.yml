@@ -15,7 +15,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           for JOB in 117750671919 117750672120; do
-            if ! gh api "repos/$GITHUB_REPOSITORY/actions/jobs/$JOB/logs" > "/tmp/$JOB.log" 2> /tmp/diag-error; then
+            if ! gh api --allow-escape-sequences "repos/$GITHUB_REPOSITORY/actions/jobs/$JOB/logs" > "/tmp/$JOB.log" 2> /tmp/diag-error; then
               echo "::notice title=Diagnostic-read-error-$(echo $JOB)::$(head -c 700 /tmp/diag-error)"
             fi
           done
@@ -25,7 +25,7 @@ jobs:
               lines=pathlib.Path('/tmp/'+job+'.log').read_text(errors='replace').splitlines()
               hits=[i for i,line in enumerate(lines) if any(s in line for s in ['services: through','=== case services','=== case auto-eight','eight:','optimize:','services=[' ])]
               selected=sorted(set(j for i in hits for j in range(max(0,i-1),min(len(lines),i+3))))
-              text=' | '.join(lines[i] for i in selected)[-18000:]
+              text=re.sub(r'\x1b\[[0-9;]*[A-Za-z]','',' | '.join(lines[i] for i in selected))[-6000:]
               # Only synthetic E2E/test output, no environment dumps or arbitrary repository files.
               text=text.replace('%','%25').replace('\r','%0D').replace('\n','%0A')
               print('::notice title=E2E-'+job+'::'+text)
