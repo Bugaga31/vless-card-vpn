@@ -18,11 +18,19 @@ sleep 3
 if ! kill -0 $PID 2>/dev/null; then echo "client Xray exited:"; tail -5 "$DIR/client.log"; fi
 check() {
   port="$1"; rest="$2"
-  a=$(curl -s -o /dev/null -m 15 -w "%{http_code}" --socks5-hostname 127.0.0.1:$port "${MATRIX_CHECK_URL:-https://www.gstatic.com/generate_204}" ${MATRIX_CA:+--cacert "$MATRIX_CA"})
-  b=$(curl -s -o /dev/null -m 25 -w "%{size_download}" --socks5-hostname 127.0.0.1:$port "${MATRIX_DOWNLOAD_URL:-https://speed.cloudflare.com/__down?bytes=262144}" ${MATRIX_CA:+--cacert "$MATRIX_CA"})
+  a=$(curl --noproxy '' -s -o /dev/null -m 15 -w "%{http_code}" --socks5-hostname 127.0.0.1:$port "${MATRIX_CHECK_URL:-https://www.gstatic.com/generate_204}" ${MATRIX_CA:+--cacert "$MATRIX_CA"})
+  b=$(curl --noproxy '' -s -o /dev/null -m 25 -w "%{size_download}" --socks5-hostname 127.0.0.1:$port "${MATRIX_DOWNLOAD_URL:-https://speed.cloudflare.com/__down?bytes=262144}" ${MATRIX_CA:+--cacert "$MATRIX_CA"})
   if [ "$a" = 204 ] && [ "${b:-0}" -ge 262144 ]; then echo "OK $port $rest"; else echo "FAIL $port $rest http=$a bytes=$b"; fi
 }
 export -f check
+# Fail fast on a broken fixture rather than timing out thousands of mask variants.
+while read -r port name mask; do
+  [ "$name" = wg ] && continue
+  [ "$mask" = none ] || continue
+  result=$(check "$port" "$name $mask")
+  echo "baseline $result"
+  [[ "$result" = OK* ]] || { echo 'Baseline failed; mask results would be invalid'; exit 1; }
+done < "$DIR/local-matrix.txt"
 # Do not instantiate any WireGuard outbounds in the shared client: even an unused
 # keepalive can steal the peer from a later single-variant probe.
 xargs -P 12 -L 1 bash -c 'check "$0" "$*"' < <(awk '$2 != "wg"' "$DIR/local-matrix.txt") > "$DIR/result.txt"

@@ -53,7 +53,7 @@ done < <(cat /tmp/xcfg/dpi-engines.txt; echo)
 echo "Xray no-server strategies: $XOK/$XALL carry HTTPS"
 [ "$XOK" -eq "$XALL" ] || { echo "xray strategies failed"; exit 1; }
 for f in /tmp/xcfg/*.json; do case $f in */warp-*) continue;; esac; echo "$(basename $f): $($X run -test -c $f 2>&1 | tail -1)"; done
-KEEP_CLIENT=1 bash tools/xray-local-e2e.sh $X /tmp/xcfg || true  # raw matrix includes masks the app never offers
+KEEP_CLIENT=1 bash tools/xray-local-e2e.sh $X /tmp/xcfg  # offered masks only; baseline must work
 # Only masks the app offers for each server type (Masks.compatible) must pass.
 python3 - <<'PY' || MFAIL=1
 import sys
@@ -85,8 +85,8 @@ if bad and len(bad) <= 120:
     import subprocess, concurrent.futures as cf, os
     def again(line):
         port = line.split()[1]
-        a = subprocess.run(['curl', '-s', '-o', '/dev/null', '-m', '15', '-w', '%{http_code}', '--socks5-hostname', '127.0.0.1:' + port, os.environ['MATRIX_CHECK_URL'], '--cacert', os.environ['MATRIX_CA']], capture_output=True, text=True).stdout
-        b = subprocess.run(['curl', '-s', '-o', '/dev/null', '-m', '25', '-w', '%{size_download}', '--socks5-hostname', '127.0.0.1:' + port, os.environ['MATRIX_DOWNLOAD_URL'], '--cacert', os.environ['MATRIX_CA']], capture_output=True, text=True).stdout
+        a = subprocess.run(['curl', '--noproxy', '', '-s', '-o', '/dev/null', '-m', '15', '-w', '%{http_code}', '--socks5-hostname', '127.0.0.1:' + port, os.environ['MATRIX_CHECK_URL'], '--cacert', os.environ['MATRIX_CA']], capture_output=True, text=True).stdout
+        b = subprocess.run(['curl', '--noproxy', '', '-s', '-o', '/dev/null', '-m', '25', '-w', '%{size_download}', '--socks5-hostname', '127.0.0.1:' + port, os.environ['MATRIX_DOWNLOAD_URL'], '--cacert', os.environ['MATRIX_CA']], capture_output=True, text=True).stdout
         return a == '204' and b.isdigit() and int(b) >= 262144
     with cf.ThreadPoolExecutor(6) as ex: res = list(ex.map(again, bad))
     fixed = sum(res); print(f"retry: {fixed} of {len(bad)} failed offered masks passed on the second try")
@@ -122,8 +122,8 @@ with open('/tmp/xcfg/wg-result.txt', 'w') as out:
         ob = [o for o in cfg['outbounds'] if o['tag'] == tag][0]
         json.dump({"inbounds": [{"port": 24900, "listen": "127.0.0.1", "protocol": "socks", "settings": {"auth": "noauth"}}], "outbounds": [ob]}, open('/tmp/wg1.json', 'w'))
         p = subprocess.Popen(['/tmp/xray/xray', 'run', '-c', '/tmp/wg1.json'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL); time.sleep(1.5)
-        a = subprocess.run(['curl', '-s', '-o', '/dev/null', '-m', '15', '-w', '%{http_code}', '--socks5-hostname', '127.0.0.1:24900', os.environ['MATRIX_CHECK_URL'], '--cacert', os.environ['MATRIX_CA']], capture_output=True, text=True).stdout
-        b = subprocess.run(['curl', '-s', '-o', '/dev/null', '-m', '25', '-w', '%{size_download}', '--socks5-hostname', '127.0.0.1:24900', os.environ['MATRIX_DOWNLOAD_URL'], '--cacert', os.environ['MATRIX_CA']], capture_output=True, text=True).stdout
+        a = subprocess.run(['curl', '--noproxy', '', '-s', '-o', '/dev/null', '-m', '15', '-w', '%{http_code}', '--socks5-hostname', '127.0.0.1:24900', os.environ['MATRIX_CHECK_URL'], '--cacert', os.environ['MATRIX_CA']], capture_output=True, text=True).stdout
+        b = subprocess.run(['curl', '--noproxy', '', '-s', '-o', '/dev/null', '-m', '25', '-w', '%{size_download}', '--socks5-hostname', '127.0.0.1:24900', os.environ['MATRIX_DOWNLOAD_URL'], '--cacert', os.environ['MATRIX_CA']], capture_output=True, text=True).stdout
         p.kill(); p.wait()
         ok = a == '204' and b.isdigit() and int(b) >= 262144
         wall += 1; wok += ok
