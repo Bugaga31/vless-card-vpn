@@ -68,8 +68,8 @@ object Masks {
     fun isWarp(s: com.vlesscardvpn.model.Server): Boolean = s.protocol == "wireguard" &&
         (s.source == "warp" || s.pbk == "bmXOC+F1FxEMF9dyiK2H5/1SUtzH0JuVo51h2wPfgyo=")
 
-    /** Russian domains that pass «white lists» of mobile operators: used as «белый SNI». */
-    val WHITE_SNI = listOf("vk.com", "ya.ru", "gosuslugi.ru", "ozon.ru")
+    /** Candidate cover domains; not guaranteed to pass any operator whitelist. Used only on compatible pinned TLS. */
+    val WHITE_SNI = listOf("vk.com", "ya.ru", "gosuslugi.ru", "ozon.ru", "yandex.ru", "vkvideo.ru")
     /** Wider pool of allowed names for the mask evolution (all present in the open whitelist geosite-cheburnet, MIT). */
     val WHITE_POOL = WHITE_SNI + listOf("mail.ru", "yandex.ru", "wildberries.ru", "avito.ru", "sberbank.ru", "2gis.ru", "rutube.ru",
         "kinopoisk.ru", "dzen.ru", "max.ru", "tbank.ru", "ok.ru", "vkvideo.ru", "x5.ru")
@@ -292,11 +292,11 @@ object Masks {
         }
 
     fun searchOrder(byeDpiAvailable: Boolean, server: com.vlesscardvpn.model.Server? = null): List<Mask> {
-        val first = listOf("chrome.n", "vc.sni.vk.com", "vc.mss300", "vc.ghost", "vc.sni.ya.ru.l2", "vc.mss120", "vc.alpn.br", "vc.mux", "vc.ghost.sni", "vc.mss120.l6", "vc.ghost.v6", "vc.sni.vk.com.mss120", "vc.tfo", "vc.v6", "vc.ghost.tfo", "vc.alpn.br.h1", "vc.mux.l5", "chrome.z5", "chrome.z10", "chrome.z1", "chrome.z5.hw", "chrome.z6.hw", "chrome.z9", "chrome.z1.hl", "chrome.z11.hw", "chrome.z12", "chrome.z7", "chrome.hw", "chrome.z2", "chrome.z3", "chrome.z4", "chrome.h4", "chrome.l1", "firefox.l2", "chrome.l4", "safari.l5", "firefox.l6", "chrome.p6", "firefox.l7", "chrome.h7", "safari.p7", "chrome.p2", "firefox.h2", "safari.p3", "edge.h5", "chrome.h1", "ios.p1", "safari.l3", "chrome.l2.b",
+        val first = listOf("chrome.n", "vc.sni.vk.com", "vc.sni.yandex.ru", "vc.sni.vkvideo.ru", "vc.mss300", "vc.ghost", "vc.sni.ya.ru.l2", "vc.mss120", "vc.alpn.br", "vc.mux", "vc.ghost.sni", "vc.mss120.l6", "vc.ghost.v6", "vc.sni.vk.com.mss120", "vc.tfo", "vc.v6", "vc.ghost.tfo", "vc.alpn.br.h1", "vc.mux.l5", "chrome.z5", "chrome.z10", "chrome.z1", "chrome.z5.hw", "chrome.z6.hw", "chrome.z9", "chrome.z1.hl", "chrome.z11.hw", "chrome.z12", "chrome.z7", "chrome.hw", "chrome.z2", "chrome.z3", "chrome.z4", "chrome.h4", "chrome.l1", "firefox.l2", "chrome.l4", "safari.l5", "firefox.l6", "chrome.p6", "firefox.l7", "chrome.h7", "safari.p7", "chrome.p2", "firefox.h2", "safari.p3", "edge.h5", "chrome.h1", "ios.p1", "safari.l3", "chrome.l2.b",
             "android.h3", "firefox.h4", "chrome.n.b", "chrome.h4.b", "firefox.p4", "chrome.p5", "chrome.h6", "qq.h2",
             "safari.n", "firefox.n", "edge.p2", "ios.h4", "android.p3", "safari.h1", "chrome.p1.b", "firefox.h3.b",
             // own VLESS Card masking and zapret in front of the server connection
-            "chrome.d:BYEDPI#VCARD_CASCADE", "firefox.d:TPWS#VCARD_SHRED", "chrome.d:BYEDPI#VCARD_SHRED", "safari.d:BYEDPI#VCARD_STEALTH",
+            "chrome.d:BYEDPI#VCARD_CASCADE", "chrome.d:BYEDPI#VK_ADAPTIVE", "chrome.d:BYEDPI#YANDEX_ADAPTIVE", "firefox.d:TPWS#VCARD_SHRED", "chrome.d:BYEDPI#VCARD_SHRED", "safari.d:BYEDPI#VCARD_STEALTH",
             "chrome.d:BYEDPI#VCARD_RECVER", "chrome.d:TPWS#SPLIT_DISORDER", "firefox.d:TPWS#TLSREC", "chrome.d:BYEDPI#OOB_THEN_DISORDER",
             "safari.d:TPWS#HOST_DISORDER", "chrome.d:BYEDPI#MULTI_DISORDER", "chrome.d:TPWS#TLSREC_OOB", "firefox.d:BYEDPI#MASK_AUTO_FAKE")
         // own masks right after the plain baseline: the user made them for this network

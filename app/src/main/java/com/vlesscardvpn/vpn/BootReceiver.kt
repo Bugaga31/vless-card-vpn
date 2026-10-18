@@ -12,6 +12,7 @@ class BootReceiver : BroadcastReceiver() {
         if (intent.action != Intent.ACTION_BOOT_COMPLETED && intent.action != Intent.ACTION_MY_PACKAGE_REPLACED) return
         runCatching {
             Store.init(context)
+            com.vlesscardvpn.core.Updater.schedule(context)
             val s = Store.state.value.settings
             if (s.autoStart && (s.proxyOnly || VpnService.prepare(context) == null)) TunnelService.start(context)
         }

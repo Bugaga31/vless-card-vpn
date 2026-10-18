@@ -54,8 +54,8 @@ class ConfigTest {
     }
 
     @Test fun maskCatalog() {
-        assertEquals(520, Masks.ALL.size)
-        assertEquals(147, Masks.ALL.count { it.viaByeDpi && it.dpi != Masks.CURRENT_DPI })
+        assertEquals(538, Masks.ALL.size)
+        assertEquals(161, Masks.ALL.count { it.viaByeDpi && it.dpi != Masks.CURRENT_DPI })
         val r = LinkParser.parse(reality)!!
         val ws = LinkParser.parse(links[1])!!
         val m = listOf(r to Masks.byId("chrome.d:BYEDPI#VCARD_CASCADE"), ws to Masks.byId("firefox.d:TPWS#VCARD_SHRED"), ws to Masks.byId("edge.h2.b"))
@@ -114,7 +114,7 @@ class ConfigTest {
 
     @Test fun dpiStrategies() {
         val all = com.vlesscardvpn.core.DpiStrategies.BUILT_IN
-        assertEquals(26, all.size)
+        assertEquals(28, all.size)
         assertEquals(all.size, all.map { it.id }.toSet().size)
         assertEquals(10, all.count { it.own })
         all.forEach { s ->

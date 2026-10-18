@@ -391,7 +391,8 @@ class R106Test {
     @org.junit.Test fun cloudListJoinsOldInstalls() {
         val old = com.vlesscardvpn.model.Settings(subscriptions = listOf("https://example.com/sub"), rev = 72)
         val m = com.vlesscardvpn.model.Settings.migrate(old)
-        org.junit.Assert.assertTrue(m.subscriptions.first().contains("/servers/alive_ru.txt"))
+        org.junit.Assert.assertEquals(com.vlesscardvpn.model.Subs.CLOUD_WORKS,m.subscriptions.first())
+        org.junit.Assert.assertTrue(m.subscriptions.any { it.contains("/servers/alive_ru.txt") })
         org.junit.Assert.assertTrue("https://example.com/sub" in m.subscriptions)
         org.junit.Assert.assertEquals(m.subscriptions, com.vlesscardvpn.model.Settings.migrate(m).subscriptions)
     }

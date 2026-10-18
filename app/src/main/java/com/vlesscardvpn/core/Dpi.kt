@@ -51,7 +51,7 @@ object DpiStrategies {
     const val CUSTOM_ID = "custom"
     /** Expands to several `--fake-sni` (ByeDPI picks one at random per connection): user's mask first. */
     const val MASK_POOL = "{mask_pool}"
-    private val POOL = listOf("ya.ru", "vk.com", "gosuslugi.ru", "ozon.ru", "mail.ru")
+    private val POOL = listOf("ya.ru", "vk.com", "yandex.ru", "vkvideo.ru", "gosuslugi.ru", "ozon.ru", "mail.ru")
     fun maskPool(userMask: String): List<String> = (listOf(ByeDpiArgs.maskDomain(userMask)) + POOL).distinct()
     private const val S = ByeDpiArgs.SNI_PLACEHOLDER
 
@@ -95,6 +95,9 @@ object DpiStrategies {
         RECVER,
         bye("SPLIT_DISORDER", "разбиение + обратный порядок", "--split", "1+s", "--disorder", "3+s"),
         bye("MASK_AUTO_FAKE", "авто: порядок → маскировка", "--disorder", "1", "--auto=torst", "--fake", "-1", "--ttl", "8", "--fake-sni", S, "--fake-tls-mod", "rand,orig"),
+        // Fake ClientHello only: the real server's SNI/certificate/Reality key remain unchanged.
+        bye("VK_ADAPTIVE", "VK: мягкий split → fake-SNI", "--disorder", "1", "--tlsrec", "1+s", "--auto=torst,ssl_err", "--fake", "-1", "--ttl", "8", "--fake-sni", "vk.com", "--fake-tls-mod", "rand,orig"),
+        bye("YANDEX_ADAPTIVE", "Яндекс: мягкий split → fake-SNI", "--split", "1+s", "--auto=torst,ssl_err", "--fake", "-1", "--ttl", "8", "--fake-sni", "yandex.ru", "--fake-tls-mod", "rand,orig"),
         tpws("OOB", "OOB-байт", "--oob", "--split-pos=1"),
         bye("DISOOB", "OOB + обратный порядок", "--disoob", "1"),
         tpws("HOST_DISORDER", "границы хоста + disorder", "--split-pos=1,host,midsld,endhost", "--disorder"),

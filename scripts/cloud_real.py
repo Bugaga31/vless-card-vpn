@@ -1,15 +1,20 @@
 #!/usr/bin/env python3
 """Cloud real check: the servers that answered the ping get a real HTTPS request through Xray-core from GitHub.
 
-Reads out/alive_ru.txt and out/alive.txt (written by cloud_servers.py), checks the first REAL_RU / REAL_ALL of them
+Reads out/alive_ru.txt and out/alive.txt (written by cloud_servers.py), checks every reachable supported configuration
 through a local Xray (one SOCKS inbound per server), and rewrites both lists with the servers that really carried
 HTTPS first (fastest first), then the rest. Also writes out/works.txt and out/works_ru.txt (only working ones).
 GitHub is abroad: this proves the server works at all, not that it passes Russian DPI — that is still the phone's job."""
 import base64, concurrent.futures as cf, hashlib, json, os, socket, ssl, subprocess, sys, tempfile, time, urllib.parse
 
 XRAY = os.environ.get("XRAY", "/tmp/xray/xray")
-REAL_RU, REAL_ALL = int(os.environ.get("REAL_RU", "1500")), int(os.environ.get("REAL_ALL", "1000"))
-BATCH, PAR, BASE = 400, 192, 21000
+def check_queue(head, hist):
+    """Prioritize historical successes, but cover the entire reachable union, not a prefix."""
+    alive = list(dict.fromkeys(head.get("alive_ru.txt", []) + head.get("alive.txt", [])))
+    return sorted(alive, key=lambda link: (0 if hist.get(link, {}).get("ok", 0) > 0 else 1,
+                  score(hist[link]) if link in hist else 10000))
+
+BATCH, PAR, BASE = 192, 64, 21000
 HIST_URL = "https://raw.githubusercontent.com/Bugaga31/vless-card-vpn/servers/history.json"
 URL = "https://www.gstatic.com/generate_204"
 
@@ -170,10 +175,10 @@ SPEED_TTL = 3600
 
 def fetch_speed(port):
     """Real download speed through one server, kbit/s (0 = failed or under 300 KB in 8 s)."""
-    r = subprocess.run(["curl", "-s", "-o", "/dev/null", "-m", "8", "-w", "%{size_download} %{speed_download}", "--socks5-hostname", f"127.0.0.1:{port}", SPEED_URL],
+    r = subprocess.run(["curl", "-s", "-H", "Accept-Encoding: identity", "-H", "Cache-Control: no-cache", "-o", "/dev/null", "-m", "8", "-w", "%{http_code} %{content_type} %{size_download} %{speed_download}", "--socks5-hostname", f"127.0.0.1:{port}", SPEED_URL],
                        capture_output=True, text=True).stdout.split()
     try:
-        return int(float(r[1]) * 8 / 1000) if len(r) == 2 and float(r[0]) >= 300_000 else 0
+        return int(float(r[-1]) * 8 / 1000) if len(r) == 4 and r[0] in ("200", "206") and r[1].split(";")[0].lower() in ("application/octet-stream", "application/binary") and float(r[-2]) >= 300_000 else 0
     except ValueError:
         return 0
 
@@ -289,6 +294,26 @@ def score(h):
     return (1 - rate) * 3000 + (h["ms"] or 3000) - min(h.get("kb", 0), 30000) / 20
 
 
+def merge_results(directory, todo):
+    """Fail closed on missing shards, inconsistent coverage, foreign or duplicate results."""
+    import pathlib
+    rows = [json.loads(p.read_text()) for p in sorted(pathlib.Path(directory).glob("result-*.json"))]
+    if not rows: raise ValueError("no cloud shards")
+    count = rows[0]["shards"]
+    if type(count) is not int or not 1 <= count <= 16: raise ValueError("invalid shard count")
+    if len(rows) != count or {r["shard"] for r in rows} != set(range(count)) or any(r["shards"] != count for r in rows):
+        raise ValueError("incomplete cloud shards")
+    allowed=set(todo);merged={}
+    for row in rows:
+        expected=set(todo[row["shard"]::count])
+        if row["assigned"] != len(expected): raise ValueError("cloud queue changed")
+        for link,ms in row["results"].items():
+            if link not in allowed or link not in expected or link in merged or type(ms) is not int or ms<0:
+                raise ValueError("invalid cloud shard result")
+            merged[link]=ms
+    return merged
+
+
 def main():
     lists = {}
     for name in ("alive_ru.txt", "alive.txt"):
@@ -296,13 +321,29 @@ def main():
         lists[name] = open(p, encoding="utf-8").read().splitlines() if os.path.exists(p) else []
     head = {n: [l for l in ls if not l.startswith("#")] for n, ls in lists.items()}
     now = int(time.time())
-    hist = load_history()
-    alive = set(head["alive_ru.txt"]) | set(head["alive.txt"])
-    # servers that worked before are always re-checked (if they still answer the ping), then the fastest pings
-    known = sorted((l for l, h in hist.items() if h["ok"] > 0 and l in alive), key=lambda l: score(hist[l]))
-    todo = list(dict.fromkeys(known[:1500] + head["alive_ru.txt"][:REAL_RU] + head["alive.txt"][:REAL_ALL]))
+    import pathlib
+    snapshot = pathlib.Path("out/check-queue.json")
+    if os.environ.get("CLOUD_PREPARE") == "1":
+        hist = load_history(); todo = check_queue(head,hist)
+        snapshot.write_text(json.dumps({"todo":todo,"history":hist},separators=(",",":")))
+        print(f"Frozen full cloud queue: {len(todo)} configurations"); return
+    if snapshot.exists():
+        saved=json.loads(snapshot.read_text());hist=saved["history"];todo=saved["todo"]
+    else:
+        hist = load_history(); todo = check_queue(head, hist)
     t = time.time()
-    res = check(todo)
+    shard_count = max(1, int(os.environ.get("CLOUD_SHARDS", "1")))
+    shard_index = int(os.environ.get("CLOUD_SHARD", "0"))
+    if not 0 <= shard_index < shard_count: raise ValueError("invalid cloud shard")
+    if shard_count > 1:
+        assigned = todo[shard_index::shard_count]
+        res = check(assigned)
+        with open(f"out/result-{shard_index}.json", "w") as f:
+            json.dump({"shard":shard_index,"shards":shard_count,"assigned":len(assigned),"results":res},f,separators=(",",":"))
+        print(f"shard {shard_index+1}/{shard_count}: {len(res)} checked, {len(assigned)-len(res)} unsupported/rejected")
+        return
+    result_dir = os.environ.get("CLOUD_RESULTS_DIR")
+    res = merge_results(result_dir,todo) if result_dir else check(todo)
     hist = learn(hist, res, now)
     top = speed_trials(res,hist,now)
     ts = time.time()
@@ -315,7 +356,7 @@ def main():
     stamp = time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime())
     for name, ls in lists.items():
         body = head[name]
-        works = sorted((l for l in body if res.get(l)), key=lambda l: (-measured_kbps(hist[l],int(time.time())),score(hist[l])))
+        works = sorted((l for l in body if res.get(l)), key=lambda l: (-(hist[l]["ok"]+.5)/(hist[l]["n"]+1), -measured_kbps(hist[l],int(time.time())), hist[l]["ms"]))
         rest = [l for l in body if not res.get(l)]
         rest = [l for l in rest if l not in res] + [l for l in rest if l in res]  # pinged but carried nothing: last
         with open("out/" + name, "w", encoding="utf-8") as f:
@@ -330,7 +371,7 @@ def main():
         st = json.load(open("out/stats.json"))
     except Exception:
         st = {}
-    st.update({"real_checked": len(res), "real_ok": ok, "real_s": int(time.time() - t), "remembered": len(hist), "stable": stable,
+    st.update({"real_candidates": len(todo), "real_unchecked": len(todo)-len(res), "coverage": "all-reachable-xray-supported", "real_checked": len(res), "real_ok": ok, "real_s": int(time.time() - t), "remembered": len(hist), "stable": stable,
                "speed_checked": len(sp), "speed_ok": len(fast), "speed_best_kbps": fast[0] if fast else 0,
                "speed_median_kbps": fast[len(fast) // 2] if fast else 0})
     json.dump(st, open("out/stats.json", "w"))

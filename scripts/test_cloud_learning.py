@@ -24,5 +24,23 @@ class CloudLearningTest(unittest.TestCase):
         self.assertEqual(4, c.merge(prev, [], 1000 + 7 * 86400)["votes"]["Wi-Fi"]["d"]["strategy"])
         self.assertEqual(saved, prev)
 
+    def test_public_device_summary_has_no_identifiers_or_fake_online(self):
+        now = 10_000_000
+        cloud = {"ids": {"secret-phone": now, "future": now+1, "old": now-31*86400},
+                 "use": {"secret-phone": {"t": now, "s": ["private-server"]}, "old": {"t": now-4*3600}}}
+        out = c.device_summary(cloud, now)
+        self.assertEqual(1, out["reporting_devices_30d"])
+        self.assertEqual(1, out["route_reports_devices_3h"])
+        self.assertIsNone(out["online_devices"])
+        self.assertFalse(out["apk_intake_enabled"])
+        self.assertNotIn("secret-phone", str(out))
+        self.assertNotIn("private-server", str(out))
+
+    def test_empty_device_summary_is_not_claimed_as_online(self):
+        out = c.device_summary({}, 1000)
+        self.assertEqual(0, out["reporting_devices_30d"])
+        self.assertEqual(0, out["route_reports_devices_3h"])
+        self.assertIsNone(out["online_devices"])
+
 if __name__ == "__main__":
     unittest.main()

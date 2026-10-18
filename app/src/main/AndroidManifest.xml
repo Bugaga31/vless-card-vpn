@@ -69,6 +69,7 @@
             android:icon="@drawable/ic_disguise_weather" android:roundIcon="@drawable/ic_disguise_weather" android:label="Погода">
             <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter>
         </activity-alias>
+        <service android:name=".core.UpdateJob" android:exported="false" android:permission="android.permission.BIND_JOB_SERVICE" />
         <service android:name=".core.DeviceCoachJob" android:exported="false" android:permission="android.permission.BIND_JOB_SERVICE" />
         <service
             android:name=".vpn.TunnelService"

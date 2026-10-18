@@ -11,7 +11,7 @@ import org.json.JSONObject
 object CloudControl {
     const val SOURCE = "cloud-manifest"
     data class Entry(val server: Server, val score: Double, val tier: String, val kbps: Int = 0, val speedAt: Long = 0)
-    data class Snapshot(val stamp: Long, val expires: Long, val entries: List<Entry>, val recipes: JSONObject, val ispTags: JSONObject)
+    data class Snapshot(val stamp: Long, val expires: Long, val entries: List<Entry>, val recipes: JSONObject, val ispTags: JSONObject) { val byId: Map<String,Entry> = entries.associateBy { it.server.id } }
     @Volatile private var snapshot: Snapshot? = null
     @Volatile private var attempted = 0L
     @Volatile private var fetched = 0L
@@ -22,7 +22,7 @@ object CloudControl {
         require(stampSeconds in 1..(now / 1000 + 300) && expiresSeconds in stampSeconds..(stampSeconds + 86400))
         val stamp = stampSeconds * 1000; val expires = expiresSeconds * 1000
         require(stamp > 0 && stamp <= now + 300000 && expires > now && expires - stamp in 1..86400000)
-        val a = o.getJSONArray("nodes"); require(a.length() <= 300)
+        val a = o.getJSONArray("nodes"); require(a.length() <= 6000)
         val entries = (0 until a.length()).mapNotNull { i ->
             val row = a.getJSONObject(i); val tier = row.getString("tier")
             if (tier !in setOf("gold", "silver")) return@mapNotNull null
@@ -33,11 +33,15 @@ object CloudControl {
         }.distinctBy { it.server.id }
         return Snapshot(stamp,expires,entries,o.optJSONObject("recipes") ?: JSONObject(),o.optJSONObject("isp_tags") ?: JSONObject())
     }
-    fun prior(server: Server, now: Long = System.currentTimeMillis()): Double? = snapshot?.takeIf { it.expires > now }?.entries?.firstOrNull { it.server.id == server.id }?.score
+    fun prior(server: Server, now: Long = System.currentTimeMillis()): Double? = snapshot?.takeIf { it.expires > now }?.byId?.get(server.id)?.score
+    fun ranked(servers: List<Server>, n: Int): List<Server> {
+        val entries = snapshot?.takeIf { it.expires > System.currentTimeMillis() }?.byId.orEmpty()
+        return ServerChoice.diverse(servers.filter { it.id in entries && AutoEligibility.allowed(it) }
+            .sortedWith(compareByDescending<Server> { entries.getValue(it.id).score }.thenByDescending { entries.getValue(it.id).kbps }),n)
+    }
     fun clear() { snapshot=null;attempted=0;fetched=0;Masks.setCloud(emptyList()) }
     fun count(now: Long = System.currentTimeMillis()): Int = snapshot?.takeIf { it.expires > now }?.entries?.size ?: 0
-    fun speed(server: Server, now: Long = System.currentTimeMillis()): Int = snapshot?.takeIf { it.expires > now }?.entries
-        ?.firstOrNull { it.server.id == server.id && it.speedAt in (now/1000-3600)..(now/1000) }?.kbps ?: 0
+    fun speed(server: Server, now: Long = System.currentTimeMillis()): Int = snapshot?.takeIf { it.expires > now }?.byId?.get(server.id)?.takeIf { it.speedAt in (now/1000-3600)..(now/1000) }?.kbps ?: 0
     fun maskHints(family: String): List<String> = hints("masks",family).filter { Masks.byId(it) != null }
     fun dpiHints(family: String): List<String> = hints("dpi",family).filter { id -> DpiStrategies.BUILT_IN.any { it.id == id } }.take(3)
     private fun hints(kind: String, family: String): List<String> {

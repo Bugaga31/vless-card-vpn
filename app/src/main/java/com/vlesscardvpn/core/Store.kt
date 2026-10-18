@@ -125,7 +125,10 @@ object Store {
     }
 
     fun update(change: (AppState) -> AppState) {
-        _state.update(change)
+        _state.update { old ->
+            val next = change(old)
+            if (next.servers !== old.servers) AutoEligibility.clean(next) else next
+        }
         syncMasks()
         synchronized(lock) {
             // During a check: one save every few seconds instead of encoding thousands of servers after every batch.
@@ -190,7 +193,7 @@ object Store {
         val maskStats = ms.keys().asSequence().associateWith { net ->
             val m = ms.getJSONObject(net); m.keys().asSequence().associateWith { id -> m.getJSONArray(id).let { MaskStat(it.optInt(0), it.optInt(1)) } }
         }
-        return AppState(servers, states, settings, maskStats)
+        return AutoEligibility.clean(AppState(servers, states, settings, maskStats))
     }
 
     /** Adds servers (dedupe by id). Returns number of new ones. */

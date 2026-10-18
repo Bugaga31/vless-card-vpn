@@ -48,6 +48,7 @@ adb shell dumpsys activity activities | grep -qE "(mResumedActivity|topResumedAc
 echo "LAUNCH OK"
 fi
 bash tools/capture-vibe-ui.sh || exit 1
+bash tools/capture-intro-ui.sh || exit 1
 echo "== upgrade over published Beta 1.0.52 (same key, data kept)"
 adb uninstall $PKG >/dev/null 2>&1
 if curl -fsL -o prev.apk https://github.com/Bugaga31/vless-card-vpn/releases/download/beta-v1.0.52/VLESS-Card-Beta-1.0.52.apk; then
