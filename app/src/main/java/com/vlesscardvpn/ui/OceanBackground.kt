@@ -32,8 +32,8 @@ fun OceanBackground(motion: Boolean) {
     var eligible by remember { mutableStateOf(false) }
     val phase = remember { mutableStateOf(0.0) }
     val paths = remember { List(4) { Path() } }
-    val colours = remember { listOf(Color(0xFF071B29), Color(0xFF09212E), Color(0xFF0A2530), Color(0xFF0B2630)) }
-    val gradient = remember { Brush.verticalGradient(listOf(Color(0xFF09101D), Color(0xFF0D1D2C), Color(0xFF0C2832))) }
+    val colours = remember { listOf(Color(0xFF0B2536), Color(0xFF0B3042), Color(0xFF0C3948), Color(0xFF104252)) }
+    val gradient = remember { Brush.verticalGradient(listOf(Color(0xFF081323), Color(0xFF10243A), Color(0xFF0A3440))) }
     DisposableEffect(ctx, owner, motion) {
         fun update() {
             val pm = ctx.getSystemService(Context.POWER_SERVICE) as PowerManager
