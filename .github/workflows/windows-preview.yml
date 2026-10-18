@@ -41,14 +41,15 @@ jobs:
           Start-Sleep 8
           $p.Refresh()
           if ($p.HasExited -or $p.MainWindowHandle -eq 0) { throw 'Preview window did not start' }
+          & ./tools/capture-windows-preview.ps1 -WindowProcessId $p.Id -OutputPath windows-preview/Windows-preview.png
           $p.CloseMainWindow() | Out-Null
           if (!$p.WaitForExit(5000)) { $p.Kill(); throw 'Preview did not close cleanly' }
-          Compress-Archive windows-preview/* VLESS-Card-Xray-Windows-Preview-0.1.0-x64.zip
-          Get-FileHash VLESS-Card-Xray-Windows-Preview-0.1.0-x64.zip -Algorithm SHA256 | Format-List
+          Compress-Archive windows-preview/* VLESS-Card-Xray-Windows-Preview-0.2.0-x64.zip
+          Get-FileHash VLESS-Card-Xray-Windows-Preview-0.2.0-x64.zip -Algorithm SHA256 | Format-List
       - uses: actions/upload-artifact@v4
         with:
-          name: VLESS-Card-Xray-Windows-Preview-0.1.0-x64
-          path: VLESS-Card-Xray-Windows-Preview-0.1.0-x64.zip
+          name: VLESS-Card-Xray-Windows-Preview-0.2.0-x64
+          path: VLESS-Card-Xray-Windows-Preview-0.2.0-x64.zip
           if-no-files-found: error
   publish-preview:
     needs: windows
@@ -61,7 +62,7 @@ jobs:
           persist-credentials: false
       - uses: actions/download-artifact@v4
         with:
-          name: VLESS-Card-Xray-Windows-Preview-0.1.0-x64
+          name: VLESS-Card-Xray-Windows-Preview-0.2.0-x64
           path: preview-release
       - name: Publish separately from Android updates
         env:
@@ -72,7 +73,7 @@ jobs:
           set -euo pipefail
           # A distinct prerelease never replaces Android's latest stable release.
           # Existing preview assets are never silently replaced by a rerun.
-          gh release create windows-preview-0.1.0 preview-release/*.zip \
+          gh release create windows-preview-0.2.0 preview-release/*.zip \
             --target "$PREVIEW_COMMIT" --prerelease --latest=false \
-            --title 'VLESS Card Xray · Windows preview 0.1.0 (SOCKS5, not TUN)' \
+            --title 'VLESS Card Xray · Windows preview 0.2.0 (SOCKS5, not TUN)' \
             --notes-file desktop/README.md

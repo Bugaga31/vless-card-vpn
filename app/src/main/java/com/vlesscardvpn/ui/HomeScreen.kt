@@ -1,5 +1,6 @@
 package com.vlesscardvpn.ui
 
+import androidx.compose.foundation.border
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -17,7 +18,9 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PowerSettingsNew
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -42,9 +45,18 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
     val working = busy
     val mode = cfg.mode
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-        Text("VLESS Card", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onBackground)
-        Text("${BuildConfig.VERSION_NAME} · Xray · " + if (cfg.stealthSocks) "прокси скрыт (случайный порт + пароль)" else "SOCKS 127.0.0.1:${cfg.socksPort}",
-            fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Row(Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("VLESS Card", fontSize = 28.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onBackground)
+                Text("Связь на одной волне", fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
+                Text("XRAY", Modifier.padding(horizontal = 12.dp, vertical = 8.dp), color = MaterialTheme.colorScheme.primary,
+                    fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.sp)
+            }
+        }
+        Text("${BuildConfig.VERSION_NAME} · " + if (cfg.stealthSocks) "Локальный прокси защищён паролем" else "SOCKS 127.0.0.1:${cfg.socksPort}",
+            modifier = Modifier.fillMaxWidth(), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
         val upd by com.vlesscardvpn.core.Updater.state.collectAsState()
         if (upd.latest.isNotEmpty()) {
             val uctx = androidx.compose.ui.platform.LocalContext.current
@@ -69,13 +81,23 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
         fun reconnect() { if (status.state == Tunnel.State.CONNECTED) onConnect() }
         val on = status.state == Tunnel.State.CONNECTED
         val busy = status.state == Tunnel.State.CONNECTING
-        val color = when { on && status.checkOk == false -> Warn; on -> Good; busy -> Accent; else -> Color(0xFF2A2F3A) }
+        val color = when { on && status.checkOk == false -> Warn; on -> Good; busy -> Accent; else -> MaterialTheme.colorScheme.primary }
         PowerButton(on, busy, color) { if (on || busy) onDisconnect() else onConnect() }
         if (status.message.isNotEmpty()) Text(status.message, color = if (status.state == Tunnel.State.ERROR) Bad else MaterialTheme.colorScheme.onBackground,
             textAlign = TextAlign.Center, fontWeight = FontWeight.Medium)
         if (status.route.isNotEmpty()) Text(status.route, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp, textAlign = TextAlign.Center)
         val cloudStatus by com.vlesscardvpn.core.CloudSpeed.status.collectAsState()
-        Text(cloudStatus, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp, textAlign = TextAlign.Center)
+        Card(Modifier.fillMaxWidth().padding(top = 16.dp), shape = RoundedCornerShape(20.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(if (busy) "Ищем вашу волну" else if (on) "Маршрут подключён" else "Готовы к подключению", fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
+                Text(if (busy) "Xray проверяет доступность и скорость. Поиск можно отменить кнопкой выше."
+                    else "Авто учитывает память этой сети и облачные подсказки. Решает проверка на вашем устройстве.",
+                    fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = .35f))
+                Text(cloudStatus, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
+            }
+        }
         val pausedUntil by Tunnel.pausedUntil.collectAsState()
         val ctx = androidx.compose.ui.platform.LocalContext.current
         if (status.state == Tunnel.State.CONNECTED) {
@@ -111,7 +133,6 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
             fontSize = 14.sp, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 6.dp))
         if (status.state == Tunnel.State.CONNECTING) Box(Modifier.fillMaxWidth().padding(top = 8.dp)) { LiveProgress(stop = false) { it.running } }
         Spacer(Modifier.height(20.dp))
-        Spacer(Modifier.height(16.dp))
         var opts by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
         Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
             Column(Modifier.padding(14.dp), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -388,20 +409,24 @@ private fun PowerButton(on: Boolean, busy: Boolean, color: Color, onClick: () ->
     val k = pulseValue
     val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
     Spacer(Modifier.height(18.dp))
-    Box(Modifier.size(220.dp), contentAlignment = Alignment.Center) {
-        Box(Modifier.size(220.dp).scale(k).clip(CircleShape).background(androidx.compose.ui.graphics.Brush.radialGradient(listOf(c.copy(alpha = 0.35f), Color.Transparent))))
-        // connecting: a running arc around the button; connected: a calm full ring
-        androidx.compose.foundation.Canvas(Modifier.size(190.dp)) {
-            val st = androidx.compose.ui.graphics.drawscope.Stroke(width = 5.dp.toPx(), cap = androidx.compose.ui.graphics.StrokeCap.Round)
-            if (busy && !on) drawArc(c, turn, 80f, false, style = st)
-            else if (on) drawArc(c.copy(alpha = 0.55f), 0f, 360f, false, style = st)
+    Box(Modifier.size(232.dp), contentAlignment = Alignment.Center) {
+        Box(Modifier.size(232.dp).scale(k).clip(CircleShape).background(Brush.radialGradient(listOf(c.copy(alpha = .18f), Color.Transparent))))
+        androidx.compose.foundation.Canvas(Modifier.size(206.dp)) {
+            val ring = androidx.compose.ui.graphics.drawscope.Stroke(width = 2.dp.toPx(), cap = androidx.compose.ui.graphics.StrokeCap.Round)
+            drawCircle(c.copy(alpha = .22f), style = ring)
+            if (busy && !on) drawArc(c, turn, 88f, false, style = androidx.compose.ui.graphics.drawscope.Stroke(4.dp.toPx(), cap = androidx.compose.ui.graphics.StrokeCap.Round))
+            else drawArc(Brush.sweepGradient(listOf(c.copy(alpha = .15f), c, c.copy(alpha = .15f))), -90f, 360f, false, style = ring)
         }
-        Box(Modifier.size(170.dp).clip(CircleShape).background(androidx.compose.ui.graphics.Brush.verticalGradient(listOf(c, c.copy(alpha = 0.7f))))
-            .clickable { haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress); onClick() },
-            contentAlignment = Alignment.Center) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Icon(Icons.Filled.PowerSettingsNew, null, tint = Color.White, modifier = Modifier.size(56.dp))
-                Text(when { on -> "Отключить"; busy -> "Подключение…"; else -> "Подключить" }, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+        Box(Modifier.size(176.dp).clip(CircleShape)
+            .background(Brush.verticalGradient(listOf(MaterialTheme.colorScheme.surfaceVariant, MaterialTheme.colorScheme.surface)))
+            .border(1.dp, c.copy(alpha = .35f), CircleShape)
+            .clickable(role = Role.Button, onClickLabel = when { on -> "Отключить VPN"; busy -> "Отменить подключение"; else -> "Подключить VPN" }) {
+                haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress); onClick()
+            }, contentAlignment = Alignment.Center) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Icon(Icons.Filled.PowerSettingsNew, null, tint = c, modifier = Modifier.size(54.dp))
+                Text(when { on -> "Отключить"; busy -> "Отменить поиск"; else -> "Подключить" }, color = MaterialTheme.colorScheme.onSurface,
+                    fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
             }
         }
     }

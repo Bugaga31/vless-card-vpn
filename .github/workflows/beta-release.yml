@@ -128,6 +128,8 @@ jobs:
           name: install-check-api-${{ matrix.api }}
           path: |
             screen.png
+            home-ocean.png
+            home-large-text.png
             logcat.txt
             security-results.txt
           if-no-files-found: ignore
@@ -144,6 +146,16 @@ jobs:
         with:
           name: beta-apk
           path: release
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: install-check-api-*
+          path: ui-checks
+      - name: Prepare actual Android UI previews
+        run: |
+          for api in 30 34; do
+            cp "ui-checks/install-check-api-$api/home-ocean.png" "release/Android-home-api-$api.png"
+            cp "ui-checks/install-check-api-$api/home-large-text.png" "release/Android-large-text-api-$api.png"
+          done
       - name: Create prerelease
         env:
           GH_TOKEN: ${{ github.token }}
@@ -163,10 +175,10 @@ jobs:
           [ -f "$NOTES" ] || NOTES=/dev/null
           { cat "$NOTES"; echo; echo "### Автоматические проверки этой сборки"; echo "- JVM-тесты: $T, ошибок: $F"; echo "- Подписи v1 + v2 + v3, постоянный ключ Beta (следующие версии ставятся поверх)"; echo "- Файл *-arm64.apk — то же приложение только для 64-битных телефонов (почти все с 2017 года), качать примерно вдвое меньше"; echo "- Суммы SHA-256 обоих файлов — в SHA256SUMS-Beta.txt"; echo "- Универсальный файл установлен и запущен на эмуляторах Android 11 и 14 (нативный x86_64, без ARM-трансляции)"; echo "- Реальный телефон и сети РФ этим не проверяются"; } > notes.md
           case "$VERSION" in
-            release-build-*) gh release create "v1.$V" VLESS-Card-Beta-1.$V.apk VLESS-Card-Beta-1.$V-arm64.apk SHA256SUMS-Beta.txt \
+            release-build-*) gh release create "v1.$V" VLESS-Card-Beta-1.$V.apk VLESS-Card-Beta-1.$V-arm64.apk SHA256SUMS-Beta.txt Android-*.png \
                 --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --latest \
                 --title "VLESS Card 1.$V" --notes-file notes.md --generate-notes ;;
-            *) gh release create "beta-v1.$V" VLESS-Card-Beta-1.$V.apk VLESS-Card-Beta-1.$V-arm64.apk SHA256SUMS-Beta.txt \
+            *) gh release create "beta-v1.$V" VLESS-Card-Beta-1.$V.apk VLESS-Card-Beta-1.$V-arm64.apk SHA256SUMS-Beta.txt Android-*.png \
                 --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease --draft \
                 --title "VLESS Card · Beta 1.$V" --notes-file notes.md ;;
           esac

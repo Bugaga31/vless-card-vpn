@@ -13,10 +13,10 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 
-val Accent = Color(0xFF4F8CFF)
-val Good = Color(0xFF2EC27E)
-val Bad = Color(0xFFE5484D)
-val Warn = Color(0xFFF5A524)
+val Accent = Color(0xFF78DEEA)
+val Good = Color(0xFF7AE4BA)
+val Bad = Color(0xFFFFA4AC)
+val Warn = Color(0xFFFFCE83)
 
 @Composable
 fun AppUi(onConnect: () -> Unit, onDisconnect: () -> Unit) {
@@ -25,10 +25,12 @@ fun AppUi(onConnect: () -> Unit, onDisconnect: () -> Unit) {
     // «Оформление»: classic dark, AMOLED (true black: saves battery on OLED screens), Material You (wallpaper colors, Android 12+)
     val scheme = when {
         theme.theme == "you" && android.os.Build.VERSION.SDK_INT >= 31 -> dynamicDarkColorScheme(ctx)
-        theme.theme == "amoled" -> darkColorScheme(primary = Accent, background = Color.Black, surface = Color(0xFF0A0A0C),
-            surfaceVariant = Color(0xFF16181D), onBackground = Color(0xFFE8EAED), onSurface = Color(0xFFE8EAED))
-        else -> darkColorScheme(primary = Accent, background = Color(0xFF0F1115), surface = Color(0xFF171A21),
-            surfaceVariant = Color(0xFF1F232C), onBackground = Color(0xFFE8EAED), onSurface = Color(0xFFE8EAED))
+        theme.theme == "amoled" -> darkColorScheme(primary = Accent, onPrimary = Color(0xFF05212B), secondary = Color(0xFFB6AFF6),
+            onSurfaceVariant = Color(0xFFB3C6D5), outline = Color(0xFF536D80), background = Color.Black, surface = Color(0xFF0A0A0C),
+            surfaceVariant = Color(0xFF16181D), onBackground = Color(0xFFF0F6FC), onSurface = Color(0xFFF0F6FC))
+        else -> darkColorScheme(primary = Accent, onPrimary = Color(0xFF05212B), secondary = Color(0xFFB6AFF6),
+            onSurfaceVariant = Color(0xFFB3C6D5), outline = Color(0xFF536D80), background = Color(0xFF07131F), surface = Color(0xFF102536),
+            surfaceVariant = Color(0xFF183345), onBackground = Color(0xFFF0F6FC), onSurface = Color(0xFFF0F6FC))
     }
     MaterialTheme(colorScheme = scheme) {
         var tab by remember { mutableIntStateOf(0) }
