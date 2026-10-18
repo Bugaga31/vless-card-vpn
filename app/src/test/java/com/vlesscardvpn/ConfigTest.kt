@@ -114,7 +114,7 @@ class ConfigTest {
 
     @Test fun dpiStrategies() {
         val all = com.vlesscardvpn.core.DpiStrategies.BUILT_IN
-        assertEquals(26, all.size)
+        assertEquals(28, all.size)
         assertEquals(all.size, all.map { it.id }.toSet().size)
         assertEquals(10, all.count { it.own })
         all.forEach { s ->
