@@ -21,8 +21,8 @@ object CloudControl {
         require(text.length <= 2 * 1024 * 1024)
         val o = JSONObject(text); require(o.getInt("schema") == 1)
         val stampSeconds = o.getLong("stamp"); val expiresSeconds = o.getLong("expires")
-        val stamp = CloudFreshness.publishedAt(stampSeconds, now) ?: error("invalid manifest stamp")
-        val expires = CloudFreshness.secondsToMillis(expiresSeconds) ?: error("invalid manifest expiry")
+        val stamp = CloudFreshness.publishedAt(stampSeconds, now) ?: throw IllegalArgumentException("invalid manifest stamp")
+        val expires = CloudFreshness.secondsToMillis(expiresSeconds) ?: throw IllegalArgumentException("invalid manifest expiry")
         require(expires >= stamp && expires - stamp in 1..86400000)
         val a = o.getJSONArray("nodes"); require(a.length() <= 6000)
         val entries = (0 until a.length()).mapNotNull { i ->
