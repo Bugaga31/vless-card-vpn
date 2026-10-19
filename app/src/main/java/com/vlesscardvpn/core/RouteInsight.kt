@@ -21,6 +21,7 @@ object RouteInsight {
         val serviceCheckedAt: Long,
         val cloudSpeedAt: Long,
         val manifestRatingHint: Boolean,
+        val operatorRatingHint: Boolean,
     )
 
     data class Decision(
@@ -74,6 +75,7 @@ object RouteInsight {
                 serviceCheckedAt = state.serviceCheckedAt.takeIf { serviceIsCurrent } ?: 0,
                 cloudSpeedAt = cloudAt,
                 manifestRatingHint = CloudControl.prior(server, now) != null,
+                operatorRatingHint = CloudSpeed.net[key]?.let { it.size >= 3 && it[2] > 0 } == true,
             )
         }
         val model = Brain.observationCount(network)

@@ -116,6 +116,8 @@ fun RouteInsightCard(modifier: Modifier = Modifier) {
                             else "Облачный замер скорости: неизвестен или устарел", color = MaterialTheme.colorScheme.onSurfaceVariant)
                         if (fact.manifestRatingHint) Text("Есть рейтинговая подсказка манифеста; возраст без замера неизвестен, это не локальная проверка",
                             color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        if (fact.operatorRatingHint) Text("Есть операторская рейтинговая подсказка; её возраст неизвестен",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
                 HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = .35f))
