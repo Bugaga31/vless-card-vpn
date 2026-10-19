@@ -448,8 +448,13 @@ object Actions {
         val tpwsOk = probe.available(DpiEngine.TPWS)
         val cfg = Store.state.value.settings
         val net0 = Net.key(app)
+        val currentDpiOk = when (DpiStrategies.resolve(cfg, net0).engine) {
+            DpiEngine.BYEDPI -> dpiOk
+            DpiEngine.TPWS -> tpwsOk
+            DpiEngine.XRAY -> true
+        }
         val maskNetwork = Net.underlying(app)?.toString()
-        val stats = Store.state.value.maskStats.let { it[net0] ?: it[Net.family(net0)] }.orEmpty()
+        val stats = MaskSearchPolicy.statsForNetwork(Store.state.value.maskStats, net0)
         // Learned order: masks that passed on this network (on any server) first, untested next, proven failures last.
         fun bucket(m: Mask): Int = MaskSearchPolicy.bucket(stats[m.id])
         // «Эволюция масок»: kept auto masks + fresh mutants of what passed here; a few slots per server right after the proven masks.
@@ -464,7 +469,7 @@ object Actions {
         val evoCand = (0 until maxOf(untried.size, pool.size)).flatMap { i -> listOfNotNull(untried.getOrNull(i), pool.getOrNull(i)) }
         val whitelisted = Whitelist.last.value?.let { it.verdict == Whitelist.Verdict.WHITELIST && System.currentTimeMillis() - it.at < 3600_000L } == true
         val order = { s: Server ->
-            val ok = { m: Mask -> MaskSearchPolicy.allowed(m, s, cfg, dpiOk, tpwsOk) }
+            val ok = { m: Mask -> MaskSearchPolicy.allowed(m, s, cfg, dpiOk, tpwsOk, currentDpiOk) }
             val fresh = evoCand.filter(ok).shuffled().take(slots)
             val base = (CloudControl.maskHints(Net.family(net0)).mapNotNull { Masks.byId(it) }.filter(ok) + Masks.searchOrder(dpiOk, s, cfg.maskFamilies, cfg.maskFps) + kept.filter(ok)).distinctBy { it.id }
                 .filter { (tpwsOk || !it.dpi.startsWith("TPWS#")) && it !in fresh }

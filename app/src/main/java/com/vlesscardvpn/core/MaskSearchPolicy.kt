@@ -8,12 +8,25 @@ import com.vlesscardvpn.xray.Masks
 
 /** Local observations are hints, never a reason to relax transport/certificate/user constraints. */
 object MaskSearchPolicy {
-    fun allowed(m: Mask, s: Server, cfg: Settings, byeDpi: Boolean, tpws: Boolean): Boolean =
-        Masks.compatible(m, s) && (!m.viaByeDpi || byeDpi) &&
-        (tpws || !m.dpi.startsWith("TPWS#")) &&
-        (m.id == Masks.DEFAULT.id || m.custom ||
+    fun allowed(m: Mask, s: Server, cfg: Settings, byeDpi: Boolean, tpws: Boolean, currentDpi: Boolean): Boolean =
+        Masks.compatible(m, s) && engineAvailable(m, cfg, byeDpi, tpws, currentDpi) &&
+        (m.id == Masks.DEFAULT.id ||
             (cfg.maskFamilies.isEmpty() || Masks.family(m) in cfg.maskFamilies) &&
             (cfg.maskFps.isEmpty() || m.fingerprint in cfg.maskFps || m.hasNoise))
+
+    private fun engineAvailable(m: Mask, cfg: Settings, byeDpi: Boolean, tpws: Boolean, currentDpi: Boolean): Boolean = when {
+        m.dpi.isEmpty() -> true
+        m.dpi == Masks.CURRENT_DPI -> currentDpi
+        else -> when (DpiStrategies.byId(m.dpi, cfg)?.engine) {
+            DpiEngine.BYEDPI -> byeDpi
+            DpiEngine.TPWS -> tpws
+            DpiEngine.XRAY -> true
+            null -> false
+        }
+    }
+
+    fun statsForNetwork(stats: Map<String, Map<String, MaskStat>>, network: String): Map<String, MaskStat> =
+        stats[network].orEmpty()
 
     /** One old success must not put a now repeatedly failing recipe ahead of untested alternatives. */
     fun bucket(stat: MaskStat?): Int = when {

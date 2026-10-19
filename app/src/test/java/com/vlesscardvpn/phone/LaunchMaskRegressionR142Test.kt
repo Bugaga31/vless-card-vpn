@@ -41,15 +41,32 @@ class LaunchMaskRegressionR142Test {
     }
     @Test fun allCandidateSourcesMustRespectUserFilters() {
         val m = Masks.byId("vc.sni.vk.com.balanced")!!
-        assertTrue(MaskSearchPolicy.allowed(m,tls,Settings(),true,true))
-        assertFalse(MaskSearchPolicy.allowed(m,tls,Settings(maskFamilies=listOf("plain")),true,true))
-        assertFalse(MaskSearchPolicy.allowed(m,tls,Settings(maskFps=listOf("firefox")),true,true))
-        assertTrue(MaskSearchPolicy.allowed(Masks.DEFAULT,tls,Settings(maskFamilies=listOf("plain")),false,false))
+        assertTrue(MaskSearchPolicy.allowed(m,tls,Settings(),true,true,true))
+        assertFalse(MaskSearchPolicy.allowed(m,tls,Settings(maskFamilies=listOf("plain")),true,true,true))
+        assertFalse(MaskSearchPolicy.allowed(m,tls,Settings(maskFps=listOf("firefox")),true,true,true))
+        assertTrue(MaskSearchPolicy.allowed(Masks.DEFAULT,tls,Settings(maskFamilies=listOf("plain")),false,false,false))
+    }
+    @Test fun customMasksRespectFamilyAndFingerprintFilters() {
+        val custom = Masks.byId("vc.sni.vk.com.balanced")!!.copy(id="my:balanced", custom=true)
+        assertTrue(MaskSearchPolicy.allowed(custom,tls,Settings(maskFamilies=listOf("my")),true,true,true))
+        assertFalse(MaskSearchPolicy.allowed(custom,tls,Settings(maskFamilies=listOf("brand")),true,true,true))
+        assertFalse(MaskSearchPolicy.allowed(custom,tls,Settings(maskFps=listOf("firefox")),true,true,true))
     }
     @Test fun missingTpwsNeverLeaksThroughFreshOrCloudCandidates() {
         val m=Masks.ALL.first { it.dpi.startsWith("TPWS#") }
-        assertFalse(MaskSearchPolicy.allowed(m,tls,Settings(),true,false))
-        assertFalse(MaskSearchPolicy.allowed(m,tls,Settings(),false,true))
+        assertFalse(MaskSearchPolicy.allowed(m,tls,Settings(),true,false,true))
+        assertFalse(MaskSearchPolicy.allowed(m,tls,Settings(),false,true,true))
+        assertTrue(MaskSearchPolicy.allowed(m,tls,Settings(),true,true,true))
+    }
+    @Test fun currentDpiMaskRequiresItsResolvedEngine() {
+        val current = Masks.byId("vc.sni.vk.com.balanced")!!.copy(dpi=Masks.CURRENT_DPI)
+        assertFalse(MaskSearchPolicy.allowed(current,tls,Settings(),true,true,false))
+        assertTrue(MaskSearchPolicy.allowed(current,tls,Settings(),true,true,true))
+    }
+    @Test fun maskStatsNeverFallBackAcrossPhysicalNetworks() {
+        val stats = mapOf("Wi-Fi" to mapOf("old" to MaskStat(9, 0)))
+        assertTrue(MaskSearchPolicy.statsForNetwork(stats,"Wi-Fi · WIFI_new").isEmpty())
+        assertEquals(MaskStat(9, 0),MaskSearchPolicy.statsForNetwork(stats,"Wi-Fi")["old"])
     }
     @Test fun oldLuckySuccessDoesNotOutrankUnknownAfterFailures() {
         assertEquals(2,MaskSearchPolicy.bucket(MaskStat(1,20)))
