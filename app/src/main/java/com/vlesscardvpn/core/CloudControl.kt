@@ -114,8 +114,8 @@ object CloudControl {
             val d=CloudTransport.fetch(ctx,"cloud-manifest.json",p.getString("etag",null)) { parse(it,now) }
             if (d.text != null) {
                 val s=parse(d.text,d.checkedAt)
-                timeline=CloudFreshness.fromManifestDocument(d.text,timeline,d.checkedAt,d.checkedAt,d.checkedAt) ?:
-                    timeline.copy(downloadedAt=d.checkedAt,checkedAt=d.checkedAt)
+                timeline=CloudFreshness.fromManifestDocument(d.text,timeline,d.downloadedAt,d.checkedAt,d.checkedAt) ?:
+                    timeline.copy(downloadedAt=d.downloadedAt,checkedAt=d.checkedAt)
                 CloudFreshness.save(ctx,"manifest",timeline)
                 apply(ctx,s);p.edit().putString("json",d.text).putString("etag",d.etag).apply()
             } else if (d.unchanged) {

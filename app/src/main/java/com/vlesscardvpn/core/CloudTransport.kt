@@ -12,7 +12,7 @@ import java.util.concurrent.TimeUnit
 
 /** PUBLIC control-plane data only. Never accepts arbitrary URLs or a private backup token. */
 object CloudTransport {
-    data class Download(val text: String?, val etag: String?, val unchanged: Boolean, val checkedAt: Long)
+    data class Download(val text: String?, val etag: String?, val unchanged: Boolean, val downloadedAt: Long, val checkedAt: Long)
     private val http by lazy { OkHttpClient.Builder().connectTimeout(2, TimeUnit.SECONDS).readTimeout(2, TimeUnit.SECONDS)
         .callTimeout(2500, TimeUnit.MILLISECONDS).retryOnConnectionFailure(false).build() }
     private val doh by lazy { http.newBuilder().dns(DnsOverHttps.Builder().client(http).url("https://cloudflare-dns.com/dns-query".toHttpUrl())
@@ -26,10 +26,12 @@ object CloudTransport {
         val urls = urls(path)
         fun request(client: OkHttpClient, url: String, tag: String?): Download {
             return client.newCall(Request.Builder().url(url).apply { if (tag != null) header("If-None-Match", tag) }.build()).execute().use { r ->
-                if (r.code == 304 && tag != null) return@use Download(null, tag, true, System.currentTimeMillis())
+                if (r.code == 304 && tag != null) return@use Download(null, tag, true, 0, System.currentTimeMillis())
                 check(r.code == 200) { "Cloud HTTP ${r.code}" }
                 val text = r.body!!.byteStream().use { String(BoundedInput.read(it, 2 * 1024 * 1024)) }
-                valid(text); Download(text, if (url == urls.first()) r.header("ETag") else null, false, System.currentTimeMillis())
+                val downloadedAt = System.currentTimeMillis()
+                valid(text)
+                Download(text, if (url == urls.first()) r.header("ETag") else null, false, downloadedAt, System.currentTimeMillis())
             }
         }
         for ((client,url,tag) in listOf(Triple(doh,urls[0],etag),Triple(http,urls[1],null),Triple(http,urls[0],etag))) {

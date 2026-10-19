@@ -149,8 +149,8 @@ object CloudSpeed {
             } else if (d.text != null) {
                 if (!Report.enabled(ctx)) return
                 speedIndex = parseIndex(d.text, d.checkedAt)
-                timeline = CloudFreshness.fromSpeedDocument(d.text, timeline, d.checkedAt, d.checkedAt, d.checkedAt) ?:
-                    timeline.copy(downloadedAt = d.checkedAt, checkedAt = d.checkedAt)
+                timeline = CloudFreshness.fromSpeedDocument(d.text, timeline, d.downloadedAt, d.checkedAt, d.checkedAt) ?:
+                    timeline.copy(downloadedAt = d.downloadedAt, checkedAt = d.checkedAt)
                 CloudFreshness.save(ctx, "speed", timeline)
                 p.edit().putString("json",d.text).putString("etag",d.etag).apply()
                 status.value=if (freshIndex(d.checkedAt).kbps.isNotEmpty()) "Облако: свежие замеры скорости загружены" else "Облако: нет свежих изолированных замеров; сравниваем на телефоне"

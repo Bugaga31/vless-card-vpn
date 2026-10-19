@@ -46,8 +46,9 @@ class CloudInsightTest {
         assertNull(CloudFreshness.ageMillis(now + 1, now))
         assertNull(CloudFreshness.secondsToMillis(Long.MAX_VALUE))
         assertNull(CloudFreshness.secondsToMillis(-1))
-        assertTrue(CloudFreshness.isFreshMeasurement(now - CloudFreshness.SPEED_TTL_MS, now))
-        assertFalse(CloudFreshness.isFreshMeasurement(now - CloudFreshness.SPEED_TTL_MS - 1, now))
+        val ttlNow = CloudFreshness.SPEED_TTL_MS + 10_000L
+        assertTrue(CloudFreshness.isFreshMeasurement(ttlNow - CloudFreshness.SPEED_TTL_MS, ttlNow))
+        assertFalse(CloudFreshness.isFreshMeasurement(ttlNow - CloudFreshness.SPEED_TTL_MS - 1, ttlNow))
         assertFalse(CloudFreshness.isFreshMeasurement(now + 1, now))
         assertNotNull(CloudFreshness.publishedAt(now / 1000 + 300, now))
         assertNull(CloudFreshness.publishedAt(now / 1000 + 301, now))
