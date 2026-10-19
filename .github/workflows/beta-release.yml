@@ -130,8 +130,14 @@ jobs:
             screen.png
             home-ocean.png
             home-large-text.png
+            home-font-scale-2.png
+            home-320dp.png
+            home-320dp-font-scale-2.png
+            home-landscape.png
+            home-route-insight-expanded.png
             intro.png
             intro-large-text.png
+            intro-320dp-font-scale-2.png
             logcat.txt
             security-results.txt
           if-no-files-found: ignore
@@ -157,8 +163,14 @@ jobs:
           for api in 30 34; do
             cp "ui-checks/install-check-api-$api/home-ocean.png" "release/Android-home-api-$api.png"
             cp "ui-checks/install-check-api-$api/home-large-text.png" "release/Android-large-text-api-$api.png"
+            cp "ui-checks/install-check-api-$api/home-font-scale-2.png" "release/Android-font-scale-2-api-$api.png"
+            cp "ui-checks/install-check-api-$api/home-320dp.png" "release/Android-320dp-api-$api.png"
+            cp "ui-checks/install-check-api-$api/home-320dp-font-scale-2.png" "release/Android-320dp-font-scale-2-api-$api.png"
+            cp "ui-checks/install-check-api-$api/home-landscape.png" "release/Android-landscape-api-$api.png"
+            cp "ui-checks/install-check-api-$api/home-route-insight-expanded.png" "release/Android-route-insight-expanded-api-$api.png"
             cp "ui-checks/install-check-api-$api/intro.png" "release/Android-intro-api-$api.png"
             cp "ui-checks/install-check-api-$api/intro-large-text.png" "release/Android-intro-large-api-$api.png"
+            cp "ui-checks/install-check-api-$api/intro-320dp-font-scale-2.png" "release/Android-intro-320dp-font-scale-2-api-$api.png"
           done
       - name: Create prerelease
         env:
