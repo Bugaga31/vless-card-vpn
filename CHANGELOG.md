@@ -1,6 +1,6 @@
-## 1.2.31
+## 1.2.32
 
-Silent intro on every foreground visit, safer media-aware mask ranking, four lightweight cover profiles, cloud freshness timelines and a local historical route explanation. See [release notes](docs/release-1.2.31.md).
+Silent intro on every foreground visit, safer media-aware mask ranking, four lightweight cover profiles, cloud freshness timelines and a local historical route explanation. See [release notes](docs/release-1.2.32.md).
 
 ## 1.2.30
 
