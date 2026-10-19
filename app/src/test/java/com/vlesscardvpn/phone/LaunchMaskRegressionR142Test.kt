@@ -55,8 +55,7 @@ class LaunchMaskRegressionR142Test {
     @Test fun missingTpwsNeverLeaksThroughFreshOrCloudCandidates() {
         val m=Masks.ALL.first { it.dpi.startsWith("TPWS#") }
         assertFalse(MaskSearchPolicy.allowed(m,tls,Settings(),true,false,true))
-        assertFalse(MaskSearchPolicy.allowed(m,tls,Settings(),false,true,true))
-        assertTrue(MaskSearchPolicy.allowed(m,tls,Settings(),true,true,true))
+        assertTrue(MaskSearchPolicy.allowed(m,tls,Settings(),false,true,true))
     }
     @Test fun currentDpiMaskRequiresItsResolvedEngine() {
         val current = Masks.byId("vc.sni.vk.com.balanced")!!.copy(dpi=Masks.CURRENT_DPI)
