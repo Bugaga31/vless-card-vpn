@@ -412,21 +412,24 @@ object Actions {
                 if (Net.key(app) != net || Net.underlying(app)?.toString() != underlying) return@real
                 val s = variants[i].first
                 val speedSample = ServerChoice.acceptsSpeedSample(p.kbps, parallel)
+                val checkedAt = System.currentTimeMillis()
                 val firstSuccess = p.works && ok.incrementAndGet() == 1
                 if (p.works) onSuccess?.invoke(s)
                 // A deliberately short attempt is inconclusive when it times out; confirm with the normal budget.
                 if (!p.works && budgetMs in 1 until ConnectPolicy.QUICK_BUDGET_MS) return@real
-                probeMemory.record(net, s.id, st.state(s).maskFor(net), p.works, System.currentTimeMillis())
+                probeMemory.record(net, s.id, st.state(s).maskFor(net), p.works, checkedAt)
                 runCatching { Brain.learn(net, s, st.state(s), p.works) }
                 states.put(s.id) {
                     if (Net.key(app) != net || Net.underlying(app)?.toString() != underlying) it else
-                    it.copy(netEvidence = (it.netEvidence + ((net + "|" + st.state(s).maskFor(net)) to it.evidenceFor(net).observe(p.works, p.realMs, System.currentTimeMillis()))).entries.sortedByDescending { e -> e.value.at }.take(8).associate { e -> e.toPair() }, realMs = p.realMs, bigOk = p.bigOk ?: it.bigOk?.takeIf { old -> old }, ytOk = if (youtube) p.ytOk else it.ytOk, tgOk = if (youtube) p.tgOk else it.tgOk, checkedAt = System.currentTimeMillis(), kbps = if (speedSample) p.kbps else it.kbps,
-                        serviceNetwork = if (youtube && p.works) net else it.serviceNetwork,
-                        serviceMask = if (youtube && p.works) st.state(s).maskFor(net) else it.serviceMask,
-                        serviceCheckedAt = if (youtube && p.works) System.currentTimeMillis() else it.serviceCheckedAt,
+                    it.copy(netEvidence = (it.netEvidence + ((net + "|" + st.state(s).maskFor(net)) to it.evidenceFor(net).observe(p.works, p.realMs, checkedAt))).entries.sortedByDescending { e -> e.value.at }.take(8).associate { e -> e.toPair() }, realMs = p.realMs, bigOk = p.bigOk ?: it.bigOk?.takeIf { old -> old }, ytOk = if (youtube) p.ytOk else it.ytOk, tgOk = if (youtube) p.tgOk else it.tgOk, checkedAt = checkedAt, kbps = if (speedSample) p.kbps else it.kbps,
+                        serviceNetwork = if (youtube && (p.ytOk != null || p.tgOk != null)) net else it.serviceNetwork,
+                        serviceMask = if (youtube && (p.ytOk != null || p.tgOk != null)) st.state(s).maskFor(net) else it.serviceMask,
+                        serviceCheckedAt = if (youtube && (p.ytOk != null || p.tgOk != null)) checkedAt else it.serviceCheckedAt,
+                        serviceYtOk = if (youtube && (p.ytOk != null || p.tgOk != null)) p.ytOk else it.serviceYtOk,
+                        serviceTgOk = if (youtube && (p.ytOk != null || p.tgOk != null)) p.tgOk else it.serviceTgOk,
                         speedNetwork = if (speedSample) net else it.speedNetwork,
                         speedMask = if (speedSample) st.state(s).maskFor(net) else it.speedMask,
-                        speedCheckedAt = if (speedSample) System.currentTimeMillis() else it.speedCheckedAt,
+                        speedCheckedAt = if (speedSample) checkedAt else it.speedCheckedAt,
                         okCount = it.okCount + if (p.works) 1 else 0, failCount = it.failCount + if (p.works) 0 else 1)
                 }
                 if (firstSuccess && onFirst != null) { states.flush(); onFirst(s) }
@@ -1416,7 +1419,12 @@ object Actions {
         }
         kotlinx.coroutines.currentCoroutineContext().ensureActive()
         if (!valid()) { selectionNetworkChanged(); return null }
-        if (onReady != null) onReady(winner)
+        if (onReady != null) {
+            RouteInsight.record(RouteInsight.Stage.FINALIST,
+                if (GameSession.active()) RouteInsight.Criterion.GAME_PROFILE else RouteInsight.Criterion.DOWNLOAD,
+                candidates.size, listOf(winner), net)
+            onReady(winner)
+        }
         return winner
     }
 
@@ -1503,7 +1511,7 @@ object Actions {
 
     /** «Страна»: only servers of the chosen country when at least one of them works, otherwise all. */
     fun preferred(st: AppState, list: List<Server>): List<Server> {
-        val safe = if (st.settings.mode == Mode.AUTO) list.filter(AutoEligibility::allowed) else list
+        val safe = list.filter(CloudControl::usable).let { if (st.settings.mode == Mode.AUTO) it.filter(AutoEligibility::allowed) else it }
         val c = st.settings.country
         if (c.isEmpty()) return safe
         return safe.filter { Countries.of(it.name) == c }.ifEmpty { safe }
@@ -1574,11 +1582,16 @@ object Actions {
 
     fun selectBest(n: Int = 10, among: Collection<Server>? = null, close: Boolean = false): Int {
         var c = 0
+        var recordDecision = false
+        var decisionRoutes: List<Server> = emptyList()
+        var decisionNet = ""
+        var decisionSourceSize = 0
+        var decisionCriterion = RouteInsight.Criterion.DOWNLOAD
         val ids = among?.map { it.id }?.toHashSet()
         runCatching { CloudSpeed.loadNet(app) }
         Store.update { st ->
             // one WireGuard tunnel per key (WARP accounts): two with the same key would steal the session from each other
-            val works = st.servers.filter { (ids == null || it.id in ids) && st.state(it).works }
+            val works = st.servers.filter { (ids == null || it.id in ids) && st.state(it).works && CloudControl.usable(it) }
             // the balancer spreads connections over all selected servers: one that cannot reach Telegram would break
             // every few Telegram connections («иногда не работает»), so such servers stay out while others exist
             // (only in «Авто»: in «Серверы» the user's own choice stays as it is)
@@ -1597,9 +1610,19 @@ object Actions {
             val sorted = ranked.distinctBy { if (it.protocol == "wireguard") "wg:" + it.secret else it.id }.take(if (st.settings.mode == Mode.AUTO) AutoEligibility.TOP else if (primary) 1 else n)
             val favs = if (st.settings.mode != Mode.AUTO && close && !primary) all.filter { it.id in st.settings.favorites } else emptyList()
             val best = ((if (st.settings.mode != Mode.AUTO && close && !primary) closeOnes(sorted.map(spread)).let { k -> sorted.take(k) } else sorted) + favs).map { it.id }.toSet()
+            val oldSelected = st.states.filterValues { it.selected }.keys
+            if (st.settings.mode == Mode.AUTO && oldSelected != best) {
+                recordDecision = true
+                decisionRoutes = sorted.filter { it.id in best }.take(RouteInsight.MAX_ROUTES)
+                decisionNet = netKey
+                decisionSourceSize = ids?.size ?: st.servers.size
+                decisionCriterion = if (gaming) RouteInsight.Criterion.GAME_PROFILE else RouteInsight.Criterion.DOWNLOAD
+            }
             c = best.size
             st.copy(states = st.servers.associate { s -> s.id to st.state(s).copy(selected = s.id in best) } )
         }
+        if (recordDecision) RouteInsight.record(RouteInsight.Stage.SELECTED_POOL, decisionCriterion,
+            decisionSourceSize, decisionRoutes, decisionNet)
         return c
     }
 

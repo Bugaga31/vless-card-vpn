@@ -99,6 +99,7 @@ data class ServerState(
     val netEvidence: Map<String, RouteEvidence> = emptyMap(),
     val speedNetwork: String = "", val speedMask: String = "", val speedCheckedAt: Long = 0,
     val serviceNetwork: String = "", val serviceMask: String = "", val serviceCheckedAt: Long = 0,
+    val serviceYtOk: Boolean? = null, val serviceTgOk: Boolean? = null,
 ) {
     /**
      * Rank for «самый быстрый»: lower is better. Not ping alone — a server that answers in 60 ms but downloads at
@@ -117,6 +118,7 @@ data class ServerState(
     fun toJson(): JSONObject = JSONObject().apply {
         if (netEvidence.isNotEmpty()) put("netEvidence", JSONObject().apply { netEvidence.forEach { (k, v) -> put(k, v.toJson()) } })
         if (serviceCheckedAt > 0) { put("serviceNetwork",serviceNetwork);put("serviceMask",serviceMask);put("serviceAt",serviceCheckedAt) }
+        serviceYtOk?.let { put("serviceYt",it) }; serviceTgOk?.let { put("serviceTg",it) }
         if (speedCheckedAt > 0) { put("speedNetwork",speedNetwork);put("speedMask",speedMask);put("speedAt",speedCheckedAt) }
         if (selected) put("sel", true); put("tcp", tcpMs); put("real", realMs); bigOk?.let { put("big", it) }; ytOk?.let { put("yt", it) }
         if (maskId.isNotEmpty()) put("mask", maskId); put("at", checkedAt); put("ok", okCount); put("fail", failCount)
@@ -132,6 +134,8 @@ data class ServerState(
             netMasks = o.optJSONObject("net")?.let { m -> m.keys().asSequence().associateWith { m.getString(it) } } ?: emptyMap(),
             tgOk = if (o.has("tg")) o.optBoolean("tg") else null, kbps = o.optInt("kbps"),
             serviceNetwork = o.optString("serviceNetwork"), serviceMask = o.optString("serviceMask"), serviceCheckedAt = o.optLong("serviceAt"),
+            serviceYtOk = if (o.has("serviceYt")) o.optBoolean("serviceYt") else null,
+            serviceTgOk = if (o.has("serviceTg")) o.optBoolean("serviceTg") else null,
             speedNetwork = o.optString("speedNetwork"), speedMask = o.optString("speedMask"), speedCheckedAt = o.optLong("speedAt"),
             netEvidence = o.optJSONObject("netEvidence")?.let { m -> m.keys().asSequence().take(8).mapNotNull { k -> m.optJSONObject(k)?.let { RouteEvidence.parse(it) }?.let { k to it } }.toMap() } ?: emptyMap(),
         )

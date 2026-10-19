@@ -244,6 +244,8 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
                     if (sum.heavyMask) Text("Маскировка «тяжёлая» (мелкие пакеты) — видео может тормозить. После подключения сам поищу лёгкую", fontSize = 11.sp, color = Warn)
                 }
             }
+            Spacer(Modifier.height(10.dp))
+            RouteInsightCard()
         }
         if (mode != Mode.SERVERS) {
             Spacer(Modifier.height(10.dp))

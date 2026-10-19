@@ -242,7 +242,8 @@ object Masks {
 
     @Volatile private var cloudById: Map<String, Mask> = emptyMap()
     fun setCloud(masks: List<Mask>) { cloudById = masks.take(12).associateBy { it.id } }
-    fun byId(id: String?): Mask? = if (id.isNullOrEmpty()) null else byId[id] ?: customById[id] ?: cloudById[id]
+    fun byId(id: String?): Mask? = if (id.isNullOrEmpty()) null else byId[id] ?: customById[id] ?:
+        cloudById[id]?.takeIf { !id.startsWith("cloudfrag#") || com.vlesscardvpn.core.CloudControl.recipesUsable() }
 
     /** Noise items of a mask: its own JSON («Мои маскировки») or the preset. */
     fun noiseFor(m: Mask): String? = m.noiseJson.ifEmpty { null } ?: m.noise.takeIf { it.isNotEmpty() }?.let { noiseItems(it) }

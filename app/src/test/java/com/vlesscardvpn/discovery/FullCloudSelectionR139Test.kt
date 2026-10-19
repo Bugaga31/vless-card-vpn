@@ -10,7 +10,7 @@ class FullCloudSelectionR139Test {
     private val now=1_000_000L
     private fun server(name:String)=Server(name,"vless","$name.invalid",443,name)
     private fun state(speed:Int=1000)=ServerState(realMs=50,kbps=speed,speedNetwork="wifi",speedMask="",speedCheckedAt=now,
-        serviceNetwork="wifi",serviceMask="",serviceCheckedAt=now,ytOk=true,tgOk=true)
+        serviceNetwork="wifi",serviceMask="",serviceCheckedAt=now,ytOk=true,tgOk=true,serviceYtOk=true,serviceTgOk=true)
     @Test fun russianFlagAnywhereOverridesEvenForeignFirstFlag() {
         assertFalse(AutoEligibility.allowed(server("🇳🇱 test 🇷🇺")))
         assertFalse(AutoEligibility.allowed(server("RU-1")))
@@ -36,7 +36,7 @@ class FullCloudSelectionR139Test {
         assertEquals(1,AutoEligibility.serviceRank(s,"wifi",now-1))
     }
     @Test fun bothServicesWinOverFasterBrokenRouteAndAllowBackgroundRepair() {
-        val good=state(1000);val bad=state(90000).copy(tgOk=false)
+        val good=state(1000);val bad=state(90000).copy(tgOk=false,serviceTgOk=false)
         assertTrue(ServerChoice.compareDownload(good,bad,"wifi",now)<0)
         assertTrue(ServerChoice.downloadUpgrade(bad,good,"wifi",now))
         assertEquals(listOf(good),AutoEligibility.servicePool(listOf(bad,good),{it},"wifi",now))
@@ -56,7 +56,8 @@ class FullCloudSelectionR139Test {
     @Test fun serviceProvenanceSurvivesDiskRoundTrip() {
         val s=state();val loaded=ServerState.fromJson(s.toJson())
         assertEquals(s.serviceNetwork,loaded.serviceNetwork);assertEquals(s.serviceMask,loaded.serviceMask)
-        assertEquals(s.serviceCheckedAt,loaded.serviceCheckedAt);assertEquals(0,AutoEligibility.serviceRank(loaded,"wifi",now))
+        assertEquals(s.serviceCheckedAt,loaded.serviceCheckedAt);assertEquals(s.serviceYtOk,loaded.serviceYtOk)
+        assertEquals(s.serviceTgOk,loaded.serviceTgOk);assertEquals(0,AutoEligibility.serviceRank(loaded,"wifi",now))
     }
     @Test fun telegramIpRulePrecedesRussianDirectAndExplicitUserOverrideStillWins() {
         val rules=org.json.JSONObject(XrayConfigBuilder.vpnConfig(listOf(server("DE-1") to null),Settings(alwaysDirect=listOf("telegram.org")),null)).getJSONObject("routing").getJSONArray("rules")

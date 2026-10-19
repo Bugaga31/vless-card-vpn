@@ -1,6 +1,6 @@
 ## 1.2.31
 
-Silent intro on every foreground visit, media-aware mask ranking, four additional lightweight cover profiles and compact ocean UI. See [release notes](docs/release-1.2.31.md).
+Silent intro on every foreground visit, safer media-aware mask ranking, four lightweight cover profiles, cloud freshness timelines and a local historical route explanation. See [release notes](docs/release-1.2.31.md).
 
 ## 1.2.30
 
