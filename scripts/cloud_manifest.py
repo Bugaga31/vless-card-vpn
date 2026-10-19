@@ -64,6 +64,14 @@ def main():
     recipe_path=pathlib.Path('config/cloud-recipes.json')
     recipes=json.loads(recipe_path.read_text()) if recipe_path.exists() else None
     sources=json.loads((root/'source-map.json').read_text()) if (root/'source-map.json').exists() else {}
+    # Only repeatedly successful actual measurements promote new profiles. Static hints remain fallback only.
+    from cloud_masks import measured_hints
+    stats_path=root/'mask-stats.json'
+    if stats_path.exists():
+        measured=measured_hints(json.loads(stats_path.read_text()),int(time.time()))
+        if measured:
+            recipes=recipes or {'version':1,'families':{}}
+            recipes['all']=dict(recipes.get('all',{}),masks=measured)
     result=build(hist,int(time.time()),cloud.get('net',{}),recipes,sources)
     (root/'source-stats.json').write_text(json.dumps(source_summary(result['nodes']),ensure_ascii=False,separators=(',',':')))
     (root/'cloud-manifest.json').write_text(json.dumps(result,ensure_ascii=False,separators=(',',':')))

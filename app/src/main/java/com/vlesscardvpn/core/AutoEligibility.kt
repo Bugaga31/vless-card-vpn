@@ -12,7 +12,12 @@ object AutoEligibility {
         servers.distinctBy { it.id }.filter { allowed(it) && state(it).works }.let { routes ->
             if (gaming) routes.sortedBy { ServerChoice.latencyScore(state(it).evidenceFor(net),state(it).realMs) }
             else routes.sortedWith(ServerChoice.downloadOrder(state,net,now))
-        }.take(TOP)
+        }.let(::independent).take(TOP)
+    /** WireGuard endpoints of one account are alternatives, not independent channels. */
+    fun independent(servers: List<Server>): List<Server> {
+        val keys = HashSet<String>()
+        return servers.filter { it.protocol != "wireguard" || keys.add(it.secret) }
+    }
     fun clean(st: AppState): AppState {
         val keep = st.servers.filter(::allowed)
         if (keep.size == st.servers.size) return st

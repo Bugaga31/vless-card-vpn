@@ -38,7 +38,7 @@ object AppWatch {
     )
 
     /**
-     * «Сторож сервисов»: app → page its service needs. While such an app is open the page is checked through the
+     * «Сторож сервисов»: Telegram MTProto / YouTube media / web for other apps. Checks go through the
      * tunnel (on opening and every 2 min); if it doesn't load twice in a row, other working servers are selected.
      */
     data class Guard(val title: String, val url: String)
@@ -92,33 +92,47 @@ object AppWatch {
         return if (g.isNotEmpty()) g else others
     }
 
+    /** Native apps are not tested by opening their marketing/web pages. */
+    private fun serviceAnswer(g: Guard, port: Int): Pair<Boolean?, String> = when {
+        g.title.startsWith("Telegram") -> TelegramProbe.check(port) to "MTProto"
+        g.title.startsWith("YouTube") -> Tester.youtubeMedia(port).ok to "видеоданные"
+        else -> Tester.site(g.url, port).let { it.answers to it.result }
+    }
+
     private suspend fun guard(pkg: String, g: Guard, opened: Boolean, reconnect: () -> Unit) {
         val now = System.currentTimeMillis()
         if (!opened && now - (guardAt[pkg] ?: 0) < 120_000L) return
         if (Actions.progress.value.running) return
         guardAt[pkg] = now
         val port = Tunnel.socks?.port ?: return
-        var p = withContext(Dispatchers.IO) { Tester.site(g.url, port) }
-        if (!p.answers) { delay(1500); p = withContext(Dispatchers.IO) { Tester.site(g.url, port) } }
-        guardFails = if (p.answers) 0 else guardFails + 1
-        if (p.answers) { guardGood[g.title] = Store.state.value.selected.map { it.id }.toSet(); return }
+        val network = appCtx?.let { Net.key(it) }
+        val handle = appCtx?.let { Net.underlying(it)?.toString() }
+        fun stillCurrent() = Tunnel.socks?.port == port && network == appCtx?.let { Net.key(it) } &&
+            handle == appCtx?.let { Net.underlying(it)?.toString() }
+        var p = withContext(Dispatchers.IO) { serviceAnswer(g, port) }
+        if (p.first == false) { delay(1500); if (!stillCurrent()) return; p = withContext(Dispatchers.IO) { serviceAnswer(g, port) } }
+        if (!stillCurrent()) return
+        if (p.first == null) { guardFails = 0; return } // consent/cipher/insufficient budget is not a failed route
+        guardFails = if (p.first == true) 0 else guardFails + 1
+        if (p.first == true) { guardGood[g.title] = Store.state.value.selected.map { it.id }.toSet(); return }
         // does anything open through the tunnel? If not, it's the whole connection — the watchdog/autopilot handle that
         val control = withContext(Dispatchers.IO) { Tester.site(Store.state.value.settings.testUrl, port) }
-        if (!control.answers) { guardFails = 0; return }
+        if (!control.answers || !stillCurrent()) { guardFails = 0; return }
         val st = Store.state.value
         val cur = st.selected.map { it.id }.toSet()
         // old «works» marks lie: switch only to servers that pass a check right now (never to a dead one)
         val others = st.servers.filter { it.id !in cur && st.state(it).works }.let { l ->
             if (l.isEmpty()) l else Actions.verified(guardOrder(l, guardGood[g.title]) + Actions.preferred(st, l).sortedBy { st.state(it).score }, 8, sort = false) }
+        if (!stillCurrent()) return
         when (guardDecide(maxOf(guardFails, 2), others.size, Tunnel.status.value.checkOk, now - guardAction)) {
             "switch" -> {
                 guardAction = now; guardFails = 0
                 val n = Actions.selectBest(5, close = true, among = others)
                 if (n > 0) {
-                    reconnect(); say("${g.title} не открывался через текущие серверы (${p.result}) — переключил на $n других")
+                    reconnect(); say("${g.title} не открывался через текущие серверы (${p.second}) — переключил на $n других")
                     delay(10_000)
-                    val ok = withContext(Dispatchers.IO) { Tester.site(g.url, Tunnel.socks?.port ?: port) }.answers
-                    if (ok) say("${g.title} теперь открывается") else guardAt[pkg] = 0 // next check right away
+                    val ok = withContext(Dispatchers.IO) { serviceAnswer(g, Tunnel.socks?.port ?: port).first }
+                    if (ok == true) say("${g.title} теперь открывается") else guardAt[pkg] = 0 // next check right away
                 }
             }
             "rescue" -> {

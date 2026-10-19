@@ -39,7 +39,7 @@ object PowerPolicy {
             o.protectTraffic && i.activeTraffic -> "Активный трафик: не мешаем загрузке"
             else -> "Готов к фоновым улучшениям"
         }
-        val pressure = hot || i.lowMemory || i.gaming || i.saver || low || o.profile == "eco" || !i.screen
+        val pressure = hot || i.lowMemory || i.gaming || i.saver || low || o.profile == "eco" || !i.screen || i.dataSaver || (o.protectTraffic && i.activeTraffic)
         val tcp = if (hot || i.lowMemory || i.gaming) 2 else if (pressure) 16 else if (o.profile == "fast") 128 else 64
         return Plan(Memory(low, hot, since), reason == "Готов к фоновым улучшениям", reason,
             tcp, if (pressure) 2 else if (o.profile == "fast") 12 else 6,

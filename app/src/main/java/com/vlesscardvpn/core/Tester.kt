@@ -23,7 +23,7 @@ import java.net.ServerSocket
 import java.net.Socket
 import java.util.concurrent.TimeUnit
 
-data class Probe(val realMs: Int, val bigOk: Boolean?, val ytOk: Boolean?, val error: String = "", val tgOk: Boolean? = null, val kbps: Int = 0) {
+data class Probe(val realMs: Int, val bigOk: Boolean?, val ytOk: Boolean?, val error: String = "", val tgOk: Boolean? = null, val kbps: Int = 0, val ytKbps: Int = 0) {
     val works: Boolean get() = realMs > 0 && bigOk != false
 }
 
@@ -32,7 +32,7 @@ data class Probe(val realMs: Int, val bigOk: Boolean?, val ytOk: Boolean?, val e
  *  - TCP: connect time to server:port;
  *  - real: HTTPS request through Xray with the server's masking (like v2rayNG "real delay");
  *  - big: 256 KB download through the server — catches the TSPU "16 KB freeze" (connects, then hangs);
- *  - YouTube: generate_204 on youtube.com through the server.
+ *  - YouTube: bounded real video media, Telegram: unauthenticated MTProto reachability.
  * Many servers/masks are tested at once through one Xray instance (one SOCKS port per variant).
  */
 object Tester {
@@ -147,6 +147,7 @@ object Tester {
             if (budgetMs > 0) { callTimeout(budgetMs, TimeUnit.MILLISECONDS); connectTimeout(minOf(budgetMs, 2500), TimeUnit.MILLISECONDS); readTimeout(budgetMs, TimeUnit.MILLISECONDS) }
         }.dispatcher(okhttp3.Dispatcher()).connectionPool(okhttp3.ConnectionPool(2, 30, TimeUnit.SECONDS))
             .proxy(Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", port))).build()
+        val mediaClient = client.newBuilder().followRedirects(false).followSslRedirects(false).build()
         val tasks = mutableListOf<java.util.concurrent.Future<*>>()
         try {
             var best = Long.MAX_VALUE; var err = ""
@@ -165,17 +166,16 @@ object Tester {
             val deadline = if (budgetDeadline == Long.MAX_VALUE) System.nanoTime() + TimeUnit.SECONDS.toNanos(40) else budgetDeadline
             fun remaining() = TimeUnit.NANOSECONDS.toMillis((deadline - System.nanoTime()).coerceAtLeast(1)).coerceAtLeast(1)
             val bigF = if (big) pool.submit<Pair<Boolean, Int>> { bigDownload(client,budgetDeadline,onCall) }.also { tasks += it } else null
-            val ytF = if (youtube) pool.submit<Boolean> { runCatching {
-                boundedCall(client,Request.Builder().url(YT_URL).header("User-Agent", UA).build()).execute().use { check(it.code == 204) }
-                boundedCall(client,Request.Builder().url("https://i.ytimg.com/vi/jNQXAC9IVRw/hqdefault.jpg").header("User-Agent", UA).build()).execute().use {
-                    it.code == 200 && it.header("Content-Type").orEmpty().startsWith("image/", true) && (it.body?.byteStream()?.read(ByteArray(1024)) ?: 0) > 0
-                } }.getOrDefault(false) }.also { tasks += it } else null
-            val tgF = if (youtube) pool.submit<Boolean> { runCatching {
-                boundedCall(client,Request.Builder().url("https://web.telegram.org/").header("User-Agent", UA).build()).execute().use { it.code == 200 && (it.body?.byteStream()?.read(ByteArray(1024)) ?: 0) > 0 } }.getOrDefault(false) }.also { tasks += it } else null
+            val ytF = if (youtube) pool.submit<YouTubeMediaProbe.Result> {
+                YouTubeMediaProbe.check { boundedCall(mediaClient, it) }
+            }.also { tasks += it } else null
+            val tgF = if (youtube) pool.submit<Boolean?> {
+                TelegramProbe.check(port, minOf(3000, remaining()))
+            }.also { tasks += it } else null
             val bigResult = ProbeTasks.await(bigF, remaining(), false to 0)
-            val ytOk = if (ytF != null) ProbeTasks.await(ytF, remaining(), false) else null
-            val tgOk = if (tgF != null) ProbeTasks.await(tgF, remaining(), false) else null
-            return Probe(best.toInt().coerceAtLeast(1), if (bigF != null) bigResult.first else null, ytOk, tgOk = tgOk, kbps = bigResult.second)
+            val ytResult = ProbeTasks.await(ytF, remaining(), YouTubeMediaProbe.Result(null))
+            val tgOk = if (tgF != null) ProbeTasks.await(tgF, remaining(), null) else null
+            return Probe(best.toInt().coerceAtLeast(1), if (bigF != null) bigResult.first else null, ytResult.ok, tgOk = tgOk, kbps = bigResult.second, ytKbps = ytResult.kbps)
         } finally {
             ProbeTasks.cancel(tasks)
             // Private dispatcher/pool: cancellation cannot cancel another probe or the live VPN's HTTP calls.
@@ -352,7 +352,7 @@ object Tester {
     ) = mutex.withLock {
         withContext(Bg.io) {
             val successes = java.util.concurrent.atomic.AtomicInteger()
-            fun skipped(i: Int) = successes.get() >= stopAfter.coerceAtLeast(1) || skip(i)
+            fun skipped(i: Int) = successes.get() >= stopAfter.coerceAtLeast(1) || skip(i) || (variants[i].first.protocol == "wireguard" && variants[i].first.secret in Tunnel.wireguardKeys)
             fun report(i: Int, p: Probe) { if (p.works) successes.incrementAndGet(); onEach(i, p) }
             // Bound config/socket footprint too, not merely simultaneous HTTP calls.
             val effectiveBatch = PowerPolicy.cap(batch, if (PhonePower.state.value.realParallel <= 2) 4 else batch)
@@ -417,19 +417,39 @@ object Tester {
     })
 
     data class DpiProbe(val ok: Boolean, val ms: Int, val bytes: Int, val error: String = "")
-    /** YouTube page download speed through a SOCKS port (kbit/s, 0 = failed / cut): the whole page, up to 4 s. */
-    fun ytSpeed(port: Int): Int = runCatching {
-        val client = base.newBuilder().proxy(Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", port))).readTimeout(6, TimeUnit.SECONDS).callTimeout(12, TimeUnit.SECONDS).build()
-        val t0 = System.nanoTime()
-        client.newCall(Request.Builder().url(DPI_URL).header("User-Agent", UA).build()).execute().use { r ->
-            check(r.code == 200 && r.header("Content-Type").orEmpty().startsWith("text/html",ignoreCase=true))
-            val src = r.body!!.byteStream(); val buf = ByteArray(32768); var total = 0L
-            val end = t0 + 4_000_000_000L
-            while (System.nanoTime() < end) { val n = src.read(buf); if (n < 0) break; total += n }
-            client.connectionPool.evictAll()
-            if (total < DPI_BYTES) 0 else (total * 8 * 1_000_000 / ((System.nanoTime() - t0) / 1000).coerceAtLeast(1) / 1000).toInt()
+    /** Actual media only. HTML/image throughput must never choose YouTube's route. */
+    fun ytSpeed(port: Int): Int = youtubeMedia(port).kbps
+
+    private fun mediaClient(port: Int) = base.newBuilder()
+        .proxy(Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", port)))
+        .followRedirects(false).followSslRedirects(false).readTimeout(3, TimeUnit.SECONDS)
+        .dispatcher(okhttp3.Dispatcher()).connectionPool(okhttp3.ConnectionPool(1, 10, TimeUnit.SECONDS)).build()
+
+    private fun mediaCall(client: OkHttpClient, request: Request, deadline: Long): okhttp3.Call = client.newCall(request).also {
+        it.timeout().timeout(TimeUnit.NANOSECONDS.toMillis((deadline - System.nanoTime()).coerceAtLeast(1)).coerceAtLeast(1), TimeUnit.MILLISECONDS)
+    }
+
+    fun youtubeMedia(port: Int): YouTubeMediaProbe.Result {
+        val client = mediaClient(port)
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(6)
+        return try { YouTubeMediaProbe.check { mediaCall(client, it, deadline) } }
+        finally { client.dispatcher.cancelAll(); client.connectionPool.evictAll() }
+    }
+
+    /** Compare the same signed video and sample size, never two HTML pages. No stored media URLs. */
+    fun compareYoutubeMedia(serverPort: Int, dpiPort: Int): Pair<Int, Int> {
+        val server = mediaClient(serverPort); val dpi = mediaClient(dpiPort)
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10)
+        return try {
+            val url = YouTubeMediaProbe.discover { mediaCall(server, it, deadline) }
+                ?: YouTubeMediaProbe.discover { mediaCall(dpi, it, deadline) } ?: return 0 to 0
+            val a = YouTubeMediaProbe.measure(url) { mediaCall(server, it, deadline) }
+            val b = YouTubeMediaProbe.measure(url) { mediaCall(dpi, it, deadline) }
+            a.kbps to b.kbps
+        } finally {
+            listOf(server, dpi).forEach { it.dispatcher.cancelAll(); it.connectionPool.evictAll() }
         }
-    }.getOrDefault(0)
+    }
 
     const val DPI_URL = "https://www.youtube.com/"
     const val DPI_BYTES = 48_000
@@ -456,8 +476,7 @@ object Tester {
     }
 
     /**
-     * What a DPI strategy must really open (not only the YouTube page): the page, YouTube's image/video CDN
-     * (throttled by SNI like googlevideo) and Discord. Score = how many passed (0-3); null bytes = skipped.
+     * What a DPI strategy must really open (not only the YouTube page): the page, YouTube's image CDN (not video playback) and Discord. Score = how many passed (0-3); null bytes = skipped.
      */
     val DPI_SITES = listOf("https://www.youtube.com/" to 48_000, "https://i.ytimg.com/vi/jNQXAC9IVRw/hqdefault.jpg" to 12_000, "https://discord.com/" to 16_000)
     data class DpiScore(val score: Int, val ms: Int, val youtube: Boolean, val error: String = "")

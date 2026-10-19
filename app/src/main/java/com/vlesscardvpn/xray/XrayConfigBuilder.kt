@@ -47,7 +47,7 @@ object XrayConfigBuilder {
      *  servers as the video itself — no VPN can cut those without breaking video. */
     val YT_ADS = listOf("full:ads.youtube.com", "full:pagead2.googlesyndication.com", "full:googleads.g.doubleclick.net",
         "full:pubads.g.doubleclick.net", "full:securepubads.g.doubleclick.net", "full:ad.doubleclick.net", "full:static.doubleclick.net",
-        "full:imasdk.googleapis.com", "full:googleadservices.com", "full:www.googleadservices.com", "full:tpc.googlesyndication.com")
+        "full:pagead.googlesyndication.com", "full:adservice.google.com", "full:admob.googleapis.com", "full:imasdk.googleapis.com", "full:googleadservices.com", "full:www.googleadservices.com", "full:tpc.googlesyndication.com")
     private fun arr(vararg v: Any): JSONArray = JSONArray().apply { v.forEach { put(it) } }
     private fun csv(s: String) = s.split(',').map { it.trim() }.filter { it.isNotEmpty() }
 
@@ -279,9 +279,16 @@ object XrayConfigBuilder {
         val servicePools = if (useServers && warpHop == null) com.vlesscardvpn.core.ServiceRoutes.indices(servers.map { it.first.id }, serviceRoutes) else emptyMap()
         servicePools.forEach { (id, pool) ->
             val target = com.vlesscardvpn.core.ServiceRoutes.targets.first { it.id == id }
-            val rule = JSONObject().put("domain", JSONArray(target.domains))
-            if (pool.size == 1) rule.put("outboundTag", "$PROXY_PREFIX${pool.first()}") else rule.put("balancerTag", "service-$id")
-            rules.put(rule)
+            // Keep explicit Hybrid / a proven Auto DPI video route. Server pins must not override it.
+            val included = id !in setOf("youtube", "telegram") || settings.services.isEmpty() || id in settings.services
+            if (included && (settings.mode != Mode.HYBRID || hybridDomains(settings).none { it in target.domains })) {
+                fun pinned(rule: JSONObject): JSONObject = rule.apply {
+                    if (pool.size == 1) put("outboundTag", "$PROXY_PREFIX${pool.first()}") else put("balancerTag", "service-$id")
+                }
+                rules.put(pinned(JSONObject().put("domain", JSONArray(target.domains))))
+                // Telegram's Android app commonly connects by DC IP, not by a web hostname.
+                if (target.ips.isNotEmpty()) rules.put(pinned(JSONObject().put("ip", JSONArray(target.ips))))
+            }
         }
         if (useServers) rules.put(toMain(JSONObject().put("domain", JSONArray(com.vlesscardvpn.core.AppWatch.AI_DOMAINS))))
         if (settings.blockAds) rules.put(JSONObject().put("domain", JSONArray(listOf("geosite:category-ads-all") + YT_ADS)).put("outboundTag", "block"))

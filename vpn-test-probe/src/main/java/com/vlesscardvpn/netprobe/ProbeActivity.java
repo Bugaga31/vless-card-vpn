@@ -45,14 +45,30 @@ public final class ProbeActivity extends Activity {
                 JSONObject r = new JSONObject(); r.put("url", u);
                 long t0 = SystemClock.elapsedRealtime();
                 try {
-                    HttpURLConnection h = (HttpURLConnection) new URL(u).openConnection();
-                    h.setConnectTimeout(15000); h.setReadTimeout(20000);
-                    int code = h.getResponseCode(); long bytes = 0;
-                    try (InputStream in = code < 400 ? h.getInputStream() : h.getErrorStream()) {
-                        byte[] buf = new byte[16384]; int k;
-                        while (in != null && (k = in.read(buf)) > 0) bytes += k;
+                    URL current = new URL(u);
+                    JSONArray redirects = new JSONArray();
+                    for (int hop = 0; ; hop++) {
+                        if (!"https".equalsIgnoreCase(current.getProtocol())) throw new Exception("Refused HTTPS downgrade");
+                        HttpURLConnection h = (HttpURLConnection) current.openConnection();
+                        try {
+                            h.setConnectTimeout(15000); h.setReadTimeout(20000); h.setInstanceFollowRedirects(false);
+                            int code = h.getResponseCode();
+                            if (code == 301 || code == 302 || code == 303 || code == 307 || code == 308) {
+                                String location = h.getHeaderField("Location");
+                                if (location == null || hop >= 5) throw new Exception("Missing Location or redirect limit");
+                                URL next = new URL(current, location);
+                                redirects.put(next.toString()); current = next; continue;
+                            }
+                            long bytes = 0;
+                            try (InputStream in = code < 400 ? h.getInputStream() : h.getErrorStream()) {
+                                byte[] buf = new byte[16384]; int k;
+                                while (in != null && bytes < 2 * 1024 * 1024 && (k = in.read(buf)) > 0) bytes += k;
+                            }
+                            r.put("code", code); r.put("bytes", bytes);
+                            r.put("finalUrl", current.toString()); r.put("redirects", redirects);
+                            break;
+                        } finally { h.disconnect(); }
                     }
-                    r.put("code", code); r.put("bytes", bytes);
                 } catch (Exception e) { r.put("code", -1); r.put("error", e.getClass().getSimpleName() + ": " + e.getMessage()); }
                 r.put("ms", SystemClock.elapsedRealtime() - t0);
                 out.put(r);

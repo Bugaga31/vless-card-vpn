@@ -16,6 +16,8 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.text.style.TextAlign
 
 val Accent = Color(0xFF78DEEA)
 val Good = Color(0xFF7AE4BA)
@@ -55,13 +57,17 @@ fun AppUi(onConnect: () -> Unit, onDisconnect: () -> Unit) {
                     Triple(4, "Телефон", Icons.Filled.PhoneAndroid),
                     Triple(2, "Настройки", Icons.Filled.Settings)
                 )
-                NavigationBar(containerColor = if (sea) scheme.surface.copy(alpha = .95f) else scheme.surface) {
+                Column(Modifier.background(scheme.surface.copy(alpha = .97f))) {
+                if (compact) Text(tabs.first { it.first == tab }.second, modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
+                    textAlign = TextAlign.Center, fontSize = 14.sp, color = scheme.onSurface)
+                NavigationBar(containerColor = Color.Transparent) {
                     tabs.forEach { (index, title, glyph) ->
                         NavigationBarItem(selected = tab == index, onClick = { tab = index },
                             icon = { Icon(glyph, contentDescription = title) },
                             alwaysShowLabel = !compact,
-                            label = { Text(title, fontSize = 12.sp, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis) })
+                            label = if (compact) null else { { Text(title, fontSize = 12.sp, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis) } })
                     }
+                }
                 }
             }
         ) { pad ->
