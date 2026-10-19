@@ -1,5 +1,9 @@
 ## 1.2.30
 
+Silent finite ocean intro, honest connection progress, reversible own-app resource presets and lower diagnostic/search overhead under pressure. No root/system-wide boost claims.
+
+Real YouTube video samples and native Telegram MTProto reachability replace web/thumbnail-only service evidence. Auto DPI requires fresh video evidence; per-service Xray pins preserve Hybrid and explicit service scope.
+
 WARP session isolation, lightweight VK/Yandex masks, measured cloud recipes, responsive silent intro and own-app energy controls. See [release notes](docs/release-1.2.30.md).
 
 # Changelog

@@ -30,16 +30,18 @@ fun DeviceScreen() {
     val tips by DeviceCoach.advice.collectAsState()
     val brain by PhoneBrain.status.collectAsState()
     val settings by Store.settings.collectAsState()
+    val power by PhonePower.state.collectAsState()
+    var previousPreset by remember { mutableStateOf<com.vlesscardvpn.model.Settings?>(null) }
     var apps by remember { mutableStateOf<List<DeviceCoach.AppUse>>(emptyList()) }
     var background by remember { mutableStateOf(DeviceCoach.backgroundEnabled(ctx)) }
     var message by remember { mutableStateOf("") }
     fun sample() { scope.launch { withContext(Dispatchers.IO) { runCatching { DeviceCoach.sample(ctx) } }; message = "Показаны доступные системные данные. Чужие приложения не изменены." } }
     fun open(action: String, pkg: String? = null) { if (!DeviceCoach.open(ctx, action, pkg)) message = "Этот экран настроек недоступен на устройстве" }
     fun refreshApps() { scope.launch { apps = withContext(Dispatchers.IO) { DeviceCoach.recentApps(ctx) } } }
-    LaunchedEffect(owner) {
+    LaunchedEffect(owner, settings.powerProfile, power.allowLight) {
         owner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
             refreshApps()
-            while (true) { withContext(Dispatchers.IO) { runCatching { DeviceCoach.sample(ctx) } }; kotlinx.coroutines.delay(10000) }
+            while (true) { withContext(Dispatchers.IO) { runCatching { DeviceCoach.sample(ctx) } }; kotlinx.coroutines.delay(ExperiencePolicy.sampleMs(settings.powerProfile == "eco", power.allowLight)) }
         }
     }
     LaunchedEffect(gameDeadline) {
@@ -66,14 +68,31 @@ fun DeviceScreen() {
             }
         } ?: Text("Получаем показатели…")
         Card(Modifier.fillMaxWidth()) {
-            Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Меньше нагрузки от VLESS Card", fontSize = 18.sp)
-                Text("Отключает движение волн, включает экономный профиль и откладывает необязательную работу при активном трафике. VPN, шифрование и приложения телефона не изменяются.", fontSize = 14.sp)
-                Button(onClick = {
-                    Store.update { it.copy(settings = DeviceEfficiency.apply(it.settings)) }
-                    PhonePower.refresh(ctx)
-                    message = "Экономный профиль приложения включён. Изменить его можно в Настройках → Нагрузка VPN и батарея."
-                }, modifier = Modifier.fillMaxWidth()) { Text("Снизить нагрузку приложения") }
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("Ресурсы под контролем", fontSize = 20.sp)
+                Text(power.reason, color = MaterialTheme.colorScheme.primary, fontSize = 14.sp)
+                Text("Профиль VLESS Card: " + when (settings.powerProfile) {
+                    "eco" -> "Экономный"; "fast" -> "Быстрый поиск"; else -> "Баланс"
+                }, fontSize = 16.sp)
+                // A column remains readable at 320 dp and enlarged system fonts.
+                listOf("eco" to "Экономить ресурсы", "balanced" to "Баланс", "fast" to "Быстрее искать маршруты").forEach { (id, title) ->
+                    OutlinedButton(onClick = {
+                        previousPreset = Store.settings.value
+                        Store.update { it.copy(settings = DeviceEfficiency.preset(it.settings, id)) }
+                        PhonePower.refresh(ctx)
+                        message = "Профиль применён без перезапуска VPN. Изменена только работа VLESS Card."
+                    }, modifier = Modifier.fillMaxWidth(), enabled = settings.powerProfile != id) { Text(title) }
+                }
+                previousPreset?.let { previous ->
+                    TextButton(onClick = {
+                        Store.update { it.copy(settings = DeviceEfficiency.restore(it.settings, previous)) }
+                        previousPreset = null; PhonePower.refresh(ctx); message = "Предыдущий профиль восстановлен"
+                    }, modifier = Modifier.fillMaxWidth()) { Text("Отменить смену профиля") }
+                }
+                Text("Экономный профиль убирает анимацию волн и снижает необязательную нагрузку. Быстрый увеличивает пределы поиска только при нормальном состоянии телефона. Защита от нагрева, низкого заряда и нехватки памяти остаётся включённой.", fontSize = 14.sp)
+                HorizontalDivider()
+                Text("Проверки: до ${power.tcpParallel} TCP / ${power.realParallel} полных одновременно. Диагностика на этом экране — раз в ${ExperiencePolicy.sampleMs(settings.powerProfile == "eco", power.allowLight) / 1000} с.", fontSize = 13.sp)
+                Text("VPN, шифрование и другие приложения не изменяются. Очистка RAM и физическое охлаждение не выполняются.", fontSize = 13.sp)
             }
         }
         Button(onClick = { sample() }, modifier = Modifier.fillMaxWidth()) { Text("Проверить телефон и составить план") }

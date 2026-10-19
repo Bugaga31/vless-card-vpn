@@ -213,7 +213,10 @@ class TunnelService : VpnService() {
             }
             // «Умный YouTube»: measured faster here through the DPI bypass straight to Google → only YouTube goes that way
             val ytDpi = st.settings.mode == Mode.AUTO && settings.mode == Mode.SERVERS && settings.smartYoutube && settings.services.isEmpty() &&
-                !settings.proxyOnly && settings.ytDpi[network] == true
+                !settings.proxyOnly && settings.ytDpi[network] == true &&
+                com.vlesscardvpn.core.YouTubeMediaProbe.freshProof(
+                    getSharedPreferences(com.vlesscardvpn.core.YouTubeMediaProbe.PROOF_PREFS, 0)
+                        .getLong(Net.fingerprint("media", network), 0), System.currentTimeMillis())
             if (ytDpi) settings = settings.copy(mode = Mode.HYBRID, hybridDomains = Settings.YT_DOMAINS)
             Tunnel.ytViaDpi = ytDpi
             if (settings.mode != Mode.BYEDPI && selected.isEmpty())
@@ -369,7 +372,7 @@ class TunnelService : VpnService() {
             } else ""
             if (Tunnel.status.value.state != Tunnel.State.CONNECTED || core !== sampledCore ||
                 Net.key(this@TunnelService) != sampledNet || Net.underlying(this@TunnelService)?.toString() != sampledHandle) return@launch
-            val text = if (p.realMs > 0) "HTTPS · ${p.realMs} мс · YouTube: ${if(p.ytOk==true) "✓" else if(p.ytOk==false) "нет ответа" else "не проверен"} · Telegram Web: ${if(p.tgOk==true) "✓" else if(p.tgOk==false) "нет ответа" else "не проверен"}$warp"
+            val text = if (p.realMs > 0) "HTTPS · ${p.realMs} мс · Видео YouTube: ${if(p.ytOk==true) "✓" else if(p.ytOk==false) "нет ответа" else "не проверен"} · Telegram MTProto: ${if(p.tgOk==true) "✓" else if(p.tgOk==false) "нет ответа" else "не проверен"}$warp"
                 else "Нет ответа через выбранный маршрут (${p.error}). " + if (st.mode == Mode.AUTO && st.autoHeal) "Ищу рабочий вариант сам…" else "Проверьте серверы или включите маскировку."
             Tunnel.status.value = cur.copy(check = text, checkOk = p.works)
             runCatching { val stv = Store.state.value; com.vlesscardvpn.core.Brain.lived(sampledNet, sampledServers, { stv.state(it) }, p.works); com.vlesscardvpn.core.Brain.save(this@TunnelService) }

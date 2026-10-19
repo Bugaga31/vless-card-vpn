@@ -97,7 +97,8 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(if (busy) "Ищем вашу волну" else if (on) "Маршрут подключён" else "Готовы к подключению", fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
-                Text(if (busy) "Xray проверяет доступность и скорость. Поиск можно отменить кнопкой выше."
+                if (busy) LiveProgress(stop = false) { it.running }
+                Text(if (busy) "Сравниваем маршруты и проверяем связь. Кнопка выше отменяет подключение; проценты показываются только для известного числа проверок."
                     else "Авто учитывает память этой сети и облачные подсказки. Решает проверка на вашем устройстве.",
                     fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = .35f))
@@ -137,7 +138,6 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
         }
         if (status.check.isNotEmpty()) Text(status.check, color = when (status.checkOk) { true -> Good; false -> Bad; null -> MaterialTheme.colorScheme.onSurfaceVariant },
             fontSize = 14.sp, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 6.dp))
-        if (status.state == Tunnel.State.CONNECTING) Box(Modifier.fillMaxWidth().padding(top = 8.dp)) { LiveProgress(stop = false) { it.running } }
         Spacer(Modifier.height(20.dp))
         var opts by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
         Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
@@ -361,9 +361,11 @@ fun LiveProgress(stop: Boolean = false, show: (Actions.Progress) -> Boolean = { 
 fun ProgressBlock(p: Actions.Progress) {
     Column(Modifier.fillMaxWidth()) {
         if (p.running) {
-            Text("${p.title}: ${p.done}/${p.total}", fontSize = 13.sp)
-            if (p.total > 0) LinearProgressIndicator(progress = { p.done.toFloat() / p.total }, modifier = Modifier.fillMaxWidth().padding(top = 4.dp))
-            else LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 4.dp))
+            Text(p.title, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+            Text(com.vlesscardvpn.core.ExperiencePolicy.counter(p.done, p.total), fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (p.total > 0) LinearProgressIndicator(progress = { com.vlesscardvpn.core.ExperiencePolicy.progress(p.done, p.total) ?: 0f }, modifier = Modifier.fillMaxWidth().padding(top = 4.dp))
+            else HorizontalDivider(Modifier.fillMaxWidth().padding(top = 8.dp), color = Accent.copy(alpha = .4f))
         } else Text(p.message, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }

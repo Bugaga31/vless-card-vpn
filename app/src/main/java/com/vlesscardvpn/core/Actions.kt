@@ -695,7 +695,7 @@ object Actions {
         if (Tunnel.ytViaDpi) return false
         val handle = Net.underlying(app)?.toString()
         val prefs = app.getSharedPreferences("youtube_route",0)
-        val decisionKey = Net.fingerprint("youtube-v2",net)
+        val decisionKey = Net.fingerprint("youtube-v3-media",net)
         val last = prefs.getLong(decisionKey,0)
         val stamp = System.currentTimeMillis()
         if (last > 0 && stamp >= last && stamp-last < 10*60000L) return false
@@ -711,12 +711,13 @@ object Actions {
         val (srv, dpi) = try {
             set.start(Store.state.value.settings, net, true, emptySet(), com.vlesscardvpn.BuildConfig.DEBUG)
             val dp = set.currentPort ?: return false
-            var a = 0; var b = 0
-            repeat(2) { a = maxOf(a, Tester.ytSpeed(vpn)); b = maxOf(b, Tester.ytSpeed(dp)) }
-            a to b
+            Tester.compareYoutubeMedia(vpn, dp)
         } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Throwable) { return false } finally { set.close() }
         if (Net.key(app) != net || Net.underlying(app)?.toString() != handle || Tunnel.socks?.port != vpn) return false
         val use = ytDpiWins(srv, dpi)
+        // The old HTML-based decision is not reusable as video evidence.
+        app.getSharedPreferences(YouTubeMediaProbe.PROOF_PREFS, 0).edit()
+            .putLong(Net.fingerprint("media", net), if (use) System.currentTimeMillis() else 0).apply()
         prefs.edit().putLong(decisionKey,System.currentTimeMillis()).apply()
         android.util.Log.i("E2E", "smart youtube net=$net server=$srv dpi=$dpi use=$use")
         Store.update { a -> a.copy(settings = a.settings.copy(ytDpi = a.settings.ytDpi + (net to use))) }
@@ -804,23 +805,32 @@ object Actions {
     /** Small endpoint checks also on mobile; each round is bounded and does not need Usage Access. */
     suspend fun checkServiceRoutes(): Boolean {
         val now = android.os.SystemClock.elapsedRealtime()
-        if (now - serviceAt < (if (serviceCursor < ServiceRoutes.targets.size) 30000L else 5 * 60000L) || progress.value.running || !PhonePower.refresh(app).allowLight) return false
+        if (now - serviceAt < (if (serviceCursor < ServiceRoutes.targets.size) 30000L else 60000L) || progress.value.running || !PhonePower.refresh(app).allowLight) return false
         val st = Store.state.value; val selected = st.selected
         if (selected.isEmpty()) return false
         serviceAt = now
         val target = ServiceRoutes.targets[serviceCursor++ % ServiceRoutes.targets.size]
+        if (ServiceRoutes.native(target) && st.settings.services.isNotEmpty() && target.id !in st.settings.services) return false
         val eligible = selected.filter { !target.ai || Countries.of(it.name) !in AppWatch.AI_BAD }.take(4)
         if (eligible.isEmpty()) return false
-        val net = Net.key(app); val results = java.util.concurrent.ConcurrentHashMap<String, Int>()
+        val net = Net.key(app); val handle = Net.underlying(app)?.toString()
+        val results = java.util.concurrent.ConcurrentHashMap<String, Int>()
         val variants = eligible.map { it to Masks.byId(st.state(it).maskFor(net)) }
         val (own, port) = dpiForTests(variants.map { it.second })
         try {
-            Tester.real(variants, target.url, port, own.ports, parallel = 3, attempts = 1, big = false, youtube = false, budgetMs = ConnectPolicy.QUICK_BUDGET_MS) { i, p ->
-                results[eligible[i].id] = p.realMs.takeIf { p.works } ?: 0
+            Tester.real(variants, if (ServiceRoutes.native(target)) st.settings.testUrl else target.url,
+                port, own.ports, parallel = 2, attempts = 1, big = false, youtube = ServiceRoutes.native(target),
+                budgetMs = if (ServiceRoutes.native(target)) 6000 else ConnectPolicy.QUICK_BUDGET_MS) { i, p ->
+                if (Net.key(app) == net && Net.underlying(app)?.toString() == handle)
+                    ServiceRoutes.measurement(target, p)?.let { results[eligible[i].id] = it }
             }
         } finally { own?.close() }
+        if (Net.key(app) != net || Net.underlying(app)?.toString() != handle || results.isEmpty()) return false
+        val current = Store.state.value
+        if (eligible.any { current.state(it).maskFor(net) != st.state(it).maskFor(net) } ||
+            current.selected.map { it.id }.toSet() != selected.map { it.id }.toSet()) return false
         val changed = ServiceRoutes.update(net, target.id, results.entries.map { it.key to it.value }, now)
-        AppWatch.note("${target.title}: HTTPS доступен через ${results.values.count { it > 0 }} из ${eligible.size} маршрутов; это не проверка аккаунта")
+        AppWatch.note("${target.title}: ${if (ServiceRoutes.native(target)) "протокол/медиаданные" else "HTTPS"} доступны через ${results.values.count { it > 0 }} из ${results.size} проверенных маршрутов; это не проверка аккаунта")
         return changed && selected.size > 1
     }
 
