@@ -451,7 +451,7 @@ object Actions {
         val maskNetwork = Net.underlying(app)?.toString()
         val stats = Store.state.value.maskStats.let { it[net0] ?: it[Net.family(net0)] }.orEmpty()
         // Learned order: masks that passed on this network (on any server) first, untested next, proven failures last.
-        fun bucket(m: Mask): Int { val st = stats[m.id] ?: return 1; return if (st.ok > 0) 0 else if (st.fail >= 4) 2 else 1 }
+        fun bucket(m: Mask): Int = MaskSearchPolicy.bucket(stats[m.id])
         // «Эволюция масок»: kept auto masks + fresh mutants of what passed here; a few slots per server right after the proven masks.
         val evo = cfg.maskEvolution && (cfg.maskFamilies.isEmpty() || "auto" in cfg.maskFamilies)
         val kept = if (evo) Masks.auto else emptyList()
@@ -464,7 +464,7 @@ object Actions {
         val evoCand = (0 until maxOf(untried.size, pool.size)).flatMap { i -> listOfNotNull(untried.getOrNull(i), pool.getOrNull(i)) }
         val whitelisted = Whitelist.last.value?.let { it.verdict == Whitelist.Verdict.WHITELIST && System.currentTimeMillis() - it.at < 3600_000L } == true
         val order = { s: Server ->
-            val ok = { m: Mask -> Masks.compatible(m, s) && (dpiOk || !m.viaByeDpi) }
+            val ok = { m: Mask -> MaskSearchPolicy.allowed(m, s, cfg, dpiOk, tpwsOk) }
             val fresh = evoCand.filter(ok).shuffled().take(slots)
             val base = (CloudControl.maskHints(Net.family(net0)).mapNotNull { Masks.byId(it) }.filter(ok) + Masks.searchOrder(dpiOk, s, cfg.maskFamilies, cfg.maskFps) + kept.filter(ok)).distinctBy { it.id }
                 .filter { (tpwsOk || !it.dpi.startsWith("TPWS#")) && it !in fresh }
@@ -488,7 +488,7 @@ object Actions {
         val kindOk = HashMap<String, Int>(); val kindFail = HashMap<String, Int>()
         val dropAfter = maxOf(6, pinned.size * 2)
         fun dead(m: Mask?): Boolean = m != null && synchronized(best) { val k = Masks.kind(m); (kindOk[k] ?: 0) == 0 && (kindFail[k] ?: 0) >= dropAfter && kindOk.values.any { it > 0 } }
-        fun eff(m: Mask, p: Probe) = p.realMs + Masks.cost(m) * 150 + (if (p.kbps > 0) com.vlesscardvpn.model.ServerState.speedPenalty(p.kbps) else 0)
+        fun eff(m: Mask, p: Probe) = MaskSearchPolicy.cost(m, p)
         progress.value = progress.value.copy(title = "Подбор маскировки")
         val phases = variants.indices.groupBy { i -> val m = variants[i].second; when {
             m == null -> 0
@@ -512,7 +512,7 @@ object Actions {
                     val cur = best[s.id]
                     if (m != null && p !== Tester.SKIPPED) (if (p.works) kindOk else kindFail).merge(Masks.kind(m), 1, Int::plus)
                     if (p.works && m != null && (cur == null || eff(m, p) < eff(cur.first, cur.second))) best[s.id] = m to p
-                    if (p.works && m != null) { good.getOrPut(s.id) { mutableListOf() } += m to p.realMs; found.merge(group(s), 1, Int::plus) }
+                    if (p.works && m != null) { good.getOrPut(s.id) { mutableListOf() } += m to eff(m, p); found.merge(group(s), 1, Int::plus) }
                     if (m != null && p !== Tester.SKIPPED) tried += Triple(s.id, m.id, p.works)
                 }
                 step(done.incrementAndGet(), variants.size)

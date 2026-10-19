@@ -12,10 +12,16 @@ adb shell wm density
 adb shell am force-stop "$PKG"
 adb shell monkey -p "$PKG" -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1
 sleep 6
+bash tools/assert-vibe-foreground.sh
+adb shell uiautomator dump /sdcard/window.xml >/dev/null
+adb shell cat /sdcard/window.xml | grep -q "Готовы к подключению" || exit 1
 adb exec-out screencap -p > home-ocean.png
 adb shell settings put system font_scale 1.3
 adb shell am force-stop "$PKG"
 adb shell monkey -p "$PKG" -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1
 sleep 4
+bash tools/assert-vibe-foreground.sh
+adb shell uiautomator dump /sdcard/window.xml >/dev/null
+adb shell cat /sdcard/window.xml | grep -q "Подключить" || exit 1
 adb exec-out screencap -p > home-large-text.png
 adb shell settings put system font_scale 1.0

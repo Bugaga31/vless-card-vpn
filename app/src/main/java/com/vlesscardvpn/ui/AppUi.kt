@@ -18,6 +18,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.text.style.TextAlign
+import androidx.lifecycle.repeatOnLifecycle
 
 val Accent = Color(0xFF78DEEA)
 val Good = Color(0xFF7AE4BA)
@@ -25,7 +26,8 @@ val Bad = Color(0xFFFFA4AC)
 val Warn = Color(0xFFFFCE83)
 
 @Composable
-fun AppUi(onConnect: () -> Unit, onDisconnect: () -> Unit) {
+fun AppUi(onConnect: () -> Unit, onDisconnect: () -> Unit,
+    launch: com.vlesscardvpn.core.LaunchCycle.Frame, onIntroDismiss: (Long) -> Unit) {
     val theme by remember { com.vlesscardvpn.core.Store.settings }.collectAsState()
     val ctx = androidx.compose.ui.platform.LocalContext.current
     // «Оформление»: classic dark, AMOLED (true black: saves battery on OLED screens), Material You (wallpaper colors, Android 12+)
@@ -40,8 +42,15 @@ fun AppUi(onConnect: () -> Unit, onDisconnect: () -> Unit) {
     }
     MaterialTheme(colorScheme = scheme) {
         var tab by remember { mutableIntStateOf(0) }
-        var intro by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(theme.welcomeSound && com.vlesscardvpn.core.Tunnel.socks == null) }
-        LaunchedEffect(intro) { if (intro) { withFrameNanos { }; withFrameNanos { }; android.util.Log.i("VCIntro", "INTRO_VISIBLE"); kotlinx.coroutines.delay(1400); intro = false } }
+        val owner = androidx.compose.ui.platform.LocalLifecycleOwner.current
+        LaunchedEffect(launch.serial, launch.visible, owner) {
+            if (launch.visible) owner.lifecycle.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.RESUMED) {
+                withFrameNanos { }; withFrameNanos { }
+                android.util.Log.i("VCIntro", "INTRO_VISIBLE serial=${launch.serial}")
+                kotlinx.coroutines.delay(1800)
+                onIntroDismiss(launch.serial)
+            }
+        }
         Box(Modifier.fillMaxSize()) {
         val sea = theme.oceanBackground && theme.theme != "amoled"
         if (sea) OceanBackground(theme.oceanMotion)
@@ -81,7 +90,7 @@ fun AppUi(onConnect: () -> Unit, onDisconnect: () -> Unit) {
                 } }
             }
         }
-        if (intro) LaunchIntro(onDismiss = { intro = false })
+        if (launch.visible) LaunchIntro(onDismiss = { onIntroDismiss(launch.serial) })
         }
     }
 }

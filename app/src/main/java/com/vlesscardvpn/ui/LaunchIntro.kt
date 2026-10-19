@@ -15,6 +15,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Path
+import kotlin.math.sin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
@@ -53,10 +55,16 @@ import com.vlesscardvpn.core.Store
             drawRect(Brush.radialGradient(listOf(Accent.copy(alpha = .08f), scheme.background),
                 center = center, radius = size.maxDimension * .65f))
             for (i in 0..2) {
-                val y = size.height * (.67f + i * .07f)
-                drawArc(Accent.copy(alpha = .04f + i * .015f), 180f, 180f, false,
-                    topLeft = androidx.compose.ui.geometry.Offset(-size.width * .3f, y),
-                    size = androidx.compose.ui.geometry.Size(size.width * 1.6f, size.height * .4f), style = Stroke(2.dp.toPx()))
+                val wave = Path()
+                val baseline = size.height * (.76f + i * .06f)
+                wave.moveTo(0f, size.height)
+                for (step in 0..64) {
+                    val x = size.width * step / 64f
+                    val y = baseline + sin(step / 64.0 * Math.PI * 2 + i + phase.floatValue * .45).toFloat() * size.height * .025f
+                    wave.lineTo(x, y)
+                }
+                wave.lineTo(size.width, size.height); wave.close()
+                drawPath(wave, Accent.copy(alpha = .035f + i * .012f))
             }
         }
         Column(Modifier.widthIn(max = 440.dp).fillMaxWidth().verticalScroll(rememberScrollState())
@@ -64,7 +72,7 @@ import com.vlesscardvpn.core.Store
             verticalArrangement = Arrangement.spacedBy(16.dp)) {
             Surface(shape = RoundedCornerShape(8.dp), color = scheme.surfaceVariant) {
                 Text("XRAY · ${BuildConfig.VERSION_NAME}", Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                    color = scheme.primary, fontSize = 12.sp, letterSpacing = 2.sp)
+                    color = scheme.primary, fontSize = 14.sp, letterSpacing = 1.sp)
             }
             Box(Modifier.size(156.dp), contentAlignment = Alignment.Center) {
                 Canvas(Modifier.fillMaxSize()) {
@@ -80,9 +88,9 @@ import com.vlesscardvpn.core.Store
             }
             Text("VLESS Card", fontSize = 30.sp, fontWeight = FontWeight.Bold, color = scheme.onBackground, textAlign = TextAlign.Center)
             Text("На одной волне", fontSize = 20.sp, color = scheme.primary, textAlign = TextAlign.Center)
-            Text("Спокойный интерфейс.\nВаш маршрут к связи.", fontSize = 16.sp, color = scheme.onSurfaceVariant, textAlign = TextAlign.Center)
-            OutlinedButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("Открыть приложение") }
-            Text("Без звука · можно сразу пропустить", fontSize = 12.sp, color = scheme.onSurfaceVariant, textAlign = TextAlign.Center)
+            Text("Одна кнопка.\nВаш маршрут к связи.", fontSize = 16.sp, color = scheme.onSurfaceVariant, textAlign = TextAlign.Center)
+            FilledTonalButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("Открыть приложение") }
+            Text("Без звука · можно сразу пропустить", fontSize = 14.sp, color = scheme.onSurfaceVariant, textAlign = TextAlign.Center)
         }
     }
 }

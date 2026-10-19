@@ -61,8 +61,8 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
                 Text(if (compact) "На одной волне · Xray" else "Связь на одной волне", fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
-        Text("${BuildConfig.VERSION_NAME} · " + if (cfg.stealthSocks) "Локальный прокси защищён паролем" else "SOCKS 127.0.0.1:${cfg.socksPort}",
-            modifier = Modifier.fillMaxWidth(), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text("${BuildConfig.VERSION_NAME} · На базе Xray",
+            modifier = Modifier.fillMaxWidth(), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
         val upd by com.vlesscardvpn.core.Updater.state.collectAsState()
         if (upd.latest.isNotEmpty()) {
             val uctx = androidx.compose.ui.platform.LocalContext.current
@@ -94,13 +94,18 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
         if (status.route.isNotEmpty()) Text(status.route, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp, textAlign = TextAlign.Center)
         val cloudStatus by com.vlesscardvpn.core.CloudSpeed.status.collectAsState()
         Card(Modifier.fillMaxWidth().padding(top = 16.dp), shape = RoundedCornerShape(20.dp),
+            border = androidx.compose.foundation.BorderStroke(1.dp, color.copy(alpha = .18f)),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(Modifier.background(Brush.verticalGradient(listOf(color.copy(alpha = .045f), Color.Transparent)))
+                .padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(if (busy) "Ищем вашу волну" else if (on) "Маршрут подключён" else "Готовы к подключению", fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
                 if (busy) LiveProgress(stop = false) { it.running }
                 Text(if (busy) "Сравниваем маршруты и проверяем связь. Кнопка выше отменяет подключение; проценты показываются только для известного числа проверок."
                     else "Авто учитывает память этой сети и облачные подсказки. Решает проверка на вашем устройстве.",
                     fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("В пуле: ${sum.selectedCount} · Всего конфигураций: ${sum.total}",
+                    fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                TextButton(onClick = openServers, modifier = Modifier.heightIn(min = 48.dp)) { Text("Открыть серверы") }
                 HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = .35f))
                 Text(cloudStatus, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
             }
@@ -419,7 +424,7 @@ private fun PowerButton(on: Boolean, busy: Boolean, color: Color, onClick: () ->
     Spacer(Modifier.height(18.dp))
     BoxWithConstraints(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
         val compact = maxWidth < 280.dp || androidx.compose.ui.platform.LocalDensity.current.fontScale > 1.2f
-        val diameter = minOf(if (compact) 180.dp else 232.dp, maxWidth)
+        val diameter = minOf(if (compact) 168.dp else 216.dp, maxWidth)
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Box(Modifier.size(diameter), contentAlignment = Alignment.Center) {
         Box(Modifier.size(diameter).scale(k).clip(CircleShape).background(Brush.radialGradient(listOf(c.copy(alpha = .18f), Color.Transparent))))

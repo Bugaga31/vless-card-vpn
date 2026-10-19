@@ -7,6 +7,7 @@ import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.runtime.collectAsState
 import androidx.activity.result.contract.ActivityResultContracts
 import kotlinx.coroutines.launch
 import androidx.lifecycle.lifecycleScope
@@ -15,7 +16,26 @@ import androidx.lifecycle.Lifecycle
 import com.vlesscardvpn.ui.AppUi
 import com.vlesscardvpn.vpn.TunnelService
 
+class LaunchPresentation : androidx.lifecycle.ViewModel() {
+    private val cycle = com.vlesscardvpn.core.LaunchCycle()
+    val frame = kotlinx.coroutines.flow.MutableStateFlow(cycle.frame)
+    fun enter(enabled: Boolean) { frame.value = cycle.enter(enabled) }
+    fun leave(changingConfiguration: Boolean) = cycle.leave(changingConfiguration)
+    fun dismiss(serial: Long) { frame.value = cycle.dismiss(serial) }
+}
+
 class MainActivity : ComponentActivity() {
+    private val launchPresentation by lazy { androidx.lifecycle.ViewModelProvider(this)[LaunchPresentation::class.java] }
+
+    override fun onStart() {
+        super.onStart()
+        launchPresentation.enter(com.vlesscardvpn.core.Store.state.value.settings.welcomeSound)
+    }
+    override fun onStop() {
+        launchPresentation.leave(isChangingConfigurations)
+        super.onStop()
+    }
+
     private val vpnPermission = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { r ->
         if (r.resultCode == RESULT_OK) start()
     }
@@ -50,7 +70,11 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
-        setContent { AppUi(onConnect = { connect() }, onDisconnect = { com.vlesscardvpn.core.Actions.cancelPrepare(); TunnelService.stop(this) }) }
+        setContent {
+            val launch = launchPresentation.frame.collectAsState()
+            AppUi(onConnect = { connect() }, onDisconnect = { com.vlesscardvpn.core.Actions.cancelPrepare(); TunnelService.stop(this) },
+                launch = launch.value, onIntroDismiss = launchPresentation::dismiss)
+        }
         e2e(intent)
         importFrom(intent)
     }

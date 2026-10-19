@@ -1,3 +1,7 @@
+## 1.2.31
+
+Silent intro on every foreground visit, media-aware mask ranking, four additional lightweight cover profiles and compact ocean UI. See [release notes](docs/release-1.2.31.md).
+
 ## 1.2.30
 
 Silent finite ocean intro, honest connection progress, reversible own-app resource presets and lower diagnostic/search overhead under pressure. No root/system-wide boost claims.
