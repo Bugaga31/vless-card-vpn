@@ -15,12 +15,13 @@ object HttpsTransferProbe {
     }
     fun check(urls: List<String> = URLS, now: () -> Long = System::nanoTime,
               call: (Request) -> Call): Result {
-        val started = now(); var bytes = 0; val hosts = HashSet<String>()
+        val started = now(); var bytes = 0; var successfulNanos = 0L; val hosts = HashSet<String>()
         // An endpoint error never blacklists a route. Try another independent TLS host.
         for (url in urls.distinctBy { it.toHttpUrlOrNull()?.host }.take(3)) {
             if (Thread.currentThread().isInterrupted) throw java.io.InterruptedIOException("cancelled")
             val parsed = url.toHttpUrlOrNull() ?: continue
             if (!parsed.isHttps || parsed.username.isNotEmpty() || parsed.password.isNotEmpty()) continue
+            val sampleStarted = now()
             try {
                 call(Request.Builder().url(url).header("Accept-Encoding","identity")
                     .header("Cache-Control","no-cache, no-store").header("Range","bytes=0-65535").build())
@@ -34,7 +35,7 @@ object HttpsTransferProbe {
                             n += count
                         }
                         bytes += n
-                        if (n == SAMPLE_BYTES) hosts += parsed.host
+                        if (n == SAMPLE_BYTES) { hosts += parsed.host; successfulNanos += (now()-sampleStarted).coerceAtLeast(1) }
                     }
             } catch (e: Exception) {
                 if (Thread.currentThread().isInterrupted) throw java.io.InterruptedIOException("cancelled")
@@ -42,6 +43,6 @@ object HttpsTransferProbe {
             if (hosts.size >= REQUIRED_HOSTS) break
         }
         val elapsed = ((now()-started)/1_000_000).coerceAtLeast(1)
-        return Result(hosts.size,bytes,if (hosts.size >= REQUIRED_HOSTS) (bytes*8L/elapsed).coerceAtMost(Int.MAX_VALUE.toLong()).toInt().coerceAtLeast(1) else 0,elapsed)
+        return Result(hosts.size,bytes,if (hosts.size >= REQUIRED_HOSTS) (hosts.size*SAMPLE_BYTES*8L / (successfulNanos/1_000_000).coerceAtLeast(1)).coerceAtMost(Int.MAX_VALUE.toLong()).toInt().coerceAtLeast(1) else 0,elapsed)
     }
 }
