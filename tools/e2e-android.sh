@@ -76,6 +76,13 @@ run_case() { # $1 name, $2 state, $3 seconds to wait for the connect result
 run_case single single.json
 N1=$(grep -c "email: u8443" $W/access.log); echo "server :8443 accepted after single: $N1"
 [ "$N1" -gt 0 ] || fail "single: server saw no traffic (traffic did not go through the server)"
+# The remaining suite cannot establish anything if the baseline chain/resource is broken.
+# Fail red immediately, retaining the exact helper/TLS result instead of waiting through every case.
+if [ "$FAILS" -gt 0 ]; then
+  adb logcat -d > "$W/logcat.txt"
+  echo "E2E baseline failed; remaining cases NOT RUN (not PASS)"
+  exit "$FAILS"
+fi
 
 : > $W/access.log
 run_case byedpi byedpi.json
