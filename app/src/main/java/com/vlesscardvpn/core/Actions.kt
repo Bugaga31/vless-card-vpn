@@ -1365,6 +1365,12 @@ object Actions {
         }
         // A mask found only by connectivity/ping still needs an isolated throughput comparison.
         val compared = if (working.isNotEmpty()) chooseCompared(working,null) else null
+        if (working.isNotEmpty() && compared == null) {
+            val message = "Сервисы проверены, но пригодная скорость маршрута не подтверждена. " +
+                (activeSearchReport?.summary() ?: "") + " Повторите поиск или выберите сервер вручную."
+            Tunnel.status.value = Tunnel.Status(Tunnel.State.ERROR, "Auto: замер скорости не завершён", check=message)
+            return message
+        }
         val primary = Store.state.value.settings.let { ServerChoice.automaticPrimary(
             it.mode == Mode.AUTO,it.balance == com.vlesscardvpn.model.Balance.LEAST_PING,GameSession.active()) }
         val n = selectBest(10, close = true, among = working)

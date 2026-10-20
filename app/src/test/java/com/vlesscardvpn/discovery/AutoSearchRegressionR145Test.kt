@@ -72,7 +72,7 @@ class AutoSearchRegressionR145Test {
     }
     @Test fun definiteTelegramFailureDoesNotWaitForStalledMediaDeadline() {
         val listener=java.net.ServerSocket(0,8,java.net.InetAddress.getByName("127.0.0.1"))
-        val mediaClosed=CountDownLatch(1);val peers=java.util.concurrent.CopyOnWriteArrayList<java.net.Socket>()
+        val mediaClosed=CountDownLatch(1);val mediaStarted=CountDownLatch(1);val peers=java.util.concurrent.CopyOnWriteArrayList<java.net.Socket>()
         val acceptor=kotlin.concurrent.thread(isDaemon=true) {
             while (!listener.isClosed) {
                 val socket=runCatching {listener.accept()}.getOrNull() ?: break;peers+=socket
@@ -91,8 +91,8 @@ class AutoSearchRegressionR145Test {
                         input.readUnsignedShort();out.write(byteArrayOf(5,0,0,1,127,0,0,1,0,1));out.flush()
                         when {
                             host=="probe.invalid" -> { while(!input.readLine().isNullOrEmpty()){};out.write("HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n".toByteArray());out.flush() }
-                            host.startsWith("149.154.") -> {input.readFully(ByteArray(42));out.write(1);out.flush()}
-                            else -> {while(input.read()>=0){};mediaClosed.countDown()}
+                            host.startsWith("149.154.") -> {input.readFully(ByteArray(42));check(mediaStarted.await(2,TimeUnit.SECONDS));out.write(1);out.flush()}
+                            else -> {mediaStarted.countDown();while(input.read()>=0){};mediaClosed.countDown()}
                         }
                     } }
                 }
