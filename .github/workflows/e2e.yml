@@ -77,6 +77,8 @@ jobs:
             /tmp/e2e/access.log
             /tmp/e2e/case-*.log
             /tmp/e2e/case-*.xml
+            /tmp/e2e/case-*-probe.json
+            /tmp/e2e/service-fixture.log
           if-no-files-found: ignore
   masks-matrix:
     runs-on: ubuntu-latest

@@ -10,6 +10,8 @@ save_case() {
   adb logcat -d -s E2E:I XrayCore:W '*:S' > "$W/case-$1.log" 2>&1
   adb shell uiautomator dump /sdcard/e2e-window.xml >/dev/null 2>&1
   adb shell cat /sdcard/e2e-window.xml > "$W/case-$1.xml" 2>&1
+  cp "$W/access.log" "$W/case-$1-access.log"
+  adb shell "run-as $PROBE cat files/result.json" > "$W/case-$1-probe.json" 2>/dev/null || true
 }
 fail() { echo "::error title=e2e::$*"; echo "FAIL: $*"; FAILS=$((FAILS+1)); }
 

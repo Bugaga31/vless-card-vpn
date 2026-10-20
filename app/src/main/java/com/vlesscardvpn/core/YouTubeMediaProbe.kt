@@ -60,6 +60,7 @@ object YouTubeMediaProbe {
 
     fun discover(call: (Request) -> Call): String? = runCatching {
         call(Request.Builder().url(WATCH).header("User-Agent", "Mozilla/5.0").build()).execute().use { r ->
+            if (com.vlesscardvpn.BuildConfig.DEBUG) runCatching { android.util.Log.i("E2E", "media-player status=${r.code} html=${r.header("Content-Type").orEmpty().startsWith("text/html", true)}") }
             if (r.code != 200 || !r.header("Content-Type").orEmpty().startsWith("text/html", true)) return null
             val input = r.body?.byteStream() ?: return null
             val out = java.io.ByteArrayOutputStream(); val buf = ByteArray(8192)
@@ -73,6 +74,10 @@ object YouTubeMediaProbe {
             }
             mediaUrl(out.toString("UTF-8"))
         }
+    }.onFailure { error ->
+        // Class names only: exception messages may contain private URLs or response data.
+        if (com.vlesscardvpn.BuildConfig.DEBUG) runCatching { android.util.Log.i("E2E",
+            "media-player failure=" + generateSequence(error) { it.cause }.take(4).joinToString("/") { it.javaClass.simpleName }) }
     }.getOrNull()
 
     /** Caller disables redirects and bounds the call by the shared probe deadline. */
