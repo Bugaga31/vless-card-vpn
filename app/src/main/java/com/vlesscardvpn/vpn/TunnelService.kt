@@ -206,7 +206,7 @@ class TunnelService : VpnService() {
                 // Retain eight working outbounds, including routes discovered after the first success.
                 // Xray's selected balancer distributes connections; this is not bandwidth bonding.
                 val candidates = Actions.preferred(st, (selected + st.servers.filter { st.state(it).works }).distinctBy { it.id })
-                val usable = com.vlesscardvpn.core.AutoEligibility.servicePool(candidates,{st.state(it)},network,System.currentTimeMillis())
+                val usable = com.vlesscardvpn.core.AutoEligibility.connectionPool(candidates,{st.state(it)},network,System.currentTimeMillis())
                 selected = com.vlesscardvpn.core.AutoEligibility.connectedPool(usable,{st.state(it)},network,
                     System.currentTimeMillis(),com.vlesscardvpn.core.GameSession.active())
                 settings = settings.copy(mode = if (selected.isEmpty() || autoDpiOnly) Mode.BYEDPI else Mode.SERVERS)
@@ -272,19 +272,19 @@ class TunnelService : VpnService() {
             var finalProof: com.vlesscardvpn.core.RecentServiceProof? = null
             if (automatic) {
                 val handle = Net.underlying(this@TunnelService)?.toString()
-                Tunnel.status.value = Tunnel.Status(Tunnel.State.CONNECTING, "Проверяю сервисы…",
-                    check = "Telegram MTProto и настоящее видео YouTube через выбранную цепочку")
+                Tunnel.status.value = Tunnel.Status(Tunnel.State.CONNECTING, "Проверяю передачу…",
+                    check = "Независимые HTTPS-ресурсы; Telegram и YouTube проверяются отдельно")
                 com.vlesscardvpn.core.ServiceHealth.begin(com.vlesscardvpn.core.ServiceProbePolicy.FINAL_MS)
                 val proofStartedAt = System.currentTimeMillis()
                 val proofMasks = used.associate { it.first.id to (it.second?.id ?: "") }
                 val proof = Tester.probeSocks(socks.port, settings.testUrl, big = false, youtube = true,
-                    attempts = 1, budgetMs = com.vlesscardvpn.core.ServiceProbePolicy.FINAL_MS, strictServices = true)
+                    attempts = 1, budgetMs = com.vlesscardvpn.core.ServiceProbePolicy.FINAL_MS, connectionCheck = true)
                 kotlinx.coroutines.currentCoroutineContext().ensureActive()
                 check(Net.key(this@TunnelService) == network && Net.underlying(this@TunnelService)?.toString() == handle) {
                     "Сеть изменилась во время проверки сервисов"
                 }
                 com.vlesscardvpn.core.ServiceHealth.finish(proof, System.currentTimeMillis(), com.vlesscardvpn.core.ServiceProbePolicy.FINAL_MS)
-                if (!com.vlesscardvpn.core.AutoEligibility.servicesWork(proof)) {
+                if (!com.vlesscardvpn.core.AutoEligibility.connectionWorks(proof)) {
                     Store.update { current ->
                         if (Net.key(this@TunnelService) != network || Net.underlying(this@TunnelService)?.toString() != handle) current
                         else current.copy(states=current.states.mapValues { (id, value) ->
@@ -389,14 +389,14 @@ class TunnelService : VpnService() {
             if (sampledCore !== expectedCore) return@launch
             val recent = verified?.takeIf { it.matches(sampledNet, sampledHandle, System.currentTimeMillis()) }
             val checkServices = st.mode == Mode.AUTO || Tunnel.ytViaDpi
-            fun accepted(probe: com.vlesscardvpn.core.Probe) = if (st.mode == Mode.AUTO) com.vlesscardvpn.core.AutoEligibility.servicesWork(probe) else probe.works
+            fun accepted(probe: com.vlesscardvpn.core.Probe) = if (st.mode == Mode.AUTO) com.vlesscardvpn.core.AutoEligibility.connectionWorks(probe) else probe.works
             val budget = if (checkServices) com.vlesscardvpn.core.ServiceProbePolicy.SERVICE_MS else 5000L
-            fun verdict(probe: com.vlesscardvpn.core.Probe): Boolean? = com.vlesscardvpn.core.AutoEligibility.learningVerdict(probe, st.mode == Mode.AUTO)
+            fun verdict(probe: com.vlesscardvpn.core.Probe): Boolean? = if (st.mode == Mode.AUTO) com.vlesscardvpn.core.AutoEligibility.connectionVerdict(probe) else com.vlesscardvpn.core.AutoEligibility.learningVerdict(probe, false)
             if (checkServices && recent == null) com.vlesscardvpn.core.ServiceHealth.begin(budget)
             fun probe(): com.vlesscardvpn.core.Probe {
-                val result = Tester.probeSocks(port, st.testUrl, big = false, youtube = checkServices && recent == null, attempts = 1, budgetMs = budget, strictServices = st.mode == Mode.AUTO)
+                val result = Tester.probeSocks(port, st.testUrl, big = false, youtube = checkServices && recent == null, attempts = 1, budgetMs = budget, connectionCheck = st.mode == Mode.AUTO && recent == null)
                 return if (result.works && recent?.matches(sampledNet, sampledHandle, System.currentTimeMillis()) == true)
-                    result.copy(ytOk=recent.probe.ytOk, tgOk=recent.probe.tgOk, ytReason=recent.probe.ytReason, tgReason=recent.probe.tgReason)
+                    result.copy(httpsHosts=recent.probe.httpsHosts,httpsChecked=recent.probe.httpsChecked,ytOk=recent.probe.ytOk, tgOk=recent.probe.tgOk, ytReason=recent.probe.ytReason, tgReason=recent.probe.tgReason)
                 else result
             }
             var p = probe()

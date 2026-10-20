@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Hermetic E2E protocol/media origin, NOT proof of public Telegram/YouTube availability.
 
-Only the emulator's debug APK trusts this ephemeral certificate, for two exact hosts.
+Only the emulator's debug APK trusts this ephemeral certificate, for exact fixture hosts only.
 Production probes, URL restrictions, nonce validation and certificate checks are unchanged.
 No key or trust anchor is checked in, uploaded as diagnostics or added to a release APK.
 """
@@ -17,7 +17,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-HOSTS = ['www.youtube.com', 'fixture.googlevideo.com']
+HTTPS_HOSTS = ['speed.cloudflare.com', 'cachefly.cachefly.net', 'proof.ovh.net']
+HOSTS = ['www.youtube.com', 'fixture.googlevideo.com'] + HTTPS_HOSTS
 
 def prepare(work):
     work.mkdir(parents=True, exist_ok=True)
@@ -34,7 +35,7 @@ def prepare(work):
         shutil.copyfile(work / 'cert.pem', debug / 'res/raw/e2e_service_ca.pem')
         (debug / 'res/xml/e2e_service_security.xml').write_text('''<?xml version="1.0" encoding="utf-8"?>
     <network-security-config><base-config cleartextTrafficPermitted="false"><trust-anchors><certificates src="system" /></trust-anchors></base-config>
-    <domain-config cleartextTrafficPermitted="false"><domain includeSubdomains="false">www.youtube.com</domain><domain includeSubdomains="false">fixture.googlevideo.com</domain>
+    <domain-config cleartextTrafficPermitted="false"><domain includeSubdomains="false">www.youtube.com</domain><domain includeSubdomains="false">fixture.googlevideo.com</domain><domain includeSubdomains="false">speed.cloudflare.com</domain><domain includeSubdomains="false">cachefly.cachefly.net</domain><domain includeSubdomains="false">proof.ovh.net</domain>
     <trust-anchors><certificates src="@raw/e2e_service_ca" /><certificates src="system" /></trust-anchors></domain-config></network-security-config>''')
         (debug / 'AndroidManifest.xml').write_text('''<manifest xmlns:android="http://schemas.android.com/apk/res/android"><application android:networkSecurityConfig="@xml/e2e_service_security" /></manifest>''')
 
@@ -48,12 +49,15 @@ def patch(path):
     config = json.loads(path.read_text())
     outbound = next(o for o in config['outbounds'] if o['tag'] == 'qa-youtube')
     outbound['settings'] = fixture_destination(18444)
+    next(o for o in config['outbounds'] if o['tag'] == 'qa-speed')['settings'] = fixture_destination(18444)
     config['outbounds'].extend([
+        {'tag': 'qa-https-fixture', 'protocol': 'freedom', 'settings': fixture_destination(18444)},
         {'tag': 'qa-youtube-media', 'protocol': 'freedom', 'settings': fixture_destination(18444)},
         {'tag': 'qa-mtproto-fixture', 'protocol': 'freedom', 'settings': fixture_destination(18445)}])
     config['routing']['rules'] = [
         {'type': 'field', 'network': 'tcp', 'port': '443', 'domain': ['full:fixture.googlevideo.com'], 'outboundTag': 'qa-youtube-media'},
-        {'type': 'field', 'network': 'tcp', 'port': '443', 'ip': ['149.154.167.51/32', '149.154.175.50/32'], 'outboundTag': 'qa-mtproto-fixture'}
+        {'type': 'field', 'network': 'tcp', 'port': '443', 'ip': ['149.154.167.51/32', '149.154.175.50/32'], 'outboundTag': 'qa-mtproto-fixture'},
+        {'type': 'field', 'network': 'tcp', 'port': '443', 'domain': ['full:' + h for h in HTTPS_HOSTS[1:]], 'outboundTag': 'qa-https-fixture'}
     ] + config['routing']['rules']
     path.write_text(json.dumps(config))
 
@@ -77,6 +81,9 @@ def serve(work):
             elif self.path.startswith('/videoplayback'):
                 data = (work / 'video.mp4').read_bytes()[:131072]
                 code, mime = 206, 'video/mp4'
+            elif self.path.startswith(('/__down?', '/1mb.test', '/files/1Mb.dat')):
+                count = 65536 if self.headers.get('Range') == 'bytes=0-65535' else 1048576
+                data, code, mime = bytes(range(256)) * (count // 256), 200, 'application/octet-stream'
             elif self.path.startswith('/generate_204'):
                 data, code, mime = b'', 204, 'text/plain'
             else:

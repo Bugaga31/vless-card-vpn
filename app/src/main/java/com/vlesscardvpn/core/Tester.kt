@@ -23,7 +23,7 @@ import java.net.ServerSocket
 import java.net.Socket
 import java.util.concurrent.TimeUnit
 
-data class Probe(val realMs: Int, val bigOk: Boolean?, val ytOk: Boolean?, val error: String = "", val tgOk: Boolean? = null, val kbps: Int = 0, val ytKbps: Int = 0, val ytReason: String = "", val tgReason: String = "") {
+data class Probe(val realMs: Int, val bigOk: Boolean?, val ytOk: Boolean?, val error: String = "", val tgOk: Boolean? = null, val kbps: Int = 0, val ytKbps: Int = 0, val ytReason: String = "", val tgReason: String = "", val httpsHosts: Int = 0, val httpsChecked: Boolean = false) {
     val works: Boolean get() = realMs > 0 && bigOk != false
 }
 
@@ -137,7 +137,7 @@ object Tester {
     }
 
     /** Requests through a local SOCKS port (the tester's or the running VPN's). */
-    fun probeSocks(port: Int, testUrl: String, big: Boolean = true, youtube: Boolean = true, attempts: Int = 2, budgetMs: Long = 0, strictServices: Boolean = false, onCall: ((okhttp3.Call) -> Unit)? = null): Probe {
+    fun probeSocks(port: Int, testUrl: String, big: Boolean = true, youtube: Boolean = true, attempts: Int = 2, budgetMs: Long = 0, strictServices: Boolean = false, connectionCheck: Boolean = false, onCall: ((okhttp3.Call) -> Unit)? = null): Probe {
         val budgetDeadline = if (budgetMs > 0) System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(budgetMs.coerceAtMost(60000)) else Long.MAX_VALUE
         fun boundedCall(client: OkHttpClient, request: Request): okhttp3.Call = client.newCall(request).also { call ->
             if (budgetDeadline != Long.MAX_VALUE) call.timeout().timeout(TimeUnit.NANOSECONDS.toMillis((budgetDeadline-System.nanoTime()).coerceAtLeast(1)).coerceAtLeast(1),TimeUnit.MILLISECONDS)
@@ -163,7 +163,7 @@ object Tester {
         }.also { tasks += it } else null
         try {
             var best = Long.MAX_VALUE; var err = ""
-            repeat(attempts.coerceIn(1, 3)) {
+            repeat(if (connectionCheck) 0 else attempts.coerceIn(1, 3)) {
                 if (Thread.currentThread().isInterrupted) throw java.io.InterruptedIOException("Проверка отменена")
                 val t0 = System.nanoTime()
                 runCatching {
@@ -174,29 +174,38 @@ object Tester {
                     best = minOf(best, (System.nanoTime() - t0) / 1_000_000)
                 }.onFailure { err = Errors.human(it) }
             }
+            val https = if (connectionCheck) HttpsTransferProbe.check { request ->
+                boundedCall(mediaClient,request).also { call ->
+                    val left = if (budgetDeadline == Long.MAX_VALUE) 1500L else
+                        TimeUnit.NANOSECONDS.toMillis((budgetDeadline-System.nanoTime()).coerceAtLeast(1)).coerceAtLeast(1)
+                    call.timeout().timeout(minOf(1500L,left),TimeUnit.MILLISECONDS)
+                }
+            } else HttpsTransferProbe.Result()
+            if (https.passed) best = https.elapsedMs
             if (best == Long.MAX_VALUE) {
                 val media = ProbeTasks.await(ytF?.takeIf { it.isDone },1,YouTubeMediaProbe.Result(null,reason="deadline"))
                 val telegram = ProbeTasks.await(tgF?.takeIf { it.isDone },1,TelegramProbe.Result(null,"deadline"))
-                return Probe(0,null,media.ok,err,tgOk=telegram.ok,ytReason=media.reason,tgReason=telegram.reason)
+                return Probe(0,null,media.ok,err,tgOk=telegram.ok,ytReason=media.reason,tgReason=telegram.reason,httpsHosts=https.hosts,httpsChecked=connectionCheck)
             }
             val deadline = if (budgetDeadline == Long.MAX_VALUE) System.nanoTime() + TimeUnit.SECONDS.toNanos(40) else budgetDeadline
             fun remaining() = TimeUnit.NANOSECONDS.toMillis((deadline - System.nanoTime()).coerceAtLeast(1)).coerceAtLeast(1)
             val tgResult = ProbeTasks.await(tgF, remaining(), TelegramProbe.Result(null,"deadline"))
             // A definite MTProto failure already disqualifies strict Auto. Do not wait eight seconds
             // for an unrelated stalled player; UNKNOWN/timeouts are not converted into FAIL here.
-            if (strictServices && youtube && tgResult.ok == false) {
+            if (strictServices && !connectionCheck && youtube && tgResult.ok == false) {
                 val media = ProbeTasks.await(ytF?.takeIf { it.isDone },1,YouTubeMediaProbe.Result(null,reason="skipped-after-mtproto-fail"))
                 return Probe(best.toInt().coerceAtLeast(1),null,media.ok,tgOk=false,
                     ytKbps=media.kbps,ytReason=media.reason,tgReason=tgResult.reason)
             }
             val ytResult = ProbeTasks.await(ytF, remaining(), YouTubeMediaProbe.Result(null,reason="deadline"))
             // A bulk speed test must not compete with service verification on the same route.
-            val bigF = if (big && remaining() >= 200) workers.download(false to 0) {
+            val bigF = if (big && !connectionCheck && remaining() >= 200) workers.download(false to 0) {
                 bigDownload(client,budgetDeadline,onCall)
             }.also { tasks += it } else null
             val bigResult = ProbeTasks.await(bigF, remaining(), false to 0)
-            return Probe(best.toInt().coerceAtLeast(1), if (big) bigResult.first else null, ytResult.ok, tgOk = tgResult.ok,
-                kbps = bigResult.second, ytKbps = ytResult.kbps, ytReason = ytResult.reason, tgReason = tgResult.reason)
+            return Probe(best.toInt().coerceAtLeast(1), if (connectionCheck) true else if (big) bigResult.first else null, ytResult.ok, tgOk = tgResult.ok,
+                kbps = if (connectionCheck) https.kbps else bigResult.second, ytKbps = ytResult.kbps, ytReason = ytResult.reason, tgReason = tgResult.reason,
+                httpsHosts = https.hosts, httpsChecked = connectionCheck)
         } finally {
             closed.set(true); sockets.forEach { runCatching { it.close() } }
             ProbeTasks.cancel(tasks); workers.purge()
@@ -371,6 +380,7 @@ object Tester {
         stopAfter: Int = Int.MAX_VALUE,
         budgetMs: Long = 0,
         strictServices: Boolean = false,
+        connectionCheck: Boolean = false,
         onEach: (Int, Probe) -> Unit,
     ) = mutex.withLock {
         withContext(Bg.io) {
@@ -394,7 +404,7 @@ object Tester {
                         val one = XrayCore.Instance("test1")
                         val p = freePorts(1)
                         val ok = runCatching { one.start(XrayConfigBuilder.testConfig(listOf(v), p, byeDpiPort, dpiPorts)) }.isSuccess && one.running
-                        try { report(idx[i], if (ok) CancellableProbe.run { bind -> probeSocks(p[0], testUrl, big = big, youtube = youtube, attempts = attempts, budgetMs = budgetMs, strictServices = strictServices, onCall = { call -> bind { call.cancel() } }) } else Probe(0, null, null, "конфиг не принят ядром")) }
+                        try { report(idx[i], if (ok) CancellableProbe.run { bind -> probeSocks(p[0], testUrl, big = big, youtube = youtube, attempts = attempts, budgetMs = budgetMs, strictServices = strictServices, connectionCheck = connectionCheck, onCall = { call -> bind { call.cancel() } }) } else Probe(0, null, null, "конфиг не принят ядром")) }
                         finally { one.stop() }
                     }
                     continue
@@ -404,7 +414,7 @@ object Tester {
                         ProbeRace.run(chunk.indices.toList(), PowerPolicy.cap(parallel, PhonePower.state.value.realParallel), stopAfter,
                             skip = { i -> skipped(idx[i]) }, staggerMs = if (stopAfter == 1) 120 else 0,
                             probe = { i -> CancellableProbe.run { bind -> probeSocks(ports[i], testUrl, big = big, youtube = youtube,
-                                attempts = attempts, budgetMs = budgetMs, strictServices = strictServices, onCall = { call -> bind { call.cancel() } }) } },
+                                attempts = attempts, budgetMs = budgetMs, strictServices = strictServices, connectionCheck = connectionCheck, onCall = { call -> bind { call.cancel() } }) } },
                             onEach = { i, p -> report(idx[i], p) })
                     }
                 } finally { core.stop() }
