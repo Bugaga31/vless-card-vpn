@@ -10,6 +10,8 @@ save_case() {
   adb logcat -d -s E2E:I XrayCore:W '*:S' > "$W/case-$1.log" 2>&1
   adb shell uiautomator dump /sdcard/e2e-window.xml >/dev/null 2>&1
   adb shell cat /sdcard/e2e-window.xml > "$W/case-$1.xml" 2>&1
+  cp "$W/access.log" "$W/case-$1-access.log"
+  adb shell "run-as $PROBE cat files/result.json" > "$W/case-$1-probe.json" 2>/dev/null || true
 }
 fail() { echo "::error title=e2e::$*"; echo "FAIL: $*"; FAILS=$((FAILS+1)); }
 
@@ -74,6 +76,13 @@ run_case() { # $1 name, $2 state, $3 seconds to wait for the connect result
 run_case single single.json
 N1=$(grep -c "email: u8443" $W/access.log); echo "server :8443 accepted after single: $N1"
 [ "$N1" -gt 0 ] || fail "single: server saw no traffic (traffic did not go through the server)"
+# The remaining suite cannot establish anything if the baseline chain/resource is broken.
+# Fail red immediately, retaining the exact helper/TLS result instead of waiting through every case.
+if [ "$FAILS" -gt 0 ]; then
+  adb logcat -d > "$W/logcat.txt"
+  echo "E2E baseline failed; remaining cases NOT RUN (not PASS)"
+  exit "$FAILS"
+fi
 
 : > $W/access.log
 run_case byedpi byedpi.json

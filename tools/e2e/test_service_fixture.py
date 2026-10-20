@@ -34,6 +34,11 @@ class ServiceFixtureTest(unittest.TestCase):
         self.assertEqual(['full:fixture.googlevideo.com'],patched['routing']['rules'][0]['domain'])
         self.assertEqual('443',patched['routing']['rules'][1]['port'])
         self.assertEqual('tcp',patched['routing']['rules'][1]['network'])
+        for tag, port in [('qa-youtube',18444),('qa-youtube-media',18444),('qa-mtproto-fixture',18445)]:
+            settings = next(o['settings'] for o in patched['outbounds'] if o['tag'] == tag)
+            self.assertEqual(f'127.0.0.1:{port}', settings['redirect'])
+            self.assertEqual([{'action':'allow','network':'tcp','port':str(port),'ip':['127.0.0.1/32']}],settings['finalRules'])
+        self.assertNotIn('finalRules',next(o for o in patched['outbounds'] if o['tag']=='qa-other').get('settings',{}))
 
     def test_trust_anchor_is_generated_only_in_debug_and_never_in_release(self):
         self.assertNotIn('networkSecurityConfig',(ROOT / 'app/src/main/AndroidManifest.xml').read_text())
