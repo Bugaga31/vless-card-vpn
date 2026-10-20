@@ -32,12 +32,13 @@ object AutoEligibility {
         if (s.serviceYtOk == false || s.serviceTgOk == false) return 2
         return if (s.serviceYtOk == true && s.serviceTgOk == true) 0 else 1
     }
+    /** Connectivity alone is not success in Auto: require real video and MTProto proofs. */
+    fun servicesWork(probe: Probe): Boolean = probe.works && probe.ytOk == true && probe.tgOk == true
+
     fun <T> servicePool(list: List<T>, state: (T) -> ServerState, net: String, now: Long): List<T> {
         // A shared balancer sends real Telegram/video connections to EVERY member.
         // Never dilute a proven pool with generic-HTTPS-only or failed routes just to reach eight.
-        val proven = list.filter { serviceRank(state(it),net,now) == 0 }
-        if (proven.isNotEmpty()) return proven
-        // Unknown remains a provisional recovery option, not proof that these services work.
-        return list.filter { serviceRank(state(it),net,now) != 2 }.ifEmpty { list }
+        // Unknown, stale and failed routes remain search candidates, never connected outbounds.
+        return list.filter { state(it).works && serviceRank(state(it),net,now) == 0 }
     }
 }

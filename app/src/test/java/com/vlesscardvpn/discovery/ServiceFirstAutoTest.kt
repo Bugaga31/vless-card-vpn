@@ -53,9 +53,9 @@ class ServiceFirstAutoTest {
             assertEquals(listOf(good),AutoEligibility.servicePool(listOf(unknown,good),{it},"wifi",now))
         }
     }
-    @Test fun zeroProofDoesNotPreventProvisionalRecovery() {
+    @Test fun zeroProofNeverEntersConnectedAutoPool() {
         val unknown=sample(5000).copy(serviceCheckedAt=0)
-        assertEquals(listOf(unknown),AutoEligibility.servicePool(listOf(unknown),{it},"wifi",now))
+        assertTrue(AutoEligibility.servicePool(listOf(unknown),{it},"wifi",now).isEmpty())
         val failed=sample(5000).copy(serviceTgOk=false)
         assertFalse(ServerChoice.downloadUpgrade(null,failed,"wifi",now))
     }
@@ -76,4 +76,31 @@ class ServiceFirstAutoTest {
         assertEquals("chrome.h6",changed.serviceMask)
     }
 
+    @Test fun noFallbackToFailedPartialOrStaleServicesEvenWhenAllCandidatesFail() {
+        val invalid=listOf(sample(5000).copy(serviceTgOk=false),sample(5000).copy(serviceYtOk=false),
+            sample(5000).copy(serviceTgOk=null),sample(5000).copy(serviceYtOk=null),
+            sample(5000).copy(serviceCheckedAt=0),sample(5000).copy(serviceNetwork="cell"),
+            sample(5000).copy(serviceCheckedAt=now-AutoEligibility.SERVICE_TTL_MS-1),
+            sample(5000).copy(serviceCheckedAt=now+1),sample(5000).copy(serviceMask="other"))
+        for (state in invalid) {
+            assertTrue(AutoEligibility.servicePool(listOf(state),{it},"wifi",now).isEmpty())
+            assertTrue(AutoEligibility.connectedPool(listOf(server(1)),{state},"wifi",now,false).isEmpty())
+        }
+    }
+    @Test fun genericHttpsAndPageReachabilityAreNotServiceSuccess() {
+        for (probe in listOf(Probe(100,true,null),Probe(100,true,true,tgOk=null),
+            Probe(100,true,false,tgOk=true),Probe(100,true,true,tgOk=false),Probe(0,true,true,tgOk=true)))
+            assertFalse(AutoEligibility.servicesWork(probe))
+        assertTrue(AutoEligibility.servicesWork(Probe(100,null,true,tgOk=true)))
+    }
+    @Test fun unknownRouteCannotWinEvenWhenItHasTheOnlyFastPing() = kotlinx.coroutines.runBlocking {
+        val route=server(1);val state=sample(100000,1).copy(serviceCheckedAt=0)
+        val winner=AutoSelection.compare(listOf(route),{state},"wifi",{now},{0L},{true},{true},false) {_,_->fail("Unproven finalist")}
+        assertNull(winner)
+    }
+    @Test fun serviceFailureDuringSpeedProbeInvalidatesFinalWinner() = kotlinx.coroutines.runBlocking {
+        val route=server(1);var state=sample(0)
+        val winner=AutoSelection.compare(listOf(route),{state},"wifi",{now},{0L},{true},{true},false) {_,_->state=sample(90000).copy(serviceTgOk=false)}
+        assertNull(winner)
+    }
 }

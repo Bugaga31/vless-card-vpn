@@ -9,6 +9,8 @@ env:
 permissions:
   contents: read
 jobs:
+  quality:
+    uses: ./.github/workflows/e2e.yml
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 40
@@ -143,7 +145,7 @@ jobs:
             security-results.txt
           if-no-files-found: ignore
   publish:
-    needs: [build, emulator-install]
+    needs: [build, emulator-install, quality]
     runs-on: ubuntu-latest
     permissions:
       contents: write

@@ -17,11 +17,11 @@ class AutoPoolRecoveryR140Test {
         assertEquals(listOf(states.first()),AutoEligibility.servicePool(states,{it},"wifi",now))
         assertEquals(8,AutoEligibility.TOP)
     }
-    @Test fun onlyKnownCurrentServiceFailuresAreExcluded() {
-        val good=sample(); val bad=good.copy(ytOk=false,serviceYtOk=false,serviceNetwork="wifi",serviceCheckedAt=now)
-        assertEquals(listOf(good),AutoEligibility.servicePool(listOf(good,bad),{it},"wifi",now))
-        assertEquals(listOf(good,bad),AutoEligibility.servicePool(listOf(good,bad),{it},"cell",now))
-        assertEquals(listOf(bad),AutoEligibility.servicePool(listOf(bad),{it},"wifi",now))
+    @Test fun unknownAndFailedRoutesNeverEnterConnectedAutoPool() {
+        val unknown=sample();val failed=unknown.copy(serviceYtOk=false,serviceNetwork="wifi",serviceCheckedAt=now)
+        assertTrue(AutoEligibility.servicePool(listOf(unknown,failed),{it},"wifi",now).isEmpty())
+        assertTrue(AutoEligibility.servicePool(listOf(unknown,failed),{it},"cell",now).isEmpty())
+        assertTrue(AutoEligibility.servicePool(listOf(failed),{it},"wifi",now).isEmpty())
     }
     @Test fun serviceProofBeatsFasterUnknownOrFailedCandidate() {
         val slow=sample(1000,10).copy(ytOk=true,tgOk=true,serviceYtOk=true,serviceTgOk=true,serviceNetwork="wifi",serviceCheckedAt=now)
@@ -86,7 +86,8 @@ class AutoPoolRecoveryR140Test {
     }
     @Test fun cloudFastChallengerCannotBeDisplacedByUnmeasuredLowPingClones() {
         val leader=server("leader");val low=server("low");val cloud=server("cloud")
-        val states=mapOf(leader.id to sample(1000),low.id to ServerState(realMs=1),cloud.id to ServerState(realMs=400))
+        fun proven(s:ServerState)=s.copy(serviceNetwork="wifi",serviceCheckedAt=now,serviceYtOk=true,serviceTgOk=true)
+        val states=mapOf(leader.id to proven(sample(1000)),low.id to proven(ServerState(realMs=1)),cloud.id to proven(ServerState(realMs=400)))
         val finalists=AutoSelection.finalists(listOf(leader,low,cloud),{states.getValue(it.id)},"wifi",now){if(it.id==cloud.id) 50000 else 0}
         assertEquals(cloud,finalists[1])
     }

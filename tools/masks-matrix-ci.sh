@@ -7,8 +7,10 @@ curl -fsSL -o /tmp/xray.zip https://github.com/XTLS/Xray-core/releases/download/
 mkdir -p /tmp/xray /tmp/srv /tmp/xcfg && unzip -qo /tmp/xray.zip -d /tmp/xray
 X=/tmp/xray/xray
 KEYS=$($X x25519); PRIV=$(echo "$KEYS" | sed -n 's/^PrivateKey: //p'); PBK=$(echo "$KEYS" | sed -n 's/^Password (PublicKey): //p')
-openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -keyout /tmp/srv.key -out /tmp/srv.crt -days 2 -subj "/CN=test.local" -addext "subjectAltName=DNS:test.local,IP:127.0.0.1" 2>/dev/null
+openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -keyout /tmp/srv.key -out /tmp/srv.crt -days 2 -subj "/CN=test.local" -addext "subjectAltName=DNS:test.local,IP:127.0.0.1,IP:10.0.0.1" 2>/dev/null
 export MATRIX_CHECK_URL=https://127.0.0.1:18443/generate_204 MATRIX_DOWNLOAD_URL=https://127.0.0.1:18443/bytes MATRIX_CA=/tmp/srv.crt
+# WireGuard rejects loopback destinations inside the tunnel; map a private fixture IP at the server.
+export MATRIX_WG_CHECK_URL=https://10.0.0.1:18443/generate_204 MATRIX_WG_DOWNLOAD_URL=https://10.0.0.1:18443/bytes
 python3 tools/e2e/matrix-origin.py >/tmp/matrix-origin.log 2>&1 & ORIGIN=$!
 trap 'kill "$ORIGIN" 2>/dev/null || true' EXIT
 P=$(openssl x509 -in /tmp/srv.crt -outform der | sha256sum | cut -d' ' -f1)
@@ -35,7 +37,15 @@ wireguard://iMKDJbeES0wVjl014e%2BVHdsv6vbOtdqgTCw4imW%2FhU4%3D@127.0.0.1:8450?pu
 socks5://mu:mp@127.0.0.1:8451#socks
 L
 chmod +x gradlew
-XRAY_MATRIX_OFFERED_ONLY=1 XRAY_CONFIG_DUMP=/tmp/xcfg XRAY_LOCAL_LINKS=/tmp/links.txt ./gradlew --no-daemon -q :app:testDebugUnitTest --tests 'com.vlesscardvpn.ConfigTest' --tests 'com.vlesscardvpn.R62Test'
+XRAY_MATRIX_OFFERED_ONLY=1 XRAY_CONFIG_DUMP=/tmp/xcfg XRAY_LOCAL_LINKS=/tmp/links.txt ./gradlew --no-daemon --rerun-tasks -q :app:testDebugUnitTest --tests 'com.vlesscardvpn.ConfigTest' --tests 'com.vlesscardvpn.CryptoWarpRegressionR62Test'
+# Fail before running the expensive matrix if a renamed test stopped producing its fixtures.
+for required in local-matrix.json local-matrix.txt dpi-engines.txt warp-masks.txt; do
+  [ -s "/tmp/xcfg/$required" ] || { echo "Missing generated matrix fixture: $required"; exit 1; }
+done
+while IFS= read -r id || [ -n "$id" ]; do
+  [ -n "$id" ] || continue
+  [ -s "/tmp/xcfg/warp-$id.json" ] || { echo "Missing generated WARP fixture: $id"; exit 1; }
+done < /tmp/xcfg/warp-masks.txt
 # One engine per fixed strategy (the app's own argv: VLESS Card, zapret, ByeDPI); servers are on loopback.
 while read -r eng args; do
   if [ "$eng" = TPWS ]; then VCVPN_TPWS_ALLOW_LOCAL=1 /tmp/tpws $args > /dev/null 2>&1 &
@@ -115,19 +125,34 @@ import json, subprocess, time, os
 cfg = json.load(open('/tmp/xcfg/local-matrix.json'))
 rows = [l.split() for l in open('/tmp/xcfg/local-matrix.txt')]
 wok = wall = 0
+
+def probe(ob):
+    json.dump({"inbounds": [{"port": 24900, "listen": "127.0.0.1", "protocol": "socks", "settings": {"auth": "noauth"}}], "outbounds": [ob]}, open('/tmp/wg1.json', 'w'))
+    with open('/tmp/xcfg/wg-client.log', 'a') as log:
+        p = subprocess.Popen(['/tmp/xray/xray', 'run', '-c', '/tmp/wg1.json'], stdout=log, stderr=subprocess.STDOUT)
+        try:
+            time.sleep(1.5)
+            common = ['curl', '--noproxy', '', '-s', '-o', '/dev/null', '--socks5-hostname', '127.0.0.1:24900', '--cacert', os.environ['MATRIX_CA']]
+            a = subprocess.run(common + ['-m', '15', '-w', '%{http_code}', os.environ['MATRIX_WG_CHECK_URL']], capture_output=True, text=True)
+            b = subprocess.run(common + ['-m', '25', '-w', '%{size_download}', os.environ['MATRIX_WG_DOWNLOAD_URL']], capture_output=True, text=True)
+            return a.returncode == 0 and b.returncode == 0 and a.stdout == '204' and b.stdout.isdigit() and int(b.stdout) >= 262144, a.stdout, b.stdout
+        finally:
+            p.terminate()
+            try: p.wait(timeout=5)
+            except subprocess.TimeoutExpired: p.kill(); p.wait()
+
+wg_rows = [(port, name, mask) for port, name, mask in rows if name == 'wg']
+baseline = next((row for row in wg_rows if row[2] == 'none'), None)
+if baseline is None: raise SystemExit('Missing plain WireGuard baseline')
+def outbound(port):
+    return next(o for o in cfg['outbounds'] if o['tag'] == 'v%d' % (int(port) - 30000))
+passed, code, size = probe(outbound(baseline[0]))
+if not passed: raise SystemExit(f'Plain WireGuard fixture failed: HTTP={code} bytes={size}; inspect server/client logs before testing masks')
 with open('/tmp/xcfg/wg-result.txt', 'w') as out:
-    for port, name, mask in rows:
-        if name != 'wg': continue
-        tag = 'v%d' % (int(port) - 30000)
-        ob = [o for o in cfg['outbounds'] if o['tag'] == tag][0]
-        json.dump({"inbounds": [{"port": 24900, "listen": "127.0.0.1", "protocol": "socks", "settings": {"auth": "noauth"}}], "outbounds": [ob]}, open('/tmp/wg1.json', 'w'))
-        p = subprocess.Popen(['/tmp/xray/xray', 'run', '-c', '/tmp/wg1.json'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL); time.sleep(1.5)
-        a = subprocess.run(['curl', '--noproxy', '', '-s', '-o', '/dev/null', '-m', '15', '-w', '%{http_code}', '--socks5-hostname', '127.0.0.1:24900', os.environ['MATRIX_CHECK_URL'], '--cacert', os.environ['MATRIX_CA']], capture_output=True, text=True).stdout
-        b = subprocess.run(['curl', '--noproxy', '', '-s', '-o', '/dev/null', '-m', '25', '-w', '%{size_download}', '--socks5-hostname', '127.0.0.1:24900', os.environ['MATRIX_DOWNLOAD_URL'], '--cacert', os.environ['MATRIX_CA']], capture_output=True, text=True).stdout
-        p.kill(); p.wait()
-        ok = a == '204' and b.isdigit() and int(b) >= 262144
+    for port, name, mask in wg_rows:
+        ok, code, size = probe(outbound(port))
         wall += 1; wok += ok
-        print(('OK' if ok else 'FAIL'), port, name, mask, a, b, file=out)
+        print(('OK' if ok else 'FAIL'), port, name, mask, code, size, file=out, flush=True)
 print(f"WireGuard (sequential, own instance): {wok}/{wall}")
 print(open('/tmp/xcfg/wg-result.txt').read())
 if wall == 0 or wok != wall: raise SystemExit('WireGuard variants failed')
@@ -142,7 +167,7 @@ echo "$R" | jq -e '.config.interface.addresses.v4 and .config.client_id and .con
 WPEER=$(echo "$R" | jq -r .config.peers[0].public_key)
 WV4=$(echo "$R" | jq -r .config.interface.addresses.v4); WRES=$(echo "$R" | jq -r .config.client_id | base64 -d | od -An -tu1 | awk '{print $1","$2","$3}')
 WOK=0; WALL=0
-while read -r id; do
+while IFS= read -r id || [ -n "$id" ]; do
   [ -n "$id" ] || continue
   sed -e "s#@WPRIV@#$WPRIV#" -e "s#@WV4@#$WV4#" -e "s#\[11,22,33\]#[$WRES]#" /tmp/xcfg/warp-$id.json > /tmp/w1.json
   python3 - "$WPEER" <<'PEER'
@@ -160,5 +185,5 @@ PEER
   if [ "$c" = 200 ] && grep -q '^warp=on' /tmp/warp-trace.txt; then WOK=$((WOK+1)); echo "WARP OK $id"; else echo "WARP FAIL $id ($c) $(tail -1 /tmp/w1.log)"; fi
 done < /tmp/xcfg/warp-masks.txt
 echo "WARP masks: $WOK/$WALL carry HTTPS through real Cloudflare WARP; ByeDPI restarts: $(cat /tmp/bd-restarts 2>/dev/null | wc -l)"
-[ "$WOK" -ge $((WALL * 8 / 10)) ] || { echo "too many WARP masks fail"; exit 1; }
+[ "$WALL" -gt 0 ] && [ "$WOK" -ge $(((WALL * 8 + 9) / 10)) ] || { echo "too many WARP masks fail"; exit 1; }
 exit ${MFAIL:-0}

@@ -13,8 +13,8 @@ class AutoSelectionTest {
     private val d = Server("d", "vless", "d.invalid", 443, "d")
     private val now = 400000L
     private fun sample(ms: Int = 100, speed: Int = 10000, at: Long = now) = ServerState(
-        realMs = ms, bigOk = true, kbps = speed, speedNetwork = "wifi", speedMask = "", speedCheckedAt = at)
-    private fun unknown(ms: Int = 100) = ServerState(realMs = ms)
+        realMs = ms, bigOk = true, kbps = speed, speedNetwork = "wifi", speedMask = "", speedCheckedAt = at, serviceNetwork="wifi", serviceCheckedAt=now, serviceYtOk=true, serviceTgOk=true)
+    private fun unknown(ms: Int = 100) = ServerState(realMs = ms, serviceNetwork="wifi", serviceCheckedAt=now, serviceYtOk=true, serviceTgOk=true)
 
     @Test fun refreshesAfterFiveMinutesWithoutExtendingOnConnectivityOnly() {
         assertFalse(AutoSelection.needsSample(sample(at=now-299999), "wifi", now))
