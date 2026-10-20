@@ -24,10 +24,21 @@ capture_home() {
 	adb shell monkey -p "$PKG" -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1
 	sleep 6
 	bash tools/assert-vibe-foreground.sh
-	adb shell uiautomator dump /sdcard/window.xml >/dev/null
-	grep -Eq 'Готовы к подключению|Маршрут подключён|Серверы выберу сам' <<< "$(adb shell cat /sdcard/window.xml)" || {
-		echo "Expected the app home screen for $destination"; exit 1;
-	}
+	# At fontScale 2 the status can be below the fold. Prove it is reachable by real
+	# bounded scrolling instead of treating a correctly scrollable layout as a crash.
+	local reachable=0 xml="ui-$(basename "$destination" .png).xml"
+	for attempt in 1 2 3 4 5 6; do
+		adb shell uiautomator dump /sdcard/window.xml >/dev/null
+		adb shell cat /sdcard/window.xml > "$xml"
+		if python3 tools/ui-layout-check.py home "$xml"; then reachable=1; break; fi
+		local points
+		points=$(python3 tools/ui-layout-check.py scroll "$xml") || exit 1
+		read -r x1 y1 x2 y2 <<< "$points"
+		adb shell input swipe "$x1" "$y1" "$x2" "$y2" 400
+		sleep 1
+	done
+	test "$reachable" = 1 || { echo "Expected reachable home content for $destination"; exit 1; }
+	bash tools/assert-vibe-foreground.sh
 	adb exec-out screencap -p > "$destination"
 	test -s "$destination"
 }
