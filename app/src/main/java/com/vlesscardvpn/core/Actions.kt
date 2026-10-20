@@ -45,6 +45,7 @@ object Actions {
     private var job: Job? = null
     private lateinit var app: Context
     private val probeMemory = ProbeMemory()
+    private val probeGeneration = java.util.concurrent.atomic.AtomicLong()
     private var requestedSourceJob: Job? = null
     private var requestedSourceAttempt = -60000L
 
@@ -52,17 +53,17 @@ object Actions {
         app = context.applicationContext
         maybeLoadRequestedSource()
         runCatching { Brain.load(app) } // load before the first probe can initialize fresh weights
-        // 1.0.81–1.0.83 left a mask neural network and maybe a 0.5–1.8 GB language model on the phone: removed, space freed
-        runCatching { java.io.File(app.filesDir, "mask_brain.json").delete(); java.io.File(app.filesDir, "llm").deleteRecursively() }
+        // Preserve legacy model files as well as current weights; removal requires an explicit user wipe.
     }
 
     fun cancelForNetworkChange() {
+        probeGeneration.incrementAndGet()
         autoGeneration.incrementAndGet()
         job?.cancel()
         progress.value = progress.value.copy(running = false, message = "Сеть изменилась — старые проверки отменены")
     }
 
-    fun cancel() { job?.cancel(); progress.value = progress.value.copy(running = false, message = "Остановлено") }
+    fun cancel() { probeGeneration.incrementAndGet(); job?.cancel(); progress.value = progress.value.copy(running = false, message = "Остановлено") }
 
     /** One in-flight public refresh; never block the connect button on mirror timeouts. */
     fun refreshPublicCloud() {
@@ -111,7 +112,7 @@ object Actions {
             val body = runCatching {
                 c.newCall(Request.Builder().url(u).header("User-Agent", "v2rayNG/1.10").build()).execute().use { r ->
                     info = com.vlesscardvpn.model.SubInfo.parse(r.header("subscription-userinfo"), r.header("profile-title"))
-                    if (r.isSuccessful) r.body?.string() else null
+                    if (r.isSuccessful) r.body?.byteStream()?.use { String(BoundedInput.read(it, 2 * 1024 * 1024)) } else null
                 }
             }.getOrNull()
             if (!body.isNullOrBlank() && LinkParser.parseMany(body).isNotEmpty()) return body to info
@@ -401,6 +402,9 @@ object Actions {
         val pinned = pinCertificates(servers)
         if (Net.key(app) != net || Net.underlying(app)?.toString() != underlying) return 0
         val st = Store.state.value
+        val generation = probeGeneration.get()
+        val chain = RouteContext.key(st.settings)
+        fun validContext() = generation == probeGeneration.get() && chain == RouteContext.key(Store.state.value.settings)
         val variants = pinned.map { it to (Masks.byId(st.state(it).maskFor(net))) }
         val (own, port) = dpiForTests(variants.map { it.second })
         val done = AtomicInteger(); val ok = AtomicInteger()
@@ -412,11 +416,13 @@ object Actions {
             Tester.real(variants, st.settings.testUrl, port, own.ports, batch = if (onFirst != null) ConnectPolicy.FIRST else 64, parallel = parallel, big = big, youtube = youtube, attempts = attempts, stopAfter = stopAfter, budgetMs = budgetMs) { i, p ->
                 if (p == Tester.SKIPPED) return@real
                 // Do not train the old profile with a result completed after Wi-Fi/cellular handoff.
-                if (Net.key(app) != net || Net.underlying(app)?.toString() != underlying) return@real
+                if (!validContext() || Net.key(app) != net || Net.underlying(app)?.toString() != underlying) return@real
                 val s = variants[i].first
                 if (youtube) ServiceRoutes.targets.filter(ServiceRoutes::native).forEach { target ->
                     ServiceRoutes.measurement(target,p)?.let { serviceResults.getValue(target.id)[s.id] = it }
                 }
+                if (com.vlesscardvpn.BuildConfig.DEBUG && youtube) android.util.Log.i("E2E",
+                    "service-probe https=${p.works} yt=${p.ytOk} media=${p.ytReason} tg=${p.tgOk}")
                 val speedSample = ServerChoice.acceptsSpeedSample(p.kbps, parallel)
                 val checkedAt = System.currentTimeMillis()
                 val qualified = p.works && (st.settings.mode != Mode.AUTO || !youtube || AutoEligibility.servicesWork(p))
@@ -424,11 +430,15 @@ object Actions {
                 if (qualified) onSuccess?.invoke(s)
                 // A deliberately short attempt is inconclusive when it times out; confirm with the normal budget.
                 if (!p.works && budgetMs in 1 until ConnectPolicy.QUICK_BUDGET_MS) return@real
-                probeMemory.record(net, s.id, st.state(s).maskFor(net), p.works, checkedAt)
-                runCatching { Brain.learn(net, s, st.state(s), p.works) }
+                val verdict = AutoEligibility.learningVerdict(p, youtube && st.settings.mode == Mode.AUTO)
+                if (verdict != null) {
+                    probeMemory.record(net, s.id, st.state(s).maskFor(net), verdict, checkedAt)
+                    if (!verdict) handoverPolicy.failure(net, AutoRoutePolicy.configuration(s, st.state(s), net), checkedAt)
+                    runCatching { Brain.learn(net, s, st.state(s), verdict) }
+                }
                 states.put(s.id) {
-                    if (Net.key(app) != net || Net.underlying(app)?.toString() != underlying) it else
-                    it.copy(netEvidence = (it.netEvidence + ((net + "|" + st.state(s).maskFor(net)) to it.evidenceFor(net).observe(p.works, p.realMs, checkedAt))).entries.sortedByDescending { e -> e.value.at }.take(8).associate { e -> e.toPair() }, realMs = p.realMs, bigOk = p.bigOk ?: it.bigOk?.takeIf { old -> old }, ytOk = if (youtube) p.ytOk else it.ytOk, tgOk = if (youtube) p.tgOk else it.tgOk, checkedAt = checkedAt, kbps = if (speedSample) p.kbps else it.kbps,
+                    if (!validContext() || Net.key(app) != net || Net.underlying(app)?.toString() != underlying) it else
+                    it.copy(netEvidence = (it.netEvidence + ((net + "|" + st.state(s).maskFor(net)) to (if (verdict == null) it.evidenceFor(net) else it.evidenceFor(net).observe(verdict, p.realMs, checkedAt)))).entries.sortedByDescending { e -> e.value.at }.take(8).associate { e -> e.toPair() }, realMs = p.realMs, bigOk = p.bigOk ?: it.bigOk?.takeIf { old -> old }, ytOk = if (youtube) p.ytOk else it.ytOk, tgOk = if (youtube) p.tgOk else it.tgOk, checkedAt = checkedAt, kbps = if (speedSample) p.kbps else it.kbps,
                         speedNetwork = if (speedSample) net else it.speedNetwork,
                         speedMask = if (speedSample) st.state(s).maskFor(net) else it.speedMask,
                         speedCheckedAt = if (speedSample) checkedAt else it.speedCheckedAt,
@@ -867,6 +877,7 @@ object Actions {
     }
 
     /** Whether the last [optimize] pass switched servers (TunnelService checks again sooner then). */
+    private val handoverPolicy = HandoverPolicy()
     @Volatile var lastOptimizeSwitched = false
 
     suspend fun optimize(): Boolean {
@@ -910,7 +921,7 @@ object Actions {
         try {
             val throughputMode = st.settings.mode == Mode.AUTO && !GameSession.active()
             // Concurrent downloads share the line and cannot rank throughput. First check HTTPS only.
-            realTest(cand, "Фоновая проверка", big = wifi && !throughputMode && PhonePower.refresh(app).allowed, youtube = throughputMode,
+            realTest(cand, "Фоновая проверка", big = wifi && !throughputMode && PhonePower.refresh(app).allowed, youtube = st.settings.mode == Mode.AUTO,
                 attempts = 1, parallel = 4, budgetMs = ConnectPolicy.QUICK_BUDGET_MS)
             if (!sameNetwork()) return false
             if (throughputMode) AutoSelection.compare(cand, { Store.state.value.state(it) }, sampleNet,
@@ -925,8 +936,12 @@ object Actions {
         } finally { progress.value = prev }
         if (!sameNetwork()) return false
         val now = Store.state.value
-        val selOk = sel.filter { now.state(it).works }
-        val best = automaticOrder(now, cand.filter { now.state(it).works })
+        val rankNow = System.currentTimeMillis()
+        val automatic = now.settings.mode == Mode.AUTO
+        fun admitted(server: Server) = now.state(server).works &&
+            (!automatic || AutoEligibility.serviceRank(now.state(server), sampleNet, rankNow) == 0)
+        val selOk = sel.filter(::admitted)
+        val best = automaticOrder(now, cand.filter(::admitted))
         if (best.isEmpty()) {
             val alive = now.servers.filter { now.state(it).tcpMs > 0 }.sortedBy { now.state(it).tcpMs }.take(8)
             if (alive.isNotEmpty()) doFindMasks(alive, 24)
@@ -943,9 +958,16 @@ object Actions {
         val currentFastest = selOk.minWithOrNull(ServerChoice.downloadOrder({ now.state(it) },net,stamp))
         val fasterDownload = ServerChoice.downloadUpgrade(currentFastest?.let { now.state(it) },now.state(best.first()),net,stamp)
         val qualityGain = if (speedMode) fasterDownload else median > bestMs * 1.6 && median - bestMs > 150
-        val switch = selOk.size < sel.size || selOk.size < (if (ServerChoice.automaticPrimary(st.settings.mode == Mode.AUTO,st.settings.balance == com.vlesscardvpn.model.Balance.LEAST_PING,GameSession.active())) 1 else minOf(3,best.size)) || selBroken || qualityGain
+        val failedSelection = selOk.size < sel.size || selOk.isEmpty() || selBroken
+        val currentRoute = currentFastest?.let { AutoRoutePolicy.configuration(it, now.state(it), net) }.orEmpty()
+        val candidateRoute = AutoRoutePolicy.configuration(best.first(), now.state(best.first()), net)
+        val stableGain = if (automatic) handoverPolicy.allow(net, currentRoute, candidateRoute, stamp,
+            now.state(best.first()).speedCheckedAt, qualityGain, failedSelection) else qualityGain
+        val switch = failedSelection || stableGain
         val pick = if (selBroken) best.filter { now.state(it).bigOk == true } else best
-        if (switch || now.settings.mode == Mode.AUTO) selectBest(AutoEligibility.TOP, close = true, among = pick)
+        // Filling unused reserve slots is allowed; an already-full healthy pool is not reselected every pass.
+        val fillReserves = automatic && selOk.size < AutoEligibility.TOP && best.size > selOk.size
+        if (switch || fillReserves) selectBest(AutoEligibility.TOP, close = true, among = pick)
         val applied = Store.state.value
         val changed = originalSelection != applied.selected.map { AutoRoutePolicy.configuration(it,applied.state(it),originalNet) }.toSet()
         lastOptimizeSwitched = changed
@@ -1041,6 +1063,7 @@ object Actions {
      */
     private val autoGeneration = AtomicInteger()
     fun autoConnect(onReady: () -> Unit) {
+        ServiceHealth.event(ServiceHealth.EventKind.SEARCH)
         val ticket = autoGeneration.incrementAndGet()
         val initialNetwork = Net.key(app) to Net.underlying(app)?.toString()
         val ready = {

@@ -3,9 +3,6 @@ package com.vlesscardvpn.core
 import android.content.Context
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import okhttp3.dnsoverhttps.DnsOverHttps
-import okhttp3.HttpUrl.Companion.toHttpUrl
-import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.Proxy
 import java.util.concurrent.TimeUnit
@@ -15,8 +12,6 @@ object CloudTransport {
     data class Download(val text: String?, val etag: String?, val unchanged: Boolean, val downloadedAt: Long, val checkedAt: Long)
     private val http by lazy { OkHttpClient.Builder().connectTimeout(2, TimeUnit.SECONDS).readTimeout(2, TimeUnit.SECONDS)
         .callTimeout(2500, TimeUnit.MILLISECONDS).retryOnConnectionFailure(false).build() }
-    private val doh by lazy { http.newBuilder().dns(DnsOverHttps.Builder().client(http).url("https://cloudflare-dns.com/dns-query".toHttpUrl())
-        .bootstrapDnsHosts(InetAddress.getByAddress(byteArrayOf(1,1,1,1)), InetAddress.getByAddress(byteArrayOf(1,0,0,1))).build()).build() }
     fun urls(path: String): List<String> {
         require(path in setOf("speed.json", "cloud.json", "cloud-manifest.json"))
         return listOf("https://raw.githubusercontent.com/Bugaga31/vless-card-vpn/servers/$path",
@@ -34,7 +29,7 @@ object CloudTransport {
                 Download(text, if (url == urls.first()) r.header("ETag") else null, false, downloadedAt, System.currentTimeMillis())
             }
         }
-        for ((client,url,tag) in listOf(Triple(doh,urls[0],etag),Triple(http,urls[1],null),Triple(http,urls[0],etag))) {
+        for ((client,url,tag) in listOf(Triple(http,urls[0],etag),Triple(http,urls[1],null))) {
             runCatching { request(client,url,tag) }.getOrNull()?.let { return it }
         }
         val ports = (listOfNotNull(Tunnel.socks?.port, Tunnel.byeDpiPort) + Warp.extraSocks).distinct().take(3)

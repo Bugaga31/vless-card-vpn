@@ -60,14 +60,20 @@ object Store {
     /** What the home screen shows about servers (counted in the background, not on the UI thread). */
     data class Summary(val total: Int = 0, val working: Int = 0, val selectedCount: Int = 0, val selectedNames: List<String> = emptyList(), val mask: String = "",
         /** the best selected server: ping, download speed, YouTube */
-        val bestMs: Int = 0, val bestKbps: Int = 0, val bestYt: Boolean? = null, val heavyMask: Boolean = false)
+        val bestMs: Int = 0, val bestKbps: Int = 0, val bestYt: Boolean? = null, val heavyMask: Boolean = false,
+        val tcpAccessible: Int = 0, val serviceVerified: Int = 0, val measured: Int = 0, val snapshotAt: Long = 0)
     val summary: StateFlow<Summary> = ui.map { st ->
         val sel = st.selected
         val mask = sel.firstNotNullOfOrNull { com.vlesscardvpn.xray.Masks.byId(st.state(it).maskId)?.takeIf { m -> m.id != com.vlesscardvpn.xray.Masks.DEFAULT.id } }?.title.orEmpty()
         val top = sel.filter { st.state(it).works }.minByOrNull { st.state(it).score }?.let { st.state(it) }
+        val network = app?.let { Net.key(it) }.orEmpty()
+        val at = System.currentTimeMillis()
         Summary(st.servers.size, st.servers.count { st.state(it).works }, sel.size, sel.take(3).map { it.name }, mask,
             top?.realMs ?: 0, top?.kbps ?: 0, top?.ytOk,
-            sel.any { com.vlesscardvpn.xray.Masks.byId(st.state(it).maskId)?.let { m -> com.vlesscardvpn.xray.Masks.cost(m) >= 2 } == true })
+            sel.any { com.vlesscardvpn.xray.Masks.byId(st.state(it).maskId)?.let { m -> com.vlesscardvpn.xray.Masks.cost(m) >= 2 } == true },
+            st.servers.count { st.state(it).tcpMs > 0 },
+            st.servers.count { AutoEligibility.serviceRank(st.state(it),network,at) == 0 },
+            st.servers.count { AutoEligibility.serviceRank(st.state(it),network,at) == 0 && ServerChoice.measuredSpeed(st.state(it),network,at) > 0 },at)
     }.distinctUntilChanged().stateIn(scope, SharingStarted.Eagerly, Summary())
     private var file: File? = null
     private var app: Context? = null
@@ -126,7 +132,7 @@ object Store {
 
     fun update(change: (AppState) -> AppState) {
         _state.update { old ->
-            val next = change(old)
+            val next = RouteContext.invalidate(old, change(old))
             if (next.servers !== old.servers) AutoEligibility.clean(next) else next
         }
         syncMasks()
@@ -177,13 +183,14 @@ object Store {
         Unit
     }
 
-    fun encode(s: AppState): JSONObject = JSONObject()
+    fun encode(s: AppState): JSONObject = JSONObject().put("schemaVersion",2)
         .put("servers", JSONArray().apply { s.servers.forEach { put(it.toJson()) } })
         .put("states", JSONObject().apply { val ids = s.servers.mapTo(HashSet()) { it.id }; s.states.forEach { (k, v) -> if (k in ids) put(k, v.toJson()) } })
         .put("settings", s.settings.toJson())
         .put("maskStats", JSONObject().apply { s.maskStats.forEach { (net, m) -> put(net, JSONObject().apply { m.forEach { (id, st) -> put(id, JSONArray().put(st.ok).put(st.fail)) } }) } })
 
     fun decode(o: JSONObject): AppState {
+        require(o.optInt("schemaVersion",1) in 1..2) { "Unsupported local state schema" }
         val arr = o.optJSONArray("servers") ?: JSONArray()
         val servers = (0 until arr.length()).mapNotNull { runCatching { Server.fromJson(arr.getJSONObject(it)) }.getOrNull() }
         val so = o.optJSONObject("states") ?: JSONObject()
@@ -200,19 +207,16 @@ object Store {
     fun addServers(list: List<Server>): Int {
         var added = 0
         update { st ->
-            val known = st.servers.map { it.id }.toHashSet()
-            val fresh = list.filter { known.add(it.id) }
-            added = fresh.size
-            st.copy(servers = st.servers + fresh)
+            val merged = SourceProvenance.merge(st.servers, list)
+            added = merged.size - st.servers.size
+            st.copy(servers = merged)
         }
         return added
     }
 
     /** Replaces the servers of one subscription, keeping results/selection of the ones still present. */
     fun replaceSource(source: String, list: List<Server>) = update { st ->
-        val keep = st.servers.filter { it.source != source }
-        val ids = keep.map { it.id }.toHashSet()
-        st.copy(servers = keep + list.filter { ids.add(it.id) })
+        st.copy(servers = SourceProvenance.replace(st.servers, source, list, st.selected.mapTo(HashSet()) { it.id }))
     }
 
     fun wipe(context: Context) = synchronized(lock) {

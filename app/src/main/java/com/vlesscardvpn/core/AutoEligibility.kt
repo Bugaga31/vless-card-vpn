@@ -13,18 +13,20 @@ object AutoEligibility {
         servicePool(servers.distinctBy { it.id }.filter { allowed(it) && state(it).works },state,net,now).let { routes ->
             if (gaming) routes.sortedBy { ServerChoice.latencyScore(state(it).evidenceFor(net),state(it).realMs) }
             else routes.sortedWith(ServerChoice.downloadOrder(state,net,now))
-        }.let(::independent).take(TOP)
+        }.let { ServerChoice.diverse(independent(it), TOP) }
     /** WireGuard endpoints of one account are alternatives, not independent channels. */
     fun independent(servers: List<Server>): List<Server> {
         val keys = HashSet<String>()
         return servers.filter { it.protocol != "wireguard" || keys.add(it.secret) }
     }
+    /** Admission is not deletion: keep manual configurations and all accumulated learning. */
     fun clean(st: AppState): AppState {
-        val keep = st.servers.filter(::allowed)
-        if (keep.size == st.servers.size) return st
-        val ids = keep.mapTo(HashSet()) { it.id }
-        return st.copy(servers=keep, states=st.states.filterKeys { it in ids },
-            settings=st.settings.copy(netServers=st.settings.netServers.mapValues { (_,v) -> v.filter { it in ids } }))
+        if (st.settings.mode != com.vlesscardvpn.model.Mode.AUTO) return st
+        val rejected = st.servers.filterNot(::allowed).mapTo(HashSet()) { it.id }
+        if (rejected.isEmpty()) return st
+        return st.copy(states = st.states.mapValues { (id, state) ->
+            if (id in rejected && state.selected) state.copy(selected = false) else state
+        }, settings = st.settings.copy(netServers = st.settings.netServers.mapValues { (_, ids) -> ids.filterNot { it in rejected } }))
     }
     fun serviceRank(s: ServerState, net: String, now: Long): Int {
         if (s.serviceNetwork != net || s.serviceMask != s.maskFor(net) || s.serviceCheckedAt <= 0 ||
@@ -34,6 +36,15 @@ object AutoEligibility {
     }
     /** Connectivity alone is not success in Auto: require real video and MTProto proofs. */
     fun servicesWork(probe: Probe): Boolean = probe.works && probe.ytOk == true && probe.tgOk == true
+
+    fun learningVerdict(probe: Probe, requireServices: Boolean): Boolean? = when {
+        Thread.currentThread().isInterrupted -> null
+        !probe.works -> false
+        !requireServices -> true
+        probe.ytOk == false || probe.tgOk == false -> false
+        probe.ytOk == true && probe.tgOk == true -> true
+        else -> null
+    }
 
     /** A new attempted check replaces old proof even when both service results are inconclusive. */
     fun recordServices(state: ServerState, net: String, mask: String, now: Long, probe: Probe): ServerState =

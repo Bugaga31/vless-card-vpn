@@ -33,6 +33,7 @@ data class Server(
     val obfsPassword: String = "",
     val extra: String = "",
     val source: String = "",
+    val sources: List<String> = emptyList(), // format v2: all origins; old source remains compatible
     // WireGuard: secret = private key, pbk = peer public key; SOCKS: user + secret
     val localAddress: String = "",
     val reserved: String = "",
@@ -40,6 +41,8 @@ data class Server(
     val psk: String = "",
     val user: String = "",
 ) {
+    val provenance: List<String> get() = (sources + source).filter { it.isNotBlank() }.distinct().take(16)
+
     /** Stable identity: same endpoint + credentials + transport = same server, regardless of name. */
     val id: String get() = Integer.toHexString(listOf(protocol, address.lowercase(), port, secret, network, security, sni, pbk, sid, path, host, serviceName, flow).joinToString("|").hashCode()) +
         Integer.toHexString("$address$secret$port".hashCode())
@@ -58,7 +61,7 @@ data class Server(
         if (network != "tcp") put("network", network); opt("security", security); opt("sni", sni); opt("fp", fp)
         opt("alpn", alpn); opt("pbk", pbk); opt("sid", sid); opt("spx", spx); opt("pqv", pqv); opt("host", host)
         opt("path", path); opt("serviceName", serviceName); opt("mode", mode); opt("headerType", headerType)
-        if (insecure) put("insecure", true); opt("ech", ech); opt("pcs", pcs); opt("vcn", vcn); opt("obfsPassword", obfsPassword); opt("extra", extra); opt("source", source)
+        if (insecure) put("insecure", true); opt("ech", ech); opt("pcs", pcs); opt("vcn", vcn); opt("obfsPassword", obfsPassword); opt("extra", extra); opt("source", source); if (sources.isNotEmpty()) put("sources", org.json.JSONArray(provenance))
         opt("localAddress", localAddress); opt("reserved", reserved); if (mtu > 0) put("mtu", mtu); opt("psk", psk); opt("user", user)
     }
 
@@ -72,6 +75,7 @@ data class Server(
             serviceName = o.optString("serviceName"), mode = o.optString("mode"), headerType = o.optString("headerType"),
             insecure = o.optBoolean("insecure"), ech = o.optString("ech"), pcs = o.optString("pcs"), vcn = o.optString("vcn"), obfsPassword = o.optString("obfsPassword"),
             extra = o.optString("extra"), source = o.optString("source"),
+            sources = o.optJSONArray("sources")?.let { a -> (0 until minOf(a.length(),16)).map { a.optString(it) }.filter { it.isNotBlank() } }.orEmpty(),
             localAddress = o.optString("localAddress"), reserved = o.optString("reserved"), mtu = o.optInt("mtu"), psk = o.optString("psk"), user = o.optString("user"),
         )
         val UDP_PROTOCOLS = setOf("hysteria2", "wireguard")

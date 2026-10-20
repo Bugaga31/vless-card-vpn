@@ -12,7 +12,7 @@ object YouTubeMediaProbe {
     const val WATCH = "https://www.youtube.com/watch?v=jNQXAC9IVRw"
     const val SAMPLE_BYTES = 131072
     const val PROOF_PREFS = "youtube_media_proof_v1"
-    data class Result(val ok: Boolean?, val kbps: Int = 0)
+    data class Result(val ok: Boolean?, val kbps: Int = 0, val reason: String = "", val firstByteMs: Long = 0)
 
     fun freshProof(at: Long, now: Long) = at > 0 && now >= at && now - at < 10 * 60000L
     fun allowedUrl(value: String): Boolean {
@@ -77,27 +77,28 @@ object YouTubeMediaProbe {
 
     /** Caller disables redirects and bounds the call by the shared probe deadline. */
     fun measure(url: String, call: (Request) -> Call): Result {
-        if (!allowedUrl(url)) return Result(null)
+        if (!allowedUrl(url)) return Result(null, reason = "invalid-media-url")
         val start = System.nanoTime()
         return try {
             call(Request.Builder().url(url).header("Range", "bytes=0-${SAMPLE_BYTES - 1}")
                 .header("Accept-Encoding", "identity").build()).execute().use { r ->
                 // Signed URL expiry, consent and rate limiting are not route failures.
-                if (r.code !in listOf(200, 206)) return Result(null)
-                if (!r.header("Content-Type").orEmpty().startsWith("video/", true)) return Result(null)
-                val input = r.body?.byteStream() ?: return Result(null)
-                var total = 0; val buf = ByteArray(16384)
+                if (r.code !in listOf(200, 206)) return Result(null, reason = "media-http-${r.code}")
+                if (!r.header("Content-Type").orEmpty().startsWith("video/", true)) return Result(null, reason = "not-video")
+                val input = r.body?.byteStream() ?: return Result(null, reason = "empty-body")
+                var total = 0; var firstByteMs = 0L; val buf = ByteArray(16384)
                 while (total < SAMPLE_BYTES) {
                     if (Thread.currentThread().isInterrupted) return Result(null)
                     val n = input.read(buf, 0, minOf(buf.size, SAMPLE_BYTES - total))
-                    if (n < 0) return Result(false)
+                    if (n < 0) return Result(false, reason = "early-eof", firstByteMs = firstByteMs)
+                    if (total == 0 && n > 0) firstByteMs = (System.nanoTime() - start) / 1000000
                     total += n
                 }
                 val ms = ((System.nanoTime() - start) / 1000000).coerceAtLeast(1)
-                Result(true, (total * 8L / ms).toInt().coerceAtLeast(1))
+                Result(true, (total * 8L / ms).toInt().coerceAtLeast(1), "video-range", firstByteMs)
             }
-        } catch (_: Exception) { Result(if (Thread.currentThread().isInterrupted) null else false) }
+        } catch (_: Exception) { Result(if (Thread.currentThread().isInterrupted) null else false, reason = if (Thread.currentThread().isInterrupted) "cancelled" else "media-transport") }
     }
 
-    fun check(call: (Request) -> Call): Result = discover(call)?.let { measure(it, call) } ?: Result(null)
+    fun check(call: (Request) -> Call): Result = discover(call)?.let { measure(it, call) } ?: Result(null, reason = "player-unavailable")
 }

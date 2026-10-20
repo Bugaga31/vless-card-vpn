@@ -18,11 +18,13 @@ class FullCloudSelectionR139Test {
         assertTrue(AutoEligibility.allowed(server("🇩🇪 test")))
         assertTrue(AutoEligibility.allowed(server("unknown")))
     }
-    @Test fun cleanupRemovesRuFromListSelectionAndRememberedChainButPreservesOthers() {
+    @Test fun autoCleanupRejectsRuWithoutDeletingManualConfigurationOrLearning() {
         val ru=server("🇷🇺 node");val de=server("🇩🇪 node")
         val st=AppState(listOf(ru,de),mapOf(ru.id to state().copy(selected=true),de.id to state()),Settings(netServers=mapOf("wifi" to listOf(ru.id,de.id))))
         val clean=AutoEligibility.clean(st)
-        assertEquals(listOf(de),clean.servers);assertFalse(ru.id in clean.states)
+        assertEquals(listOf(ru,de),clean.servers);assertFalse(clean.state(ru).selected)
+        assertEquals(st.state(ru).okCount, clean.state(ru).okCount)
+        assertEquals(st.copy(settings=st.settings.copy(mode=Mode.SERVERS)),AutoEligibility.clean(st.copy(settings=st.settings.copy(mode=Mode.SERVERS))))
         assertEquals(listOf(de.id),clean.settings.netServers["wifi"])
         assertEquals(clean,AutoEligibility.clean(clean));assertEquals(8,AutoEligibility.TOP)
     }

@@ -17,6 +17,7 @@ object CloudControl {
     }
     @Volatile private var snapshot: Snapshot? = null
     @Volatile private var attempted = 0L
+    fun acceptsPublication(previous: Long, incoming: Long): Boolean = incoming > 0 && (previous <= 0 || incoming >= previous)
     fun parse(text: String, now: Long): Snapshot {
         require(text.length <= 2 * 1024 * 1024)
         val o = JSONObject(text); require(o.getInt("schema") == 1)
@@ -111,7 +112,10 @@ object CloudControl {
         if (!CloudSpeed.refreshDue(now,maxOf(timeline.downloadedAt,timeline.checkedAt),maxOf(attempted,timeline.checkedAt),snapshot != null)) return
         attempted=now
         runCatching {
-            val d=CloudTransport.fetch(ctx,"cloud-manifest.json",p.getString("etag",null)) { parse(it,now) }
+            val d=CloudTransport.fetch(ctx,"cloud-manifest.json",p.getString("etag",null)) {
+                val candidate = parse(it,now)
+                require(acceptsPublication(maxOf(timeline.publishedAt, snapshot?.stamp ?: 0), candidate.stamp)) { "Manifest rollback rejected" }
+            }
             if (d.text != null) {
                 val s=parse(d.text,d.checkedAt)
                 timeline=CloudFreshness.fromManifestDocument(d.text,timeline,d.downloadedAt,d.checkedAt,d.checkedAt) ?:
