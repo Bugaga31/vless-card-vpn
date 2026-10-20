@@ -51,6 +51,18 @@ object AutoEligibility {
         state.copy(serviceNetwork = net, serviceMask = mask, serviceCheckedAt = now,
             serviceYtOk = probe.ytOk, serviceTgOk = probe.tgOk)
 
+    /** A failed actual chain cannot keep cached positive evidence for the next button press.
+     * This revokes proof, NOT a per-server failure verdict: a balancer/resource failure isn't attributable
+     * to every member. Preserve history and newer/concurrent observations or a changed mask/network.
+     */
+    fun invalidateChainProof(s: ServerState, net: String, mask: String, startedAt: Long): ServerState {
+        if (s.serviceNetwork != net || s.serviceMask != mask || s.maskFor(net) != mask ||
+            s.serviceCheckedAt > startedAt) return s
+        val invalidateSpeed = s.speedNetwork == net && s.speedMask == mask && s.speedCheckedAt <= startedAt
+        return s.copy(selected=false, serviceCheckedAt=0,
+            speedCheckedAt=if (invalidateSpeed) 0 else s.speedCheckedAt)
+    }
+
     fun <T> servicePool(list: List<T>, state: (T) -> ServerState, net: String, now: Long): List<T> {
         // A shared balancer sends real Telegram/video connections to EVERY member.
         // Never dilute a proven pool with generic-HTTPS-only or failed routes just to reach eight.

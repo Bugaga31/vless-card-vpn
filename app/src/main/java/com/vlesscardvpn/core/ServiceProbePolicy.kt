@@ -12,6 +12,7 @@ object ServiceProbePolicy {
     fun reason(code: String): String = when (code) {
         "mtproto-timeout", "deadline" -> "не хватило времени на протокольный ответ"
         "cancelled" -> "проверка отменена"
+        "skipped-after-mtproto-fail" -> "проверка видео остановлена после отказа Telegram"
         "mtproto-invalid" -> "ответ MTProto не прошёл проверку"
         "mtproto-connect" -> "не удалось установить MTProto-соединение"
         "player-login-required" -> "контрольный плеер требует вход или проверку от ботов"

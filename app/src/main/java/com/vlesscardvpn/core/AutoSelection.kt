@@ -69,6 +69,7 @@ object AutoSelection {
         val working = AutoEligibility.servicePool(valid, { results.getValue(it.id) }, net, now())
         return if (gaming) working.minByOrNull {
             ServerChoice.latencyScore(results.getValue(it.id).evidenceFor(net), results.getValue(it.id).realMs)
-        } else working.minWithOrNull(ServerChoice.downloadOrder(::effective, net, now()))
+        } else working.filter { ServerChoice.measuredSpeed(effective(it), net, now()) > 0 }
+            .minWithOrNull(ServerChoice.downloadOrder(::effective, net, now()))
     }
 }

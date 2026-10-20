@@ -92,7 +92,7 @@ class AutoSelectionTest {
         val winner=AutoSelection.compare(listOf(a),{unknown()},"wifi",{now},{System.nanoTime()/1000000},{true},{true},false){_,_->
             try { delay(10000) } finally { cleaned=true }
         }
-        assertEquals(a,winner);assertTrue(cleaned) // timeout stays inconclusive; HTTPS candidate remains usable
+        assertNull(winner);assertTrue(cleaned) // timeout is UNKNOWN, not evidence of usable throughput; manual candidate remains stored
     }
 
     @Test fun anInconclusiveRefreshCannotWinUsingOldUnreproducedBandwidth() = runBlocking {

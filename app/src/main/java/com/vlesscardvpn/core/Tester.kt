@@ -137,7 +137,7 @@ object Tester {
     }
 
     /** Requests through a local SOCKS port (the tester's or the running VPN's). */
-    fun probeSocks(port: Int, testUrl: String, big: Boolean = true, youtube: Boolean = true, attempts: Int = 2, budgetMs: Long = 0, onCall: ((okhttp3.Call) -> Unit)? = null): Probe {
+    fun probeSocks(port: Int, testUrl: String, big: Boolean = true, youtube: Boolean = true, attempts: Int = 2, budgetMs: Long = 0, strictServices: Boolean = false, onCall: ((okhttp3.Call) -> Unit)? = null): Probe {
         val budgetDeadline = if (budgetMs > 0) System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(budgetMs.coerceAtMost(60000)) else Long.MAX_VALUE
         fun boundedCall(client: OkHttpClient, request: Request): okhttp3.Call = client.newCall(request).also { call ->
             if (budgetDeadline != Long.MAX_VALUE) call.timeout().timeout(TimeUnit.NANOSECONDS.toMillis((budgetDeadline-System.nanoTime()).coerceAtLeast(1)).coerceAtLeast(1),TimeUnit.MILLISECONDS)
@@ -181,8 +181,15 @@ object Tester {
             }
             val deadline = if (budgetDeadline == Long.MAX_VALUE) System.nanoTime() + TimeUnit.SECONDS.toNanos(40) else budgetDeadline
             fun remaining() = TimeUnit.NANOSECONDS.toMillis((deadline - System.nanoTime()).coerceAtLeast(1)).coerceAtLeast(1)
-            val ytResult = ProbeTasks.await(ytF, remaining(), YouTubeMediaProbe.Result(null,reason="deadline"))
             val tgResult = ProbeTasks.await(tgF, remaining(), TelegramProbe.Result(null,"deadline"))
+            // A definite MTProto failure already disqualifies strict Auto. Do not wait eight seconds
+            // for an unrelated stalled player; UNKNOWN/timeouts are not converted into FAIL here.
+            if (strictServices && youtube && tgResult.ok == false) {
+                val media = ProbeTasks.await(ytF?.takeIf { it.isDone },1,YouTubeMediaProbe.Result(null,reason="skipped-after-mtproto-fail"))
+                return Probe(best.toInt().coerceAtLeast(1),null,media.ok,tgOk=false,
+                    ytKbps=media.kbps,ytReason=media.reason,tgReason=tgResult.reason)
+            }
+            val ytResult = ProbeTasks.await(ytF, remaining(), YouTubeMediaProbe.Result(null,reason="deadline"))
             // A bulk speed test must not compete with service verification on the same route.
             val bigF = if (big && remaining() >= 200) workers.download(false to 0) {
                 bigDownload(client,budgetDeadline,onCall)
@@ -363,6 +370,7 @@ object Tester {
         skip: (Int) -> Boolean = { false },
         stopAfter: Int = Int.MAX_VALUE,
         budgetMs: Long = 0,
+        strictServices: Boolean = false,
         onEach: (Int, Probe) -> Unit,
     ) = mutex.withLock {
         withContext(Bg.io) {
@@ -386,7 +394,7 @@ object Tester {
                         val one = XrayCore.Instance("test1")
                         val p = freePorts(1)
                         val ok = runCatching { one.start(XrayConfigBuilder.testConfig(listOf(v), p, byeDpiPort, dpiPorts)) }.isSuccess && one.running
-                        try { report(idx[i], if (ok) CancellableProbe.run { bind -> probeSocks(p[0], testUrl, big = big, youtube = youtube, attempts = attempts, budgetMs = budgetMs, onCall = { call -> bind { call.cancel() } }) } else Probe(0, null, null, "конфиг не принят ядром")) }
+                        try { report(idx[i], if (ok) CancellableProbe.run { bind -> probeSocks(p[0], testUrl, big = big, youtube = youtube, attempts = attempts, budgetMs = budgetMs, strictServices = strictServices, onCall = { call -> bind { call.cancel() } }) } else Probe(0, null, null, "конфиг не принят ядром")) }
                         finally { one.stop() }
                     }
                     continue
@@ -396,7 +404,7 @@ object Tester {
                         ProbeRace.run(chunk.indices.toList(), PowerPolicy.cap(parallel, PhonePower.state.value.realParallel), stopAfter,
                             skip = { i -> skipped(idx[i]) }, staggerMs = if (stopAfter == 1) 120 else 0,
                             probe = { i -> CancellableProbe.run { bind -> probeSocks(ports[i], testUrl, big = big, youtube = youtube,
-                                attempts = attempts, budgetMs = budgetMs, onCall = { call -> bind { call.cancel() } }) } },
+                                attempts = attempts, budgetMs = budgetMs, strictServices = strictServices, onCall = { call -> bind { call.cancel() } }) } },
                             onEach = { i, p -> report(idx[i], p) })
                     }
                 } finally { core.stop() }

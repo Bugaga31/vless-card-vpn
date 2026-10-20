@@ -45,6 +45,7 @@ object Actions {
     private var job: Job? = null
     private lateinit var app: Context
     private val probeMemory = ProbeMemory()
+    private val foregroundDiscovery = ForegroundDiscovery()
     @Volatile private var activeSearchReport: AutoSearchReport? = null
     private val probeGeneration = java.util.concurrent.atomic.AtomicLong()
     private var requestedSourceJob: Job? = null
@@ -414,7 +415,7 @@ object Actions {
             target.id to java.util.concurrent.ConcurrentHashMap<String, Int>()
         }
         try {
-            Tester.real(variants, st.settings.testUrl, port, own.ports, batch = if (onFirst != null) ConnectPolicy.FIRST else 64, parallel = parallel, big = big, youtube = youtube, attempts = attempts, stopAfter = stopAfter, budgetMs = budgetMs) { i, p ->
+            Tester.real(variants, st.settings.testUrl, port, own.ports, batch = if (onFirst != null) ConnectPolicy.FIRST else 64, parallel = parallel, big = big, youtube = youtube, attempts = attempts, stopAfter = stopAfter, budgetMs = budgetMs, strictServices = youtube && st.settings.mode == Mode.AUTO) { i, p ->
                 if (p == Tester.SKIPPED) return@real
                 // Do not train the old profile with a result completed after Wi-Fi/cellular handoff.
                 if (!validContext() || Net.key(app) != net || Net.underlying(app)?.toString() != underlying) return@real
@@ -1404,9 +1405,9 @@ object Actions {
             probeMemory.cooling(net, server.id, st.state(server).maskFor(net), time) ||
                 (e.streak > 0 && time >= e.at && time - e.at < ProbeMemory.cooldownMs(e.streak))
         }) { s -> learned[s.id] ?: Int.MAX_VALUE }
-        val cachedGood = first.filter { st.state(it).evidenceFor(net).let { e -> e.successes > 0 && e.streak == 0 && time >= e.at && time - e.at < 1800000 } }.map { it.id }.toSet()
+        val cachedGood = first.filter { st.state(it).evidenceFor(net).let { e -> e.successes > 0 && e.streak == 0 && time >= e.at && time - e.at < 30_000 && AutoEligibility.serviceRank(st.state(it),net,time) == 0 } }.map { it.id }.toSet()
         val reachable = Tester.fastFilter(first.filter { it.id !in cachedGood })
-        val available = first.filter { (reachable[it.id] ?: -1) != 0 }.ifEmpty { first }
+        val available = first.filter { (reachable[it.id] ?: -1) != 0 }
         val ordered = available.sortedBy { if (it.id in cachedGood || (reachable[it.id] ?: -1) > 0) 0 else 1 }
         // Check up to eight real routes; parallelism stays bounded and downloads remain sequential.
         val shortlist = ServerChoice.diverse(ordered, AutoEligibility.TOP)
@@ -1429,15 +1430,15 @@ object Actions {
             deepPending = true; return "Telegram и видео YouTube проверены; облачные подсказки ${cloud.size}"
         }
         // Only if the first wave failed: bound DNS/TCP work to a small diverse wave, not thousands of subscriptions.
-        val rest = ServerChoice.diverse(eligible.filter { it.id !in attempted }, ConnectPolicy.NEXT)
+        val rest = foregroundDiscovery.window(eligible.filter { it.id !in attempted }, net)
         attempted.addAll(rest.map { it.id })
         val tcp = java.util.concurrent.ConcurrentHashMap<String, Int>(); val states = StateBatch()
-        Tester.tcp(rest, parallel = 32, timeoutMs = 1500) { server, ms -> tcp[server.id] = ms; states.put(server.id) { it.copy(tcpMs = ms) } }
+        Tester.tcp(rest, parallel = 32, timeoutMs = 1200) { server, ms -> tcp[server.id] = ms; states.put(server.id) { it.copy(tcpMs = ms) } }
         states.flush()
-        val candidates = rest.filter { (tcp[it.id] ?: 0) > 0 }.sortedBy { tcp[it.id] }
+        val candidates = rest.filter { (tcp[it.id] ?: 0) > 0 }.sortedBy { tcp[it.id] }.take(ForegroundDiscovery.HTTPS_FINALISTS)
         passed.clear()
         val second = realTest(candidates, "Авто: запасные ${candidates.size} маршрутов", big = false, youtube = false,
-            attempts = 1, stopAfter = Int.MAX_VALUE, budgetMs = ConnectPolicy.QUICK_BUDGET_MS,onSuccess={ passed.add(it.id) })
+            attempts = 1, parallel = 6, stopAfter = Int.MAX_VALUE, budgetMs = ConnectPolicy.QUICK_BUDGET_MS,onSuccess={ passed.add(it.id) })
         if (Net.key(app) != net || Net.underlying(app)?.toString() != network) return selectionNetworkChanged()
         val verified = if (second > 0) chooseCompared(candidates.filter { it.id in passed },onFirst, eligible.filter { it.id !in attempted }) else null
         if (verified != null) deepPending = true
@@ -1455,11 +1456,13 @@ object Actions {
         fun remaining() = (deadline - android.os.SystemClock.elapsedRealtime()).coerceAtLeast(0)
         fun valid() = Net.key(app) == net && Net.underlying(app)?.toString() == network
         fun allowed() = !GameSession.active() && PhonePower.refresh(app).let { it.allowLight && !it.deferTraffic }
+        val serviceAttempted = mutableSetOf<String>()
         suspend fun compare(pool: List<Server>, servicesChecked: Boolean = false): Server? {
             val before = Store.state.value
             val working = pool.filter { before.state(it).works && (before.settings.mode != Mode.AUTO || AutoEligibility.allowed(it)) }
-            val missing = ServerChoice.diverse(working.filter { AutoEligibility.serviceRank(before.state(it),net,System.currentTimeMillis()) != 0 },ServiceProbePolicy.FINALISTS)
+            val missing = ServerChoice.diverse(working.filter { it.id !in serviceAttempted && AutoEligibility.serviceRank(before.state(it),net,System.currentTimeMillis()) != 0 },ServiceProbePolicy.FINALISTS)
             if (!servicesChecked && before.settings.mode == Mode.AUTO && missing.isNotEmpty() && remaining() >= 1500) {
+                serviceAttempted.addAll(missing.map { it.id })
                 kotlinx.coroutines.withTimeoutOrNull(minOf(ServiceProbePolicy.SERVICE_MS + 2000,remaining())) {
                     realTest(missing,"Авто: проверяю Telegram и YouTube",big=false,youtube=true,attempts=1,parallel=ServiceProbePolicy.PARALLEL,
                         budgetMs=minOf(ServiceProbePolicy.SERVICE_MS,remaining()))
@@ -1469,8 +1472,9 @@ object Actions {
             val snapshot=Store.state.value
             val live=working.filter { snapshot.state(it).works }
             val acceptable = if (before.settings.mode == Mode.AUTO) AutoEligibility.servicePool(live,{snapshot.state(it)},net,System.currentTimeMillis()) else live
-            if (remaining() < AutoSelection.MIN_PROBE_MS) return acceptable.minWithOrNull(
-                ServerChoice.downloadOrder({ snapshot.state(it) },net,System.currentTimeMillis()))
+            if (remaining() < AutoSelection.MIN_PROBE_MS) return acceptable.filter {
+                GameSession.active() || ServerChoice.measuredSpeed(snapshot.state(it),net,System.currentTimeMillis()) > 0
+            }.minWithOrNull(ServerChoice.downloadOrder({ snapshot.state(it) },net,System.currentTimeMillis()))
             return AutoSelection.compare(acceptable, { Store.state.value.state(it) }, net,
                 now = { System.currentTimeMillis() }, elapsed = { android.os.SystemClock.elapsedRealtime() },
                 validNetwork = { valid() },
@@ -1487,7 +1491,8 @@ object Actions {
         var initial = compare(candidates)
         // Generic HTTPS may pass while both requested services fail. Continue with another bounded wave.
         if (initial == null && valid() && activeSearchReport?.resourceUnavailable() != true && remaining() >= 1500) {
-            val wave = ServerChoice.diverse(explore.filter { s -> AutoEligibility.allowed(s) && candidates.none { it.id == s.id } },ServiceProbePolicy.FINALISTS)
+            val wave = ForegroundDiscovery.serviceWave((candidates + explore).distinctBy { it.id }
+                .filter(AutoEligibility::allowed), serviceAttempted)
             if (wave.isNotEmpty()) {
                 kotlinx.coroutines.withTimeoutOrNull(minOf(ServiceProbePolicy.SERVICE_MS + 2000,remaining())) {
                     realTest(wave,"Авто: ищу Telegram и видео YouTube",big=false,youtube=true,
