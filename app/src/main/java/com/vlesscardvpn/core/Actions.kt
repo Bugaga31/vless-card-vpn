@@ -1308,6 +1308,7 @@ object Actions {
     }
 
     private suspend fun doAutoPrepareWithinBudget(onReady: () -> Unit): String {
+        val searchScope = CoroutineScope(kotlinx.coroutines.currentCoroutineContext())
         val now = System.currentTimeMillis()
         val st0 = Store.state.value
         val notes = mutableListOf<String>()
@@ -1318,7 +1319,7 @@ object Actions {
             if (AutoEligibility.servicePool(listOf(server), { snapshot.state(it) }, Net.key(app), System.currentTimeMillis()).isNotEmpty() && started.claim()) {
                 deepPending = true
                 selectBest(10, close = false, among = listOf(server) + Store.state.value.let { a -> a.servers.filter { a.state(it).works } })
-                scope.launch(Dispatchers.Main) { onReady() }
+                searchScope.launch(Dispatchers.Main) { onReady() }
             }
         }
         fun fresh() = Store.state.value.let { st -> preferred(st, AutoEligibility.servicePool(

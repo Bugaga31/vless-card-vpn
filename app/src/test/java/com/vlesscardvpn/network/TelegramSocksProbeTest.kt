@@ -12,7 +12,9 @@ import kotlin.concurrent.thread
 
 /** Only loopback fake SOCKS, no requests to real Telegram or user accounts. */
 class TelegramSocksProbeTest {
-    @Test fun protocolHandshakeTraversesSocksAndValidatesNonce() {
+    @Test fun protocolHandshakeTraversesSocksAndValidatesNonce() = protocolHandshake(0)
+    @Test fun realSocksHandshakeAboveOld1500msBudgetStillPasses() = protocolHandshake(2000)
+    private fun protocolHandshake(responseDelayMs: Long) {
         val error = AtomicReference<Throwable?>()
         ServerSocket(0, 1, InetAddress.getByName("127.0.0.1")).use { listener ->
             listener.soTimeout = 3000
@@ -38,6 +40,7 @@ class TelegramSocksProbeTest {
                     val response = ByteBuffer.allocate(84).order(ByteOrder.LITTLE_ENDIAN)
                         .putLong(0).putLong(1).putInt(64).putInt(0x05162463).put(nonce).put(ByteArray(16))
                         .put(8).put(ByteArray(8)).put(ByteArray(3)).putInt(0x1cb5c415).putInt(1).putLong(1).array()
+                    Thread.sleep(responseDelayMs)
                     out.write(21); out.write(response); out.flush()
                 } } catch (e: Throwable) { error.set(e) }
             }
