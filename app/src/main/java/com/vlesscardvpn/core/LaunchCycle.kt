@@ -1,6 +1,6 @@
 package com.vlesscardvpn.core
 
-/** One silent presentation per foreground visit, not once per installation or recomposition. */
+/** One silent presentation per cold process launch; background/rotation never rearms it. */
 class LaunchCycle {
     data class Frame(val serial: Long = 0, val visible: Boolean = false)
     var frame = Frame(); private set
@@ -12,7 +12,7 @@ class LaunchCycle {
         }
         return frame
     }
-    fun leave(changingConfiguration: Boolean) { if (!changingConfiguration) pending = true }
+    fun leave(changingConfiguration: Boolean) { if (!changingConfiguration) frame = frame.copy(visible = false) }
     fun dismiss(serial: Long): Frame {
         if (serial == frame.serial) frame = frame.copy(visible = false)
         return frame

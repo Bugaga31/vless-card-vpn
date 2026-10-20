@@ -88,9 +88,9 @@ import com.vlesscardvpn.core.Store
             }
             Text("VLESS Card", fontSize = 30.sp, fontWeight = FontWeight.Bold, color = scheme.onBackground, textAlign = TextAlign.Center)
             Text("На одной волне", fontSize = 20.sp, color = scheme.primary, textAlign = TextAlign.Center)
-            Text("Одна кнопка.\nВаш маршрут к связи.", fontSize = 16.sp, color = scheme.onSurfaceVariant, textAlign = TextAlign.Center)
-            FilledTonalButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("Открыть приложение") }
-            Text("Без звука · можно сразу пропустить", fontSize = 14.sp, color = scheme.onSurfaceVariant, textAlign = TextAlign.Center)
+            Text("Связь начинается с одной волны.", fontSize = 16.sp, color = scheme.onSurfaceVariant, textAlign = TextAlign.Center)
+            FilledTonalButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("На главную") }
+            Text("Без звука. Без ожидания сети.", fontSize = 14.sp, color = scheme.onSurfaceVariant, textAlign = TextAlign.Center)
         }
     }
 }

@@ -65,11 +65,11 @@ fun RouteInsightCard(modifier: Modifier = Modifier) {
     val current = decision?.let { currentToken?.let { token -> token == it.networkToken } }
     Card(
         modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(14.dp),
+        shape = RoundedCornerShape(24.dp),
         border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = .18f)),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
     ) {
-        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text("Почему этот маршрут?", fontWeight = FontWeight.SemiBold)
@@ -117,8 +117,6 @@ fun RouteInsightCard(modifier: Modifier = Modifier) {
                         if (fact.manifestRatingHint) Text("Есть рейтинговая подсказка манифеста; возраст без замера неизвестен, это не локальная проверка",
                             color = MaterialTheme.colorScheme.onSurfaceVariant)
                         if (fact.operatorRatingHint) Text("Есть рейтинг оператора без времени замера; это подсказка неизвестного возраста",
-                            color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        if (fact.operatorRatingHint) Text("Есть операторская рейтинговая подсказка; её возраст неизвестен",
                             color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
