@@ -69,8 +69,17 @@ test -n "$point" || { echo 'Route insight expand control is missing'; exit 1; }
 read -r center_x center_y <<< "$point"
 adb shell input tap "$center_x" "$center_y"
 sleep 1
-adb shell uiautomator dump /sdcard/window.xml >/dev/null
-grep -q 'Пока нет истории маршрута' <<< "$(adb shell cat /sdcard/window.xml)" || { echo 'Expanded route insight empty state is missing'; exit 1; }
+expanded_found=0
+for attempt in 1 2 3 4 5 6; do
+	adb shell uiautomator dump /sdcard/window.xml >/dev/null
+	adb shell cat /sdcard/window.xml > ui-route-expanded.xml
+	if grep -q 'Пока нет истории маршрута' ui-route-expanded.xml; then expanded_found=1; break; fi
+	points=$(python3 tools/ui-layout-check.py scroll ui-route-expanded.xml)
+	read -r x1 y1 x2 y2 <<< "$points"
+	adb shell input swipe "$x1" "$y1" "$x2" "$y2" 400
+	sleep 1
+done
+test "$expanded_found" = 1 || { echo 'Expanded route insight empty state is not reachable'; exit 1; }
 bash tools/assert-vibe-foreground.sh
 adb exec-out screencap -p > home-route-insight-expanded.png
 test -s home-route-insight-expanded.png
