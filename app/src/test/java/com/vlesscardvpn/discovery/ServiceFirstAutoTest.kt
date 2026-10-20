@@ -103,4 +103,16 @@ class ServiceFirstAutoTest {
         val winner=AutoSelection.compare(listOf(route),{state},"wifi",{now},{0L},{true},{true},false) {_,_->state=sample(90000).copy(serviceTgOk=false)}
         assertNull(winner)
     }
+    @Test fun inconclusiveRecheckCannotReuseEarlierSuccessfulServiceProof() {
+        val old = sample(90000)
+        val rechecked = AutoEligibility.recordServices(old, "wifi", "", now + 1, Probe(100, null, null))
+        assertEquals(1, AutoEligibility.serviceRank(rechecked, "wifi", now + 1))
+        assertTrue(AutoEligibility.servicePool(listOf(rechecked), { it }, "wifi", now + 1).isEmpty())
+        assertNull(rechecked.serviceYtOk)
+        assertNull(rechecked.serviceTgOk)
+        assertEquals(old.speedCheckedAt, rechecked.speedCheckedAt)
+        val partial = AutoEligibility.recordServices(old, "wifi", "", now + 1, Probe(100, null, true))
+        assertEquals(1, AutoEligibility.serviceRank(partial, "wifi", now + 1))
+    }
+
 }

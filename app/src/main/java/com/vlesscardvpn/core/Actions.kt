@@ -429,15 +429,13 @@ object Actions {
                 states.put(s.id) {
                     if (Net.key(app) != net || Net.underlying(app)?.toString() != underlying) it else
                     it.copy(netEvidence = (it.netEvidence + ((net + "|" + st.state(s).maskFor(net)) to it.evidenceFor(net).observe(p.works, p.realMs, checkedAt))).entries.sortedByDescending { e -> e.value.at }.take(8).associate { e -> e.toPair() }, realMs = p.realMs, bigOk = p.bigOk ?: it.bigOk?.takeIf { old -> old }, ytOk = if (youtube) p.ytOk else it.ytOk, tgOk = if (youtube) p.tgOk else it.tgOk, checkedAt = checkedAt, kbps = if (speedSample) p.kbps else it.kbps,
-                        serviceNetwork = if (youtube && (p.ytOk != null || p.tgOk != null)) net else it.serviceNetwork,
-                        serviceMask = if (youtube && (p.ytOk != null || p.tgOk != null)) st.state(s).maskFor(net) else it.serviceMask,
-                        serviceCheckedAt = if (youtube && (p.ytOk != null || p.tgOk != null)) checkedAt else it.serviceCheckedAt,
-                        serviceYtOk = if (youtube && (p.ytOk != null || p.tgOk != null)) p.ytOk else it.serviceYtOk,
-                        serviceTgOk = if (youtube && (p.ytOk != null || p.tgOk != null)) p.tgOk else it.serviceTgOk,
                         speedNetwork = if (speedSample) net else it.speedNetwork,
                         speedMask = if (speedSample) st.state(s).maskFor(net) else it.speedMask,
                         speedCheckedAt = if (speedSample) checkedAt else it.speedCheckedAt,
-                        okCount = it.okCount + if (p.works) 1 else 0, failCount = it.failCount + if (p.works) 0 else 1)
+                        okCount = it.okCount + if (p.works) 1 else 0, failCount = it.failCount + if (p.works) 0 else 1).let { updated ->
+                            if (youtube) AutoEligibility.recordServices(updated, net, st.state(s).maskFor(net), checkedAt, p)
+                            else updated
+                        }
                 }
                 if (firstSuccess && onFirst != null) { states.flush(); onFirst(s) }
                 step(done.incrementAndGet(), variants.size)

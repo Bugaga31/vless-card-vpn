@@ -35,6 +35,11 @@ object AutoEligibility {
     /** Connectivity alone is not success in Auto: require real video and MTProto proofs. */
     fun servicesWork(probe: Probe): Boolean = probe.works && probe.ytOk == true && probe.tgOk == true
 
+    /** A new attempted check replaces old proof even when both service results are inconclusive. */
+    fun recordServices(state: ServerState, net: String, mask: String, now: Long, probe: Probe): ServerState =
+        state.copy(serviceNetwork = net, serviceMask = mask, serviceCheckedAt = now,
+            serviceYtOk = probe.ytOk, serviceTgOk = probe.tgOk)
+
     fun <T> servicePool(list: List<T>, state: (T) -> ServerState, net: String, now: Long): List<T> {
         // A shared balancer sends real Telegram/video connections to EVERY member.
         // Never dilute a proven pool with generic-HTTPS-only or failed routes just to reach eight.
