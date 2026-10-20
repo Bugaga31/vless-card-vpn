@@ -61,8 +61,8 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
                 Text(if (compact) "На одной волне · Xray" else "Связь на одной волне", fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
-        Text("${BuildConfig.VERSION_NAME} · " + if (cfg.stealthSocks) "Локальный прокси защищён паролем" else "SOCKS 127.0.0.1:${cfg.socksPort}",
-            modifier = Modifier.fillMaxWidth(), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text("${BuildConfig.VERSION_NAME} · На базе Xray",
+            modifier = Modifier.fillMaxWidth(), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
         val upd by com.vlesscardvpn.core.Updater.state.collectAsState()
         if (upd.latest.isNotEmpty()) {
             val uctx = androidx.compose.ui.platform.LocalContext.current
@@ -87,24 +87,13 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
         fun reconnect() { if (status.state == Tunnel.State.CONNECTED) onConnect() }
         val on = status.state == Tunnel.State.CONNECTED
         val busy = status.state == Tunnel.State.CONNECTING
-        val color = when { on && status.checkOk == false -> Warn; on -> Good; busy -> Accent; else -> MaterialTheme.colorScheme.primary }
+        val color = when { on && status.checkOk == false -> Warn; on && status.checkOk == true -> Good; on -> Accent; busy -> Accent; else -> MaterialTheme.colorScheme.primary }
         PowerButton(on, busy, color) { if (on || busy) onDisconnect() else onConnect() }
         if (status.message.isNotEmpty()) Text(status.message, color = if (status.state == Tunnel.State.ERROR) Bad else MaterialTheme.colorScheme.onBackground,
             textAlign = TextAlign.Center, fontWeight = FontWeight.Medium)
         if (status.route.isNotEmpty()) Text(status.route, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp, textAlign = TextAlign.Center)
         val cloudStatus by com.vlesscardvpn.core.CloudSpeed.status.collectAsState()
-        Card(Modifier.fillMaxWidth().padding(top = 16.dp), shape = RoundedCornerShape(20.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(if (busy) "Ищем вашу волну" else if (on) "Маршрут подключён" else "Готовы к подключению", fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
-                if (busy) LiveProgress(stop = false) { it.running }
-                Text(if (busy) "Сравниваем маршруты и проверяем связь. Кнопка выше отменяет подключение; проценты показываются только для известного числа проверок."
-                    else "Авто учитывает память этой сети и облачные подсказки. Решает проверка на вашем устройстве.",
-                    fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = .35f))
-                Text(cloudStatus, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
-            }
-        }
+        ConnectionOverview(status, sum, cloudStatus, openServers)
         val pausedUntil by Tunnel.pausedUntil.collectAsState()
         val ctx = androidx.compose.ui.platform.LocalContext.current
         if (status.state == Tunnel.State.CONNECTED) {
@@ -142,7 +131,7 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
         var opts by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
         Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
             Column(Modifier.padding(14.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                Row(Modifier.fillMaxWidth().clickable { opts = !opts }, verticalAlignment = Alignment.CenterVertically) {
+                Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable { opts = !opts }, verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Text("Как подключаться", fontWeight = FontWeight.SemiBold)
                         Text(listOf(when (mode) { Mode.AUTO -> "Авто"; Mode.SERVERS -> "Серверы"; Mode.BYEDPI -> "ByeDPI"; Mode.HYBRID -> "Гибрид" },
@@ -202,10 +191,14 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
                     Store.update { it.copy(settings = it.settings.copy(services = if (v) (it.settings.services + id).distinct() else it.settings.services - id)) }
                     if (status.state == Tunnel.State.CONNECTED) onConnect()
                 }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Через VPN только:", fontSize = 13.sp)
-                    Checkbox("youtube" in services, { toggleService("youtube", it) }); Text("YouTube", fontSize = 13.sp)
-                    Checkbox("telegram" in services, { toggleService("telegram", it) }); Text("Telegram", fontSize = 13.sp)
+                Column {
+                    Text("Через VPN только:", fontSize = 14.sp)
+                    listOf("youtube" to "YouTube", "telegram" to "Telegram").forEach { (id, label) ->
+                        Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable(role = Role.Checkbox) { toggleService(id, id !in services) }, verticalAlignment = Alignment.CenterVertically) {
+                            Checkbox(id in services, onCheckedChange = null)
+                            Text(label, fontSize = 16.sp)
+                        }
+                    }
                 }
                 Text(if (services.isEmpty()) "Ничего не отмечено — через VPN идёт весь трафик"
                     else "Через VPN: " + com.vlesscardvpn.core.Services.label(services) + ", остальное напрямую (другие сервисы — в Настройках)",
@@ -226,12 +219,12 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
                     }, fontWeight = FontWeight.SemiBold)
                     Text(when {
                         sum.total == 0 -> "Откройте «Серверы» → «Подписки» или вставьте свою ссылку"
-                        sum.selectedCount == 0 && sum.working > 0 -> "Рабочих по последней проверке: ${sum.working}. Подключусь к 5 самым быстрым — выбирать ничего не нужно."
+                        sum.selectedCount == 0 && sum.working > 0 -> "Рабочих по последней проверке: ${sum.working}. Авто сравнит кандидатов перед подключением."
                         sum.selectedCount == 0 -> "Всего ${sum.total}. Нажмите «Подключить» — проверю и выберу сам."
                         else -> sum.selectedNames.joinToString() + if (sum.selectedCount > 3) " и ещё ${sum.selectedCount - 3}" else ""
                     }, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    if (sum.bestMs > 0) Text("Лучший: ${sum.bestMs} мс" + (if (sum.bestKbps > 0) " · ${Actions.mbps(sum.bestKbps)}" else "") +
-                        when (sum.bestYt) { true -> " · YouTube ✓"; false -> " · YouTube ✗"; null -> "" },
+                    if (sum.bestMs > 0) Text("В сохранённых результатах: ${sum.bestMs} мс" + (if (sum.bestKbps > 0) " · ${Actions.mbps(sum.bestKbps)}" else "") +
+                        when (sum.bestYt) { true -> " · тест YouTube прошёл"; false -> " · тест YouTube не прошёл"; null -> "" },
                         fontSize = 13.sp, color = if (sum.bestKbps in 1..2999 || sum.bestYt == false) Warn else Good)
                     Text("Маскировка: авто" + (if (sum.mask.isNotEmpty()) " — ${sum.mask}" else " (подбирается сама под сеть)"), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
@@ -239,6 +232,8 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
                     if (sum.heavyMask) Text("Маскировка «тяжёлая» (мелкие пакеты) — видео может тормозить. После подключения сам поищу лёгкую", fontSize = 11.sp, color = Warn)
                 }
             }
+            Spacer(Modifier.height(10.dp))
+            RouteInsightCard()
         }
         if (mode != Mode.SERVERS) {
             Spacer(Modifier.height(10.dp))
@@ -419,7 +414,7 @@ private fun PowerButton(on: Boolean, busy: Boolean, color: Color, onClick: () ->
     Spacer(Modifier.height(18.dp))
     BoxWithConstraints(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
         val compact = maxWidth < 280.dp || androidx.compose.ui.platform.LocalDensity.current.fontScale > 1.2f
-        val diameter = minOf(if (compact) 180.dp else 232.dp, maxWidth)
+        val diameter = minOf(if (compact) 168.dp else 216.dp, maxWidth)
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Box(Modifier.size(diameter), contentAlignment = Alignment.Center) {
         Box(Modifier.size(diameter).scale(k).clip(CircleShape).background(Brush.radialGradient(listOf(c.copy(alpha = .18f), Color.Transparent))))

@@ -11,17 +11,20 @@ import org.json.JSONObject
 object CloudControl {
     const val SOURCE = "cloud-manifest"
     data class Entry(val server: Server, val score: Double, val tier: String, val kbps: Int = 0, val speedAt: Long = 0, val sources: List<String> = emptyList())
-    data class Snapshot(val stamp: Long, val expires: Long, val entries: List<Entry>, val recipes: JSONObject, val ispTags: JSONObject) { val byId: Map<String,Entry> = entries.associateBy { it.server.id } }
+    data class Snapshot(val stamp: Long, val expires: Long, val entries: List<Entry>, val recipes: JSONObject, val ispTags: JSONObject) {
+        val byId: Map<String,Entry> = entries.associateBy { it.server.id }
+        fun usable(now: Long): Boolean = expires > now
+    }
     @Volatile private var snapshot: Snapshot? = null
     @Volatile private var attempted = 0L
-    @Volatile private var fetched = 0L
+    fun acceptsPublication(previous: Long, incoming: Long): Boolean = incoming > 0 && (previous <= 0 || incoming >= previous)
     fun parse(text: String, now: Long): Snapshot {
         require(text.length <= 2 * 1024 * 1024)
         val o = JSONObject(text); require(o.getInt("schema") == 1)
         val stampSeconds = o.getLong("stamp"); val expiresSeconds = o.getLong("expires")
-        require(stampSeconds in 1..(now / 1000 + 300) && expiresSeconds in stampSeconds..(stampSeconds + 86400))
-        val stamp = stampSeconds * 1000; val expires = expiresSeconds * 1000
-        require(stamp > 0 && stamp <= now + 300000 && expires > now && expires - stamp in 1..86400000)
+        val stamp = CloudFreshness.publishedAt(stampSeconds, now) ?: throw IllegalArgumentException("invalid manifest stamp")
+        val expires = CloudFreshness.secondsToMillis(expiresSeconds) ?: throw IllegalArgumentException("invalid manifest expiry")
+        require(expires >= stamp && expires - stamp in 1..86400000)
         val a = o.getJSONArray("nodes"); require(a.length() <= 6000)
         val entries = (0 until a.length()).mapNotNull { i ->
             val row = a.getJSONObject(i); val tier = row.getString("tier")
@@ -29,7 +32,7 @@ object CloudControl {
             val score = row.getDouble("cloudScore"); require(score.isFinite() && score in 0.0..1.0)
             val server = LinkParser.parse(row.getString("link"), SOURCE) ?: return@mapNotNull null
             if (server.protocol !in setOf("vless", "vmess", "trojan", "shadowsocks")) return@mapNotNull null
-            Entry(server,score,tier,row.optInt("kbps",0).coerceIn(0,10000000),row.optLong("speed_measured_at",0),
+            Entry(server,score,tier,row.optInt("kbps",0).coerceIn(0,10000000),CloudFreshness.secondsToMillis(row.optLong("speed_measured_at",0)) ?: 0,
                 row.optJSONArray("sources")?.let { urls -> (0 until minOf(urls.length(),16)).mapNotNull { j ->
                     urls.optString(j).takeIf { it.length<=2048 && it.startsWith("https://") &&
                         runCatching { java.net.URI(it).let { u -> u.host != null && u.rawUserInfo == null && u.rawFragment == null } }.getOrDefault(false) }
@@ -37,20 +40,29 @@ object CloudControl {
         }.distinctBy { it.server.id }
         return Snapshot(stamp,expires,entries,o.optJSONObject("recipes") ?: JSONObject(),o.optJSONObject("isp_tags") ?: JSONObject())
     }
-    fun sources(server: Server): List<String> = snapshot?.takeIf { it.expires > System.currentTimeMillis() }?.byId?.get(server.id)?.sources.orEmpty()
-    fun prior(server: Server, now: Long = System.currentTimeMillis()): Double? = snapshot?.takeIf { it.expires > now }?.byId?.get(server.id)?.score
+    fun usable(server: Server, now: Long = System.currentTimeMillis()): Boolean = server.source != SOURCE ||
+        snapshot?.takeIf { it.usable(now) }?.byId?.containsKey(server.id) == true
+    fun recipesUsable(now: Long = System.currentTimeMillis()): Boolean = snapshot?.usable(now) == true
+    fun sources(server: Server): List<String> = snapshot?.takeIf { it.usable(System.currentTimeMillis()) }?.byId?.get(server.id)?.sources.orEmpty()
+    fun prior(server: Server, now: Long = System.currentTimeMillis()): Double? = snapshot?.takeIf { it.usable(now) }?.byId?.get(server.id)?.score
     fun ranked(servers: List<Server>, n: Int): List<Server> {
-        val entries = snapshot?.takeIf { it.expires > System.currentTimeMillis() }?.byId.orEmpty()
+        val entries = snapshot?.takeIf { it.usable(System.currentTimeMillis()) }?.byId.orEmpty()
         return ServerChoice.diverse(servers.filter { it.id in entries && AutoEligibility.allowed(it) }
             .sortedWith(compareByDescending<Server> { speed(it) }.thenByDescending { entries.getValue(it.id).score }),n)
     }
-    fun clear() { snapshot=null;attempted=0;fetched=0;Masks.setCloud(emptyList()) }
-    fun count(now: Long = System.currentTimeMillis()): Int = snapshot?.takeIf { it.expires > now }?.entries?.size ?: 0
-    fun speed(server: Server, now: Long = System.currentTimeMillis()): Int = snapshot?.takeIf { it.expires > now }?.byId?.get(server.id)?.takeIf { it.speedAt in (now/1000-3600)..(now/1000) }?.kbps ?: 0
+    fun clear() {
+        snapshot=null;attempted=0;Masks.setCloud(emptyList())
+        CloudFreshness.manifestTimeline.value = CloudFreshness.Timeline()
+    }
+    fun count(now: Long = System.currentTimeMillis()): Int = snapshot?.takeIf { it.usable(now) }?.entries?.size ?: 0
+    fun speedAt(server: Server, now: Long = System.currentTimeMillis()): Long? = snapshot?.takeIf { it.usable(now) }?.byId?.get(server.id)
+        ?.speedAt?.takeIf { it > 0 && CloudFreshness.isFreshMeasurement(it, now) }
+    fun speed(server: Server, now: Long = System.currentTimeMillis()): Int = if (speedAt(server, now) != null)
+        snapshot?.byId?.get(server.id)?.kbps ?: 0 else 0
     fun maskHints(family: String): List<String> = hints("masks",family).filter { Masks.byId(it) != null }
     fun dpiHints(family: String): List<String> = hints("dpi",family).filter { id -> DpiStrategies.BUILT_IN.any { it.id == id } }.take(3)
     private fun hints(kind: String, family: String): List<String> {
-        val s = snapshot?.takeIf { it.expires > System.currentTimeMillis() } ?: return emptyList()
+        val s = snapshot?.takeIf { it.usable(System.currentTimeMillis()) } ?: return emptyList()
         val a = s.recipes.optJSONObject("families")?.optJSONObject(family)?.optJSONArray(kind) ?: s.recipes.optJSONObject("all")?.optJSONArray(kind)
         return a?.let { (0 until minOf(it.length(),12)).map { i -> it.optString(i).take(100) } }?.distinct().orEmpty()
     }
@@ -67,7 +79,12 @@ object CloudControl {
     }
     private fun apply(ctx: Context, s: Snapshot) {
         if (!Report.enabled(ctx)) return
-        snapshot=s;Masks.setCloud(fragments(s.recipes))
+        snapshot=s
+        if (!s.usable(System.currentTimeMillis())) {
+            Masks.setCloud(emptyList())
+            return
+        }
+        Masks.setCloud(fragments(s.recipes))
         CloudSpeed.cacheNet(ctx,s.ispTags.toString(),Net.family(Net.key(ctx)))
         Store.update { st ->
             val keep=st.servers.filter { it.source != SOURCE || st.state(it).selected }
@@ -77,19 +94,38 @@ object CloudControl {
     }
     fun loadCached(ctx: Context) {
         if (!Report.enabled(ctx)) { clear(); return }
-        if (snapshot?.expires?.let { it <= System.currentTimeMillis() } == true) { snapshot=null;Masks.setCloud(emptyList()) }
         if (snapshot != null) return
-        ctx.getSharedPreferences("cloud_control",0).getString("json",null)?.let { runCatching { apply(ctx,parse(it,System.currentTimeMillis())) } }
+        val p = ctx.getSharedPreferences("cloud_control",0)
+        var timeline = CloudFreshness.load(ctx, "manifest")
+        p.getString("json",null)?.let { text -> runCatching {
+            val now = System.currentTimeMillis(); val parsed = parse(text, now)
+            timeline = CloudFreshness.fromManifestDocument(text, timeline, 0, 0, now) ?: timeline
+            CloudFreshness.save(ctx, "manifest", timeline)
+            apply(ctx, parsed)
+        } }
     }
     @Synchronized fun refresh(ctx: Context) {
         loadCached(ctx);if (!Report.enabled(ctx) || !PhonePower.refresh(ctx).allowLight) return
         val now=System.currentTimeMillis()
-        if (!CloudSpeed.refreshDue(now,fetched,attempted,snapshot != null && fetched > 0)) return
-        attempted=now;val p=ctx.getSharedPreferences("cloud_control",0)
+        val p=ctx.getSharedPreferences("cloud_control",0)
+        var timeline=CloudFreshness.load(ctx,"manifest")
+        if (!CloudSpeed.refreshDue(now,maxOf(timeline.downloadedAt,timeline.checkedAt),maxOf(attempted,timeline.checkedAt),snapshot != null)) return
+        attempted=now
         runCatching {
-            val d=CloudTransport.fetch(ctx,"cloud-manifest.json",p.getString("etag",null)) { parse(it,now) }
-            if (d.text != null) { val s=parse(d.text,now);apply(ctx,s);p.edit().putString("json",d.text).putString("etag",d.etag).apply();fetched=now }
-            else if (d.unchanged) fetched=now
+            val d=CloudTransport.fetch(ctx,"cloud-manifest.json",p.getString("etag",null)) {
+                val candidate = parse(it,now)
+                require(acceptsPublication(maxOf(timeline.publishedAt, snapshot?.stamp ?: 0), candidate.stamp)) { "Manifest rollback rejected" }
+            }
+            if (d.text != null) {
+                val s=parse(d.text,d.checkedAt)
+                timeline=CloudFreshness.fromManifestDocument(d.text,timeline,d.downloadedAt,d.checkedAt,d.checkedAt) ?:
+                    timeline.copy(downloadedAt=d.downloadedAt,checkedAt=d.checkedAt)
+                CloudFreshness.save(ctx,"manifest",timeline)
+                apply(ctx,s);p.edit().putString("json",d.text).putString("etag",d.etag).apply()
+            } else if (d.unchanged) {
+                timeline=CloudFreshness.notModified(timeline,d.checkedAt)
+                CloudFreshness.save(ctx,"manifest",timeline)
+            }
         }
     }
 }

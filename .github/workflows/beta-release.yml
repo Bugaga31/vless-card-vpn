@@ -9,6 +9,8 @@ env:
 permissions:
   contents: read
 jobs:
+  quality:
+    uses: ./.github/workflows/e2e.yml
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 40
@@ -41,6 +43,8 @@ jobs:
           N=${VERSION#beta-build-}; export GITHUB_RUN_NUMBER=${N#release-build-}
           chmod +x gradlew
           bash tools/test-security-result-parser.sh
+          bash tools/test-vibe-foreground.sh
+          python3 tools/test_ui_layout.py
           PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p 'test_cloud_*.py'
           ./gradlew -PbetaPreview=true -PemulatorAbis=true -PsplitAbi=true --no-daemon --max-workers=2 :app:testDebugUnitTest :app:assembleRelease :security-test-probe:assembleDebug
       - name: Sign with persistent Beta key (v1+v2+v3)
@@ -130,13 +134,23 @@ jobs:
             screen.png
             home-ocean.png
             home-large-text.png
+            home-font-scale-2.png
+            home-320dp.png
+            home-320dp-font-scale-2.png
+            home-landscape.png
+            home-route-insight-expanded.png
             intro.png
             intro-large-text.png
+            intro-320dp-font-scale-2.png
             logcat.txt
             security-results.txt
+            install-check.log
+            install-activities.txt
+            install-windows.txt
+            ui-*.xml
           if-no-files-found: ignore
   publish:
-    needs: [build, emulator-install]
+    needs: [build, emulator-install, quality]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -157,8 +171,14 @@ jobs:
           for api in 30 34; do
             cp "ui-checks/install-check-api-$api/home-ocean.png" "release/Android-home-api-$api.png"
             cp "ui-checks/install-check-api-$api/home-large-text.png" "release/Android-large-text-api-$api.png"
+            cp "ui-checks/install-check-api-$api/home-font-scale-2.png" "release/Android-font-scale-2-api-$api.png"
+            cp "ui-checks/install-check-api-$api/home-320dp.png" "release/Android-320dp-api-$api.png"
+            cp "ui-checks/install-check-api-$api/home-320dp-font-scale-2.png" "release/Android-320dp-font-scale-2-api-$api.png"
+            cp "ui-checks/install-check-api-$api/home-landscape.png" "release/Android-landscape-api-$api.png"
+            cp "ui-checks/install-check-api-$api/home-route-insight-expanded.png" "release/Android-route-insight-expanded-api-$api.png"
             cp "ui-checks/install-check-api-$api/intro.png" "release/Android-intro-api-$api.png"
             cp "ui-checks/install-check-api-$api/intro-large-text.png" "release/Android-intro-large-api-$api.png"
+            cp "ui-checks/install-check-api-$api/intro-320dp-font-scale-2.png" "release/Android-intro-320dp-font-scale-2-api-$api.png"
           done
       - name: Create prerelease
         env:

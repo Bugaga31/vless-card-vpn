@@ -113,7 +113,7 @@ fun SettingsScreen() {
                 set { it.copy(oceanBackground = v, theme = if (v && it.theme == "amoled") "dark" else it.theme) }
             }
             Toggle("Анимация волн", "Не чаще 20 кадров/с. Замирает в фоне, при экономии энергии, низком заряде, нагреве и выключенной системной анимации; фон остаётся виден", s.oceanMotion) { v -> set { it.copy(oceanMotion = v) } }
-            Toggle("Заставка при открытии", "Короткая морская заставка без голоса и звука. Коснитесь, чтобы сразу перейти к приложению. При работающем VPN пропускается", s.welcomeSound) { v -> set { it.copy(welcomeSound = v) } }
+            Toggle("Заставка при открытии", "При каждом открытии, даже с работающим VPN. Без звука, можно сразу пропустить. Туннель не перезапускается", s.welcomeSound) { v -> set { it.copy(welcomeSound = v) } }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 listOf("dark" to "Тёмная", "amoled" to "AMOLED", "you" to "Material You").forEach { (id, t) ->
                     if (id != "you" || Build.VERSION.SDK_INT >= 31) FilterChip(selected = s.theme == id, onClick = { set { it.copy(theme = id) } }, label = { Text(t) })

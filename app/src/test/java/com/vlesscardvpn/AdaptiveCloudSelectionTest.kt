@@ -12,7 +12,9 @@ class AdaptiveCloudSelectionTest {
     private fun manifest(now: Long=1000000) = JSONObject().put("schema",1).put("stamp",now/1000).put("expires",now/1000+3600)
         .put("nodes",org.json.JSONArray().put(JSONObject().put("link",link).put("tier","silver").put("cloudScore",.75)))
     @Test fun manifestRejectsExpiredFutureAndOverflowDates() {
-        for (o in listOf(manifest().put("expires",999),manifest().put("stamp",99999999),manifest().put("stamp",Long.MAX_VALUE))) {
+        val expired = CloudControl.parse(manifest().put("stamp",998).put("expires",999).toString(), 1_000_000)
+        assertFalse(expired.usable(1_000_000))
+        for (o in listOf(manifest().put("stamp",99999999),manifest().put("stamp",Long.MAX_VALUE))) {
             try { CloudControl.parse(o.toString(),1000000);fail() } catch (_: IllegalArgumentException) { }
         }
     }

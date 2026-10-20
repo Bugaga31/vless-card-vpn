@@ -54,7 +54,8 @@ class ConfigTest {
     }
 
     @Test fun maskCatalog() {
-        assertEquals(542, Masks.ALL.size)
+        assertEquals(546, Masks.ALL.size)
+        assertEquals(4, Masks.ALL.count { it.id.startsWith("vc.sni.") && it.id.endsWith(".balanced") })
         assertEquals(161, Masks.ALL.count { it.viaByeDpi && it.dpi != Masks.CURRENT_DPI })
         val r = LinkParser.parse(reality)!!
         val ws = LinkParser.parse(links[1])!!

@@ -1,3 +1,7 @@
+## 1.2.32
+
+Silent intro on every foreground visit, safer media-aware mask ranking, four lightweight cover profiles, cloud freshness timelines and a local historical route explanation. See [release notes](docs/release-1.2.32.md).
+
 ## 1.2.30
 
 Silent finite ocean intro, honest connection progress, reversible own-app resource presets and lower diagnostic/search overhead under pressure. No root/system-wide boost claims.

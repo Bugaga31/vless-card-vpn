@@ -9,6 +9,7 @@ import org.json.JSONObject
  * Cloud weights are optional hints, not code or instructions. They cannot overwrite an already learned model.
  */
 object Brain {
+    data class ObservationCount(val count: Int, val networkScoped: Boolean)
     const val N = 14
     private val w = HashMap<String, DoubleArray>()
     private val trained = HashMap<String, Double>()
@@ -29,6 +30,11 @@ object Brain {
 
     @Volatile var seen = 0; private set
     private var dirty = false
+
+    @Synchronized fun observationCount(net: String): ObservationCount {
+        if (scoped(net)) return ObservationCount(contexts[contextKey(net)]?.checks?.toInt() ?: 0, true)
+        return ObservationCount((trained[kind(net)] ?: 0.0).toInt(), false)
+    }
 
     fun features(s: Server, st: ServerState): DoubleArray {
         val good = st.okCount.coerceAtLeast(0).toDouble(); val bad = st.failCount.coerceAtLeast(0).toDouble()

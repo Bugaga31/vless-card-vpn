@@ -18,8 +18,8 @@ class ReleaseQualityR141Test {
     }
     @Test fun fastestEndpointOfAccountSurvivesRanking() {
         val a=server("DE-slow"); val b=server("DE-fast")
-        val states=mapOf(a.id to ServerState(realMs=10,bigOk=true,kbps=1000,speedCheckedAt=100000,speedNetwork="wifi"),
-            b.id to ServerState(realMs=200,bigOk=true,kbps=30000,speedCheckedAt=100000,speedNetwork="wifi"))
+        val states=mapOf(a.id to ServerState(realMs=10,bigOk=true,kbps=1000,speedCheckedAt=100000,speedNetwork="wifi",serviceNetwork="wifi",serviceCheckedAt=100000,serviceYtOk=true,serviceTgOk=true),
+            b.id to ServerState(realMs=200,bigOk=true,kbps=30000,speedCheckedAt=100000,speedNetwork="wifi",serviceNetwork="wifi",serviceCheckedAt=100000,serviceYtOk=true,serviceTgOk=true))
         assertEquals(listOf(b),AutoEligibility.connectedPool(listOf(a,b),{states.getValue(it.id)},"wifi",100000,false))
     }
     @Test fun coverProfilesNeverChangeRealitySniOrBypassCertificateAuthentication() {

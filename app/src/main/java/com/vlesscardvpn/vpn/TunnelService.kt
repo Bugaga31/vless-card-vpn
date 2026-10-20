@@ -42,6 +42,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -231,7 +232,7 @@ class TunnelService : VpnService() {
                 val limit = Masks.byId(mine)?.let { Masks.cost(it) } ?: 0
                 val pool = (ss.goodMasks + mine).filter { it.isNotEmpty() && (Masks.byId(it)?.let { m -> Masks.cost(m) } ?: 0) <= limit }
                 val id = com.vlesscardvpn.core.AutoRoutePolicy.launchMask(automatic, rotate, mine, pool) { it.random() }
-                srv to if (safeMasks) null else Masks.byId(id)
+                srv to if (safeMasks && !automatic) null else Masks.byId(id)
             }
             val needCurrent = settings.mode != Mode.SERVERS || withMasks.any { it.second?.dpi == Masks.CURRENT_DPI }
             val fixed = if (settings.mode == Mode.BYEDPI) emptySet() else Masks.strategies(withMasks.map { it.second }) - Masks.CURRENT_DPI
@@ -268,6 +269,22 @@ class TunnelService : VpnService() {
             Tunnel.socks = socks
             if (BuildConfig.DEBUG) Log.i("E2E", "pool size=${used.size} ids=${used.map { it.first.id }}")
             Log.i("E2E", "socks port=${socks.port} auth=${socks.auth} dpi=${dpiLabel.ifEmpty { "-" }} fixed=${set.ports.keys} mode=${settings.mode} services=${settings.services} proxy=$proxy")
+            if (automatic) {
+                val handle = Net.underlying(this@TunnelService)?.toString()
+                Tunnel.status.value = Tunnel.Status(Tunnel.State.CONNECTING, "Проверяю сервисы…",
+                    check = "Telegram MTProto и настоящее видео YouTube через выбранную цепочку")
+                com.vlesscardvpn.core.ServiceHealth.begin(6000)
+                val proof = Tester.probeSocks(socks.port, settings.testUrl, big = false, youtube = true,
+                    attempts = 1, budgetMs = 6000)
+                kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                check(Net.key(this@TunnelService) == network && Net.underlying(this@TunnelService)?.toString() == handle) {
+                    "Сеть изменилась во время проверки сервисов"
+                }
+                com.vlesscardvpn.core.ServiceHealth.finish(proof, System.currentTimeMillis(), 6000)
+                check(com.vlesscardvpn.core.AutoEligibility.servicesWork(proof)) {
+                    "Telegram или видео YouTube не подтверждены (MTProto=${proof.tgOk}, media=${proof.ytOk}, ${proof.ytReason}). Авто продолжит поиск."
+                }
+            }
             if (!proxy && !keepTun) startTun(settings, socks)
 
             val auto = st.settings.mode == Mode.AUTO
@@ -282,6 +299,7 @@ class TunnelService : VpnService() {
             if (proxy) route = "Прокси SOCKS5 :${socks.port} · HTTP :${settings.httpPort}" + (if (settings.lanShare) " (для всей сети: ${lanIp() ?: "IP телефона"})" else "") + " · $route"
             val since = if (keepTun && prev.since > 0) prev.since else System.currentTimeMillis()
             if (!keepTun) { com.vlesscardvpn.core.Traffic.start(); Tunnel.rx0 = android.net.TrafficStats.getUidRxBytes(android.os.Process.myUid()); Tunnel.tx0 = android.net.TrafficStats.getUidTxBytes(android.os.Process.myUid()) }
+            com.vlesscardvpn.core.ServiceHealth.event(com.vlesscardvpn.core.ServiceHealth.EventKind.CONNECTED)
             Tunnel.status.value = Tunnel.Status(Tunnel.State.CONNECTED, "Подключено", route, "Проверяю интернет…", null, since)
             watchScreen()
             foreground(if (settings.quietNotification) "Активно" else "Подключено · $route")
@@ -358,10 +376,12 @@ class TunnelService : VpnService() {
             val sampledServers = usedServers.toList()
             val sampledCore = core
             val checkServices = st.mode == Mode.AUTO || Tunnel.ytViaDpi
+            fun accepted(probe: com.vlesscardvpn.core.Probe) = if (st.mode == Mode.AUTO) com.vlesscardvpn.core.AutoEligibility.servicesWork(probe) else probe.works
+            if (checkServices) com.vlesscardvpn.core.ServiceHealth.begin(5000)
             var p = Tester.probeSocks(port, st.testUrl, big = false, youtube = checkServices, attempts = 1, budgetMs = 5000)
             // right after connecting the first packets may still be on their way (WireGuard/WARP handshake, a slow
             // mobile network): one calm second try before calling the route bad and starting a heal or a reconnect
-            if (!p.works) { delay(3000); if (Tunnel.socks?.port == port) p = Tester.probeSocks(port, st.testUrl, big = false, youtube = checkServices, attempts = 1, budgetMs = 5000) }
+            if (!accepted(p)) { delay(3000); if (Tunnel.socks?.port == port) p = Tester.probeSocks(port, st.testUrl, big = false, youtube = checkServices, attempts = 1, budgetMs = 5000) }
             val cur = Tunnel.status.value
             if (cur.state != Tunnel.State.CONNECTED || core !== sampledCore || Net.key(this@TunnelService) != sampledNet ||
                 Net.underlying(this@TunnelService)?.toString() != sampledHandle) return@launch
@@ -372,12 +392,13 @@ class TunnelService : VpnService() {
             } else ""
             if (Tunnel.status.value.state != Tunnel.State.CONNECTED || core !== sampledCore ||
                 Net.key(this@TunnelService) != sampledNet || Net.underlying(this@TunnelService)?.toString() != sampledHandle) return@launch
+            if (checkServices) com.vlesscardvpn.core.ServiceHealth.finish(p, System.currentTimeMillis(), 5000)
             val text = if (p.realMs > 0) "HTTPS · ${p.realMs} мс · Видео YouTube: ${if(p.ytOk==true) "✓" else if(p.ytOk==false) "нет ответа" else "не проверен"} · Telegram MTProto: ${if(p.tgOk==true) "✓" else if(p.tgOk==false) "нет ответа" else "не проверен"}$warp"
                 else "Нет ответа через выбранный маршрут (${p.error}). " + if (st.mode == Mode.AUTO && st.autoHeal) "Ищу рабочий вариант сам…" else "Проверьте серверы или включите маскировку."
-            Tunnel.status.value = cur.copy(check = text, checkOk = p.works)
-            runCatching { val stv = Store.state.value; com.vlesscardvpn.core.Brain.lived(sampledNet, sampledServers, { stv.state(it) }, p.works); com.vlesscardvpn.core.Brain.save(this@TunnelService) }
+            Tunnel.status.value = cur.copy(check = text, checkOk = accepted(p))
+            runCatching { val stv = Store.state.value; com.vlesscardvpn.core.Brain.lived(sampledNet, sampledServers, { stv.state(it) }, accepted(p)); com.vlesscardvpn.core.Brain.save(this@TunnelService) }
             Log.i("E2E", "check ok=${p.works} ms=${p.realMs} big=${p.bigOk} yt=${p.ytOk} tg=${p.tgOk} err=${p.error} warp=$warp")
-            if (p.works && st.mode == Mode.AUTO) Actions.rememberNet(sampledNet)
+            if (accepted(p) && st.mode == Mode.AUTO) Actions.rememberNet(sampledNet)
             // «Умный YouTube» broke YouTube here (the bypass stopped working): back to the servers for YouTube
             if (p.realMs > 0 && p.ytOk == false && Tunnel.ytViaDpi) {
                 val net = Net.key(this@TunnelService)
@@ -385,11 +406,11 @@ class TunnelService : VpnService() {
                 scope.launch { lock.withLock { connect(soft = true) } }
                 return@launch
             }
-            if (!p.works && lastSoft && Store.state.value.settings.autoHeal) {
+            if (!accepted(p) && lastSoft && Store.state.value.settings.autoHeal) {
                 // a fresh Xray sometimes needs a moment: look again in 3 s before rebuilding the whole VPN
                 // (every rebuild makes browsers show «нет сети» for a second — it must not happen by mistake)
                 delay(3000)
-                if (Tester.probeSocks(port, st.testUrl, big = false, youtube = false, attempts = 2).realMs > 0) { lastSoft = false; verifySoon(0); return@launch }
+                if (accepted(Tester.probeSocks(port, st.testUrl, big = false, youtube = checkServices, attempts = 1, budgetMs = 5000))) { lastSoft = false; verifySoon(0); return@launch }
                 if (!Actions.online()) { heal(); return@launch }
                 // after an internal reconnect (network change, switching servers) the internet didn't come back: do what the
                 // big button does (stop + start, the TUN rebuilt) before the longer healing — once per network change
@@ -397,7 +418,7 @@ class TunnelService : VpnService() {
                 if (sinceNet < 90_000L && !netHardDone) { netHardDone = true; hardRestart("новая сеть, а интернет не пошёл", force = true); return@launch }
                 if (System.currentTimeMillis() - lastHard > 5 * 60_000L) { hardRestart("после переподключения интернет не пошёл"); return@launch }
             }
-            if (p.works) { healStep = 0; dpiHeals = 0; connectFails = 0; warmUp(); scheduleOptimize(if (com.vlesscardvpn.core.Actions.deepPending || usedServers.size < com.vlesscardvpn.core.AutoEligibility.TOP) 5_000 else 60_000); com.vlesscardvpn.core.AppWatch.start(this@TunnelService) { scope.launch { lock.withLock { connect(soft = true) } } }; watchdog(); standbyScout(); coverTraffic(); serviceRoutes(); if (serverless()) rescueLater() } else heal()
+            if (accepted(p)) { healStep = 0; dpiHeals = 0; connectFails = 0; warmUp(); scheduleOptimize(if (com.vlesscardvpn.core.Actions.deepPending || usedServers.size < com.vlesscardvpn.core.AutoEligibility.TOP) 5_000 else 60_000); com.vlesscardvpn.core.AppWatch.start(this@TunnelService) { scope.launch { lock.withLock { connect(soft = true) } } }; watchdog(); standbyScout(); coverTraffic(); serviceRoutes(); if (serverless()) rescueLater() } else heal()
         }
     }
 
@@ -739,6 +760,8 @@ class TunnelService : VpnService() {
             runCatching { setUnderlyingNetworks(network?.let { arrayOf(it) }) }
             netJob?.cancel(); checkJob?.cancel(); healJob?.cancel(); optJob?.cancel(); scoutJob?.cancel(); rescueJob?.cancel()
             watchJob?.cancel(); coverJob?.cancel(); serviceJob?.cancel(); liveJob?.cancel()
+            com.vlesscardvpn.core.ServiceHealth.reset()
+            com.vlesscardvpn.core.ServiceHealth.event(com.vlesscardvpn.core.ServiceHealth.EventKind.NETWORK_CHANGE)
             Actions.cancelForNetworkChange()
             if (!change.online) {
                 val current = Tunnel.status.value
@@ -770,6 +793,7 @@ class TunnelService : VpnService() {
     }
 
     private fun teardown(error: String?, keepTun: Boolean = false) {
+        com.vlesscardvpn.core.ServiceHealth.reset()
         if (!keepTun) runCatching { com.vlesscardvpn.core.Traffic.tick() }
         liveJob?.cancel()
         scoutJob?.cancel(); scoutJob=null
