@@ -63,6 +63,9 @@ def main(xray, origin):
             video = subprocess.check_output(curl+['-H','Range: bytes=0-131071',
                 'https://fixture.googlevideo.com/videoplayback?e2e=1'])
             assert len(video) == 131072, 'video transfer incomplete'
+            for url in ('https://speed.cloudflare.com/__down?bytes=65536', 'https://cachefly.cachefly.net/1mb.test', 'https://proof.ovh.net/files/1Mb.dat'):
+                body = subprocess.check_output(curl+['-H','Range: bytes=0-65535',url])
+                assert len(body) == 65536, 'HTTPS control incomplete'
             with socket.create_connection(('127.0.0.1',18443),timeout=20) as sock:
                 sock.settimeout(20); sock.sendall(b'\5\1\0'); assert recv(sock,2) == b'\5\0'
                 sock.sendall(b'\5\1\0\1'+socket.inet_aton('149.154.167.51')+struct.pack('!H',443))

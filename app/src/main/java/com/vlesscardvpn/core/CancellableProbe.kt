@@ -1,23 +1,42 @@
 package com.vlesscardvpn.core
 
 import kotlinx.coroutines.*
-import java.util.concurrent.atomic.AtomicReference
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
-/** Cancellation closes the active HTTP call, not just its waiting coroutine. */
+/** A probe can own parallel HTTPS/player calls; cancelling only the LAST registered call leaks the others. */
+internal class ProbeCancellation {
+    private val lock = Any()
+    private val hooks = mutableListOf<() -> Unit>()
+    private var cancelled = false
+    private var finished = false
+    fun register(hook: () -> Unit) {
+        val closeNow = synchronized(lock) {
+            if (cancelled || finished) true else { hooks += hook; false }
+        }
+        if (closeNow) runCatching(hook)
+    }
+    fun cancel() {
+        val pending = synchronized(lock) {
+            cancelled = true
+            hooks.toList().also { hooks.clear() }
+        }
+        pending.forEach { runCatching(it) }
+    }
+    fun finish() { synchronized(lock) { finished = true; hooks.clear() } }
+}
+
+/** Parent cancellation closes ALL registered transports, including concurrently registered/late calls. */
 object CancellableProbe {
     suspend fun <T> run(block: ((() -> Unit) -> Unit) -> T): T = suspendCancellableCoroutine { cont ->
-        val cancel = AtomicReference<(() -> Unit)?>(null)
+        val cancellation = ProbeCancellation()
         val worker = CoroutineScope(Bg.io).launch {
             try {
-                val result = runInterruptible {
-                    block { hook -> cancel.set(hook); if (!cont.isActive) hook() }
-                }
+                val result = runInterruptible { block(cancellation::register) }
                 cont.resume(result)
             } catch (e: Throwable) { cont.resumeWithException(e) }
-            finally { cancel.set(null) }
+            finally { cancellation.finish() }
         }
-        cont.invokeOnCancellation { runCatching { cancel.get()?.invoke() }; worker.cancel() }
+        cont.invokeOnCancellation { cancellation.cancel(); worker.cancel() }
     }
 }

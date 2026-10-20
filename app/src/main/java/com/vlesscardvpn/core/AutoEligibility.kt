@@ -10,7 +10,7 @@ object AutoEligibility {
     const val TOP = 8
     /** Every returned route is handed to Xray's multi-outbound pool, not held as a hidden spare. */
     fun connectedPool(servers: List<Server>, state: (Server) -> ServerState, net: String, now: Long, gaming: Boolean): List<Server> =
-        servicePool(servers.distinctBy { it.id }.filter { allowed(it) && state(it).works },state,net,now).let { routes ->
+        connectionPool(servers.distinctBy { it.id }.filter { allowed(it) && state(it).works },state,net,now).let { routes ->
             if (gaming) routes.sortedBy { ServerChoice.latencyScore(state(it).evidenceFor(net),state(it).realMs) }
             else routes.sortedWith(ServerChoice.downloadOrder(state,net,now))
         }.let { ServerChoice.diverse(independent(it), TOP) }
@@ -37,6 +37,27 @@ object AutoEligibility {
     /** Connectivity alone is not success in Auto: require real video and MTProto proofs. */
     fun servicesWork(probe: Probe): Boolean = probe.works && probe.ytOk == true && probe.tgOk == true
 
+    /** Generic HTTPS admission is explicitly NOT a service PASS. Confirmed service FAIL is excluded. */
+    fun connectionWorks(probe: Probe): Boolean = probe.works && probe.httpsHosts >= HttpsTransferProbe.REQUIRED_HOSTS &&
+        probe.ytOk != false && probe.tgOk != false
+    fun httpsFresh(s: ServerState, net: String, now: Long): Boolean =
+        s.httpsHosts >= HttpsTransferProbe.REQUIRED_HOSTS && s.httpsNetwork == net && s.httpsMask == s.maskFor(net) &&
+            s.httpsCheckedAt > 0 && now - s.httpsCheckedAt in 0..SERVICE_TTL_MS
+    fun recordConnection(s: ServerState, net: String, mask: String, now: Long, p: Probe): ServerState =
+        if (!p.httpsChecked) s else s.copy(httpsNetwork=net,httpsMask=mask,httpsCheckedAt=now,httpsHosts=p.httpsHosts)
+    fun <T> connectionPool(list: List<T>, state: (T) -> ServerState, net: String, now: Long): List<T> {
+        val proven = servicePool(list,state,net,now)
+        // Keep a fully proven pool intact. Otherwise allow explicitly unconfirmed-service HTTPS routes.
+        return proven.ifEmpty { list.filter { state(it).works && httpsFresh(state(it),net,now) && serviceRank(state(it),net,now) != 2 } }
+    }
+    fun connectionVerdict(probe: Probe): Boolean? = when {
+        Thread.currentThread().isInterrupted -> null
+        !probe.httpsChecked -> null
+        probe.httpsHosts < HttpsTransferProbe.REQUIRED_HOSTS -> null // control resources may be unavailable
+        probe.ytOk == false || probe.tgOk == false -> false
+        else -> true // connectivity only, never write invented service flags
+    }
+
     fun learningVerdict(probe: Probe, requireServices: Boolean): Boolean? = when {
         Thread.currentThread().isInterrupted -> null
         !probe.works -> false
@@ -59,7 +80,7 @@ object AutoEligibility {
         if (s.serviceNetwork != net || s.serviceMask != mask || s.maskFor(net) != mask ||
             s.serviceCheckedAt > startedAt) return s
         val invalidateSpeed = s.speedNetwork == net && s.speedMask == mask && s.speedCheckedAt <= startedAt
-        return s.copy(selected=false, serviceCheckedAt=0,
+        return s.copy(selected=false, serviceCheckedAt=0, httpsCheckedAt=0,
             speedCheckedAt=if (invalidateSpeed) 0 else s.speedCheckedAt)
     }
 

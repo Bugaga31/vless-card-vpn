@@ -18,7 +18,7 @@ object RouteContext {
         } == true }.mapTo(HashSet()) { it.id }
         if (changed.isEmpty()) return next
         return next.copy(states = next.states.mapValues { (id, state) ->
-            if (id in changed) state.copy(serviceCheckedAt = 0, speedCheckedAt = 0) else state
+            if (id in changed) state.copy(serviceCheckedAt = 0, speedCheckedAt = 0, httpsCheckedAt = 0) else state
         })
     }
 }

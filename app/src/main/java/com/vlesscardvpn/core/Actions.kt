@@ -415,7 +415,7 @@ object Actions {
             target.id to java.util.concurrent.ConcurrentHashMap<String, Int>()
         }
         try {
-            Tester.real(variants, st.settings.testUrl, port, own.ports, batch = if (onFirst != null) ConnectPolicy.FIRST else 64, parallel = parallel, big = big, youtube = youtube, attempts = attempts, stopAfter = stopAfter, budgetMs = budgetMs, strictServices = youtube && st.settings.mode == Mode.AUTO) { i, p ->
+            Tester.real(variants, st.settings.testUrl, port, own.ports, batch = if (onFirst != null) ConnectPolicy.FIRST else 64, parallel = parallel, big = big, youtube = youtube, attempts = attempts, stopAfter = stopAfter, budgetMs = budgetMs, connectionCheck = st.settings.mode == Mode.AUTO && (youtube || big)) { i, p ->
                 if (p == Tester.SKIPPED) return@real
                 // Do not train the old profile with a result completed after Wi-Fi/cellular handoff.
                 if (!validContext() || Net.key(app) != net || Net.underlying(app)?.toString() != underlying) return@real
@@ -429,12 +429,12 @@ object Actions {
                 val measuredKbps = ServiceProbePolicy.isolatedSpeed(p, parallel)
                 val speedSample = ServerChoice.acceptsSpeedSample(measuredKbps, parallel)
                 val checkedAt = System.currentTimeMillis()
-                val qualified = p.works && (st.settings.mode != Mode.AUTO || !youtube || AutoEligibility.servicesWork(p))
+                val qualified = p.works && (st.settings.mode != Mode.AUTO || !youtube || AutoEligibility.connectionWorks(p))
                 val firstSuccess = qualified && ok.incrementAndGet() == 1
                 if (qualified) onSuccess?.invoke(s)
                 // A deliberately short attempt is inconclusive when it times out; confirm with the normal budget.
                 if (!p.works && budgetMs in 1 until ConnectPolicy.QUICK_BUDGET_MS) return@real
-                val verdict = AutoEligibility.learningVerdict(p, youtube && st.settings.mode == Mode.AUTO)
+                val verdict = if (st.settings.mode == Mode.AUTO && (youtube || big)) AutoEligibility.connectionVerdict(p) else AutoEligibility.learningVerdict(p, false)
                 if (verdict != null) {
                     probeMemory.record(net, s.id, st.state(s).maskFor(net), verdict, checkedAt)
                     if (!verdict) handoverPolicy.failure(net, AutoRoutePolicy.configuration(s, st.state(s), net), checkedAt)
@@ -442,13 +442,13 @@ object Actions {
                 }
                 states.put(s.id) {
                     if (!validContext() || Net.key(app) != net || Net.underlying(app)?.toString() != underlying) it else
-                    it.copy(netEvidence = (it.netEvidence + ((net + "|" + st.state(s).maskFor(net)) to (if (verdict == null) it.evidenceFor(net) else it.evidenceFor(net).observe(verdict, p.realMs, checkedAt)))).entries.sortedByDescending { e -> e.value.at }.take(8).associate { e -> e.toPair() }, realMs = p.realMs, bigOk = p.bigOk ?: it.bigOk?.takeIf { old -> old }, ytOk = if (youtube) p.ytOk else it.ytOk, tgOk = if (youtube) p.tgOk else it.tgOk, checkedAt = checkedAt, kbps = if (speedSample) measuredKbps else it.kbps,
+                    it.copy(netEvidence = (it.netEvidence + ((net + "|" + st.state(s).maskFor(net)) to (if (verdict == null) it.evidenceFor(net) else it.evidenceFor(net).observe(verdict, p.realMs, checkedAt)))).entries.sortedByDescending { e -> e.value.at }.take(8).associate { e -> e.toPair() }, realMs = if (p.httpsChecked && p.httpsHosts < HttpsTransferProbe.REQUIRED_HOSTS) it.realMs else p.realMs, bigOk = p.bigOk ?: it.bigOk?.takeIf { old -> old }, ytOk = if (youtube) p.ytOk else it.ytOk, tgOk = if (youtube) p.tgOk else it.tgOk, checkedAt = checkedAt, kbps = if (speedSample) measuredKbps else it.kbps,
                         speedNetwork = if (speedSample) net else it.speedNetwork,
                         speedMask = if (speedSample) st.state(s).maskFor(net) else it.speedMask,
                         speedCheckedAt = if (speedSample) checkedAt else it.speedCheckedAt,
-                        okCount = it.okCount + if (p.works) 1 else 0, failCount = it.failCount + if (p.works) 0 else 1).let { updated ->
-                            if (youtube) AutoEligibility.recordServices(updated, net, st.state(s).maskFor(net), checkedAt, p)
-                            else updated
+                        okCount = it.okCount + if (p.works) 1 else 0, failCount = it.failCount + if (!p.works && (!p.httpsChecked || verdict == false)) 1 else 0).let { updated ->
+                            AutoEligibility.recordConnection(if (youtube) AutoEligibility.recordServices(updated, net, st.state(s).maskFor(net), checkedAt, p)
+                            else updated,net,st.state(s).maskFor(net),checkedAt,p)
                         }
                 }
                 if (firstSuccess && onFirst != null) { states.flush(); onFirst(s) }
@@ -718,7 +718,7 @@ object Actions {
             val win = v2.indices.filter { v2[it].first.id == s.id && res[it]?.works == true && res[it]?.ytOk != false }.minByOrNull { res.getValue(it).realMs } ?: return@forEach
             val m = v2[win].second!!; val p = res.getValue(win)
             if (cur.kbps > 0 && p.kbps in 1 until cur.kbps) return@forEach // the heavy one is still faster here: keep it
-            Store.setState(s.id) { it.copy(maskId = m.id, netMasks = it.netMasks + (net to m.id), realMs = p.realMs, bigOk = p.bigOk, kbps = p.kbps, speedNetwork = net, speedMask = m.id, speedCheckedAt = 0, checkedAt = System.currentTimeMillis()) }
+            Store.setState(s.id) { it.copy(maskId = m.id, netMasks = it.netMasks + (net to m.id), realMs = if (p.httpsChecked && p.httpsHosts < HttpsTransferProbe.REQUIRED_HOSTS) it.realMs else p.realMs, bigOk = p.bigOk, kbps = p.kbps, speedNetwork = net, speedMask = m.id, speedCheckedAt = 0, checkedAt = System.currentTimeMillis()) }
             Store.recordMasks(net, listOf(m.id to true))
         }
     }
@@ -1079,7 +1079,7 @@ object Actions {
         runCatching { Report.prime(app); CloudSpeed.loadCached(app) }
         refreshPublicCloud()
         val st = Store.state.value
-        val working = preferred(st, AutoEligibility.servicePool(st.servers.filter { st.state(it).works },
+        val working = preferred(st, AutoEligibility.connectionPool(st.servers.filter { st.state(it).works },
             { st.state(it) }, Net.key(app), System.currentTimeMillis()))
         val busy = job
         // Instant start: something worked before → connect now; the tunnel itself re-checks, heals and keeps searching.
@@ -1317,22 +1317,17 @@ object Actions {
         val attempted = mutableSetOf<String>()
         val firstReady: (Server) -> Unit = { server ->
             val snapshot = Store.state.value
-            if (AutoEligibility.servicePool(listOf(server), { snapshot.state(it) }, Net.key(app), System.currentTimeMillis()).isNotEmpty() && started.claim()) {
+            if (AutoEligibility.connectionPool(listOf(server), { snapshot.state(it) }, Net.key(app), System.currentTimeMillis()).isNotEmpty() && started.claim()) {
                 deepPending = true
                 selectBest(10, close = false, among = listOf(server) + Store.state.value.let { a -> a.servers.filter { a.state(it).works } })
                 searchScope.launch(Dispatchers.Main) { onReady() }
             }
         }
-        fun fresh() = Store.state.value.let { st -> preferred(st, AutoEligibility.servicePool(
+        fun fresh() = Store.state.value.let { st -> preferred(st, AutoEligibility.connectionPool(
             st.servers.filter { st.state(it).works }, { st.state(it) }, Net.key(app), System.currentTimeMillis())) }
         // Existing catalog first, even when subscription timestamps are old. Cloud cache was applied before this.
         if (st0.servers.isNotEmpty() && fresh().isEmpty()) notes += quickTest(st0.servers, firstReady, attempted)
-        if (started.started) return "Telegram и видео YouTube проверены — подключаюсь"
-        if (fresh().isEmpty() && activeSearchReport?.resourceUnavailable() == true) {
-            val message = activeSearchReport!!.summary() + " Строгий Auto не подтверждён; доступен ручной выбор."
-            Tunnel.status.value = Tunnel.Status(Tunnel.State.ERROR, "Контрольное видео недоступно", check = message)
-            return message
-        }
+        if (started.started) return "Передача HTTPS проверена — подключаюсь; сервисы показаны отдельно"
         if (st0.servers.isEmpty() || fresh().isEmpty() && st0.settings.autoUpdateSubs && now - st0.settings.lastSubRefresh > 12 * 3600_000L) {
             progress.value = progress.value.copy(title = "Авто: загружаю первые серверы")
             notes += doRefresh(firstReady = { list -> quickTest(list, firstReady, attempted) })
@@ -1340,17 +1335,12 @@ object Actions {
         if (started.started) return "VPN подключается; подписки дозагружены в фоне"
         if (fresh().isEmpty() && Store.state.value.servers.isNotEmpty()) {
             notes += quickTest(Store.state.value.servers, firstReady, attempted)
-            if (started.started) return "Telegram и видео YouTube проверены — подключаюсь"
+            if (started.started) return "Передача HTTPS проверена — подключаюсь; сервисы показаны отдельно"
             val st = Store.state.value
             realTest(st.servers.filter { st.state(it).tcpMs > 0 && st.state(it).realMs < 0 && it.id !in attempted }.sortedBy { st.state(it).tcpMs }.take(ConnectPolicy.NEXT),
                 "Авто: запасные маршруты для Telegram и YouTube", big = false, youtube = true, attempts = 1, parallel = ServiceProbePolicy.PARALLEL, stopAfter = Int.MAX_VALUE, budgetMs = ServiceProbePolicy.SERVICE_MS, onFirst = firstReady)
             if (started.started) return "Запасной маршрут найден — подключаюсь"
             deepPending = true
-        }
-        if (fresh().isEmpty() && activeSearchReport?.resourceUnavailable() == true) {
-            val message = activeSearchReport!!.summary() + " Строгий Auto не подтверждён. Выберите сервер вручную или повторите позже."
-            Tunnel.status.value = Tunnel.Status(Tunnel.State.ERROR, "Контрольное видео недоступно", check = message)
-            return message
         }
         if (fresh().isEmpty()) {
             val st = Store.state.value
@@ -1366,7 +1356,7 @@ object Actions {
         // A mask found only by connectivity/ping still needs an isolated throughput comparison.
         val compared = if (working.isNotEmpty()) chooseCompared(working,null) else null
         if (working.isNotEmpty() && compared == null) {
-            val message = "Сервисы проверены, но пригодная скорость маршрута не подтверждена. " +
+            val message = "Пригодная скорость маршрута не подтверждена. " +
                 (activeSearchReport?.summary() ?: "") + " Повторите поиск или выберите сервер вручную."
             Tunnel.status.value = Tunnel.Status(Tunnel.State.ERROR, "Auto: замер скорости не завершён", check=message)
             return message
@@ -1433,7 +1423,7 @@ object Actions {
             youtube = false, attempts = 1, stopAfter = Int.MAX_VALUE, budgetMs = ConnectPolicy.QUICK_BUDGET_MS,onSuccess={ passed.add(it.id) })
         if (Net.key(app) != net || Net.underlying(app)?.toString() != network) return selectionNetworkChanged()
         if (ok > 0 && chooseCompared(additional.filter { it.id in passed },onFirst, eligible.filter { it.id !in attempted }) != null) {
-            deepPending = true; return "Telegram и видео YouTube проверены; облачные подсказки ${cloud.size}"
+            deepPending = true; return "Передача HTTPS проверена; облачные подсказки ${cloud.size}"
         }
         // Only if the first wave failed: bound DNS/TCP work to a small diverse wave, not thousands of subscriptions.
         val rest = foregroundDiscovery.window(eligible.filter { it.id !in attempted }, net)
@@ -1448,7 +1438,7 @@ object Actions {
         if (Net.key(app) != net || Net.underlying(app)?.toString() != network) return selectionNetworkChanged()
         val verified = if (second > 0) chooseCompared(candidates.filter { it.id in passed },onFirst, eligible.filter { it.id !in attempted }) else null
         if (verified != null) deepPending = true
-        return if (verified != null) "Telegram и видео YouTube подтверждены" else "Нет маршрута с подтверждением Telegram и видео YouTube; продолжаю поиск"
+        return if (verified != null) "Маршрут проверен передачей HTTPS; результаты сервисов отдельно" else "Нет маршрута с подтверждённой передачей данных; продолжаю поиск"
     }
 
     private fun expireUnreproducedSpeed(server: Server, net: String, at: Long) {
@@ -1477,7 +1467,7 @@ object Actions {
             if (!valid()) return null
             val snapshot=Store.state.value
             val live=working.filter { snapshot.state(it).works }
-            val acceptable = if (before.settings.mode == Mode.AUTO) AutoEligibility.servicePool(live,{snapshot.state(it)},net,System.currentTimeMillis()) else live
+            val acceptable = if (before.settings.mode == Mode.AUTO) AutoEligibility.connectionPool(live,{snapshot.state(it)},net,System.currentTimeMillis()) else live
             if (remaining() < AutoSelection.MIN_PROBE_MS) return acceptable.filter {
                 GameSession.active() || ServerChoice.measuredSpeed(snapshot.state(it),net,System.currentTimeMillis()) > 0
             }.minWithOrNull(ServerChoice.downloadOrder({ snapshot.state(it) },net,System.currentTimeMillis()))
@@ -1532,7 +1522,7 @@ object Actions {
         }
         kotlinx.coroutines.currentCoroutineContext().ensureActive()
         if (!valid()) { selectionNetworkChanged(); return null }
-        if (Store.state.value.settings.mode == Mode.AUTO && AutoEligibility.servicePool(listOf(winner),
+        if (Store.state.value.settings.mode == Mode.AUTO && AutoEligibility.connectionPool(listOf(winner),
                 { Store.state.value.state(it) },net,System.currentTimeMillis()).isEmpty()) return null
         if (onReady != null) {
             RouteInsight.record(RouteInsight.Stage.FINALIST,
@@ -1714,7 +1704,7 @@ object Actions {
             // the balancer spreads connections over all selected servers: one that cannot reach Telegram would break
             // every few Telegram connections («иногда не работает»), so such servers stay out while others exist
             // (only in «Авто»: in «Серверы» the user's own choice stays as it is)
-            val all = if (st.settings.mode == com.vlesscardvpn.model.Mode.AUTO) AutoEligibility.servicePool(works.filter(AutoEligibility::allowed),{st.state(it)},Net.key(app),System.currentTimeMillis()) else works
+            val all = if (st.settings.mode == com.vlesscardvpn.model.Mode.AUTO) AutoEligibility.connectionPool(works.filter(AutoEligibility::allowed),{st.state(it)},Net.key(app),System.currentTimeMillis()) else works
             val me = runCatching { Report.loadFrom(app); Report.phoneId(app) }.getOrDefault("")
             val gaming = GameSession.active()
             val netKey = Net.key(app)

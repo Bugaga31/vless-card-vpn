@@ -75,7 +75,12 @@ class AutoServiceBudgetRegressionTest {
                         input.readUnsignedShort()
                         out.write(byteArrayOf(5,0,0,1,127,0,0,1,0,1));out.flush()
                         connected.countDown()
-                        while(input.read() >= 0) { }
+                        // Cancellation may close a SOCKS/TLS peer with FIN or RST when its reply
+                        // has not yet been consumed. Both prove closure; a timeout still fails.
+                        try { while(input.read() >= 0) { } }
+                        catch (e: java.net.SocketException) {
+                            if (!e.message.orEmpty().contains("reset",ignoreCase=true)) throw e
+                        }
                         closed.countDown()
                     } }
                 }
@@ -86,7 +91,7 @@ class AutoServiceBudgetRegressionTest {
                 youtube=true,attempts=1,budgetMs=8000,onCall={ call -> bind { call.cancel() } }) }
         }
         try {
-            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { assertTrue(connected.await(3,TimeUnit.SECONDS)) }
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { assertTrue("three probe sockets never completed SOCKS handshake",connected.await(3,TimeUnit.SECONDS)) }
             task.cancel(); task.join()
             kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { assertTrue("probe sockets leaked",closed.await(2,TimeUnit.SECONDS)) }
         } finally {

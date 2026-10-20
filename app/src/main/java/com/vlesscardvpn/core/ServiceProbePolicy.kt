@@ -27,18 +27,19 @@ object ServiceProbePolicy {
         else "подтверждения пока нет"
     }
     fun describe(probe: Probe): String {
-        fun label(value: Boolean?, reasonCode: String) = when (value) { true -> "проверен"; false -> "не прошёл: ${reason(reasonCode)}"; null -> "не подтверждён: ${reason(reasonCode)}" }
+        fun label(value: Boolean?, reasonCode: String) = when (value) { true -> "проверен"; false -> "не прошёл: ${reason(reasonCode)}"; null -> "не подтверждён: не удалось проверить — ${reason(reasonCode)}" }
         return "Telegram MTProto: ${label(probe.tgOk,probe.tgReason)}. YouTube-медиа: ${label(probe.ytOk,probe.ytReason)}."
     }
     /** Parallel media transfers are not comparable throughput samples. */
     fun isolatedSpeed(probe: Probe, parallel: Int): Int = when {
         parallel != 1 -> 0
+        probe.httpsChecked -> probe.kbps.coerceAtLeast(0)
         probe.ytOk == true && probe.ytKbps > 0 -> probe.ytKbps
         else -> probe.kbps.coerceAtLeast(0)
     }
 }
 
-class ServiceProofException(val proof: Probe) : IllegalStateException(ServiceProbePolicy.describe(proof))
+class ServiceProofException(val proof: Probe) : IllegalStateException("HTTPS-ресурсы: ${proof.httpsHosts}/2. " + ServiceProbePolicy.describe(proof))
 
 /** Per-search diagnostics only, not proof of the current tunnel and never persisted or uploaded. */
 class AutoSearchReport {
@@ -72,5 +73,5 @@ internal class AutoSearchHandoff {
 /** Only handed directly from final-chain verification to its immediate health check; RAM, 30s maximum. */
 internal data class RecentServiceProof(val probe: Probe, val network: String, val handle: String?, val at: Long) {
     fun matches(network: String, handle: String?, now: Long): Boolean =
-        AutoEligibility.servicesWork(probe) && this.network == network && this.handle == handle && now - at in 0..30_000
+        (AutoEligibility.servicesWork(probe) || AutoEligibility.connectionWorks(probe)) && this.network == network && this.handle == handle && now - at in 0..30_000
 }

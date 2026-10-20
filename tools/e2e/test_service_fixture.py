@@ -30,11 +30,12 @@ class ServiceFixtureTest(unittest.TestCase):
             path = Path(d) / 'server.json'; path.write_text(json.dumps(original)); fixture.patch(path)
             patched = json.loads(path.read_text())
         self.assertEqual(original['inbounds'],patched['inbounds'])
-        self.assertEqual(original['routing']['rules'],patched['routing']['rules'][2:])
+        self.assertEqual(original['routing']['rules'],patched['routing']['rules'][3:])
         self.assertEqual(['full:fixture.googlevideo.com'],patched['routing']['rules'][0]['domain'])
+        self.assertEqual(['full:cachefly.cachefly.net','full:proof.ovh.net'],patched['routing']['rules'][2]['domain'])
         self.assertEqual('443',patched['routing']['rules'][1]['port'])
         self.assertEqual('tcp',patched['routing']['rules'][1]['network'])
-        for tag, port in [('qa-youtube',18444),('qa-youtube-media',18444),('qa-mtproto-fixture',18445)]:
+        for tag, port in [('qa-speed',18444),('qa-https-fixture',18444),('qa-youtube',18444),('qa-youtube-media',18444),('qa-mtproto-fixture',18445)]:
             settings = next(o['settings'] for o in patched['outbounds'] if o['tag'] == tag)
             self.assertEqual(f'127.0.0.1:{port}', settings['redirect'])
             self.assertEqual([{'action':'allow','network':'tcp','port':str(port),'ip':['127.0.0.1/32']}],settings['finalRules'])
@@ -51,6 +52,7 @@ class ServiceFixtureTest(unittest.TestCase):
         self.assertNotIn('networkSecurityConfig',(ROOT / 'vpn-test-probe/src/main/AndroidManifest.xml').read_text())
         self.assertNotIn('ssl.CERT_NONE',source)
         self.assertNotIn('check_hostname = False',source)
-        self.assertEqual(['www.youtube.com','fixture.googlevideo.com'],fixture.HOSTS)
+        self.assertEqual(['www.youtube.com','fixture.googlevideo.com'] + ['speed.cloudflare.com','cachefly.cachefly.net','proof.ovh.net'],fixture.HOSTS)
+        self.assertEqual(5,len(set(fixture.HOSTS)))
 
 if __name__ == '__main__': unittest.main()

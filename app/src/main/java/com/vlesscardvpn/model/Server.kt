@@ -104,6 +104,7 @@ data class ServerState(
     val speedNetwork: String = "", val speedMask: String = "", val speedCheckedAt: Long = 0,
     val serviceNetwork: String = "", val serviceMask: String = "", val serviceCheckedAt: Long = 0,
     val serviceYtOk: Boolean? = null, val serviceTgOk: Boolean? = null,
+    val httpsNetwork: String = "", val httpsMask: String = "", val httpsCheckedAt: Long = 0, val httpsHosts: Int = 0,
 ) {
     /**
      * Rank for «самый быстрый»: lower is better. Not ping alone — a server that answers in 60 ms but downloads at
@@ -121,6 +122,7 @@ data class ServerState(
     val works: Boolean get() = realMs > 0 && bigOk != false
     fun toJson(): JSONObject = JSONObject().apply {
         if (netEvidence.isNotEmpty()) put("netEvidence", JSONObject().apply { netEvidence.forEach { (k, v) -> put(k, v.toJson()) } })
+        if (httpsCheckedAt > 0) { put("httpsNetwork",httpsNetwork);put("httpsMask",httpsMask);put("httpsAt",httpsCheckedAt);put("httpsHosts",httpsHosts) }
         if (serviceCheckedAt > 0) { put("serviceNetwork",serviceNetwork);put("serviceMask",serviceMask);put("serviceAt",serviceCheckedAt) }
         serviceYtOk?.let { put("serviceYt",it) }; serviceTgOk?.let { put("serviceTg",it) }
         if (speedCheckedAt > 0) { put("speedNetwork",speedNetwork);put("speedMask",speedMask);put("speedAt",speedCheckedAt) }
@@ -137,6 +139,7 @@ data class ServerState(
             goodMasks = o.optJSONArray("good")?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: emptyList(),
             netMasks = o.optJSONObject("net")?.let { m -> m.keys().asSequence().associateWith { m.getString(it) } } ?: emptyMap(),
             tgOk = if (o.has("tg")) o.optBoolean("tg") else null, kbps = o.optInt("kbps"),
+            httpsNetwork = o.optString("httpsNetwork"), httpsMask = o.optString("httpsMask"), httpsCheckedAt = o.optLong("httpsAt"), httpsHosts = o.optInt("httpsHosts"),
             serviceNetwork = o.optString("serviceNetwork"), serviceMask = o.optString("serviceMask"), serviceCheckedAt = o.optLong("serviceAt"),
             serviceYtOk = if (o.has("serviceYt")) o.optBoolean("serviceYt") else null,
             serviceTgOk = if (o.has("serviceTg")) o.optBoolean("serviceTg") else null,
