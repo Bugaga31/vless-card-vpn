@@ -7,4 +7,8 @@ echo "$focus" | grep -q "mCurrentFocus=.*$PKG" || { echo 'UI capture refused: ap
 if echo "$focus" | grep -qiE 'Application (Error|Not Responding)|PermissionController|GrantPermissions'; then
   echo 'UI capture refused: dialog covers the app'; exit 1
 fi
-adb shell dumpsys activity activities | grep -qE "(mResumedActivity|topResumedActivity).*$PKG" || exit 1
+# Consume all adb output before matching: grep -q otherwise closes the pipe early under pipefail.
+activities=$(adb shell dumpsys activity activities | tr -d '\r')
+grep -qE "(mResumedActivity|topResumedActivity).*$PKG" <<< "$activities" || {
+  echo 'UI capture refused: app Activity is not resumed'; exit 1;
+}

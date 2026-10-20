@@ -12,9 +12,9 @@ class AutoPoolRecoveryR140Test {
     private val now=500000L
     private fun server(n:String,source:String="")=Server(n,"vless","$n.invalid",443,"00000000-0000-0000-0000-000000000001",source=source)
     private fun sample(kbps:Int=10000,ms:Int=100)=ServerState(realMs=ms,bigOk=true,kbps=kbps,speedNetwork="wifi",speedMask="",speedCheckedAt=now)
-    @Test fun oneServiceProvenNodeCannotCollapseEightHttpsWorkingRoutes() {
+    @Test fun onlyServiceProvenRoutesEnterSharedPoolWhenAvailable() {
         val states=(0..7).map { sample(10000+it*1000).let { s -> if(it==0) s.copy(ytOk=true,tgOk=true,serviceYtOk=true,serviceTgOk=true,serviceNetwork="wifi",serviceCheckedAt=now) else s } }
-        assertEquals(8,AutoEligibility.servicePool(states,{it},"wifi",now).size)
+        assertEquals(listOf(states.first()),AutoEligibility.servicePool(states,{it},"wifi",now))
         assertEquals(8,AutoEligibility.TOP)
     }
     @Test fun onlyKnownCurrentServiceFailuresAreExcluded() {
@@ -23,10 +23,10 @@ class AutoPoolRecoveryR140Test {
         assertEquals(listOf(good,bad),AutoEligibility.servicePool(listOf(good,bad),{it},"cell",now))
         assertEquals(listOf(bad),AutoEligibility.servicePool(listOf(bad),{it},"wifi",now))
     }
-    @Test fun fasterUnknownServiceCandidateBeatsSlowProvenButNeverKnownFailure() {
+    @Test fun serviceProofBeatsFasterUnknownOrFailedCandidate() {
         val slow=sample(1000,10).copy(ytOk=true,tgOk=true,serviceYtOk=true,serviceTgOk=true,serviceNetwork="wifi",serviceCheckedAt=now)
         val fast=sample(30000,700)
-        assertTrue(ServerChoice.compareDownload(fast,slow,"wifi",now)<0)
+        assertTrue(ServerChoice.compareDownload(slow,fast,"wifi",now)<0)
         assertTrue(ServerChoice.compareDownload(slow,fast.copy(ytOk=false,serviceYtOk=false,serviceNetwork="wifi",serviceCheckedAt=now),"wifi",now)<0)
     }
     @Test fun speedWeightedBalancerDoesNotLetTinyPingStealAllTraffic() {

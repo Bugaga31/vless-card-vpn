@@ -10,7 +10,7 @@ object AutoEligibility {
     const val TOP = 8
     /** Every returned route is handed to Xray's multi-outbound pool, not held as a hidden spare. */
     fun connectedPool(servers: List<Server>, state: (Server) -> ServerState, net: String, now: Long, gaming: Boolean): List<Server> =
-        servers.distinctBy { it.id }.filter { allowed(it) && state(it).works }.let { routes ->
+        servicePool(servers.distinctBy { it.id }.filter { allowed(it) && state(it).works },state,net,now).let { routes ->
             if (gaming) routes.sortedBy { ServerChoice.latencyScore(state(it).evidenceFor(net),state(it).realMs) }
             else routes.sortedWith(ServerChoice.downloadOrder(state,net,now))
         }.let(::independent).take(TOP)
@@ -33,8 +33,11 @@ object AutoEligibility {
         return if (s.serviceYtOk == true && s.serviceTgOk == true) 0 else 1
     }
     fun <T> servicePool(list: List<T>, state: (T) -> ServerState, net: String, now: Long): List<T> {
-        // Unknown is not failed. One fully tested route must not discard seven HTTPS-working routes.
-        // Explicit current-network failures stay out when any non-failed option exists.
+        // A shared balancer sends real Telegram/video connections to EVERY member.
+        // Never dilute a proven pool with generic-HTTPS-only or failed routes just to reach eight.
+        val proven = list.filter { serviceRank(state(it),net,now) == 0 }
+        if (proven.isNotEmpty()) return proven
+        // Unknown remains a provisional recovery option, not proof that these services work.
         return list.filter { serviceRank(state(it),net,now) != 2 }.ifEmpty { list }
     }
 }
