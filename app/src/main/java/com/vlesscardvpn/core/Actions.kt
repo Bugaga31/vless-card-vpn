@@ -423,8 +423,8 @@ object Actions {
                 if (youtube) ServiceRoutes.targets.filter(ServiceRoutes::native).forEach { target ->
                     ServiceRoutes.measurement(target,p)?.let { serviceResults.getValue(target.id)[s.id] = it }
                 }
-                if (com.vlesscardvpn.BuildConfig.DEBUG && youtube) android.util.Log.i("E2E",
-                    "service-probe https=${p.works} yt=${p.ytOk} media=${p.ytReason} tg=${p.tgOk}")
+                if (com.vlesscardvpn.BuildConfig.DEBUG && (youtube || big)) android.util.Log.i("E2E",
+                    "service-probe https=${p.works} yt=${p.ytOk} media=${p.ytReason} tg=${p.tgOk} httpsHosts=${p.httpsHosts} kbps=${p.kbps} isolated=${parallel == 1}")
                 if (youtube) activeSearchReport?.record(s.id + "|" + st.state(s).maskFor(net), p)
                 val measuredKbps = ServiceProbePolicy.isolatedSpeed(p, parallel)
                 val speedSample = ServerChoice.acceptsSpeedSample(measuredKbps, parallel)
@@ -1473,7 +1473,8 @@ object Actions {
             return AutoSelection.compare(acceptable, { Store.state.value.state(it) }, net,
                 now = { System.currentTimeMillis() }, elapsed = { android.os.SystemClock.elapsedRealtime() },
                 validNetwork = { valid() },
-                allowDownload = { allowed() && remaining() >= AutoSelection.MIN_PROBE_MS }, gaming = GameSession.active(),
+                allowDownload = { !GameSession.active() && PowerPolicy.foregroundTransferAllowed(
+                    PhonePower.refresh(app),hasLiveTunnel = Tunnel.socks != null) && remaining() >= AutoSelection.MIN_PROBE_MS }, gaming = GameSession.active(),
                 hint = { maxOf(CloudControl.speed(it),CloudSpeed.speedOf(Report.serverKey(it))) },
                 onInconclusive = { server, at -> expireUnreproducedSpeed(server,net,at) }) { server, budget ->
                 val bounded = minOf(budget,remaining())
