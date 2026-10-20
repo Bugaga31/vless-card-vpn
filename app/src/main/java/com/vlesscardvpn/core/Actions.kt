@@ -943,7 +943,7 @@ object Actions {
         val rankNow = System.currentTimeMillis()
         val automatic = now.settings.mode == Mode.AUTO
         fun admitted(server: Server) = now.state(server).works &&
-            (!automatic || AutoEligibility.serviceRank(now.state(server), sampleNet, rankNow) == 0)
+            (!automatic || AutoEligibility.connectionPool(listOf(server),{now.state(it)},sampleNet,rankNow).isNotEmpty())
         val selOk = sel.filter(::admitted)
         val best = automaticOrder(now, cand.filter(::admitted))
         if (best.isEmpty()) {
@@ -1413,9 +1413,8 @@ object Actions {
         if (Net.key(app) != net || Net.underlying(app)?.toString() != network) return selectionNetworkChanged()
         if (fastOk > 0 && chooseCompared(shortlist.filter { it.id in passed },onFirst,
                 eligible.filter { s -> shortlist.none { it.id == s.id } }) != null) {
-            deepPending = true; return "Telegram и видео YouTube работают; выбран быстрый проверенный маршрут"
+            deepPending = true; return "Передача HTTPS проверена; выбран маршрут с измеренной скоростью. Сервисы — отдельно"
         }
-        if (activeSearchReport?.resourceUnavailable() == true) return activeSearchReport!!.summary()
         attempted.addAll(shortlist.map { it.id });passed.clear()
         val additional = ordered.filter { it.id !in attempted }
         attempted.addAll(additional.map { it.id })
@@ -1584,7 +1583,7 @@ object Actions {
         try { realTest(candidates,"Фон: запасной маршрут для Telegram и YouTube",big=false,youtube=true,attempts=1,
             parallel=ServiceProbePolicy.PARALLEL,budgetMs=ServiceProbePolicy.SERVICE_MS)
             val current=Store.state.value
-            found=candidates.filter { current.state(it).works && AutoEligibility.serviceRank(current.state(it),net,System.currentTimeMillis())==0 }
+            found=AutoEligibility.connectionPool(candidates,{current.state(it)},net,System.currentTimeMillis())
                 .minWithOrNull(ServerChoice.downloadOrder({current.state(it)},net,System.currentTimeMillis()))
         }
         finally { progress.value=previous }

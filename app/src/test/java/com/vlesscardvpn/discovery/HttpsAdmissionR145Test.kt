@@ -36,6 +36,15 @@ class HttpsAdmissionR145Test {
         val result=HttpsTransferProbe.check(urls) { response(it,if(it.url.host=="a.invalid")503 else 200) }
         assertTrue(result.passed);assertEquals(2,result.hosts)
     }
+    @Test fun unavailableControlTimeDoesNotCorruptMeasuredSuccessfulTransferRate() {
+        var clock=0L
+        val result=HttpsTransferProbe.check(urls,now={clock}) {
+            clock += if(it.url.host=="a.invalid") 1500000000L else 100000000L
+            response(it,if(it.url.host=="a.invalid")503 else 200)
+        }
+        assertTrue(result.passed);assertEquals(1700L,result.elapsedMs)
+        assertEquals(5242,result.kbps) // 2 x 64 KiB / 200 ms, not failed-control waiting
+    }
     @Test fun html204AndShortTransferAreNotSuccessfulDataProof() {
         val result=HttpsTransferProbe.check(urls) { when(it.url.host) {
             "a.invalid" -> response(it,204,size=0)
