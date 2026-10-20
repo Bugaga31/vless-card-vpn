@@ -27,15 +27,16 @@ def prepare(work):
     subprocess.run(['ffmpeg', '-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i',
         'testsrc2=size=320x180:rate=24', '-t', '4', '-c:v', 'mpeg4', '-q:v', '2', str(work / 'video.mp4')], check=True)
     assert (work / 'video.mp4').stat().st_size >= 131072
-    debug = ROOT / 'app/src/debug'
-    (debug / 'res/raw').mkdir(parents=True, exist_ok=True)
-    (debug / 'res/xml').mkdir(parents=True, exist_ok=True)
-    shutil.copyfile(work / 'cert.pem', debug / 'res/raw/e2e_service_ca.pem')
-    (debug / 'res/xml/e2e_service_security.xml').write_text('''<?xml version="1.0" encoding="utf-8"?>
-<network-security-config><base-config cleartextTrafficPermitted="false"><trust-anchors><certificates src="system" /></trust-anchors></base-config>
-<domain-config cleartextTrafficPermitted="false"><domain includeSubdomains="false">www.youtube.com</domain><domain includeSubdomains="false">fixture.googlevideo.com</domain>
-<trust-anchors><certificates src="@raw/e2e_service_ca" /><certificates src="system" /></trust-anchors></domain-config></network-security-config>''')
-    (debug / 'AndroidManifest.xml').write_text('''<manifest xmlns:android="http://schemas.android.com/apk/res/android"><application android:networkSecurityConfig="@xml/e2e_service_security" /></manifest>''')
+    for module in ("app", "vpn-test-probe"):
+        debug = ROOT / module / 'src/debug'
+        (debug / 'res/raw').mkdir(parents=True, exist_ok=True)
+        (debug / 'res/xml').mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(work / 'cert.pem', debug / 'res/raw/e2e_service_ca.pem')
+        (debug / 'res/xml/e2e_service_security.xml').write_text('''<?xml version="1.0" encoding="utf-8"?>
+    <network-security-config><base-config cleartextTrafficPermitted="false"><trust-anchors><certificates src="system" /></trust-anchors></base-config>
+    <domain-config cleartextTrafficPermitted="false"><domain includeSubdomains="false">www.youtube.com</domain><domain includeSubdomains="false">fixture.googlevideo.com</domain>
+    <trust-anchors><certificates src="@raw/e2e_service_ca" /><certificates src="system" /></trust-anchors></domain-config></network-security-config>''')
+        (debug / 'AndroidManifest.xml').write_text('''<manifest xmlns:android="http://schemas.android.com/apk/res/android"><application android:networkSecurityConfig="@xml/e2e_service_security" /></manifest>''')
 
 def patch(path):
     config = json.loads(path.read_text())

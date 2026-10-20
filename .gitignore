@@ -47,3 +47,6 @@ test-output/
 app/src/debug/AndroidManifest.xml
 app/src/debug/res/raw/e2e_service_ca.pem
 app/src/debug/res/xml/e2e_service_security.xml
+vpn-test-probe/src/debug/AndroidManifest.xml
+vpn-test-probe/src/debug/res/raw/e2e_service_ca.pem
+vpn-test-probe/src/debug/res/xml/e2e_service_security.xml
