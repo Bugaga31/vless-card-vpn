@@ -36,7 +36,18 @@ for scale in 1.0 1.3 2.0; do
   sleep 3
   bash tools/assert-vibe-foreground.sh
   adb shell uiautomator dump /sdcard/window.xml >/dev/null
-  grep -q 'Готовы к подключению' <<< "$(adb shell cat /sdcard/window.xml)" || { echo 'Intro did not return to the home screen'; exit 1; }
+  # At large font the same home status may be below the fold; assert reachability.
+  home_found=0
+  for attempt in 1 2 3 4 5 6; do
+    adb shell uiautomator dump /sdcard/window.xml >/dev/null
+    adb shell cat /sdcard/window.xml > "ui-intro-home-$scale.xml"
+    if python3 tools/ui-layout-check.py home "ui-intro-home-$scale.xml"; then home_found=1; break; fi
+    points=$(python3 tools/ui-layout-check.py scroll "ui-intro-home-$scale.xml")
+    read -r x1 y1 x2 y2 <<< "$points"
+    adb shell input swipe "$x1" "$y1" "$x2" "$y2" 400
+    sleep 1
+  done
+  test "$home_found" = 1 || { echo 'Intro did not return to reachable home content'; exit 1; }
 done
 
 adb shell am start -a android.settings.SETTINGS >/dev/null

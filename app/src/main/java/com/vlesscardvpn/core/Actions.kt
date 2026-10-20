@@ -452,7 +452,7 @@ object Actions {
             }
         } finally {
             own?.close(); states.flush(); runCatching { Brain.save(app) }
-            if (youtube && Net.key(app) == net && Net.underlying(app)?.toString() == underlying) {
+            if (youtube && validContext() && Net.key(app) == net && Net.underlying(app)?.toString() == underlying) {
                 val current = Store.state.value
                 serviceResults.forEach { (id, results) ->
                     val valid = results.entries.filter { (serverId, _) ->
