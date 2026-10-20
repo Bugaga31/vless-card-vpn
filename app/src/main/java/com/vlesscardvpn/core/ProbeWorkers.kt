@@ -3,7 +3,7 @@ package com.vlesscardvpn.core
 import java.util.concurrent.*
 
 /** Same 12-worker ceiling as before, but slow downloads/player HTML cannot starve MTProto. */
-internal class ProbeWorkerSet(workers: Int = 4, capacity: Int = 64) : AutoCloseable {
+internal class ProbeWorkerSet(private val workers: Int = 4, private val capacity: Int = 64) : AutoCloseable {
     private fun executor(label: String) = ThreadPoolExecutor(workers,workers,0,TimeUnit.MILLISECONDS,
         ArrayBlockingQueue<Runnable>(capacity), { r -> Thread(r,"probe-$label").apply { isDaemon = true } },ThreadPoolExecutor.AbortPolicy())
     private val telegram = executor("telegram")

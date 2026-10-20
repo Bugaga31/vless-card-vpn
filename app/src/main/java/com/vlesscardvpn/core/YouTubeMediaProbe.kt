@@ -94,7 +94,7 @@ object YouTubeMediaProbe {
         }
     } catch (error: Exception) {
         if (com.vlesscardvpn.BuildConfig.DEBUG) runCatching { android.util.Log.i("E2E",
-            "media-player failure=" + generateSequence(error) { it.cause }.take(4).joinToString("/") { it.javaClass.simpleName }) }
+            "media-player failure=" + generateSequence<Throwable>(error) { it.cause }.take(4).joinToString("/") { it.javaClass.simpleName }) }
         Discovery(reason=if (Thread.currentThread().isInterrupted) "cancelled" else "player-transport")
     }
 
