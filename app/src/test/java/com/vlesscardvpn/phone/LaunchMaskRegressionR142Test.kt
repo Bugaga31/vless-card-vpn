@@ -7,25 +7,29 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class LaunchMaskRegressionR142Test {
-    @Test fun everyForegroundVisitShowsIntroAgain() {
+    @Test fun onlyColdLaunchShowsIntroAndWarmReturnDoesNotRearmIt() {
         val c = LaunchCycle(); val first = c.enter(true)
         assertTrue(first.visible); c.dismiss(first.serial)
-        assertFalse(c.enter(true).visible) // recomposition / repeated start is not another visit
         c.leave(false)
-        val second = c.enter(true)
-        assertTrue(second.visible); assertTrue(second.serial > first.serial)
-        c.dismiss(first.serial) // an old timer cannot dismiss the new visit
-        assertTrue(c.frame.visible)
+        assertEquals(first.serial, c.enter(true).serial)
+        assertFalse(c.frame.visible)
+        c.dismiss(first.serial - 1)
+        assertFalse(c.frame.visible)
+    }
+    @Test fun leavingDuringIntroDoesNotResumeItOverSystemDialogs() {
+        val c = LaunchCycle(); c.enter(true); c.leave(false)
+        assertFalse(c.enter(true).visible)
     }
     @Test fun rotationDoesNotReplayDismissedIntro() {
         val c = LaunchCycle(); c.dismiss(c.enter(true).serial)
         c.leave(true); assertFalse(c.enter(true).visible)
     }
-    @Test fun settingOffIsRespectedAndCanBeReenabled() {
+    @Test fun settingOffStaysOffUntilNextColdProcessLaunch() {
         val c = LaunchCycle(); assertFalse(c.enter(false).visible)
-        c.leave(false); assertTrue(c.enter(true).visible)
+        c.leave(false); assertFalse(c.enter(true).visible)
+        assertTrue(LaunchCycle().enter(true).visible)
     }
-    @Test fun newActivityCycleIsNotOncePerInstall() {
+    @Test fun independentColdProcessesAreNotOncePerInstall() {
         assertTrue(LaunchCycle().enter(true).visible)
         assertTrue(LaunchCycle().enter(true).visible)
     }

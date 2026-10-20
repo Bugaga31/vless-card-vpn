@@ -6,6 +6,11 @@ set -uo pipefail
 PKG=com.vlesscardvpn; PROBE=com.vlesscardvpn.netprobe
 W=/tmp/e2e; mkdir -p $W; FAILS=0
 XRAY=${XRAY:-/tmp/xray/xray}
+save_case() {
+  adb logcat -d -s E2E:I XrayCore:W '*:S' > "$W/case-$1.log" 2>&1
+  adb shell uiautomator dump /sdcard/e2e-window.xml >/dev/null 2>&1
+  adb shell cat /sdcard/e2e-window.xml > "$W/case-$1.xml" 2>&1
+}
 fail() { echo "::error title=e2e::$*"; echo "FAIL: $*"; FAILS=$((FAILS+1)); }
 
 # ---- servers on the host (emulator sees the host as 10.0.2.2)
@@ -13,8 +18,14 @@ KEYS=$($XRAY x25519); PRIV=$(echo "$KEYS" | sed -n 's/^PrivateKey: //p'); PBK=$(
 openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -keyout $W/k.pem -out $W/c.pem -days 2 -subj "/CN=test.local" 2>/dev/null
 U=a00975c5-597e-4c22-a7a7-a84ce5e0691e
 sed -e "s#@PRIV@#$PRIV#g" -e "s#@U@#$U#g" -e "s#@W@#$W#g" tools/e2e/server.json > $W/server.json
+FIXTURE_PID=
+if [ -n "${E2E_SERVICE_FIXTURE:-}" ]; then
+  python3 tools/e2e/service_fixture.py patch "$W/server.json"
+  python3 tools/e2e/service_fixture.py serve "$E2E_SERVICE_FIXTURE" > "$W/service-fixture.log" 2>&1 & FIXTURE_PID=$!
+  echo 'E2E uses an isolated protocol/media fixture, not live Telegram/YouTube availability'
+fi
 $XRAY run -c $W/server.json > $W/server.log 2>&1 & SRV=$!
-trap 'kill $SRV 2>/dev/null' EXIT
+trap 'kill $SRV ${FIXTURE_PID:-} 2>/dev/null || true' EXIT
 sleep 2
 python3 tools/e2e/make_state.py $W "$PBK"
 
@@ -49,12 +60,13 @@ run_case() { # $1 name, $2 state, $3 seconds to wait for the connect result
   adb shell am start -n $PKG/.MainActivity --ez e2e_disconnect true >/dev/null; sleep 3; : > $W/access.log
   load $2; adb logcat -c
   adb shell am start -n $PKG/.MainActivity --ez e2e_connect true >/dev/null
-  C=$(waitlog "check ok=|connect failed" ${3:-60}) || { fail "$1: no connect result"; return; }
+  C=$(waitlog "check ok=|connect failed" ${3:-60}) || { fail "$1: no connect result"; save_case "$1"; return; }
   echo "app: $C"
   echo "$C" | grep -q "check ok=true" || fail "$1: in-app check through 127.0.0.1:10808 failed"
   R=$(probe $1); okprobe "$R" || fail "$1: probe app traffic through VPN failed"
   S=$(adb logcat -d -s E2E:I | grep "socks port=" | tail -1); echo "app: $S"
   echo "$S" | grep -q "auth=true" || fail "$1: local SOCKS is not password-protected (stealth)"
+  save_case "$1"
   adb shell cat /proc/net/tcp /proc/net/tcp6 | awk '$4=="0A"{print $2}' | grep -qi ":2A38$" && fail "$1: something listens on 10808 (proxy must be hidden)"
 }
 

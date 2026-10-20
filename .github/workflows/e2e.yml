@@ -41,6 +41,11 @@ jobs:
           key: native-${{ runner.os }}-${{ runner.arch }}-ndk27.2.12479018-api24-all-${{ hashFiles('native/**', 'app/build.gradle.kts') }}
       - name: Install pinned NDK
         run: sdkmanager 'ndk;27.2.12479018'
+      - name: Prepare isolated MTProto/media fixture (debug APK only; no public-service claim)
+        run: |
+          command -v ffmpeg >/dev/null || (sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg)
+          python3 tools/e2e/test_service_fixture.py
+          python3 tools/e2e/service_fixture.py prepare /tmp/e2e-service
       - name: Build (all ABIs, debug) + JVM tests
         run: |
           chmod +x gradlew
@@ -61,7 +66,7 @@ jobs:
           arch: x86_64
           disable-animations: true
           emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
-          script: bash tools/e2e-android.sh
+          script: E2E_SERVICE_FIXTURE=/tmp/e2e-service bash tools/e2e-android.sh
       - if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -70,6 +75,8 @@ jobs:
             /tmp/e2e/logcat.txt
             /tmp/e2e/server.log
             /tmp/e2e/access.log
+            /tmp/e2e/case-*.log
+            /tmp/e2e/case-*.xml
           if-no-files-found: ignore
   masks-matrix:
     runs-on: ubuntu-latest

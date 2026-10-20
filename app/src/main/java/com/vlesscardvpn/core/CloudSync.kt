@@ -91,7 +91,7 @@ object CloudSync {
                 }
                 coroutineContext.ensureActive(); check(g == generation)
                 lastHash = text.hashCode()
-                State("Сохранено в облако: маски, обход DPI, результаты, мини-нейросеть (" + java.text.SimpleDateFormat("HH:mm", java.util.Locale.US).format(java.util.Date()) + ")")
+                State("Сохранено в облако: маски, обход DPI, результаты, локальная модель (" + java.text.SimpleDateFormat("HH:mm", java.util.Locale.US).format(java.util.Date()) + ")")
             }.getOrElse { State("Не сохранилось: ${Errors.human(it)}") }
             if (g == generation) state.value = result
         }

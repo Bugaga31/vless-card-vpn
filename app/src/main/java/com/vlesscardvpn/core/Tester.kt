@@ -23,7 +23,7 @@ import java.net.ServerSocket
 import java.net.Socket
 import java.util.concurrent.TimeUnit
 
-data class Probe(val realMs: Int, val bigOk: Boolean?, val ytOk: Boolean?, val error: String = "", val tgOk: Boolean? = null, val kbps: Int = 0, val ytKbps: Int = 0) {
+data class Probe(val realMs: Int, val bigOk: Boolean?, val ytOk: Boolean?, val error: String = "", val tgOk: Boolean? = null, val kbps: Int = 0, val ytKbps: Int = 0, val ytReason: String = "") {
     val works: Boolean get() = realMs > 0 && bigOk != false
 }
 
@@ -175,7 +175,7 @@ object Tester {
             val bigResult = ProbeTasks.await(bigF, remaining(), false to 0)
             val ytResult = ProbeTasks.await(ytF, remaining(), YouTubeMediaProbe.Result(null))
             val tgOk = if (tgF != null) ProbeTasks.await(tgF, remaining(), null) else null
-            return Probe(best.toInt().coerceAtLeast(1), if (bigF != null) bigResult.first else null, ytResult.ok, tgOk = tgOk, kbps = bigResult.second, ytKbps = ytResult.kbps)
+            return Probe(best.toInt().coerceAtLeast(1), if (bigF != null) bigResult.first else null, ytResult.ok, tgOk = tgOk, kbps = bigResult.second, ytKbps = ytResult.kbps, ytReason = ytResult.reason)
         } finally {
             ProbeTasks.cancel(tasks)
             // Private dispatcher/pool: cancellation cannot cancel another probe or the live VPN's HTTP calls.

@@ -17,10 +17,10 @@ import com.vlesscardvpn.ui.AppUi
 import com.vlesscardvpn.vpn.TunnelService
 
 class LaunchPresentation : androidx.lifecycle.ViewModel() {
-    private val cycle = com.vlesscardvpn.core.LaunchCycle()
+    companion object { private val cycle = com.vlesscardvpn.core.LaunchCycle() }
     val frame = kotlinx.coroutines.flow.MutableStateFlow(cycle.frame)
     fun enter(enabled: Boolean) { frame.value = cycle.enter(enabled) }
-    fun leave(changingConfiguration: Boolean) = cycle.leave(changingConfiguration)
+    fun leave(changingConfiguration: Boolean) { cycle.leave(changingConfiguration); frame.value = cycle.frame }
     fun dismiss(serial: Long) { frame.value = cycle.dismiss(serial) }
 }
 
