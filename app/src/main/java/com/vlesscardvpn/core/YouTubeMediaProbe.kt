@@ -58,27 +58,45 @@ object YouTubeMediaProbe {
         null
     }.getOrNull()
 
-    fun discover(call: (Request) -> Call): String? = runCatching {
+    data class Discovery(val url: String? = null, val reason: String = "player-incomplete")
+
+    internal fun playerResource(html: String): Discovery = runCatching {
+        val root = JSONObject(playerJson(html) ?: return Discovery())
+        when (root.optJSONObject("playabilityStatus")?.optString("status")) {
+            "LOGIN_REQUIRED" -> Discovery(reason="player-login-required")
+            "OK" -> mediaUrl(html)?.let { Discovery(it,"player-url") } ?: Discovery(reason="player-no-direct-media")
+            else -> Discovery(reason="player-unplayable")
+        }
+    }.getOrDefault(Discovery())
+
+    fun discover(call: (Request) -> Call): String? = discoverResult(call).url
+
+    fun discoverResult(call: (Request) -> Call): Discovery = try {
         call(Request.Builder().url(WATCH).header("User-Agent", "Mozilla/5.0").build()).execute().use { r ->
-            if (com.vlesscardvpn.BuildConfig.DEBUG) runCatching { android.util.Log.i("E2E", "media-player status=${r.code} html=${r.header("Content-Type").orEmpty().startsWith("text/html", true)}") }
-            if (r.code != 200 || !r.header("Content-Type").orEmpty().startsWith("text/html", true)) return null
-            val input = r.body?.byteStream() ?: return null
+            if (r.code != 200) return Discovery(reason="player-http-${r.code}")
+            if (!r.header("Content-Type").orEmpty().startsWith("text/html",true)) return Discovery(reason="player-unavailable")
+            val input = r.body?.byteStream() ?: return Discovery(reason="player-unavailable")
             val out = java.io.ByteArrayOutputStream(); val buf = ByteArray(8192)
             while (out.size() < 1048576) {
-                if (Thread.currentThread().isInterrupted) return null
-                val n = input.read(buf, 0, minOf(buf.size, 1048576 - out.size()))
+                if (Thread.currentThread().isInterrupted) return Discovery(reason="cancelled")
+                val n = input.read(buf,0,minOf(buf.size,1048576-out.size()))
                 if (n < 0) break
-                out.write(buf, 0, n)
-                // Do not fetch an entire multi-megabyte watch page once usable player data arrived.
-                if (out.size() % 32768 < 8192) mediaUrl(out.toString("UTF-8"))?.let { return it }
+                out.write(buf,0,n)
+                if (out.size() % 32768 < 8192) {
+                    val result = playerResource(out.toString("UTF-8"))
+                    // A complete challenge/unsupported player is terminal for this resource, not a dead server.
+                    if (result.reason != "player-incomplete") return result
+                }
             }
-            mediaUrl(out.toString("UTF-8"))
+            playerResource(out.toString("UTF-8")).let {
+                if (it.reason == "player-incomplete") Discovery(reason="player-unavailable") else it
+            }
         }
-    }.onFailure { error ->
-        // Class names only: exception messages may contain private URLs or response data.
+    } catch (error: Exception) {
         if (com.vlesscardvpn.BuildConfig.DEBUG) runCatching { android.util.Log.i("E2E",
             "media-player failure=" + generateSequence(error) { it.cause }.take(4).joinToString("/") { it.javaClass.simpleName }) }
-    }.getOrNull()
+        Discovery(reason=if (Thread.currentThread().isInterrupted) "cancelled" else "player-transport")
+    }
 
     /** Caller disables redirects and bounds the call by the shared probe deadline. */
     fun measure(url: String, call: (Request) -> Call): Result {
@@ -105,5 +123,8 @@ object YouTubeMediaProbe {
         } catch (_: Exception) { Result(if (Thread.currentThread().isInterrupted) null else false, reason = if (Thread.currentThread().isInterrupted) "cancelled" else "media-transport") }
     }
 
-    fun check(call: (Request) -> Call): Result = discover(call)?.let { measure(it, call) } ?: Result(null, reason = "player-unavailable")
+    fun check(call: (Request) -> Call): Result {
+        val resource = discoverResult(call)
+        return resource.url?.let { measure(it,call) } ?: Result(null,reason=resource.reason)
+    }
 }

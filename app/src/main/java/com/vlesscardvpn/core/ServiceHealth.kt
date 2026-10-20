@@ -4,7 +4,7 @@ package com.vlesscardvpn.core
 object ServiceHealth {
     enum class Verdict { PASS, FAIL, UNKNOWN, STALE, CHECKING }
     data class Snapshot(val checkedAt: Long = 0, val youtube: Boolean? = null, val telegram: Boolean? = null,
-                        val checking: Boolean = false, val budgetMs: Long = 0, val youtubeReason: String = "")
+                        val checking: Boolean = false, val budgetMs: Long = 0, val youtubeReason: String = "", val telegramReason: String = "")
     enum class EventKind { SEARCH, CHECK, UNKNOWN, FAILURE, CONNECTED, NETWORK_CHANGE }
     data class Event(val at: Long, val kind: EventKind)
     val history = kotlinx.coroutines.flow.MutableStateFlow<List<Event>>(emptyList())
@@ -23,7 +23,7 @@ object ServiceHealth {
     }
     fun begin(budgetMs: Long) { event(EventKind.CHECK); state.value = Snapshot(checking = true, budgetMs = budgetMs) }
     fun finish(probe: Probe, now: Long, budgetMs: Long) {
-        state.value = Snapshot(now, probe.ytOk, probe.tgOk, budgetMs = budgetMs, youtubeReason = probe.ytReason)
+        state.value = Snapshot(now, probe.ytOk, probe.tgOk, budgetMs = budgetMs, youtubeReason = probe.ytReason, telegramReason = probe.tgReason)
         if (probe.ytOk == false || probe.tgOk == false) event(EventKind.FAILURE, now)
         else if (probe.ytOk == null || probe.tgOk == null) event(EventKind.UNKNOWN, now)
     }

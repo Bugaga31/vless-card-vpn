@@ -71,6 +71,10 @@ fun ConnectionOverview(status: Tunnel.Status, summary: Store.Summary, cloud: Str
             }, color = scheme.onSurfaceVariant, fontSize = 16.sp)
             Text("Telegram MTProto: ${serviceLabel(health.telegram)}", fontSize = 14.sp)
             Text("YouTube-медиа: ${serviceLabel(health.youtube)}", fontSize = 14.sp)
+            if (!health.checking && health.checkedAt > 0 && health.telegram != true)
+                Text(com.vlesscardvpn.core.ServiceProbePolicy.reason(health.telegramReason), color = scheme.onSurfaceVariant, fontSize = 12.sp)
+            if (!health.checking && health.checkedAt > 0 && health.youtube != true)
+                Text(com.vlesscardvpn.core.ServiceProbePolicy.reason(health.youtubeReason), color = scheme.onSurfaceVariant, fontSize = 12.sp)
             Text("Проверка транспорта без аккаунта; не проверяет сообщения и звонки. Медиа: до 128 КиБ, бюджет ${health.budgetMs / 1000} с." +
                 if (health.checkedAt > 0) " Проверено ${(now - health.checkedAt).coerceAtLeast(0) / 1000} с назад." else " Результата ещё нет.",
                 color = scheme.onSurfaceVariant, fontSize = 12.sp)

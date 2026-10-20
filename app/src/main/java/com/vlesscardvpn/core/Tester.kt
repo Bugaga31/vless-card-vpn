@@ -23,7 +23,7 @@ import java.net.ServerSocket
 import java.net.Socket
 import java.util.concurrent.TimeUnit
 
-data class Probe(val realMs: Int, val bigOk: Boolean?, val ytOk: Boolean?, val error: String = "", val tgOk: Boolean? = null, val kbps: Int = 0, val ytKbps: Int = 0, val ytReason: String = "") {
+data class Probe(val realMs: Int, val bigOk: Boolean?, val ytOk: Boolean?, val error: String = "", val tgOk: Boolean? = null, val kbps: Int = 0, val ytKbps: Int = 0, val ytReason: String = "", val tgReason: String = "") {
     val works: Boolean get() = realMs > 0 && bigOk != false
 }
 
@@ -149,6 +149,18 @@ object Tester {
             .proxy(Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", port))).build()
         val mediaClient = client.newBuilder().followRedirects(false).followSslRedirects(false).build()
         val tasks = mutableListOf<java.util.concurrent.Future<*>>()
+        val closed = java.util.concurrent.atomic.AtomicBoolean()
+        val sockets = java.util.concurrent.ConcurrentLinkedQueue<Socket>()
+        // Start independent service checks BEFORE the generic HTTPS check consumes its budget.
+        val tgF = if (youtube) workers.telegram(TelegramProbe.Result(null,"worker-busy")) {
+            TelegramProbe.checkResult(port, if (budgetMs > 0) budgetMs else ServiceProbePolicy.TELEGRAM_MS) { socket ->
+                sockets += socket
+                if (closed.get()) runCatching { socket.close() }
+            }
+        }.also { tasks += it } else null
+        val ytF = if (youtube) workers.media(YouTubeMediaProbe.Result(null,reason="worker-busy")) {
+            YouTubeMediaProbe.check { boundedCall(mediaClient,it) }
+        }.also { tasks += it } else null
         try {
             var best = Long.MAX_VALUE; var err = ""
             repeat(attempts.coerceIn(1, 3)) {
@@ -162,28 +174,31 @@ object Tester {
                     best = minOf(best, (System.nanoTime() - t0) / 1_000_000)
                 }.onFailure { err = Errors.human(it) }
             }
-            if (best == Long.MAX_VALUE) return Probe(0, null, null, err)
+            if (best == Long.MAX_VALUE) {
+                val media = ProbeTasks.await(ytF?.takeIf { it.isDone },1,YouTubeMediaProbe.Result(null,reason="deadline"))
+                val telegram = ProbeTasks.await(tgF?.takeIf { it.isDone },1,TelegramProbe.Result(null,"deadline"))
+                return Probe(0,null,media.ok,err,tgOk=telegram.ok,ytReason=media.reason,tgReason=telegram.reason)
+            }
             val deadline = if (budgetDeadline == Long.MAX_VALUE) System.nanoTime() + TimeUnit.SECONDS.toNanos(40) else budgetDeadline
             fun remaining() = TimeUnit.NANOSECONDS.toMillis((deadline - System.nanoTime()).coerceAtLeast(1)).coerceAtLeast(1)
-            val bigF = if (big) pool.submit<Pair<Boolean, Int>> { bigDownload(client,budgetDeadline,onCall) }.also { tasks += it } else null
-            val ytF = if (youtube) pool.submit<YouTubeMediaProbe.Result> {
-                YouTubeMediaProbe.check { boundedCall(mediaClient, it) }
-            }.also { tasks += it } else null
-            val tgF = if (youtube) pool.submit<Boolean?> {
-                TelegramProbe.check(port, minOf(3000, remaining()))
+            val ytResult = ProbeTasks.await(ytF, remaining(), YouTubeMediaProbe.Result(null,reason="deadline"))
+            val tgResult = ProbeTasks.await(tgF, remaining(), TelegramProbe.Result(null,"deadline"))
+            // A bulk speed test must not compete with service verification on the same route.
+            val bigF = if (big && remaining() >= 200) workers.download(false to 0) {
+                bigDownload(client,budgetDeadline,onCall)
             }.also { tasks += it } else null
             val bigResult = ProbeTasks.await(bigF, remaining(), false to 0)
-            val ytResult = ProbeTasks.await(ytF, remaining(), YouTubeMediaProbe.Result(null))
-            val tgOk = if (tgF != null) ProbeTasks.await(tgF, remaining(), null) else null
-            return Probe(best.toInt().coerceAtLeast(1), if (bigF != null) bigResult.first else null, ytResult.ok, tgOk = tgOk, kbps = bigResult.second, ytKbps = ytResult.kbps, ytReason = ytResult.reason)
+            return Probe(best.toInt().coerceAtLeast(1), if (big) bigResult.first else null, ytResult.ok, tgOk = tgResult.ok,
+                kbps = bigResult.second, ytKbps = ytResult.kbps, ytReason = ytResult.reason, tgReason = tgResult.reason)
         } finally {
-            ProbeTasks.cancel(tasks)
+            closed.set(true); sockets.forEach { runCatching { it.close() } }
+            ProbeTasks.cancel(tasks); workers.purge()
             // Private dispatcher/pool: cancellation cannot cancel another probe or the live VPN's HTTP calls.
             client.dispatcher.cancelAll(); client.connectionPool.evictAll()
         }
     }
 
-    private val pool = java.util.concurrent.Executors.newFixedThreadPool(12) { r -> Thread(r, "probe").apply { isDaemon = true } }
+    private val workers = ProbeWorkerSet()
 
     /** 256 KB through the server: (passed, kbit/s). A freeze (read timeout — the TSPU "16 KB" cut) fails at once, no second mirror. */
     private fun bigDownload(client: OkHttpClient, deadline: Long = Long.MAX_VALUE, onCall: ((okhttp3.Call) -> Unit)? = null): Pair<Boolean, Int> {

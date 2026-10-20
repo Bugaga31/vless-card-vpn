@@ -43,35 +43,56 @@ object TelegramProbe {
         count in 1..16 && b.remaining() == count * 8
     }.getOrDefault(false)
 
-    /** null = not enough budget/cancelled; false = neither sampled DC answered valid MTProto. */
-    fun check(port: Int, budgetMs: Long = 3000): Boolean? {
-        if (port !in 1..65535 || budgetMs < 200 || Thread.currentThread().isInterrupted) return null
-        val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(budgetMs.coerceAtMost(3000))
-        var tried = 0
+    data class Result(val ok: Boolean?, val reason: String)
+
+    /** Injectable clock/transport for slow-handshake and budget regressions. No network work is faked in production. */
+    internal fun evaluate(budgetMs: Long, elapsed: () -> Long, attempt: (String, Long) -> Result): Result {
+        val deadline = elapsed() + budgetMs.coerceIn(0, ServiceProbePolicy.TELEGRAM_MS)
+        var unknown: Result? = null
+        var last = Result(null,"deadline")
         for (host in dc) {
-            val left = TimeUnit.NANOSECONDS.toMillis(deadline - System.nanoTime())
-            if (left < 100 || Thread.currentThread().isInterrupted) return null
-            val allowance = minOf(1500, left).coerceAtLeast(1)
+            if (Thread.currentThread().isInterrupted) return Result(null,"cancelled")
+            val left = deadline - elapsed()
+            if (left < 200) return unknown ?: Result(null,"deadline")
+            last = attempt(host,minOf(ServiceProbePolicy.DC_MS,left))
+            if (last.ok == true) return last
+            if (last.reason == "cancelled") return last
+            if (last.ok == null) unknown = last
+        }
+        return unknown ?: last
+    }
+
+    fun check(port: Int, budgetMs: Long = ServiceProbePolicy.TELEGRAM_MS): Boolean? = checkResult(port,budgetMs).ok
+
+    /** The deadline includes SOCKS + actual tunnel handshake + MTProto; 1.5s used to cut off working routes. */
+    fun checkResult(port: Int, budgetMs: Long = ServiceProbePolicy.TELEGRAM_MS, onSocket: (Socket) -> Unit = {}): Result {
+        if (port !in 1..65535 || budgetMs < 200) return Result(null,"deadline")
+        return evaluate(budgetMs, { TimeUnit.NANOSECONDS.toMillis(System.nanoTime()) }) { host, allowance ->
             val socket = Socket(Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", port)))
-            // A Future interrupt alone does not unblock java.net reads. Always close at a hard deadline.
+            onSocket(socket)
+            val end = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(allowance)
             val timeout = timer.schedule({ runCatching { socket.close() } }, allowance, TimeUnit.MILLISECONDS)
-            val ok = try {
+            try {
                 socket.use { s ->
                     s.soTimeout = allowance.toInt()
-                    s.connect(InetSocketAddress(host, 443), allowance.toInt())
+                    s.connect(InetSocketAddress(host,443),allowance.toInt())
                     val nonce = ByteArray(16).also(random::nextBytes)
-                    s.getOutputStream().write(request(nonce, System.currentTimeMillis()))
+                    s.getOutputStream().write(request(nonce,System.currentTimeMillis()))
                     val input = java.io.DataInputStream(s.getInputStream())
                     val first = input.readUnsignedByte()
                     val words = if (first == 127) input.readUnsignedByte() or (input.readUnsignedByte() shl 8) or (input.readUnsignedByte() shl 16) else first
-                    if (words !in 19..1024) false else {
-                        val frame = ByteArray(words * 4); input.readFully(frame); validResponse(frame, nonce)
+                    val valid = if (words !in 19..1024) false else {
+                        val frame = ByteArray(words * 4); input.readFully(frame); validResponse(frame,nonce)
                     }
+                    Result(valid,if (valid) "mtproto-response" else "mtproto-invalid")
                 }
-            } catch (_: Exception) { false } finally { timeout.cancel(false); runCatching { socket.close() } }
-            tried++
-            if (ok) return true
+            } catch (e: Exception) {
+                when {
+                    Thread.currentThread().isInterrupted -> Result(null,"cancelled")
+                    e is java.net.SocketTimeoutException || System.nanoTime() >= end -> Result(null,"mtproto-timeout")
+                    else -> Result(false,"mtproto-connect")
+                }
+            } finally { timeout.cancel(false); runCatching { socket.close() } }
         }
-        return if (Thread.currentThread().isInterrupted || tried != dc.size) null else false
     }
 }

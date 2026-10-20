@@ -45,6 +45,7 @@ object Actions {
     private var job: Job? = null
     private lateinit var app: Context
     private val probeMemory = ProbeMemory()
+    @Volatile private var activeSearchReport: AutoSearchReport? = null
     private val probeGeneration = java.util.concurrent.atomic.AtomicLong()
     private var requestedSourceJob: Job? = null
     private var requestedSourceAttempt = -60000L
@@ -423,7 +424,9 @@ object Actions {
                 }
                 if (com.vlesscardvpn.BuildConfig.DEBUG && youtube) android.util.Log.i("E2E",
                     "service-probe https=${p.works} yt=${p.ytOk} media=${p.ytReason} tg=${p.tgOk}")
-                val speedSample = ServerChoice.acceptsSpeedSample(p.kbps, parallel)
+                if (youtube) activeSearchReport?.record(s.id + "|" + st.state(s).maskFor(net), p)
+                val measuredKbps = ServiceProbePolicy.isolatedSpeed(p, parallel)
+                val speedSample = ServerChoice.acceptsSpeedSample(measuredKbps, parallel)
                 val checkedAt = System.currentTimeMillis()
                 val qualified = p.works && (st.settings.mode != Mode.AUTO || !youtube || AutoEligibility.servicesWork(p))
                 val firstSuccess = qualified && ok.incrementAndGet() == 1
@@ -438,7 +441,7 @@ object Actions {
                 }
                 states.put(s.id) {
                     if (!validContext() || Net.key(app) != net || Net.underlying(app)?.toString() != underlying) it else
-                    it.copy(netEvidence = (it.netEvidence + ((net + "|" + st.state(s).maskFor(net)) to (if (verdict == null) it.evidenceFor(net) else it.evidenceFor(net).observe(verdict, p.realMs, checkedAt)))).entries.sortedByDescending { e -> e.value.at }.take(8).associate { e -> e.toPair() }, realMs = p.realMs, bigOk = p.bigOk ?: it.bigOk?.takeIf { old -> old }, ytOk = if (youtube) p.ytOk else it.ytOk, tgOk = if (youtube) p.tgOk else it.tgOk, checkedAt = checkedAt, kbps = if (speedSample) p.kbps else it.kbps,
+                    it.copy(netEvidence = (it.netEvidence + ((net + "|" + st.state(s).maskFor(net)) to (if (verdict == null) it.evidenceFor(net) else it.evidenceFor(net).observe(verdict, p.realMs, checkedAt)))).entries.sortedByDescending { e -> e.value.at }.take(8).associate { e -> e.toPair() }, realMs = p.realMs, bigOk = p.bigOk ?: it.bigOk?.takeIf { old -> old }, ytOk = if (youtube) p.ytOk else it.ytOk, tgOk = if (youtube) p.tgOk else it.tgOk, checkedAt = checkedAt, kbps = if (speedSample) measuredKbps else it.kbps,
                         speedNetwork = if (speedSample) net else it.speedNetwork,
                         speedMask = if (speedSample) st.state(s).maskFor(net) else it.speedMask,
                         speedCheckedAt = if (speedSample) checkedAt else it.speedCheckedAt,
@@ -823,7 +826,7 @@ object Actions {
             val net=Net.key(app);val handle=Net.underlying(app)?.toString()
             fun valid()=Net.key(app)==net && Net.underlying(app)?.toString()==handle
             realTest(test,"Фон: Telegram и YouTube, очередь ${available.size}",big=false,youtube=true,
-                attempts=1,parallel=4,budgetMs=ConnectPolicy.QUICK_BUDGET_MS)
+                attempts=1,parallel=ServiceProbePolicy.PARALLEL,budgetMs=ServiceProbePolicy.SERVICE_MS)
             checked=test.size
             if (valid()) AutoSelection.compare(test,{Store.state.value.state(it)},net,
                 now={System.currentTimeMillis()},elapsed={android.os.SystemClock.elapsedRealtime()},validNetwork={valid()},
@@ -922,7 +925,7 @@ object Actions {
             val throughputMode = st.settings.mode == Mode.AUTO && !GameSession.active()
             // Concurrent downloads share the line and cannot rank throughput. First check HTTPS only.
             realTest(cand, "Фоновая проверка", big = wifi && !throughputMode && PhonePower.refresh(app).allowed, youtube = st.settings.mode == Mode.AUTO,
-                attempts = 1, parallel = 4, budgetMs = ConnectPolicy.QUICK_BUDGET_MS)
+                attempts = 1, parallel = ServiceProbePolicy.PARALLEL, budgetMs = ServiceProbePolicy.SERVICE_MS)
             if (!sameNetwork()) return false
             if (throughputMode) AutoSelection.compare(cand, { Store.state.value.state(it) }, sampleNet,
                 now = { System.currentTimeMillis() }, elapsed = { android.os.SystemClock.elapsedRealtime() },
@@ -1215,9 +1218,9 @@ object Actions {
         val passed = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
         val prev = progress.value
         try {
-            kotlinx.coroutines.withTimeoutOrNull(6000) {
-                realTest(candidates, "Новая сеть: Telegram и видео YouTube", big = false, youtube = true,
-                    attempts = 1, parallel = 4, budgetMs = 4500, onSuccess = { passed.add(it.id) })
+            kotlinx.coroutines.withTimeoutOrNull(ServiceProbePolicy.FINAL_MS) {
+                realTest(candidates.take(ServiceProbePolicy.FINALISTS), "Новая сеть: Telegram и видео YouTube", big = false, youtube = true,
+                    attempts = 1, parallel = ServiceProbePolicy.PARALLEL, budgetMs = ServiceProbePolicy.SERVICE_MS, onSuccess = { passed.add(it.id) })
             }
             if (!valid()) return false
             val ok = candidates.filter { it.id in passed }
@@ -1289,6 +1292,22 @@ object Actions {
     private fun autoPrepare(onReady: () -> Unit) = launch("Авто-настройка") { doAutoPrepare(onReady) }
 
     private suspend fun doAutoPrepare(onReady: () -> Unit): String {
+        val report = AutoSearchReport()
+        val handoff = AutoSearchHandoff()
+        activeSearchReport = report
+        try {
+            val result = kotlinx.coroutines.withTimeoutOrNull(ServiceProbePolicy.FOREGROUND_MS) {
+                doAutoPrepareWithinBudget { if (handoff.claim()) onReady() }
+            }
+            if (result != null) return result
+            if (!handoff.expire()) return "Маршрут выбран — проверяю фактическую цепочку"
+            val message = "Бюджет поиска исчерпан. " + report.summary() + " Можно повторить или выбрать сервер вручную."
+            Tunnel.status.value = Tunnel.Status(Tunnel.State.ERROR, "Авто: подтверждённый маршрут не найден", check = message)
+            return message
+        } finally { handoff.expire(); if (activeSearchReport === report) activeSearchReport = null }
+    }
+
+    private suspend fun doAutoPrepareWithinBudget(onReady: () -> Unit): String {
         val now = System.currentTimeMillis()
         val st0 = Store.state.value
         val notes = mutableListOf<String>()
@@ -1307,6 +1326,11 @@ object Actions {
         // Existing catalog first, even when subscription timestamps are old. Cloud cache was applied before this.
         if (st0.servers.isNotEmpty() && fresh().isEmpty()) notes += quickTest(st0.servers, firstReady, attempted)
         if (started.started) return "Telegram и видео YouTube проверены — подключаюсь"
+        if (fresh().isEmpty() && activeSearchReport?.resourceUnavailable() == true) {
+            val message = activeSearchReport!!.summary() + " Строгий Auto не подтверждён; доступен ручной выбор."
+            Tunnel.status.value = Tunnel.Status(Tunnel.State.ERROR, "Контрольное видео недоступно", check = message)
+            return message
+        }
         if (st0.servers.isEmpty() || fresh().isEmpty() && st0.settings.autoUpdateSubs && now - st0.settings.lastSubRefresh > 12 * 3600_000L) {
             progress.value = progress.value.copy(title = "Авто: загружаю первые серверы")
             notes += doRefresh(firstReady = { list -> quickTest(list, firstReady, attempted) })
@@ -1317,9 +1341,14 @@ object Actions {
             if (started.started) return "Telegram и видео YouTube проверены — подключаюсь"
             val st = Store.state.value
             realTest(st.servers.filter { st.state(it).tcpMs > 0 && st.state(it).realMs < 0 && it.id !in attempted }.sortedBy { st.state(it).tcpMs }.take(ConnectPolicy.NEXT),
-                "Авто: запасные маршруты для Telegram и YouTube", big = false, youtube = true, attempts = 1, stopAfter = Int.MAX_VALUE, budgetMs = ConnectPolicy.QUICK_BUDGET_MS, onFirst = firstReady)
+                "Авто: запасные маршруты для Telegram и YouTube", big = false, youtube = true, attempts = 1, parallel = ServiceProbePolicy.PARALLEL, stopAfter = Int.MAX_VALUE, budgetMs = ServiceProbePolicy.SERVICE_MS, onFirst = firstReady)
             if (started.started) return "Запасной маршрут найден — подключаюсь"
             deepPending = true
+        }
+        if (fresh().isEmpty() && activeSearchReport?.resourceUnavailable() == true) {
+            val message = activeSearchReport!!.summary() + " Строгий Auto не подтверждён. Выберите сервер вручную или повторите позже."
+            Tunnel.status.value = Tunnel.Status(Tunnel.State.ERROR, "Контрольное видео недоступно", check = message)
+            return message
         }
         if (fresh().isEmpty()) {
             val st = Store.state.value
@@ -1337,8 +1366,16 @@ object Actions {
         val primary = Store.state.value.settings.let { ServerChoice.automaticPrimary(
             it.mode == Mode.AUTO,it.balance == com.vlesscardvpn.model.Balance.LEAST_PING,GameSession.active()) }
         val n = selectBest(10, close = true, among = working)
+        val dpiCandidate = Store.state.value.settings.let { settings ->
+            settings.dpiRemembered[Net.key(app)] ?: settings.dpiRemembered[Net.family(Net.key(app))]
+        } != null
+        if (n == 0 && !dpiCandidate) {
+            val message = activeSearchReport?.summary() ?: "Нет маршрута с подтверждением Telegram MTProto и YouTube-медиа"
+            Tunnel.status.value = Tunnel.Status(Tunnel.State.ERROR, "Авто: маршрут не подтверждён", check = message)
+            return message
+        }
         withContext(Dispatchers.Main) { onReady() }
-        return if (n > 0) "Авто: выбрано $n лучших серверов — подключаюсь" else "Авто: рабочих серверов нет — подключаюсь через обход DPI без сервера"
+        return if (n > 0) "Авто: выбрано $n лучших серверов — подключаюсь" else "Авто: проверяю Telegram и видео через сохранённую стратегию обхода DPI"
     }
 
     /** Cached cloud/network candidates first; no whole-catalog TCP scan or video downloads before first connect. */
@@ -1380,11 +1417,14 @@ object Actions {
                 eligible.filter { s -> shortlist.none { it.id == s.id } }) != null) {
             deepPending = true; return "Telegram и видео YouTube работают; выбран быстрый проверенный маршрут"
         }
-        attempted.addAll(first.map { it.id });passed.clear()
-        val ok = realTest(ordered, "Авто: первые ${first.size} маршрутов (облако: ${cloud.size})", big = false,
+        if (activeSearchReport?.resourceUnavailable() == true) return activeSearchReport!!.summary()
+        attempted.addAll(shortlist.map { it.id });passed.clear()
+        val additional = ordered.filter { it.id !in attempted }
+        attempted.addAll(additional.map { it.id })
+        val ok = realTest(additional, "Авто: первые ${first.size} маршрутов (облако: ${cloud.size})", big = false,
             youtube = false, attempts = 1, stopAfter = Int.MAX_VALUE, budgetMs = ConnectPolicy.QUICK_BUDGET_MS,onSuccess={ passed.add(it.id) })
         if (Net.key(app) != net || Net.underlying(app)?.toString() != network) return selectionNetworkChanged()
-        if (ok > 0 && chooseCompared(ordered.filter { it.id in passed },onFirst, eligible.filter { it.id !in attempted }) != null) {
+        if (ok > 0 && chooseCompared(additional.filter { it.id in passed },onFirst, eligible.filter { it.id !in attempted }) != null) {
             deepPending = true; return "Telegram и видео YouTube проверены; облачные подсказки ${cloud.size}"
         }
         // Only if the first wave failed: bound DNS/TCP work to a small diverse wave, not thousands of subscriptions.
@@ -1414,14 +1454,14 @@ object Actions {
         fun remaining() = (deadline - android.os.SystemClock.elapsedRealtime()).coerceAtLeast(0)
         fun valid() = Net.key(app) == net && Net.underlying(app)?.toString() == network
         fun allowed() = !GameSession.active() && PhonePower.refresh(app).let { it.allowLight && !it.deferTraffic }
-        suspend fun compare(pool: List<Server>): Server? {
+        suspend fun compare(pool: List<Server>, servicesChecked: Boolean = false): Server? {
             val before = Store.state.value
             val working = pool.filter { before.state(it).works && (before.settings.mode != Mode.AUTO || AutoEligibility.allowed(it)) }
-            val missing = ServerChoice.diverse(working.filter { AutoEligibility.serviceRank(before.state(it),net,System.currentTimeMillis()) != 0 },AutoEligibility.TOP)
-            if (before.settings.mode == Mode.AUTO && missing.isNotEmpty() && remaining() >= 1500) {
-                kotlinx.coroutines.withTimeoutOrNull(minOf(4000L,remaining())) {
-                    realTest(missing,"Авто: проверяю Telegram и YouTube",big=false,youtube=true,attempts=1,parallel=6,
-                        budgetMs=minOf(ConnectPolicy.QUICK_BUDGET_MS,remaining()))
+            val missing = ServerChoice.diverse(working.filter { AutoEligibility.serviceRank(before.state(it),net,System.currentTimeMillis()) != 0 },ServiceProbePolicy.FINALISTS)
+            if (!servicesChecked && before.settings.mode == Mode.AUTO && missing.isNotEmpty() && remaining() >= 1500) {
+                kotlinx.coroutines.withTimeoutOrNull(minOf(ServiceProbePolicy.SERVICE_MS + 2000,remaining())) {
+                    realTest(missing,"Авто: проверяю Telegram и YouTube",big=false,youtube=true,attempts=1,parallel=ServiceProbePolicy.PARALLEL,
+                        budgetMs=minOf(ServiceProbePolicy.SERVICE_MS,remaining()))
                 }
             }
             if (!valid()) return null
@@ -1445,14 +1485,14 @@ object Actions {
         }
         var initial = compare(candidates)
         // Generic HTTPS may pass while both requested services fail. Continue with another bounded wave.
-        if (initial == null && valid() && remaining() >= 1500) {
-            val wave = ServerChoice.diverse(explore.filter { s -> AutoEligibility.allowed(s) && candidates.none { it.id == s.id } },8)
+        if (initial == null && valid() && activeSearchReport?.resourceUnavailable() != true && remaining() >= 1500) {
+            val wave = ServerChoice.diverse(explore.filter { s -> AutoEligibility.allowed(s) && candidates.none { it.id == s.id } },ServiceProbePolicy.FINALISTS)
             if (wave.isNotEmpty()) {
-                kotlinx.coroutines.withTimeoutOrNull(minOf(4500L,remaining())) {
+                kotlinx.coroutines.withTimeoutOrNull(minOf(ServiceProbePolicy.SERVICE_MS + 2000,remaining())) {
                     realTest(wave,"Авто: ищу Telegram и видео YouTube",big=false,youtube=true,
-                        attempts=1,parallel=4,budgetMs=minOf(4000L,remaining()))
+                        attempts=1,parallel=ServiceProbePolicy.PARALLEL,budgetMs=minOf(ServiceProbePolicy.SERVICE_MS,remaining()))
                 }
-                if (valid()) initial = compare(wave)
+                if (valid()) initial = compare(wave, servicesChecked = true)
             }
         }
         var winner = initial ?: run {
@@ -1540,7 +1580,7 @@ object Actions {
         var found: Server? = null
         val previous = progress.value
         try { realTest(candidates,"Фон: запасной маршрут для Telegram и YouTube",big=false,youtube=true,attempts=1,
-            parallel=2,budgetMs=ConnectPolicy.QUICK_BUDGET_MS)
+            parallel=ServiceProbePolicy.PARALLEL,budgetMs=ServiceProbePolicy.SERVICE_MS)
             val current=Store.state.value
             found=candidates.filter { current.state(it).works && AutoEligibility.serviceRank(current.state(it),net,System.currentTimeMillis())==0 }
                 .minWithOrNull(ServerChoice.downloadOrder({current.state(it)},net,System.currentTimeMillis()))
