@@ -12,7 +12,7 @@ class DownloadPriorityTest {
     private val b=Server("b","vless","b.invalid",443,"b")
     private val c=Server("c","vless","c.invalid",443,"c")
     private val d=Server("d","vless","d.invalid",443,"d")
-    private fun sample(kbps:Int=10000,ms:Int=100)=ServerState(realMs=ms,bigOk=true,kbps=kbps,speedNetwork="wifi",speedMask="",speedCheckedAt=now)
+    private fun sample(kbps:Int=10000,ms:Int=100)=ServerState(realMs=ms,bigOk=true,kbps=kbps,speedNetwork="wifi",speedMask="",speedCheckedAt=now,serviceNetwork="wifi",serviceCheckedAt=now,serviceYtOk=true,serviceTgOk=true)
     @Test fun thirtyMegabitsBeatsTenEvenWithHigherPing() {
         assertTrue(ServerChoice.compareDownload(sample(30000,700),sample(10000,20),"wifi",now)<0)
     }

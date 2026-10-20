@@ -43,8 +43,14 @@ object AutoRoutePolicy {
                 old <= 0 || sample.kbps.toLong() >= old.toLong() * 120 / 100 && sample.kbps.toLong() - old >= 256
             }
 
+    /** Never replace a service-proven mask based on a generic CDN download alone. */
+    fun serviceSafeImprovement(current: ServerState, net: String, now: Long, sample: Probe): Boolean =
+        sample.ytOk == true && sample.tgOk == true && improved(current,net,now,sample)
+
     fun apply(current: ServerState, net: String, mask: String, now: Long, sample: Probe): ServerState = current.copy(
         maskId = mask, netMasks = current.netMasks + (net to mask),
         realMs = sample.realMs, bigOk = sample.bigOk, kbps = sample.kbps,
-        speedNetwork = net, speedMask = mask, speedCheckedAt = now, checkedAt = now)
+        speedNetwork = net, speedMask = mask, speedCheckedAt = now, checkedAt = now,
+        serviceNetwork = net, serviceMask = mask, serviceCheckedAt = now,
+        serviceYtOk = sample.ytOk, serviceTgOk = sample.tgOk)
 }

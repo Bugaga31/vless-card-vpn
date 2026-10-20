@@ -52,17 +52,17 @@ object ServerChoice {
         if (s.works && measuredSpeed(s,net,now)==0 && s.kbps>0)
             s.realMs.coerceIn(0,60000) + com.vlesscardvpn.model.ServerState.speedPenalty(s.kbps) + 1500
         else qualityScore(s,net,now)
-    /** Throughput-first Auto: a lower ping cannot outweigh a higher verified download rate. */
+    /** Service proof first, then current-network throughput; ping only breaks equal-speed ties. */
     fun compareDownload(a: com.vlesscardvpn.model.ServerState, b: com.vlesscardvpn.model.ServerState,
                         net: String, now: Long): Int {
         if (a.works != b.works) return if (a.works) -1 else 1
         val aService = AutoEligibility.serviceRank(a,net,now)
         val bService = AutoEligibility.serviceRank(b,net,now)
-        if ((aService == 2) != (bService == 2)) return if (aService == 2) 1 else -1
+        val service = aService.compareTo(bService)
+        if (service != 0) return service
         val speed = measuredSpeed(b,net,now).compareTo(measuredSpeed(a,net,now))
         if (speed != 0) return speed
-        val service = aService.compareTo(bService)
-        return if (service != 0) service else qualityScore(a,net,now).compareTo(qualityScore(b,net,now))
+        return qualityScore(a,net,now).compareTo(qualityScore(b,net,now))
     }
     fun downloadOrder(state: (Server) -> com.vlesscardvpn.model.ServerState, net: String, now: Long): Comparator<Server> =
         Comparator { a,b -> compareDownload(state(a),state(b),net,now) }
@@ -70,7 +70,10 @@ object ServerChoice {
     fun downloadUpgrade(current: com.vlesscardvpn.model.ServerState?, candidate: com.vlesscardvpn.model.ServerState,
                         net: String, now: Long): Boolean {
         if (!candidate.works) return false
-        if (current != null && AutoEligibility.serviceRank(current,net,now)==2 && AutoEligibility.serviceRank(candidate,net,now)==0) return true
+        val candidateRank = AutoEligibility.serviceRank(candidate,net,now)
+        val currentRank = current?.takeIf { it.works }?.let { AutoEligibility.serviceRank(it,net,now) }
+        if (currentRank != null && candidateRank != currentRank) return candidateRank < currentRank
+        if (candidateRank == 2) return false
         val speed = measuredSpeed(candidate,net,now)
         if (speed <= 0) return false
         val old = current?.takeIf { it.works }?.let { measuredSpeed(it,net,now) } ?: 0

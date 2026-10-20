@@ -9,6 +9,8 @@ env:
 permissions:
   contents: read
 jobs:
+  quality:
+    uses: ./.github/workflows/e2e.yml
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 40
@@ -41,6 +43,7 @@ jobs:
           N=${VERSION#beta-build-}; export GITHUB_RUN_NUMBER=${N#release-build-}
           chmod +x gradlew
           bash tools/test-security-result-parser.sh
+          bash tools/test-vibe-foreground.sh
           PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p 'test_cloud_*.py'
           ./gradlew -PbetaPreview=true -PemulatorAbis=true -PsplitAbi=true --no-daemon --max-workers=2 :app:testDebugUnitTest :app:assembleRelease :security-test-probe:assembleDebug
       - name: Sign with persistent Beta key (v1+v2+v3)
@@ -142,7 +145,7 @@ jobs:
             security-results.txt
           if-no-files-found: ignore
   publish:
-    needs: [build, emulator-install]
+    needs: [build, emulator-install, quality]
     runs-on: ubuntu-latest
     permissions:
       contents: write

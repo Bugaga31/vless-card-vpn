@@ -1,8 +1,9 @@
 name: E2E (Xray chain on emulator)
 on:
   push:
-    branches: ['rebuild-*', 'release-*']
+    branches: ['rebuild-*', 'release-*', '!release-build-*']
   workflow_dispatch:
+  workflow_call:
 permissions:
   contents: read
 concurrency:
@@ -97,5 +98,19 @@ jobs:
           key: native-${{ runner.os }}-${{ runner.arch }}-ndk27.2.12479018-api24-all-${{ hashFiles('native/**', 'app/build.gradle.kts') }}
       - name: Install pinned NDK
         run: sdkmanager 'ndk;27.2.12479018'
+      - name: Validate matrix fixture guardrails
+        run: python3 tools/e2e/test_matrix_fixture.py
       - name: Every server type × every mask through real Xray-core
         run: bash tools/masks-matrix-ci.sh
+      - name: Upload matrix diagnostics (no account configurations)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: masks-matrix-diagnostics
+          path: |
+            /tmp/xcfg/result.txt
+            /tmp/xcfg/wg-result.txt
+            /tmp/xcfg/wg-client.log
+            /tmp/srv/server.log
+            /tmp/matrix-origin.log
+          if-no-files-found: ignore

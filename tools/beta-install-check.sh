@@ -43,8 +43,10 @@ if ! unzip -l "$APK" | grep -q "lib/x86_64/libgojni.so" && grep -q "ndk_translat
 else
 if grep -E "FATAL EXCEPTION|Fatal signal" -A20 logcat.txt | grep -q "$PKG"; then grep -E "FATAL EXCEPTION|Fatal signal" -A25 logcat.txt | head -60; exit 1; fi
 test -n "$PID" || exit 1
-adb shell dumpsys activity activities | grep -E "mResumedActivity|topResumedActivity" | head -2
-adb shell dumpsys activity activities | grep -qE "(mResumedActivity|topResumedActivity).*$PKG" || exit 1
+# Avoid adb SIGPIPE under pipefail; keep both transport and foreground failures fatal.
+activities=$(adb shell dumpsys activity activities | tr -d '\r') || exit 1
+grep -E "mResumedActivity|topResumedActivity" <<< "$activities"
+grep -qE "(mResumedActivity|topResumedActivity).*$PKG" <<< "$activities" || exit 1
 echo "LAUNCH OK"
 fi
 bash tools/capture-vibe-ui.sh || exit 1

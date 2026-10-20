@@ -18,7 +18,7 @@ object AutoSelection {
 
     /** Keep the measured leader, reserve a challenger slot, then prefer other hosts over link clones. */
     fun finalists(candidates: List<Server>, state: (Server) -> ServerState, net: String, now: Long, hint: (Server) -> Int = { 0 }): List<Server> {
-        val ranked = candidates.distinctBy { it.id }.filter { state(it).works }
+        val ranked = AutoEligibility.servicePool(candidates.distinctBy { it.id }.filter { state(it).works },state,net,now)
             .sortedWith(ServerChoice.downloadOrder(state,net,now))
         val leader = ranked.minWithOrNull(ServerChoice.downloadOrder(state, net, now)) ?: return emptyList()
         val others = ranked.filter { it.id != leader.id }
@@ -37,7 +37,7 @@ object AutoSelection {
                         allowDownload: () -> Boolean, gaming: Boolean,
                         onInconclusive: (Server, Long) -> Unit = { _, _ -> }, hint: (Server) -> Int = { 0 },
                         probe: suspend (Server, Long) -> Unit): Server? {
-        val valid = if (gaming) candidates.distinctBy { it.id }.filter { state(it).works }
+        val valid = if (gaming) AutoEligibility.servicePool(candidates.distinctBy { it.id }.filter { state(it).works },state,net,now())
             .sortedBy { ServerChoice.latencyScore(state(it).evidenceFor(net), state(it).realMs) }.take(3)
         else finalists(candidates, state, net, now(),hint)
         val started = elapsed()
@@ -66,7 +66,7 @@ object AutoSelection {
             return if (attemptedAt[server.id]?.let { at -> result.speedCheckedAt <= at } == true)
                 result.copy(speedCheckedAt = 0) else result
         }
-        val working = valid.filter { results.getValue(it.id).works }
+        val working = AutoEligibility.servicePool(valid, { results.getValue(it.id) }, net, now())
         return if (gaming) working.minByOrNull {
             ServerChoice.latencyScore(results.getValue(it.id).evidenceFor(net), results.getValue(it.id).realMs)
         } else working.minWithOrNull(ServerChoice.downloadOrder(::effective, net, now()))
