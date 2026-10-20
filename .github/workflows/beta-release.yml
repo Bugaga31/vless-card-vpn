@@ -143,6 +143,9 @@ jobs:
             intro-320dp-font-scale-2.png
             logcat.txt
             security-results.txt
+            install-check.log
+            install-activities.txt
+            install-windows.txt
           if-no-files-found: ignore
   publish:
     needs: [build, emulator-install, quality]

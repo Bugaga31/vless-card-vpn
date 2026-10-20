@@ -42,3 +42,8 @@ __pycache__/
 # .NET build and test output
 obj/
 test-output/
+
+# Ephemeral CI-only trust anchors; never ship in production or commit keys.
+app/src/debug/AndroidManifest.xml
+app/src/debug/res/raw/e2e_service_ca.pem
+app/src/debug/res/xml/e2e_service_security.xml

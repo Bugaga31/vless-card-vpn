@@ -25,7 +25,7 @@ capture_home() {
 	sleep 6
 	bash tools/assert-vibe-foreground.sh
 	adb shell uiautomator dump /sdcard/window.xml >/dev/null
-	adb shell cat /sdcard/window.xml | grep -Eq 'Готовы к подключению|Маршрут подключён|Серверы выберу сам' || {
+	grep -Eq 'Готовы к подключению|Маршрут подключён|Серверы выберу сам' <<< "$(adb shell cat /sdcard/window.xml)" || {
 		echo "Expected the app home screen for $destination"; exit 1;
 	}
 	adb exec-out screencap -p > "$destination"
@@ -48,7 +48,7 @@ capture_home /tmp/home-route-insight-base.png 1.0 0
 card_found=0
 for scroll_attempt in 1 2 3 4; do
 	adb shell uiautomator dump /sdcard/window.xml >/dev/null
-	if adb shell cat /sdcard/window.xml | grep -q 'Почему этот маршрут?'; then card_found=1; break; fi
+	if grep -q 'Почему этот маршрут?' <<< "$(adb shell cat /sdcard/window.xml)"; then card_found=1; break; fi
 	adb shell input swipe "$((physical_width / 2))" "$((physical_height * 4 / 5))" \
 		"$((physical_width / 2))" "$((physical_height / 4))" 450
 done
@@ -59,7 +59,7 @@ read -r center_x center_y <<< "$point"
 adb shell input tap "$center_x" "$center_y"
 sleep 1
 adb shell uiautomator dump /sdcard/window.xml >/dev/null
-adb shell cat /sdcard/window.xml | grep -q 'Автоподбор ещё не записал решение' || { echo 'Expanded route insight empty state is missing'; exit 1; }
+grep -q 'Автоподбор ещё не записал решение' <<< "$(adb shell cat /sdcard/window.xml)" || { echo 'Expanded route insight empty state is missing'; exit 1; }
 bash tools/assert-vibe-foreground.sh
 adb exec-out screencap -p > home-route-insight-expanded.png
 test -s home-route-insight-expanded.png
