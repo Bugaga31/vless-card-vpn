@@ -57,9 +57,9 @@ capture_home home-landscape.png 1.0 0
 adb shell settings put system user_rotation 0
 capture_home /tmp/home-route-insight-base.png 1.0 0
 card_found=0
-for scroll_attempt in 1 2 3 4; do
+for scroll_attempt in 1 2 3 4 5 6; do
 	adb shell uiautomator dump /sdcard/window.xml >/dev/null
-	if grep -q 'Почему этот маршрут?' <<< "$(adb shell cat /sdcard/window.xml)"; then card_found=1; break; fi
+	if grep -q 'Раскрыть объяснение' <<< "$(adb shell cat /sdcard/window.xml)"; then card_found=1; break; fi
 	adb shell input swipe "$((physical_width / 2))" "$((physical_height * 4 / 5))" \
 		"$((physical_width / 2))" "$((physical_height / 4))" 450
 done
@@ -70,7 +70,7 @@ read -r center_x center_y <<< "$point"
 adb shell input tap "$center_x" "$center_y"
 sleep 1
 adb shell uiautomator dump /sdcard/window.xml >/dev/null
-grep -q 'Автоподбор ещё не записал решение' <<< "$(adb shell cat /sdcard/window.xml)" || { echo 'Expanded route insight empty state is missing'; exit 1; }
+grep -q 'Пока нет истории маршрута' <<< "$(adb shell cat /sdcard/window.xml)" || { echo 'Expanded route insight empty state is missing'; exit 1; }
 bash tools/assert-vibe-foreground.sh
 adb exec-out screencap -p > home-route-insight-expanded.png
 test -s home-route-insight-expanded.png

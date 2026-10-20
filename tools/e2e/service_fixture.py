@@ -38,13 +38,19 @@ def prepare(work):
     <trust-anchors><certificates src="@raw/e2e_service_ca" /><certificates src="system" /></trust-anchors></domain-config></network-security-config>''')
         (debug / 'AndroidManifest.xml').write_text('''<manifest xmlns:android="http://schemas.android.com/apk/res/android"><application android:networkSecurityConfig="@xml/e2e_service_security" /></manifest>''')
 
+def fixture_destination(port):
+    # Xray 26.9.30 blocks private destinations after VLESS by default, including redirects.
+    # Permit only this fixture's exact TCP loopback port; keep all other private-IP guards.
+    return {'redirect': f'127.0.0.1:{port}', 'finalRules': [
+        {'action': 'allow', 'network': 'tcp', 'port': str(port), 'ip': ['127.0.0.1/32']}]}
+
 def patch(path):
     config = json.loads(path.read_text())
     outbound = next(o for o in config['outbounds'] if o['tag'] == 'qa-youtube')
-    outbound['settings'] = {'redirect': '127.0.0.1:18444'}
+    outbound['settings'] = fixture_destination(18444)
     config['outbounds'].extend([
-        {'tag': 'qa-youtube-media', 'protocol': 'freedom', 'settings': {'redirect': '127.0.0.1:18444'}},
-        {'tag': 'qa-mtproto-fixture', 'protocol': 'freedom', 'settings': {'redirect': '127.0.0.1:18445'}}])
+        {'tag': 'qa-youtube-media', 'protocol': 'freedom', 'settings': fixture_destination(18444)},
+        {'tag': 'qa-mtproto-fixture', 'protocol': 'freedom', 'settings': fixture_destination(18445)}])
     config['routing']['rules'] = [
         {'type': 'field', 'network': 'tcp', 'port': '443', 'domain': ['full:fixture.googlevideo.com'], 'outboundTag': 'qa-youtube-media'},
         {'type': 'field', 'network': 'tcp', 'port': '443', 'ip': ['149.154.167.51/32', '149.154.175.50/32'], 'outboundTag': 'qa-mtproto-fixture'}

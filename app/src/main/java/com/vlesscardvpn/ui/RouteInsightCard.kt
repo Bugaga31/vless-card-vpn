@@ -85,6 +85,11 @@ fun RouteInsightCard(modifier: Modifier = Modifier) {
                         contentDescription = if (expanded) "Свернуть объяснение" else "Раскрыть объяснение")
                 }
             }
+            if (expanded && decision == null) {
+                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = .35f))
+                Text("Пока нет истории маршрута. После автоподбора здесь появятся фактические причины выбора и возраст проверок.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+            }
             if (expanded && decision != null) {
                 HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = .35f))
                 Text("Это историческая запись выбора, не проверка текущего туннеля и не гарантия самого быстрого маршрута.",
