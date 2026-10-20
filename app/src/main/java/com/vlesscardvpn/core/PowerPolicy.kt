@@ -47,5 +47,11 @@ object PowerPolicy {
             if (pressure) 45000 else 20000,
             !hot && !i.lowMemory && !i.gaming && !i.saver && !low && !(i.now < pauseUntil) && !(!i.screen && o.quietScreen) && !i.dataSaver, o.protectTraffic && i.activeTraffic, i.screen)
     }
+    /** A mandatory bounded first-connection sample is not optional maintenance. Our own preceding
+     * HTTPS/media bytes can raise the device traffic sampler; they must not veto that very sample.
+     * Keep the active-tunnel traffic guard and all thermal/battery/light-work restrictions intact.
+     */
+    fun foregroundTransferAllowed(plan: Plan, hasLiveTunnel: Boolean): Boolean =
+        plan.allowLight && (!plan.deferTraffic || !hasLiveTunnel)
     fun cap(requested: Int, limit: Int) = requested.coerceIn(1, limit.coerceAtLeast(1))
 }

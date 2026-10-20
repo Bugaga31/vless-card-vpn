@@ -97,6 +97,23 @@ class HttpsAdmissionR145Test {
         val legacy=s.toJson().apply { remove("httpsAt");remove("httpsHosts");remove("httpsNetwork") }
         val old=ServerState.fromJson(legacy);assertEquals(18,old.okCount);assertFalse(AutoEligibility.httpsFresh(old,"wifi",now))
     }
+    @Test fun mandatoryFirstConnectionSampleIsNotVetoedByItsOwnEarlierProbeTraffic() {
+        val busy=PowerPolicy.Plan(allowLight=true,deferTraffic=true,allowed=false)
+        assertTrue(PowerPolicy.foregroundTransferAllowed(busy,hasLiveTunnel=false))
+        assertFalse(PowerPolicy.foregroundTransferAllowed(busy,hasLiveTunnel=true))
+        assertFalse(PowerPolicy.foregroundTransferAllowed(busy.copy(allowLight=false),hasLiveTunnel=false))
+        assertFalse(busy.allowed) // optional exploration is still suspended
+    }
+    @Test fun firstConnectionStillNeedsActualSpeedUnderTrafficPressure() = kotlinx.coroutines.runBlocking {
+        val server=Server("first","vless","first.invalid",443,"fixture")
+        var current=state().copy(kbps=0,speedCheckedAt=0)
+        var samples=0
+        val winner=AutoSelection.compare(listOf(server),{current},"wifi",{now},{0L},{true},
+            {PowerPolicy.foregroundTransferAllowed(PowerPolicy.Plan(deferTraffic=true),false)},false) { _,_->
+            samples++;current=current.copy(kbps=6000,speedNetwork="wifi",speedCheckedAt=now)
+        }
+        assertEquals(server,winner);assertEquals(1,samples);assertEquals(6000,current.kbps)
+    }
     @Test fun immediateUnknownServiceProofReuseDoesNotInventServiceResults() {
         val p=Probe(20,true,null,tgOk=null,httpsHosts=2,httpsChecked=true)
         assertTrue(RecentServiceProof(p,"wifi","handle",now).matches("wifi","handle",now+1))
