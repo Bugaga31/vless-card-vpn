@@ -1399,25 +1399,38 @@ object Actions {
         if(com.vlesscardvpn.BuildConfig.DEBUG) android.util.Log.i("E2E", "auto-fast catalog=${list.size} candidates=${candidates.size}")
         fun valid() = generation == probeGeneration.get() && Net.key(app)==net && Net.underlying(app)?.toString()==handle
         val visited = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
-        for (wave in candidates.chunked(4)) {
-            kotlinx.coroutines.currentCoroutineContext().ensureActive()
-            if(!valid()) return selectionNetworkChanged()
-            val passed = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
-            realTest(wave,"Авто: проверяю передачу данных",big=false,youtube=false,verifyTransfer=true,
-                attempts=1,parallel=4,budgetMs=3500,
-                onSuccess={passed.add(it.id)}, onResult={server,_->visited.add(server.id)})
-            attempted.addAll(visited)
-            if(!valid()) return selectionNetworkChanged()
-            if(passed.isNotEmpty()) {
-                val finalists = wave.filter { it.id in passed }
-                // Services and isolated speed compete only inside the remaining shared search phase.
-                val winner = chooseCompared(finalists,null)
-                if (winner != null) { onFirst?.invoke(winner); return "Передача данных проверена" }
-                val current=Store.state.value
-                val fallback=AutoEligibility.connectionPool(finalists,{current.state(it)},net,System.currentTimeMillis()).firstOrNull()
-                if(fallback!=null) { onFirst?.invoke(fallback); return "Интернет проверен. Telegram/YouTube пока не подтверждены" }
-                // A confirmed service FAIL is not a winner: continue to the next bounded wave.
-            }
+        val dataPassed = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+        val attempt = autoAttempt
+        val searchDeadline = android.os.SystemClock.elapsedRealtime() +
+            (attempt?.searchMs() ?: (AutoForegroundAttempt.TARGET_MS - AutoForegroundAttempt.FINAL_RESERVE_MS))
+        fun remaining() = (searchDeadline - android.os.SystemClock.elapsedRealtime()).coerceAtLeast(0)
+        val winner = DeferredAutoFallback.search(candidates, ::remaining,
+            valid = { valid() && (attempt == null || attempt.reason() == "searching") },
+            probeWave = { wave ->
+                val transferMs = minOf(3500L,remaining())
+                if (transferMs > 0) realTest(wave,"Авто: проверяю передачу данных",big=false,youtube=false,verifyTransfer=true,
+                    attempts=1,parallel=4,budgetMs=transferMs,
+                    onSuccess={dataPassed.add(it.id)}, onResult={server,_->visited.add(server.id)})
+                attempted.addAll(visited)
+                kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                if (valid() && remaining() > 0) {
+                    val finalists = wave.filter { it.id in dataPassed }
+                    if (finalists.isNotEmpty()) chooseCompared(finalists,null)
+                }
+            },
+            select = { observed ->
+                val current = Store.state.value
+                AutoEligibility.connectionPool(observed.filter { it.id in dataPassed },
+                    {current.state(it)},net,System.currentTimeMillis())
+                    .minWithOrNull(ServerChoice.downloadOrder({current.state(it)},net,System.currentTimeMillis()))
+            },
+            confirmed = { AutoEligibility.serviceRank(Store.state.value.state(it),net,System.currentTimeMillis()) == 0 })
+        kotlinx.coroutines.currentCoroutineContext().ensureActive()
+        if (!valid()) return selectionNetworkChanged()
+        if (winner != null) {
+            onFirst?.invoke(winner)
+            return if (AutoEligibility.serviceRank(Store.state.value.state(winner),net,System.currentTimeMillis()) == 0)
+                "Передача данных проверена" else "Интернет проверен. Telegram/YouTube пока не подтверждены"
         }
         return "Проверено ${visited.size} перспективных маршрутов; остальные — отдельная фоновая очередь"
     }

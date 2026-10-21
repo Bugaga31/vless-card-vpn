@@ -1,7 +1,7 @@
 name: E2E (Xray chain on emulator)
 on:
   push:
-    branches: ['rebuild-*', 'release-*', '!release-build-*']
+    branches: ['rebuild-*', 'release-*', '!release-build-*', 'fix/auto-deferred-fallback-149']
   workflow_dispatch:
   workflow_call:
 permissions:

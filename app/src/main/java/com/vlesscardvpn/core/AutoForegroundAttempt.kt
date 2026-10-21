@@ -1,5 +1,6 @@
 package com.vlesscardvpn.core
 
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withTimeout
 import java.util.concurrent.atomic.AtomicLong
 
@@ -57,5 +58,31 @@ object AutoDiagnostics {
             when(p.tgOk) {true->"services-passed";false->"telegram-failed";null->"telegram-unknown"})
         record(generation,"youtube",when(p.ytOk) {true->Verdict.PASS;false->Verdict.FAIL;null->Verdict.UNKNOWN},
             when(p.ytOk) {true->"services-passed";false->"youtube-failed";null->"youtube-discovery-unavailable"})
+    }
+}
+
+/** Two bounded waves share one caller-owned monotonic search deadline. UNKNOWN is provisional.
+ * Selection re-reads evidence at finalization, so revoked/stale/explicit FAIL proof cannot be retained.
+ */
+object DeferredAutoFallback {
+    suspend fun <T> search(candidates: List<T>, remainingMs: () -> Long, valid: () -> Boolean,
+                          probeWave: suspend (List<T>) -> Unit, select: (List<T>) -> T?,
+                          confirmed: (T) -> Boolean): T? {
+        val observed = mutableListOf<T>()
+        for (wave in candidates.take(AutoForegroundAttempt.MAX_CANDIDATES).chunked(4)) {
+            kotlinx.coroutines.currentCoroutineContext().ensureActive()
+            if (!valid()) return null
+            val left = remainingMs()
+            if (left <= 0) break
+            observed.addAll(wave)
+            // A phase timeout finalizes existing data proof; parent cancellation still propagates.
+            kotlinx.coroutines.withTimeoutOrNull(left) { probeWave(wave) }
+            kotlinx.coroutines.currentCoroutineContext().ensureActive()
+            if (!valid()) return null
+            val winner = select(observed)
+            if (winner != null && confirmed(winner)) return winner
+        }
+        kotlinx.coroutines.currentCoroutineContext().ensureActive()
+        return if (valid()) select(observed) else null
     }
 }
