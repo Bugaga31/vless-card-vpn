@@ -99,7 +99,7 @@ class TunnelService : VpnService() {
     @Volatile private var usedServers: List<com.vlesscardvpn.model.Server> = emptyList()
     @Volatile private var appliedAutoWeights = ""
     @Volatile private var appliedMasks: Map<String,String> = emptyMap()
-    @Volatile private var appliedRouteContext = ""
+    @Volatile private var appliedRouteContext: List<Any> = emptyList()
     @Volatile private var warpChained = false
     /** DPI-strategy repairs in a row (reset by a good check). */
     private var dpiHeals = 0
