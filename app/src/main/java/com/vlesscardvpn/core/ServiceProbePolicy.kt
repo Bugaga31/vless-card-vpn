@@ -8,7 +8,7 @@ object ServiceProbePolicy {
     const val DC_MS = 4000L
     const val FINALISTS = 2
     const val PARALLEL = 2
-    const val FOREGROUND_MS = 45000L
+    const val FOREGROUND_MS = AutoForegroundAttempt.TARGET_MS
     fun reason(code: String): String = when (code) {
         "mtproto-timeout", "deadline" -> "не хватило времени на протокольный ответ"
         "cancelled" -> "проверка отменена"

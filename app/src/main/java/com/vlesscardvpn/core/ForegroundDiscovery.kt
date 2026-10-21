@@ -2,13 +2,12 @@ package com.vlesscardvpn.core
 
 import com.vlesscardvpn.model.Server
 
-/** Cheap reachability breadth from the old search, without a full unbounded catalog scan.
- * RAM-only cursors partitioned by network; retries don't always stop at the same first 24 links.
+/** Network-specific catalogue ordering and optional lightweight windows.
+ * A window is not a limit on real checks: full discovery uses catalog().
  */
 class ForegroundDiscovery {
     companion object {
         const val WINDOW = 128
-        const val HTTPS_FINALISTS = 30
         fun serviceWave(ordered: List<Server>, attempted: Set<String>): List<Server> =
             ServerChoice.diverse(ordered.filter { it.id !in attempted }, ServiceProbePolicy.FINALISTS)
     }

@@ -75,7 +75,7 @@ class BroadCatalogR146Test {
         val routes=(0..29).map {server(it,host="host$it.invalid")};val seen=mutableSetOf<String>()
         repeat(5) { val wave=ForegroundDiscovery.serviceWave(routes,seen);assertEquals(2,wave.size);seen+=wave.map {it.id} }
         assertEquals(10,seen.size);assertTrue(routes[8].id in seen)
-        assertEquals(8,AutoEligibility.TOP);assertEquals(30,ForegroundDiscovery.HTTPS_FINALISTS)
+        assertEquals(8,AutoEligibility.TOP)
     }
     @Test fun coverageSeparatesCatalogTcpHttpsAndDataRatherThanShowingOnlyFinalists() {
         val report=AutoSearchReport();report.catalog(1000,950)

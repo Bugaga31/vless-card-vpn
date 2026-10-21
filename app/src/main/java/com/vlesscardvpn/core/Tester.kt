@@ -176,9 +176,9 @@ object Tester {
             }
             val https = if (connectionCheck) HttpsTransferProbe.check { request ->
                 boundedCall(mediaClient,request).also { call ->
-                    val left = if (budgetDeadline == Long.MAX_VALUE) 1500L else
+                    val left = if (budgetDeadline == Long.MAX_VALUE) 4000L else
                         TimeUnit.NANOSECONDS.toMillis((budgetDeadline-System.nanoTime()).coerceAtLeast(1)).coerceAtLeast(1)
-                    call.timeout().timeout(minOf(1500L,left),TimeUnit.MILLISECONDS)
+                    call.timeout().timeout(minOf(4000L,left),TimeUnit.MILLISECONDS)
                 }
             } else HttpsTransferProbe.Result()
             if (https.passed) best = https.elapsedMs
@@ -411,7 +411,7 @@ object Tester {
                 }
                 try {
                     coroutineScope {
-                        ProbeRace.run(chunk.indices.toList(), PowerPolicy.cap(parallel, PhonePower.state.value.realParallel), stopAfter,
+                        ProbeRace.run(chunk.indices.toList(), PowerPolicy.cap(if (youtube || big) minOf(parallel, ServiceProbePolicy.PARALLEL) else parallel, PhonePower.state.value.realParallel), stopAfter,
                             skip = { i -> skipped(idx[i]) }, staggerMs = if (stopAfter == 1) 120 else 0,
                             probe = { i -> CancellableProbe.run { bind -> probeSocks(ports[i], testUrl, big = big, youtube = youtube,
                                 attempts = attempts, budgetMs = budgetMs, strictServices = strictServices, connectionCheck = connectionCheck, onCall = { call -> bind { call.cancel() } }) } },
