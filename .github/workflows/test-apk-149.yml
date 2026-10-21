@@ -1,0 +1,164 @@
+name: Signed test APK 149 (no release)
+on:
+  push:
+    branches: ['test/signed-candidate-149']
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: signed-test-apk-149
+  cancel-in-progress: false
+jobs:
+  candidate:
+    if: github.repository == 'Bugaga31/vless-card-vpn' && github.ref == 'refs/heads/test/signed-candidate-149'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      SOURCE_SHA: 386c1ac71b24f5e837c68efb93aeb82d66d11808
+      ARTIFACT_DIR: ${{ runner.temp }}/candidate-149
+      ORCHESTRATION_SHA: ${{ github.sha }}
+    steps:
+      - name: Require the exact successful source CI attempt
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'PY'
+          import json, os, urllib.request
+          u='https://api.github.com/repos/Bugaga31/vless-card-vpn/actions/runs/39654604838/attempts/2'
+          req=urllib.request.Request(u,headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],'User-Agent':'VLESS-Card-test-APK'})
+          r=json.load(urllib.request.urlopen(req,timeout=40))
+          if r['head_sha'] != os.environ['SOURCE_SHA'] or r['run_attempt'] != 2 or r['conclusion'] != 'success':
+              raise SystemExit('Source CI identity/success mismatch')
+          print('Exact source CI attempt is successful')
+          PY
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          ref: 386c1ac71b24f5e837c68efb93aeb82d66d11808
+          persist-credentials: false
+      - name: Verify immutable source checkout
+        run: |
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          test -z "$(git status --porcelain)"
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407
+        with:
+          packages: platform-tools platforms;android-34 build-tools;34.0.0
+          log-accepted-android-sdk-licenses: false
+      - name: Install existing pinned release NDK
+        run: sdkmanager 'ndk;27.2.12479018'
+      - name: Repeat JVM, lint and release build from immutable source
+        run: |
+          GITHUB_RUN_NUMBER=149 ./gradlew -PbetaPreview=true -PemulatorAbis=true -PsplitAbi=true \
+            --no-daemon --max-workers=2 :app:testDebugUnitTest :app:lintRelease :app:assembleRelease
+      - name: Require complete tests and verify published baseline
+        run: |
+          mkdir -p "$ARTIFACT_DIR"
+          python3 - <<'PY'
+          import glob, json, os, pathlib, xml.etree.ElementTree as E
+          total={k:0 for k in ('tests','failures','errors','skipped')}
+          paths=glob.glob('app/build/test-results/testDebugUnitTest/TEST-*.xml')
+          for p in paths:
+              r=E.parse(p).getroot()
+              for k in total: total[k]+=int(r.get(k,0))
+          if total != {'tests':535,'failures':0,'errors':0,'skipped':0}:
+              raise SystemExit('Unexpected JVM counters: '+json.dumps(total))
+          lint={}
+          for i in E.parse('app/build/reports/lint-results-release.xml').getroot().findall('issue'):
+              level=i.get('severity');lint[level]=lint.get(level,0)+1
+          if lint.get('Error',0) or lint.get('Fatal',0): raise SystemExit('Release lint errors')
+          out=pathlib.Path(os.environ['ARTIFACT_DIR'])
+          (out/'tests.json').write_text(json.dumps({'jvm':total,'lint':lint},indent=2)+'\n')
+          print('JVM: 535 tests, 0 failures/errors/skips; lint: 0 errors')
+          PY
+          curl -fL --retry 0 --max-time 180 -o "$RUNNER_TEMP/baseline-1.2.37.apk" \
+            https://github.com/Bugaga31/vless-card-vpn/releases/download/v1.2.37/VLESS-Card-Beta-1.2.37-arm64.apk
+          echo "b36e12088c619bb74851f08faa7e18d0aec0236466d0f4fd6e1ef1a314e48689  $RUNNER_TEMP/baseline-1.2.37.apk" | sha256sum -c -
+          "$ANDROID_HOME/build-tools/34.0.0/apksigner" verify --print-certs "$RUNNER_TEMP/baseline-1.2.37.apk" > "$ARTIFACT_DIR/baseline-cert.txt"
+          grep -q 'certificate SHA-256 digest: 3b9f1771645de07cb01b2303a868363e97cfa8d3ca4d6079dae307066f4f1e6b' "$ARTIFACT_DIR/baseline-cert.txt"
+      - name: Sign only with the existing persistent release key
+        env:
+          KS_B64: ${{ secrets.BETA_KEYSTORE_B64 }}
+          KSP: ${{ secrets.BETA_KEYSTORE_PASSWORD }}
+        shell: bash
+        run: |
+          set +x
+          set -euo pipefail
+          umask 077
+          test -n "$KS_B64" && test -n "$KSP" || { echo 'Existing release key unavailable; stop'; exit 1; }
+          KEYDIR=$(mktemp -d "$RUNNER_TEMP/signing-149.XXXXXX")
+          cleanup() { rm -rf "$KEYDIR"; unset KS_B64 KSP; }
+          trap cleanup EXIT
+          trap 'exit 130' INT
+          trap 'exit 143' TERM
+          printf '%s' "$KS_B64" | base64 -d > "$KEYDIR/release.jks"
+          BT="$ANDROID_HOME/build-tools/34.0.0"
+          sign_one() {
+            "$BT/zipalign" -f -p 4 "$1" "$KEYDIR/aligned.apk"
+            "$BT/apksigner" sign --ks "$KEYDIR/release.jks" --ks-key-alias beta \
+              --ks-pass env:KSP --key-pass env:KSP \
+              --v1-signing-enabled true --v2-signing-enabled true --v3-signing-enabled true \
+              --min-sdk-version 21 --out "$2" "$KEYDIR/aligned.apk"
+          }
+          sign_one app/build/outputs/apk/release/app-universal-release-unsigned.apk "$ARTIFACT_DIR/VLESS-Card-1.2.38-candidate.apk"
+          sign_one app/build/outputs/apk/release/app-arm64-v8a-release-unsigned.apk "$ARTIFACT_DIR/VLESS-Card-1.2.38-candidate-arm64.apk"
+          rm -f "$ARTIFACT_DIR/"*.idsig
+      - name: Verify final signed APKs, certificate identity and release contents
+        run: |
+          python3 - <<'PY'
+          import hashlib, json, os, pathlib, re, subprocess, zipfile
+          out=pathlib.Path(os.environ['ARTIFACT_DIR']);bt=pathlib.Path(os.environ['ANDROID_HOME'])/'build-tools/34.0.0'
+          expected='3b9f1771645de07cb01b2303a868363e97cfa8d3ca4d6079dae307066f4f1e6b'
+          def run(*args):return subprocess.check_output([str(a) for a in args],text=True,stderr=subprocess.STDOUT)
+          baseline=run(bt/'aapt2','dump','badging',pathlib.Path(os.environ['RUNNER_TEMP'])/'baseline-1.2.37.apk').splitlines()[0]
+          if "name='com.vlesscardvpn.beta2' versionCode='148' versionName='1.2.37'" not in baseline:
+              raise SystemExit('Baseline package/version mismatch')
+          checks=[]
+          for name in ['VLESS-Card-1.2.38-candidate.apk','VLESS-Card-1.2.38-candidate-arm64.apk']:
+              apk=out/name
+              verify=run(bt/'apksigner','verify','--verbose','--print-certs',apk)
+              certs=re.findall(r'^Signer #\d+ certificate SHA-256 digest: ([0-9a-f]+)$',verify,re.M)
+              if certs != [expected]: raise SystemExit('Release certificate mismatch')
+              for scheme in (1,2,3):
+                  if not re.search(r'v'+str(scheme)+r' scheme.*: true',verify):raise SystemExit('Required signature scheme absent')
+              run(bt/'zipalign','-c','-p','4',apk)
+              package=run(bt/'aapt2','dump','badging',apk).splitlines()[0]
+              if "name='com.vlesscardvpn.beta2' versionCode='149' versionName='1.2.38'" not in package:
+                  raise SystemExit('Candidate package/version mismatch')
+              manifest=run(bt/'aapt2','dump','xmltree',apk,'--file','AndroidManifest.xml')
+              if re.search(r'android:(?:debuggable|testOnly|networkSecurityConfig)',manifest):
+                  raise SystemExit('Unexpected debug/test/network-security override')
+              with zipfile.ZipFile(apk) as z:
+                  suspicious=[n for n in z.namelist() if re.search(r'fixture|e2e|\.(pem|crt|cer|der|jks|p12|pfx)$',n,re.I)]
+                  if suspicious:raise SystemExit('Unexpected fixture/certificate file in release APK')
+                  for n in z.namelist():
+                      if n.endswith('.dex'):
+                          data=z.read(n)
+                          if any(m in data for m in (b'e2e_reload',b'e2e_connect',b'e2e_select',b'e2e_masks')):
+                              raise SystemExit('Debug E2E marker in release DEX')
+                  if name.endswith('candidate.apk'):
+                      for lib in ('libgojni.so','libhev-socks5-tunnel.so'):
+                          if 'lib/x86_64/'+lib not in z.namelist():raise SystemExit('Universal APK native ABI missing')
+              digest=hashlib.sha256(apk.read_bytes()).hexdigest()
+              checks.append({'file':name,'sha256':digest,'certificate_sha256':expected,'package':package,'signature_schemes':[1,2,3],'targeted_release_content_checks':'PASS'})
+              (out/(name+'.verify.txt')).write_text(verify)
+              print('::notice title=Verified signed test APK::'+name+' SHA-256='+digest+' certificate='+expected+' package=com.vlesscardvpn.beta2 version=1.2.38 code=149')
+          provenance={'candidate_sha':os.environ['SOURCE_SHA'],'workflow_sha':os.environ['ORCHESTRATION_SHA'],'run_id':os.environ['GITHUB_RUN_ID'],'run_attempt':os.environ['GITHUB_RUN_ATTEMPT'],'baseline_apk_sha256':'b36e12088c619bb74851f08faa7e18d0aec0236466d0f4fd6e1ef1a314e48689','apks':checks,'physical_phone_tested':False,'release_or_tag_created':False}
+          (out/'provenance.json').write_text(json.dumps(provenance,indent=2)+'\n')
+          (out/'SHA256SUMS.txt').write_text(''.join(x['sha256']+'  '+x['file']+'\n' for x in checks))
+          (out/'README.txt').write_text('Signed TEST CANDIDATE, not a published release. Install over 1.2.37 without uninstalling. Physical smoke-test is still required. Source SHA: '+os.environ['SOURCE_SHA']+'\n')
+          PY
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          test -z "$(git status --porcelain)"
+      - name: Upload only verified APKs and public verification records
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: signed-test-apk-149-386c1ac
+          path: |
+            ${{ runner.temp }}/candidate-149/*.apk
+            ${{ runner.temp }}/candidate-149/*.txt
+            ${{ runner.temp }}/candidate-149/*.json
+          if-no-files-found: error
+          retention-days: 7
