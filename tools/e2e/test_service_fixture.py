@@ -46,6 +46,10 @@ class ServiceFixtureTest(unittest.TestCase):
         warp = script[script.index('echo "=== case warp'):script.index('echo "=== DPI strategy')]
         self.assertIn('okprobe "$R" 1048576 || fail "warp: probe app traffic through WARP failed"',warp)
         self.assertIn('https://cachefly.cachefly.net/1mb.test',warp)
+        self.assertIn('[ "$after" -gt "$before" ]',warp)
+        self.assertIn('--dns-handoff "$R"',warp)
+        self.assertEqual(1,warp.count('probe warp-after-handoff'))
+        self.assertIn('warp-initial-probe.json',warp)
         self.assertIn('else fail "warp: no working WARP endpoint"; fi',warp)
         self.assertLess(warp.index('warp-registration.log'),warp.index('  adb logcat -c'))
         self.assertGreater(warp.index('save_case warp'),warp.index('else fail'))

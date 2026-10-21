@@ -82,6 +82,8 @@ jobs:
             /tmp/e2e/case-*.xml
             /tmp/e2e/case-*-probe.json
             /tmp/e2e/service-fixture.log
+            /tmp/e2e/warp-registration.log
+            /tmp/e2e/warp-initial-probe.json
           if-no-files-found: ignore
   masks-matrix:
     runs-on: ubuntu-latest
