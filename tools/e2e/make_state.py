@@ -23,7 +23,7 @@ def write(path, servers, selected, masks, mode="SERVERS", balance="LEAST_PING", 
 out = sys.argv[1]
 write(f"{out}/single.json", [reality], ["e2e-reality"], {})
 write(f"{out}/multi.json", [reality, ws, xhttp, dead], ["e2e-reality", "e2e-ws-tls", "e2e-xhttp", "e2e-dead"],
-      {"e2e-reality": "chrome.h4", "e2e-ws-tls": "firefox.p2.b", "e2e-xhttp": "safari.h1"}, balance="ROUND_ROBIN")
+      {"e2e-reality": "chrome.h4", "e2e-ws-tls": "firefox.p2.b", "e2e-xhttp": "safari.h1"}, balance="ROUND_ROBIN", protectActiveTraffic=False)
 write(f"{out}/byedpi.json", [reality], [], {}, mode="BYEDPI")
 write(f"{out}/test.json", [reality, ws, xhttp, dead], [], {})
 write(f"{out}/tpws.json", [reality], [], {}, mode="BYEDPI", dpiStrategy="TPWS#SPLIT_DISORDER")
@@ -50,5 +50,5 @@ write(f"{out}/auto-wide.json",wide,[],{},mode="AUTO",autoUpdateSubs=False,lastSu
 background=[dict(reality,name=f"e2e-background-{i}",secret=f"00000000-0000-0000-0000-{i+2:012d}") for i in range(16)]
 # This case tests real queue coverage, not optional active-traffic deferral. Emulator/system/probe
 # traffic must not turn the explicit 300s coverage assertion into a random idle-network assertion.
-# Only this fixture opts out; production defaults and the separate power-policy tests stay intact.
+# Only maintenance fixtures opt out; production defaults and separate power-policy tests stay intact.
 write(f"{out}/auto-background.json",background,[],{},mode="AUTO",autoUpdateSubs=False,lastSubRefresh=4102444800000,protectActiveTraffic=False)

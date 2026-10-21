@@ -12,15 +12,16 @@ fixture = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(fixture)
 
 class ServiceFixtureTest(unittest.TestCase):
-    def test_catalog_coverage_fixture_explicitly_allows_background_work_only_for_that_case(self):
+    def test_maintenance_fixtures_explicitly_allow_work_without_changing_other_cases(self):
         import subprocess
         with tempfile.TemporaryDirectory() as folder:
             subprocess.run(['python3', str(ROOT / 'tools/e2e/make_state.py'), folder, 'fixture-public-key'], check=True)
             states = {p.name: json.loads(p.read_text()) for p in Path(folder).glob('*.json')}
             self.assertIs(False, states['auto-background.json']['settings']['protectActiveTraffic'])
+            self.assertIs(False, states['multi.json']['settings']['protectActiveTraffic'])
             self.assertEqual(16, len(states['auto-background.json']['servers']))
             for name, state in states.items():
-                if name != 'auto-background.json':
+                if name not in ('auto-background.json', 'multi.json'):
                     self.assertNotIn('protectActiveTraffic', state['settings'])
         settings = (ROOT / 'app/src/main/java/com/vlesscardvpn/model/Settings.kt').read_text()
         self.assertRegex(settings, r'val protectActiveTraffic: Boolean = true')
@@ -36,6 +37,7 @@ class ServiceFixtureTest(unittest.TestCase):
         self.assertNotIn('grep -q "result=true" || fail "optimize:', script)
         service = (ROOT / 'app/src/main/java/com/vlesscardvpn/vpn/TunnelService.kt').read_text()
         self.assertIn('AutoRoutePolicy.selectionPending(s.settings.mode', service)
+        self.assertIn('val busyNow = reconnect && Store.state.value.settings.protectActiveTraffic && userActive()', service)
 
     def test_mtproto_frame_contains_fresh_request_nonce(self):
         nonce = bytes(range(16))

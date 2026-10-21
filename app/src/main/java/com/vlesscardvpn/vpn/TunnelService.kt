@@ -535,7 +535,7 @@ class TunnelService : VpnService() {
                             usedServers.map { s.state(it).realMs })) }
                 val reconnect = result || pending
                 // the user is in a call / watching video: wait a minute; still busy → skip, the next pass decides again
-                val busyNow = reconnect && userActive() && run { Log.i("E2E", "optimize: user is busy — switch postponed"); delay(60_000); userActive() }
+                val busyNow = reconnect && Store.state.value.settings.protectActiveTraffic && userActive() && run { Log.i("E2E", "optimize: user is busy — switch postponed"); delay(60_000); userActive() }
                 if (reconnect && !busyNow && Tunnel.status.value.state == Tunnel.State.CONNECTED) {
                     Log.i("E2E", "optimize: switching to faster servers")
                     lock.withLock { connect(soft = true) }
