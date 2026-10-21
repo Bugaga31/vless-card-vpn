@@ -167,6 +167,8 @@ load warp.json; adb logcat -c
 adb shell am start -n $PKG/.MainActivity --ez e2e_warp true >/dev/null
 WR=$(waitlog "action\[WARP\]" 420) || fail "warp: no result"
 adb logcat -d -s E2E:I | grep "warp " ; echo "warp: $WR"
+# Preserve registration evidence before the connect stage clears logcat.
+adb logcat -d -s E2E:I XrayCore:W '*:S' > "$W/warp-registration.log" 2>&1
 adb logcat -d -s E2E:I | grep "warp accounts" | grep -q "plus=[1-9]" && echo "warp: WARP+ key bound" || echo "::warning title=warp::no WARP+ key could be bound (all built-in keys busy?)"
 if echo "$WR" | grep -q "WARP готов"; then
   adb logcat -c
@@ -175,6 +177,8 @@ if echo "$WR" | grep -q "WARP готов"; then
   echo "app: $C"; echo "$C" | grep -q "check ok=true" || fail "warp: in-app check through WARP failed"
   R=$(probe warp); okprobe "$R" || fail "warp: probe app traffic through WARP failed"
 else fail "warp: no working WARP endpoint"; fi
+# Always capture the real cross-UID result, including FAIL, before DPI resets logcat/result.json.
+save_case warp
 
 echo "=== DPI strategy search (all engines start and carry HTTPS)"
 adb shell am start -n $PKG/.MainActivity --ez e2e_disconnect true >/dev/null; sleep 2
