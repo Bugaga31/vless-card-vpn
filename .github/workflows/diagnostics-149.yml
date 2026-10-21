@@ -1,23 +1,13 @@
-name: Pause release 149 for revised requirements
-on:
-  push:
-    branches: [diagnostics-149]
+name: Read release 149 status
+on: workflow_dispatch
 permissions:
+  actions: read
   contents: read
-  actions: write
 jobs:
-  pause-release:
+  status:
     runs-on: ubuntu-latest
     steps:
-      - name: Stop only the unpublished candidate requested for revision
+      - name: Read cancelled candidate status
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          REPO=Bugaga31/vless-card-vpn
-          RUN=39616599655
-          SHA=$(gh api repos/$REPO/actions/runs/$RUN --jq .head_sha)
-          test "$SHA" = 4efdb14e1bbd7c5c6a34de7f9b2d637994b1ca2e
-          STATUS=$(gh api repos/$REPO/actions/runs/$RUN --jq .status)
-          if [ "$STATUS" != completed ]; then gh api -X POST repos/$REPO/actions/runs/$RUN/cancel; fi
-          gh api repos/$REPO/actions/runs/$RUN --jq '{id,status,conclusion,head_sha}'
+        run: gh api repos/Bugaga31/vless-card-vpn/actions/runs/39616599655 --jq '{id,status,conclusion,head_sha}'
