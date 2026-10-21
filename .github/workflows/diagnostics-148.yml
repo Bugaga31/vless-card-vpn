@@ -20,7 +20,7 @@ jobs:
           python3 - <<'PY'
           import re
           from pathlib import Path
-          patterns = [r'optimize result=(?:true|false)', r'optimize sel=\d+ ok=\d+ median=-?\d+ best=-?\d+ switch=(?:true|false) changed=(?:true|false)', r'catalog-background cycle=\d+ issued=\d+ completed=\d+ total=\d+', r'pool size=\d+', r'optimize: user is busy', r'physical network changed', r'check ok=(?:true|false) ms=\d+ big=(?:true|false|null) yt=(?:true|false|null) tg=(?:true|false|null)', r'Фон через Xray, остальные вне пула: \d+ из \d+[^<"]{0,100}']
+          patterns = [r'optimize result=error [a-zA-Zа-яА-Я0-9 :.,()_?=<>-]{0,180}', r'optimize result=(?:true|false)', r'optimize sel=\d+ ok=\d+ median=-?\d+ best=-?\d+ switch=(?:true|false) changed=(?:true|false)', r'catalog-background cycle=\d+ issued=\d+ completed=\d+ total=\d+', r'pool size=\d+', r'optimize: user is busy', r'physical network changed', r'check ok=(?:true|false) ms=\d+ big=(?:true|false|null) yt=(?:true|false|null) tg=(?:true|false|null)', r'Фон через Xray, остальные вне пула: \d+ из \d+[^<"]{0,100}']
           for path in sorted(Path('evidence').rglob('case-multi.*')):
               if path.suffix not in ('.log','.xml'): continue
               text=path.read_text(errors='replace')
