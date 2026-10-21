@@ -48,4 +48,7 @@ write(f"{out}/auto-wide.json",wide,[],{},mode="AUTO",autoUpdateSubs=False,lastSu
 
 # Full selected pool must not stop real background checks of the rest of a 16-route catalogue.
 background=[dict(reality,name=f"e2e-background-{i}",secret=f"00000000-0000-0000-0000-{i+2:012d}") for i in range(16)]
-write(f"{out}/auto-background.json",background,[],{},mode="AUTO",autoUpdateSubs=False,lastSubRefresh=4102444800000)
+# This case tests real queue coverage, not optional active-traffic deferral. Emulator/system/probe
+# traffic must not turn the explicit 300s coverage assertion into a random idle-network assertion.
+# Only this fixture opts out; production defaults and the separate power-policy tests stay intact.
+write(f"{out}/auto-background.json",background,[],{},mode="AUTO",autoUpdateSubs=False,lastSubRefresh=4102444800000,protectActiveTraffic=False)

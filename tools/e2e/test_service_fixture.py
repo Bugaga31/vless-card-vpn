@@ -12,6 +12,22 @@ fixture = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(fixture)
 
 class ServiceFixtureTest(unittest.TestCase):
+    def test_catalog_coverage_fixture_explicitly_allows_background_work_only_for_that_case(self):
+        import subprocess
+        with tempfile.TemporaryDirectory() as folder:
+            subprocess.run(['python3', str(ROOT / 'tools/e2e/make_state.py'), folder, 'fixture-public-key'], check=True)
+            states = {p.name: json.loads(p.read_text()) for p in Path(folder).glob('*.json')}
+            self.assertIs(False, states['auto-background.json']['settings']['protectActiveTraffic'])
+            self.assertEqual(16, len(states['auto-background.json']['servers']))
+            for name, state in states.items():
+                if name != 'auto-background.json':
+                    self.assertNotIn('protectActiveTraffic', state['settings'])
+        settings = (ROOT / 'app/src/main/java/com/vlesscardvpn/model/Settings.kt').read_text()
+        self.assertRegex(settings, r'val protectActiveTraffic: Boolean = true')
+        script = (ROOT / 'tools/e2e-android.sh').read_text()
+        self.assertIn('completed=8 total=8', script)
+        self.assertIn('remaining catalog did not complete real checks', script)
+
     def test_mtproto_frame_contains_fresh_request_nonce(self):
         nonce = bytes(range(16))
         response = fixture.response(nonce)
