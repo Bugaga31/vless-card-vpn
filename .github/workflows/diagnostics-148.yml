@@ -1,43 +1,27 @@
-name: Read sanitized release failure
+name: Retry failed release emulator infrastructure
 on:
   push:
     branches: [diagnostics-148]
 permissions:
   contents: read
-  actions: read
+  actions: write
 jobs:
-  diagnose:
+  retry:
     runs-on: ubuntu-latest
     steps:
-      - name: Read failing job log without publishing credentials
+      - name: Retry only failed jobs on the unchanged release run
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           python3 - <<'PY'
-          import urllib.request, urllib.error, os, re, gzip, zipfile, io
-          class NoRedirect(urllib.request.HTTPRedirectHandler):
-              def redirect_request(self, *args, **kwargs): return None
-          opener=urllib.request.build_opener(NoRedirect())
-          req=urllib.request.Request('https://api.github.com/repos/Bugaga31/vless-card-vpn/actions/jobs/119229701326/logs', headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],'Accept':'application/vnd.github+json'})
-          try:
-              data=opener.open(req,timeout=30).read(20000000)
-          except urllib.error.HTTPError as e:
-              if e.code != 302: raise
-              url=e.headers['Location']
-              if not url.startswith('https://'): raise RuntimeError('Expected HTTPS log download')
-              data=urllib.request.urlopen(url,timeout=60).read(20000000)
-          if data.startswith(b'\x1f\x8b'): data=gzip.decompress(data)
-          if zipfile.is_zipfile(io.BytesIO(data)):
-              z=zipfile.ZipFile(io.BytesIO(data)); data=b'\n'.join(z.read(n) for n in z.namelist())
-          lines=data.decode(errors='replace').splitlines()
-          hits=[(i,line) for i,line in enumerate(lines) if re.search(r'SyntaxError|Traceback|unbound variable|E2E failures:|E2E ALL OK|::error|FAIL:|Error:|error:|Exception|Process completed|failed with exit|killed|Killed|not found',line)]
-          chosen=sorted(set(i for i,_ in hits[-15:])|set(range(max(0,len(lines)-22),len(lines))))
-          text='\n'.join(lines[i] for i in chosen)
-          text=re.sub(r'https?://\S+','[URL]',text)
-          text=re.sub(r'[0-9a-fA-F]{8}-[0-9a-fA-F-]{27,}','[ID]',text)
-          text=re.sub(r'[A-Za-z0-9_+/=.-]{32,}','[TOKEN]',text)
-          text=text.replace(os.environ['GH_TOKEN'],'[TOKEN]')
-          for start in range(0,min(len(text),18000),3000):
-              chunk=text[start:start+3000].replace('%','%25').replace('\r','%0D').replace('\n','%0A')
-              print('::notice title=sanitized failure log::'+chunk)
+          import urllib.request, json, os
+          base='https://api.github.com/repos/Bugaga31/vless-card-vpn/actions/runs/39602335580'
+          headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],'Accept':'application/vnd.github+json'}
+          data=json.load(urllib.request.urlopen(urllib.request.Request(base,headers=headers),timeout=30))
+          assert data['head_sha']=='b5f040783f6b9efb64960e1a9dcba98d559f2851', 'Release commit changed'
+          assert data['status']=='completed' and data['conclusion']=='failure', 'Expected completed failed run'
+          request=urllib.request.Request(base+'/rerun-failed-jobs',data=json.dumps({'enable_debug_logging':False}).encode(),headers={**headers,'Content-Type':'application/json'},method='POST')
+          response=urllib.request.urlopen(request,timeout=30)
+          assert response.status==201
+          print('::notice title=release retry::Requested failed-job retry on the unchanged verified release commit; all publication gates retained')
           PY
