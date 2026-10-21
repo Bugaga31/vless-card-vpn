@@ -90,6 +90,15 @@ object AutoEligibility {
             speedCheckedAt=if (invalidateSpeed) 0 else s.speedCheckedAt)
     }
 
+    /** Attribute a live service receipt only to a single exact-context outbound.
+     * A balancer failure revokes shared proof but never invents per-member FAIL observations.
+     */
+    fun recordChainServices(s: ServerState, net: String, mask: String, startedAt: Long, now: Long, p: Probe, isolated: Boolean): ServerState {
+        if (s.maskFor(net) != mask || s.serviceNetwork == net && s.serviceMask == mask && s.serviceCheckedAt > startedAt) return s
+        if (isolated) return recordServices(s,net,mask,now,p)
+        return if (p.ytOk == false || p.tgOk == false) invalidateChainProof(s,net,mask,startedAt) else s
+    }
+
     fun <T> servicePool(list: List<T>, state: (T) -> ServerState, net: String, now: Long): List<T> {
         // A shared balancer sends real Telegram/video connections to EVERY member.
         // Never dilute a proven pool with generic-HTTPS-only or failed routes just to reach eight.
