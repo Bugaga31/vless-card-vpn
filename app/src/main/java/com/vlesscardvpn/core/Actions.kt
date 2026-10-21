@@ -401,7 +401,7 @@ object Actions {
             if (Net.key(app) != net || Net.underlying(app)?.toString() != network) return selectionNetworkChanged()
             val completed = AtomicInteger()
             working += realTest(wave, "Проверка всех серверов через Xray", big = big, attempts = 1,
-                parallel = ServiceProbePolicy.PARALLEL, budgetMs = ServiceProbePolicy.SERVICE_MS,
+                parallel = ServiceProbePolicy.PARALLEL, budgetMs = ServiceProbePolicy.SERVICE_MS, verifyTransfer = big,
                 onResult = { _, _ -> completed.incrementAndGet() }, progressOffset = checked, progressTotal = ordered.size)
             checked += completed.get()
         }
@@ -411,7 +411,7 @@ object Actions {
 
     private suspend fun realTest(servers: List<Server>, title: String, big: Boolean = true, attempts: Int = 2, parallel: Int = 32, youtube: Boolean = true,
                                  stopAfter: Int = Int.MAX_VALUE, budgetMs: Long = 0, onFirst: ((Server) -> Unit)? = null, onSuccess: ((Server) -> Unit)? = null,
-                                 onResult: ((Server, Probe) -> Unit)? = null, progressOffset: Int = 0, progressTotal: Int = servers.size): Int {
+                                 onResult: ((Server, Probe) -> Unit)? = null, progressOffset: Int = 0, progressTotal: Int = servers.size, verifyTransfer: Boolean = false): Int {
         if (servers.isEmpty()) return 0
         progress.value = progress.value.copy(title = title, done = progressOffset, total = progressTotal)
         val net = Net.key(app)
@@ -430,7 +430,7 @@ object Actions {
             target.id to java.util.concurrent.ConcurrentHashMap<String, Int>()
         }
         try {
-            Tester.real(variants, st.settings.testUrl, port, own.ports, batch = if (onFirst != null) ConnectPolicy.FIRST else 64, parallel = parallel, big = big, youtube = youtube, attempts = attempts, stopAfter = stopAfter, budgetMs = budgetMs, connectionCheck = st.settings.mode == Mode.AUTO && (youtube || big)) { i, p ->
+            Tester.real(variants, st.settings.testUrl, port, own.ports, batch = if (onFirst != null) ConnectPolicy.FIRST else 64, parallel = parallel, big = big, youtube = youtube, attempts = attempts, stopAfter = stopAfter, budgetMs = budgetMs, connectionCheck = verifyTransfer || st.settings.mode == Mode.AUTO && (youtube || big)) { i, p ->
                 if (p == Tester.SKIPPED) return@real
                 // Do not train the old profile with a result completed after Wi-Fi/cellular handoff.
                 if (!validContext() || Net.key(app) != net || Net.underlying(app)?.toString() != underlying) return@real
