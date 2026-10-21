@@ -13,15 +13,15 @@ jobs:
         with:
           pattern: e2e-api-*
           path: evidence
-          run-id: 39592229221
+          run-id: 39595255929
           github-token: ${{ github.token }}
       - name: Publish counters only, never configurations or raw logs
         run: |
           python3 - <<'PY'
           import re
           from pathlib import Path
-          patterns = [r'catalog-background cycle=\d+ issued=\d+ completed=\d+ total=\d+', r'pool size=\d+', r'optimize: user is busy', r'physical network changed', r'check ok=(?:true|false) ms=\d+ big=(?:true|false|null) yt=(?:true|false|null) tg=(?:true|false|null)', r'Фон через Xray, остальные вне пула: \d+ из \d+[^<"]{0,100}']
-          for path in sorted(Path('evidence').rglob('case-auto-background.*')):
+          patterns = [r'optimize result=(?:true|false)', r'optimize sel=\d+ ok=\d+ median=-?\d+ best=-?\d+ switch=(?:true|false) changed=(?:true|false)', r'catalog-background cycle=\d+ issued=\d+ completed=\d+ total=\d+', r'pool size=\d+', r'optimize: user is busy', r'physical network changed', r'check ok=(?:true|false) ms=\d+ big=(?:true|false|null) yt=(?:true|false|null) tg=(?:true|false|null)', r'Фон через Xray, остальные вне пула: \d+ из \d+[^<"]{0,100}']
+          for path in sorted(Path('evidence').rglob('case-multi.*')):
               if path.suffix not in ('.log','.xml'): continue
               text=path.read_text(errors='replace')
               matches=[]
