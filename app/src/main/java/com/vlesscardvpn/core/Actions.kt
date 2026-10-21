@@ -907,6 +907,36 @@ object Actions {
         val originalSelection = st.selected.map { AutoRoutePolicy.configuration(it,st.state(it),originalNet) }.toSet()
         if (st.settings.mode == com.vlesscardvpn.model.Mode.BYEDPI) return false
         val wifi = unmetered()
+        // Do not put optional whole-catalog scans, mask tuning and downloads in front of a small
+        // missing-reserve batch. Keep fresh PASSes intact instead of overwriting them with UNKNOWN.
+        if (st.settings.mode == Mode.AUTO && st.selected.size < AutoEligibility.TOP) {
+            val net=Net.key(app);val handle=Net.underlying(app)?.toString();val chain=RouteContext.key(st.settings)
+            val stamp=System.currentTimeMillis()
+            val reserve=AutoReservePolicy.pending(st.servers.filterNot {
+                probeMemory.cooling(net,it.id,st.state(it).maskFor(net),stamp)
+            },{st.state(it)},net,stamp)
+            if (reserve.isNotEmpty()) {
+                val previous=progress.value
+                try {
+                    kotlinx.coroutines.withTimeoutOrNull(AutoReservePolicy.ROUND_MS) {
+                        realTest(reserve,"Фон: проверяю недостающие резервы",big=false,youtube=true,
+                            attempts=1,parallel=ServiceProbePolicy.PARALLEL,budgetMs=ServiceProbePolicy.SERVICE_MS)
+                    }
+                } finally { progress.value=previous }
+                if (Net.key(app)!=net || Net.underlying(app)?.toString()!=handle) return false
+                val current=Store.state.value
+                if (current.settings.mode!=Mode.AUTO || RouteContext.key(current.settings)!=chain ||
+                    originalSelection != current.selected.map { AutoRoutePolicy.configuration(it,current.state(it),originalNet) }.toSet()) return false
+                val pool=AutoEligibility.connectedPool(current.servers,{current.state(it)},net,System.currentTimeMillis(),GameSession.active())
+                val additions=pool.any { candidate -> current.selected.none { it.id==candidate.id } }
+                if (additions) selectBest(AutoEligibility.TOP,close=true,among=pool)
+                val changed=originalSelection != Store.state.value.let { updated ->
+                    updated.selected.map { AutoRoutePolicy.configuration(it,updated.state(it),originalNet) }.toSet() }
+                lastOptimizeSwitched=changed
+                android.util.Log.i("E2E","reserve batch=${reserve.size} proven=${pool.size} changed=$changed")
+                return changed
+            }
+        }
         catalogWave()
         st = Store.state.value
         var ytSwitch = false
