@@ -2,7 +2,9 @@
 
 ## Состояние
 
-Рабочая ветка: auto-budget-149, исходная точка 4efdb14e1bbd7c5c6a34de7f9b2d637994b1ca2e.
+Рабочая ветка: auto-budget-149. Проверочная ветка: rebuild-auto-budget-149.
+Исходная точка уточнения: 4efdb14e1bbd7c5c6a34de7f9b2d637994b1ca2e.
+Окончательный проверенный код: 3464bb27ae6cd8aa08517e0bb2caa79dd765cea5 (CI-ветка); код рабочей ветки 2ff1a9f6bd2e6c0bd29c6575a809001381307e40 идентичен по содержимому. Этот отчёт обновляется отдельным документационным коммитом, без изменения проверенного кода.
 Последний подтверждённый релиз: 1.2.37. Неограниченный кандидат 1.2.38 отменён до публикации, штатные проверки не отключены.
 AGENTS.md/CONTRIBUTING.md в актуальном main отсутствуют; прочитаны README, auto-preflight-budget, auto-service-hotfix-144 и test-map. Основная ветка f2503e45, открытый PR #111 относится к старой 1.2.32; изменения поверх опубликованной 1.2.37 не перезаписывают его ветку.
 
@@ -23,9 +25,49 @@ AGENTS.md/CONTRIBUTING.md в актуальном main отсутствуют; �
 - Облачный refresh асинхронен; stale/cloud data не создаёт локальный PASS.
 - Форматы пользовательских данных/обучения не меняются, миграция не нужна.
 
-## Проверки
+## Фактически выполненные проверки
 
-Результаты нового кандидата будут внесены после фактического выполнения. Предыдущие 504 JVM-теста относятся к отменённому кандидату, не к этому исправлению.
+- Финальный локальный снимок: 523 JVM-теста, 0 failures/errors/skips. 19 новых тестов в FastAutoBudgetR149Test; прежние регрессии сохранены.
+- Полный lintRelease: 0 ошибок, 50 предупреждений и 4 информационных замечания. Lint не отключался и baseline не добавлялся.
+- assembleRelease успешно: пакет com.vlesscardvpn.beta2, versionCode 149, versionName 1.2.38. Локальные APK НЕ подписаны релизным ключом, не предлагаются как обновление.
+- 28 Python-тестов tools/e2e, bash -n и git diff --check прошли.
+- Финальный CI: https://github.com/Bugaga31/vless-card-vpn/actions/runs/39626237696 — completed/success, SHA 3464bb27ae6cd8aa08517e0bb2caa79dd765cea5.
+- E2E API 29 и API 33: completed/success. Проверены ограниченный Auto (8 кандидатов из 41 без ложного подключения к непроверенному хвосту), отдельный полный проход 41 конфигурации, рабочие учётные данные после 40 неверных, реальные TLS/MTProto/медиа fixtures, наполнение/применение пула и фоновые проверки.
+- masks-matrix: completed/success, включая шаг Every server type × every mask through real Xray-core. Противоречивый промежуточный статус GitHub перепроверен до завершения задачи.
+- UNKNOWN, все FAIL, недоступный общий endpoint, монотонный общий deadline, отмена, поздний результат старого сетевого контекста, stale cloud и разделение подтверждённого пула/fallback проверены unit-тестами. Это не имитация переключения оператора на реальном телефоне.
+- Дополнительно проверены гонка раннего успешного handoff и запись фоновых сервисных результатов: единичный FAIL исключает маршрут; неоднозначный отказ балансировщика отзывает общее доказательство без массовых отрицательных наблюдений. Старые маски/настройки не получают новых сервисных подтверждений.
+
+Системный VPN-диалог согласия пользователя предшествует запуску Auto; его ожидание не является сетевым поиском и не включается в 15 секунд. JNI/очистка не имеют гарантированного жёсткого прерывания.
+
+## Публикация и блокер PR
+
+1.2.38 не опубликована. Последний подтверждённый опубликованный релиз — 1.2.37, существующие APK не заменялись. Отменённый неограниченный кандидат не возобновлялся.
+
+Создание draft PR штатным GitHub MCP вернуло 403 Resource not accessible by personal access token. Другим способом действие не повторялось. Ветки и код сохранены; для PR нужны права Pull requests: write у подключения либо действие владельца. Сравнение для PR: https://github.com/Bugaga31/vless-card-vpn/compare/main...rebuild-auto-budget-149?expand=1
+
+Основная ветка пока 1.2.30; поэтому сравнение с main включает промежуточные опубликованные изменения. Фокус текущего уточнения: https://github.com/Bugaga31/vless-card-vpn/compare/4efdb14e1bbd7c5c6a34de7f9b2d637994b1ca2e...3464bb27ae6cd8aa08517e0bb2caa79dd765cea5
+
+Перед выпуском остаются разрешённый PR/ревью и штатные проверки подписанного APK, сертификата обновления и установки релизного артефакта. Зелёный debug E2E не подменяет эти проверки.
+
+## Файлы относительно опубликованной 1.2.37
+
+- README.md
+- app/src/main/java/com/vlesscardvpn/core/Actions.kt
+- app/src/main/java/com/vlesscardvpn/core/AutoEligibility.kt
+- app/src/main/java/com/vlesscardvpn/core/AutoForegroundAttempt.kt
+- app/src/main/java/com/vlesscardvpn/core/AutoSelection.kt
+- app/src/main/java/com/vlesscardvpn/core/ForegroundDiscovery.kt
+- app/src/main/java/com/vlesscardvpn/core/FullCatalogChecks.kt
+- app/src/main/java/com/vlesscardvpn/core/ServiceProbePolicy.kt
+- app/src/main/java/com/vlesscardvpn/core/Tester.kt
+- app/src/main/java/com/vlesscardvpn/vpn/TunnelService.kt
+- app/src/test/java/com/vlesscardvpn/discovery/BroadCatalogR146Test.kt
+- app/src/test/java/com/vlesscardvpn/discovery/FastAutoBudgetR149Test.kt
+- app/src/test/java/com/vlesscardvpn/discovery/FullCatalogR149Test.kt
+- tools/e2e-android.sh
+- tools/e2e/make_state.py
+- docs/release-1.2.38.md
+- docs/auto-fast-budget-149.md
 
 ## Не проверено
 
