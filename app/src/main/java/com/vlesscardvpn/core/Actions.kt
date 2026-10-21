@@ -408,7 +408,8 @@ object Actions {
     }
 
     private suspend fun realTest(servers: List<Server>, title: String, big: Boolean = true, attempts: Int = 2, parallel: Int = 32, youtube: Boolean = true,
-                                 stopAfter: Int = Int.MAX_VALUE, budgetMs: Long = 0, onFirst: ((Server) -> Unit)? = null, onSuccess: ((Server) -> Unit)? = null): Int {
+                                 stopAfter: Int = Int.MAX_VALUE, budgetMs: Long = 0, onFirst: ((Server) -> Unit)? = null, onSuccess: ((Server) -> Unit)? = null,
+                                 onResult: ((Server, Probe) -> Unit)? = null): Int {
         if (servers.isEmpty()) return 0
         progress.value = progress.value.copy(title = title, done = 0, total = servers.size)
         val net = Net.key(app)
@@ -432,6 +433,7 @@ object Actions {
                 // Do not train the old profile with a result completed after Wi-Fi/cellular handoff.
                 if (!validContext() || Net.key(app) != net || Net.underlying(app)?.toString() != underlying) return@real
                 val s = variants[i].first
+                onResult?.invoke(s,p)
                 activeSearchReport?.httpsResult(s.id,p)
                 if (youtube) ServiceRoutes.targets.filter(ServiceRoutes::native).forEach { target ->
                     ServiceRoutes.measurement(target,p)?.let { serviceResults.getValue(target.id)[s.id] = it }
@@ -818,39 +820,52 @@ object Actions {
         "Облегчено масок: ${before - after} из $before" + if (after < before && Tunnel.socks != null) " — переподключаюсь." else if (after == before) " (лёгкие маски здесь не прошли — тяжёлые оставлены, иначе не будет работать)." else "."
     }
 
+    private val backgroundCatalog=BackgroundCatalogQueue()
     private var catalogAt = -300000L
-    private suspend fun catalogWave() {
-        val now = android.os.SystemClock.elapsedRealtime()
-        if (now - catalogAt < 30000 || !PhonePower.refresh(app).allowLight || progress.value.running) return
-        catalogAt = now
-        val st = Store.state.value
-        val available = preferred(st,st.servers.filter { !st.state(it).selected })
-        val affinity = SourceAffinity.order(available,st.servers,{st.state(it)},Net.key(app),System.currentTimeMillis()) { CloudControl.sources(it) }
-        val cloud = (CloudSpeed.pick(available,emptyList(),n=4) + affinity.take(4) + CloudControl.ranked(available,8)).distinctBy { it.id }.take(16)
-        val wave = PublicCloudQueue.merge(available.sortedBy { st.state(it).checkedAt },cloud,available,ConnectPolicy.BACKGROUND,slots=8)
-        val states = StateBatch(); val alive = java.util.concurrent.ConcurrentHashMap<String, Int>()
-        Tester.tcp(wave, parallel = 32, timeoutMs = 1500) { s, ms -> alive[s.id] = ms; states.put(s.id) { it.copy(tcpMs = ms, checkedAt = System.currentTimeMillis()) } }
-        states.flush()
-        if (!PhonePower.refresh(app).allowLight) return
-        val reachable = wave.filter { (alive[it.id] ?: 0) > 0 }
-        val test = PublicCloudQueue.merge(reachable.sortedBy { alive[it.id] },cloud,reachable,ConnectPolicy.BACKGROUND,slots=8)
-        var checked = 0
-        val prev = progress.value
+    private fun catalogContext(st: AppState): String =
+        Net.key(app)+"|"+Net.underlying(app)?.toString()+"|"+RouteContext.key(st.settings)
+    private fun catalogRoutes(st: AppState): List<Server> =
+        preferred(st,st.servers.filter { !st.state(it).selected }).distinctBy {it.id}
+    private fun catalogRoute(st: AppState,s: Server,net: String)=AutoRoutePolicy.configuration(s,st.state(s),net)
+    /** Used by the existing maintenance timer: a full selected pool does not stop catalogue coverage. */
+    fun backgroundCatalogPending(): Boolean {
+        val st=Store.state.value
+        if(st.settings.mode!=Mode.AUTO) return false
+        val net=Net.key(app)
+        return backgroundCatalog.pending(catalogContext(st),catalogRoutes(st).map {catalogRoute(st,it,net)})
+    }
+    private suspend fun catalogWave(): List<Server> {
+        val now=android.os.SystemClock.elapsedRealtime();val plan=PhonePower.refresh(app)
+        if(now-catalogAt<30000 || !plan.allowed || plan.deferTraffic || progress.value.running) return emptyList()
+        val st=Store.state.value;val net=Net.key(app);val context=catalogContext(st)
+        val available=catalogRoutes(st)
+        val byRoute=available.associateBy {catalogRoute(st,it,net)}
+        val ticket=backgroundCatalog.next(context,byRoute.keys.toList())
+        val batch=ticket.routes.mapNotNull(byRoute::get)
+        if(batch.isEmpty()) return emptyList()
+        catalogAt=now
+        val previous=progress.value
+        val checked=java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
         try {
-            val net=Net.key(app);val handle=Net.underlying(app)?.toString()
-            fun valid()=Net.key(app)==net && Net.underlying(app)?.toString()==handle
-            realTest(test,"Фон: Telegram и YouTube, очередь ${available.size}",big=false,youtube=true,
-                attempts=1,parallel=ServiceProbePolicy.PARALLEL,budgetMs=ServiceProbePolicy.SERVICE_MS)
-            checked=test.size
-            if (valid()) AutoSelection.compare(test,{Store.state.value.state(it)},net,
-                now={System.currentTimeMillis()},elapsed={android.os.SystemClock.elapsedRealtime()},validNetwork={valid()},
-                allowDownload={PhonePower.refresh(app).let { it.allowed && !it.deferTraffic }},gaming=GameSession.active(),
-                hint={maxOf(CloudControl.speed(it),CloudSpeed.speedOf(Report.serverKey(it)))},
-                onInconclusive={s,at->expireUnreproducedSpeed(s,net,at)}) { server,budget ->
-                realTest(listOf(server),"Фон: сравниваю скорость",big=true,youtube=false,attempts=1,parallel=1,budgetMs=budget)
+            // Do NOT filter this queue by ping or re-rank it to the same cloud top-eight.
+            // The actual configured protocol/chain is tested, including UDP-only transports.
+            kotlinx.coroutines.withTimeoutOrNull(BackgroundCatalogQueue.ROUND_MS) {
+                realTest(batch,"Фон: проверяю весь каталог, пачка ${batch.size}",big=false,youtube=true,
+                    attempts=1,parallel=ServiceProbePolicy.PARALLEL,budgetMs=ServiceProbePolicy.SERVICE_MS,
+                    onResult={server,proof ->
+                        if(catalogContext(Store.state.value)==context && proof.ytReason!="worker-busy") {
+                            checked+=server.id
+                            backgroundCatalog.completed(ticket,catalogRoute(st,server,net))
+                        }
+                    })
             }
-        } finally { progress.value = prev }
-        AppWatch.note("Фон: просмотрены ${wave.size} запасных маршрутов, через Xray проверены $checked; основной туннель не ждёт этот поиск")
+        } finally { progress.value=previous }
+        if(catalogContext(Store.state.value)!=context) return emptyList()
+        val count=backgroundCatalog.snapshot(context) ?: return emptyList()
+        if(com.vlesscardvpn.BuildConfig.DEBUG) android.util.Log.i("E2E",
+            "catalog-background cycle=${count.cycle} issued=${count.issued} completed=${count.completed} total=${count.total}")
+        AppWatch.note(count.text()+". Это реальные проверки конфигураций, не TCP-пинг; неподтверждённое не становится PASS")
+        return batch.filter {it.id in checked}
     }
 
     private var serviceCursor = 0; private var serviceAt = -300000L
@@ -937,10 +952,11 @@ object Actions {
                 return changed
             }
         }
-        catalogWave()
+        val catalogChecked=catalogWave()
+        if(Net.key(app)!=originalNet) return false
         st = Store.state.value
         var ytSwitch = false
-        if (deepPending && PhonePower.refresh(app).allowed) {
+        if (deepPending && st.settings.mode!=Mode.AUTO && PhonePower.refresh(app).allowed) {
             // connected right after the quick check: now test the rest calmly (outside the tunnel) and lighten heavy masks
             deepPending = false
             val prev0 = progress.value
@@ -959,7 +975,8 @@ object Actions {
         st = Store.state.value
         // An empty Auto selection is recovered from the best working pool.
         val sel = st.selected.ifEmpty { automaticOrder(st, st.servers.filter { st.state(it).works }).take(AutoEligibility.TOP) }
-        val others = automaticOrder(st, st.servers.filter { it !in sel && st.state(it).works }).take(if (wifi) 12 else 6)
+        val others = (catalogChecked.filter {st.state(it).works} + automaticOrder(st,
+            st.servers.filter { it !in sel && st.state(it).works })).distinctBy {it.id}.take(if (wifi) 12 else 6)
         val cand = (sel + others).distinctBy { it.id }
         if (cand.isEmpty()) return ytSwitch
         val prev = progress.value
@@ -968,7 +985,7 @@ object Actions {
         try {
             val throughputMode = st.settings.mode == Mode.AUTO && !GameSession.active()
             // Concurrent downloads share the line and cannot rank throughput. First check HTTPS only.
-            realTest(cand, "Фоновая проверка", big = wifi && !throughputMode && PhonePower.refresh(app).allowed, youtube = st.settings.mode == Mode.AUTO,
+            if(catalogChecked.isEmpty()) realTest(cand, "Фоновая проверка", big = wifi && !throughputMode && PhonePower.refresh(app).allowed, youtube = st.settings.mode == Mode.AUTO,
                 attempts = 1, parallel = ServiceProbePolicy.PARALLEL, budgetMs = ServiceProbePolicy.SERVICE_MS)
             if (!sameNetwork()) return false
             if (throughputMode) AutoSelection.compare(cand, { Store.state.value.state(it) }, sampleNet,

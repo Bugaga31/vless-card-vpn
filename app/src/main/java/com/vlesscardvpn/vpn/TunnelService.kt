@@ -540,7 +540,7 @@ class TunnelService : VpnService() {
                 calm = if (Actions.lastOptimizeSwitched) 0 else minOf(calm + 1, 3)
                 // sleep until the next pass, or wake early (45 s) when the network changes
                 val incomplete = Store.state.value.settings.mode == Mode.AUTO && usedServers.size < com.vlesscardvpn.core.AutoEligibility.TOP
-                val next = if (incomplete) 30_000L else longArrayOf(60_000L,120_000L,180_000L,300_000L)[calm]
+                val next = if (incomplete || com.vlesscardvpn.core.Actions.backgroundCatalogPending()) 30_000L else longArrayOf(60_000L,120_000L,180_000L,300_000L)[calm]
                 if (kotlinx.coroutines.withTimeoutOrNull(next) { optKick.receive() } != null) { calm = 0; delay(5_000) }
             }
         }

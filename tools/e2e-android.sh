@@ -152,6 +152,13 @@ P=$(waitlog "pool size=8 " 240) || fail "auto-eight: real Xray pool never reache
 echo "eight: $P"
 save_case auto-eight # retain background pool-fill diagnostics, not just the initial two routes
 
+# Once eight are selected, all eight remaining configurations must get REAL Xray/service results.
+: > $W/access.log
+run_case auto-background auto-background.json 180
+B=$(waitlog "catalog-background .*completed=8 total=8" 300) || fail "auto-background: remaining catalog did not complete real checks"
+echo "background: $B"
+save_case auto-background
+
 echo "=== case proxy (no VPN: SOCKS5 10808 + HTTP 10809 for other apps)"
 adb shell am start -n $PKG/.MainActivity --ez e2e_disconnect true >/dev/null; sleep 3; : > $W/access.log
 load proxy.json; adb logcat -c

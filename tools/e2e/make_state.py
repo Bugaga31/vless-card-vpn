@@ -45,3 +45,7 @@ write(f"{out}/auto-eight.json",pool,[],{},mode="AUTO",autoUpdateSubs=False,lastS
 # Wide Auto regression: the only real route sits after 40 unusable configurations.
 wide=[dict(dead,name=f"e2e-wide-dead-{i}",secret=f"00000000-0000-0000-0001-{i+2:012d}") for i in range(40)]+[reality]
 write(f"{out}/auto-wide.json",wide,[],{},mode="AUTO",autoUpdateSubs=False,lastSubRefresh=4102444800000)
+
+# Full selected pool must not stop real background checks of the rest of a 16-route catalogue.
+background=[dict(reality,name=f"e2e-background-{i}",secret=f"00000000-0000-0000-0000-{i+2:012d}") for i in range(16)]
+write(f"{out}/auto-background.json",background,[],{},mode="AUTO",autoUpdateSubs=False,lastSubRefresh=4102444800000)
