@@ -65,10 +65,10 @@ echo "== upgrade over published 1.2.37 (same package and certificate)"
 adb uninstall $PKG >/dev/null 2>&1
 curl -fsL -o prev.apk https://github.com/Bugaga31/vless-card-vpn/releases/download/v1.2.37/VLESS-Card-Beta-1.2.37.apk
 adb install prev.apk 2>&1 | tail -1 | grep -q Success || { echo "::error::Published 1.2.37 did not install"; exit 1; }
-BEFORE=$(adb shell dumpsys package "$PKG" | sed -n 's/.*versionCode=\([0-9]*\).*//p' | head -1 | tr -d '\r')
+BEFORE=$(adb shell dumpsys package "$PKG" | grep -m1 -o 'versionCode=[0-9]*' | cut -d= -f2 | tr -d '\r')
 test "$BEFORE" = 148 || { echo "::error::Expected installed versionCode 148, got $BEFORE"; exit 1; }
 U=$(adb install -r "$APK" 2>&1 | tail -1); echo "$U"; echo "$U" | grep -q Success || { echo "::error::1.2.38 did not upgrade 1.2.37"; exit 1; }
-AFTER=$(adb shell dumpsys package "$PKG" | sed -n 's/.*versionCode=\([0-9]*\).*//p' | head -1 | tr -d '\r')
+AFTER=$(adb shell dumpsys package "$PKG" | grep -m1 -o 'versionCode=[0-9]*' | cut -d= -f2 | tr -d '\r')
 test "$AFTER" = 149 || { echo "::error::Expected upgraded versionCode 149, got $AFTER"; exit 1; }
 echo "UPGRADE 1.2.37 (148) -> 1.2.38 (149) OK"
 echo "ALL INSTALL CHECKS OK"
