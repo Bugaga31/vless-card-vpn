@@ -49,6 +49,9 @@ class ServiceFixtureTest(unittest.TestCase):
         self.assertLess(warp.index('warp-registration.log'),warp.index('  adb logcat -c'))
         self.assertGreater(warp.index('save_case warp'),warp.index('else fail'))
         self.assertIn('exit $FAILS',script)
+        self.assertIn('save_case auto-eight',script)
+        self.assertIn('for round in 1 2 3; do',script)
+        self.assertIn('ownmask: server :$p not reached through own masking',script)
 
     def test_trust_anchor_is_generated_only_in_debug_and_never_in_release(self):
         self.assertNotIn('networkSecurityConfig',(ROOT / 'app/src/main/AndroidManifest.xml').read_text())

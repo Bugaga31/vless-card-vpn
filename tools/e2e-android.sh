@@ -108,6 +108,14 @@ adb logcat -d -s E2E:I | grep "socks port=" | tail -1 | grep -q "dpi=zapret" || 
 : > $W/access.log
 run_case ownmask ownmask.json
 adb logcat -d -s E2E:I | grep "socks port=" | tail -1 | grep -q "VCARD_CASCADE" || fail "ownmask: own cascade engine not started"
+# Xray starts on fallback outbound 0 until its first observatory round finishes.
+# Drive fresh real app connections in a bounded window; still require BOTH actual masked exits.
+for round in 1 2 3; do
+  grep -q "email: u8443" "$W/access.log" && grep -q "email: u8444" "$W/access.log" && break
+  sleep 5
+  R=$(probe "ownmask-balanced-$round"); okprobe "$R" || fail "ownmask: balanced app traffic failed"
+done
+save_case ownmask
 for p in 8443 8444; do
   c=$(grep -c "email: u$p" $W/access.log); echo "ownmask: server :$p accepted $c"
   [ "$c" -gt 0 ] || fail "ownmask: server :$p not reached through own masking"
@@ -143,6 +151,7 @@ adb logcat -d -s E2E:I | grep "socks port=" | tail -1 | grep -q "mode=SERVERS" |
 run_case auto-eight auto-eight.json 180
 P=$(waitlog "pool size=8 " 150) || fail "auto-eight: real Xray pool never reached eight outbounds"
 echo "eight: $P"
+save_case auto-eight # retain background pool-fill diagnostics, not just the initial two routes
 
 echo "=== case proxy (no VPN: SOCKS5 10808 + HTTP 10809 for other apps)"
 adb shell am start -n $PKG/.MainActivity --ez e2e_disconnect true >/dev/null; sleep 3; : > $W/access.log
