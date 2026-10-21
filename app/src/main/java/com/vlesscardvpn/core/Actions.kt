@@ -109,6 +109,7 @@ object Actions {
             if (socks != null && Tunnel.status.value.state == Tunnel.State.CONNECTED)
                 add(http.newBuilder().proxy(Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", socks.port))).build())
         }
+        var failure="download"
         for (c in clients) for (u in Settings.mirrors(url)) {
             var info: com.vlesscardvpn.model.SubInfo? = null
             val body = runCatching {
@@ -117,7 +118,18 @@ object Actions {
                     if (r.isSuccessful) r.body?.byteStream()?.use { String(BoundedInput.read(it, 2 * 1024 * 1024)) } else null
                 }
             }.getOrNull()
-            if (!body.isNullOrBlank() && LinkParser.parseMany(body).isNotEmpty()) return body to info
+            if (!body.isNullOrBlank()) {
+                if(LinkParser.parseMany(body).isNotEmpty()) {
+                    val prior=Store.state.value.settings.subInfo[url]
+                    info=(info ?: prior ?: com.vlesscardvpn.model.SubInfo()).copy(at=System.currentTimeMillis(),lastError="",attemptedAt=System.currentTimeMillis())
+                    return body to info
+                }
+                failure=SubscriptionImport.failure(body)
+            }
+        }
+        Store.update { st ->
+            val old=st.settings.subInfo[url] ?: com.vlesscardvpn.model.SubInfo()
+            st.copy(settings=st.settings.copy(subInfo=st.settings.subInfo+(url to old.copy(lastError=failure,attemptedAt=System.currentTimeMillis()))))
         }
         return null
     }
@@ -420,6 +432,7 @@ object Actions {
                 // Do not train the old profile with a result completed after Wi-Fi/cellular handoff.
                 if (!validContext() || Net.key(app) != net || Net.underlying(app)?.toString() != underlying) return@real
                 val s = variants[i].first
+                activeSearchReport?.httpsResult(s.id,p)
                 if (youtube) ServiceRoutes.targets.filter(ServiceRoutes::native).forEach { target ->
                     ServiceRoutes.measurement(target,p)?.let { serviceResults.getValue(target.id)[s.id] = it }
                 }
@@ -1296,6 +1309,7 @@ object Actions {
         val report = AutoSearchReport()
         val handoff = AutoSearchHandoff()
         activeSearchReport = report
+        report.catalog(Store.state.value.servers.size,Store.state.value.servers.count(AutoEligibility::allowed))
         try {
             val result = kotlinx.coroutines.withTimeoutOrNull(ServiceProbePolicy.FOREGROUND_MS) {
                 doAutoPrepareWithinBudget { if (handoff.claim()) onReady() }
@@ -1305,7 +1319,7 @@ object Actions {
             val message = "Бюджет поиска исчерпан. " + report.summary() + " Можно повторить или выбрать сервер вручную."
             Tunnel.status.value = Tunnel.Status(Tunnel.State.ERROR, "Авто: подтверждённый маршрут не найден", check = message)
             return message
-        } finally { handoff.expire(); if (activeSearchReport === report) activeSearchReport = null }
+        } finally { report.flush(); handoff.expire(); if (activeSearchReport === report) activeSearchReport = null }
     }
 
     private suspend fun doAutoPrepareWithinBudget(onReady: () -> Unit): String {
@@ -1380,6 +1394,7 @@ object Actions {
     suspend fun quickTest(list: List<Server>, onFirst: ((Server) -> Unit)? = null, attempted: MutableSet<String> = mutableSetOf()): String {
         CloudSpeed.loadCached(app)
         val st = Store.state.value
+        val report=activeSearchReport
         val untried = list.filter { it.id !in attempted }
         if (untried.isEmpty()) return "Эти маршруты уже проверены в текущем поиске"
         val net = Net.key(app); val network = Net.underlying(app)?.toString()
@@ -1401,43 +1416,50 @@ object Actions {
             probeMemory.cooling(net, server.id, st.state(server).maskFor(net), time) ||
                 (e.streak > 0 && time >= e.at && time - e.at < ProbeMemory.cooldownMs(e.streak))
         }) { s -> learned[s.id] ?: Int.MAX_VALUE }
-        val cachedGood = first.filter { st.state(it).evidenceFor(net).let { e -> e.successes > 0 && e.streak == 0 && time >= e.at && time - e.at < 30_000 && AutoEligibility.serviceRank(st.state(it),net,time) == 0 } }.map { it.id }.toSet()
-        val reachable = Tester.fastFilter(first.filter { it.id !in cachedGood })
-        val available = first.filter { (reachable[it.id] ?: -1) != 0 }
-        val ordered = available.sortedBy { if (it.id in cachedGood || (reachable[it.id] ?: -1) > 0) 0 else 1 }
-        // Check up to eight real routes; parallelism stays bounded and downloads remain sequential.
-        val shortlist = ServerChoice.diverse(ordered, AutoEligibility.TOP)
-        val passed = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
-        val fastOk = realTest(shortlist, "Авто: проверяю до восьми маршрутов", big = false, youtube = false,
-            attempts = 1, parallel = 4, budgetMs = ConnectPolicy.QUICK_BUDGET_MS,onSuccess={ passed.add(it.id) })
-        if (Net.key(app) != net || Net.underlying(app)?.toString() != network) return selectionNetworkChanged()
-        if (fastOk > 0 && chooseCompared(shortlist.filter { it.id in passed },onFirst,
-                eligible.filter { s -> shortlist.none { it.id == s.id } }) != null) {
-            deepPending = true; return "Передача HTTPS проверена; выбран маршрут с измеренной скоростью. Сервисы — отдельно"
+        // 1.0.100's useful baseline: reachability across the catalog BEFORE choosing up to 30 routes.
+        // Keep its breadth, not its unbounded DNS wait or ping-only evidence. Expensive checks stay bounded.
+        val catalog=foregroundDiscovery.catalog((first+eligible).distinctBy { it.id },net)
+        report?.catalog(Store.state.value.servers.size,eligible.size)
+        progress.value=progress.value.copy(title="Авто: доступность каталога ${catalog.size}",done=0,total=catalog.size)
+        val tcp=java.util.concurrent.ConcurrentHashMap<String,Int>();val states=StateBatch()
+        val scanned=AtomicInteger()
+        val generation=probeGeneration.get()
+        fun sameNetwork()=generation==probeGeneration.get() && Net.key(app)==net && Net.underlying(app)?.toString()==network
+        var lastContextCheck=0L;var cachedContext=true
+        fun resultContext(): Boolean {
+            if(generation!=probeGeneration.get()) return false
+            val at=System.nanoTime()
+            if(at-lastContextCheck>=150000000L) { cachedContext=sameNetwork();lastContextCheck=at }
+            return cachedContext
         }
-        attempted.addAll(shortlist.map { it.id });passed.clear()
-        val additional = ordered.filter { it.id !in attempted }
-        attempted.addAll(additional.map { it.id })
-        val ok = realTest(additional, "Авто: первые ${first.size} маршрутов (облако: ${cloud.size})", big = false,
-            youtube = false, attempts = 1, stopAfter = Int.MAX_VALUE, budgetMs = ConnectPolicy.QUICK_BUDGET_MS,onSuccess={ passed.add(it.id) })
-        if (Net.key(app) != net || Net.underlying(app)?.toString() != network) return selectionNetworkChanged()
-        if (ok > 0 && chooseCompared(additional.filter { it.id in passed },onFirst, eligible.filter { it.id !in attempted }) != null) {
-            deepPending = true; return "Передача HTTPS проверена; облачные подсказки ${cloud.size}"
+        val summary=CancellableProbe.run { bind ->
+            CatalogTcpProbe.scan(catalog,budgetMs=6000,window=PowerPolicy.cap(192,PhonePower.refresh(app).tcpParallel),bindCancel=bind,
+                onStart={ i -> report?.tcpStarted(catalog[i].id);step(scanned.incrementAndGet(),catalog.size) }) { i,ms ->
+                if(resultContext()) {
+                    val server=catalog[i];tcp[server.id]=ms
+                    report?.tcpResult(server.id,ms)
+                    if(ms>=0) states.put(server.id) { it.copy(tcpMs=ms) }
+                }
+            }
         }
-        // Only if the first wave failed: bound DNS/TCP work to a small diverse wave, not thousands of subscriptions.
-        val rest = foregroundDiscovery.window(eligible.filter { it.id !in attempted }, net)
-        attempted.addAll(rest.map { it.id })
-        val tcp = java.util.concurrent.ConcurrentHashMap<String, Int>(); val states = StateBatch()
-        Tester.tcp(rest, parallel = 32, timeoutMs = 1200) { server, ms -> tcp[server.id] = ms; states.put(server.id) { it.copy(tcpMs = ms) } }
-        states.flush()
-        val candidates = rest.filter { (tcp[it.id] ?: 0) > 0 }.sortedBy { tcp[it.id] }.take(ForegroundDiscovery.HTTPS_FINALISTS)
-        passed.clear()
-        val second = realTest(candidates, "Авто: запасные ${candidates.size} маршрутов", big = false, youtube = false,
-            attempts = 1, parallel = 6, stopAfter = Int.MAX_VALUE, budgetMs = ConnectPolicy.QUICK_BUDGET_MS,onSuccess={ passed.add(it.id) })
-        if (Net.key(app) != net || Net.underlying(app)?.toString() != network) return selectionNetworkChanged()
-        val verified = if (second > 0) chooseCompared(candidates.filter { it.id in passed },onFirst, eligible.filter { it.id !in attempted }) else null
-        if (verified != null) deepPending = true
-        return if (verified != null) "Маршрут проверен передачей HTTPS; результаты сервисов отдельно" else "Нет маршрута с подтверждённой передачей данных; продолжаю поиск"
+        states.flush();foregroundDiscovery.advanceCatalog(net,summary.started,catalog.size)
+        if(!sameNetwork()) return selectionNetworkChanged()
+        val reachable=catalog.filter { (tcp[it.id] ?: -1)>0 }
+        val candidates=ServerChoice.diverse(reachable.sortedWith(compareBy<Server> { tcp[it.id] }.thenBy { learned[it.id] ?: Int.MAX_VALUE }),ForegroundDiscovery.HTTPS_FINALISTS)
+        if(com.vlesscardvpn.BuildConfig.DEBUG) android.util.Log.i("E2E",
+            "catalog-scan total=${catalog.size} started=${summary.started} reachable=${summary.reachable} finalists=${candidates.size}")
+        val passed=java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+        attempted.addAll(candidates.map { it.id }) // A TCP hint alone is NOT an attempted real route.
+        val ok=realTest(candidates,"Авто: HTTPS ${candidates.size} кандидатов из ${catalog.size}",big=false,youtube=false,
+            attempts=1,parallel=6,stopAfter=Int.MAX_VALUE,budgetMs=ConnectPolicy.QUICK_BUDGET_MS,onSuccess={passed.add(it.id)})
+        if(!sameNetwork()) return selectionNetworkChanged()
+        val verified=if(ok>0) chooseCompared(candidates.filter { it.id in passed },onFirst,
+            reachable.filter { it.id !in attempted }) else null
+        if(verified!=null) deepPending=true
+        report?.flush()
+        return (if(verified!=null) "Передача HTTPS и скорость подтверждены; сервисы — отдельно. "
+            else "В текущем бюджете маршрут не подтверждён. ")+
+            "Каталог ${catalog.size}: проверена доступность ${summary.started}, доступны ${summary.reachable}; HTTPS-кандидатов ${candidates.size}. Остальные не объявлены нерабочими."
     }
 
     private fun expireUnreproducedSpeed(server: Server, net: String, at: Long) {
@@ -1486,9 +1508,11 @@ object Actions {
         }
         var initial = compare(candidates)
         // Generic HTTPS may pass while both requested services fail. Continue with another bounded wave.
-        if (initial == null && valid() && activeSearchReport?.resourceUnavailable() != true && remaining() >= 1500) {
+        while (initial == null && valid() && remaining() >= 1500) {
             val wave = ForegroundDiscovery.serviceWave((candidates + explore).distinctBy { it.id }
                 .filter(AutoEligibility::allowed), serviceAttempted)
+            if (wave.isEmpty()) break
+            serviceAttempted.addAll(wave.map { it.id })
             if (wave.isNotEmpty()) {
                 kotlinx.coroutines.withTimeoutOrNull(minOf(ServiceProbePolicy.SERVICE_MS + 2000,remaining())) {
                     realTest(wave,"Авто: ищу Telegram и видео YouTube",big=false,youtube=true,
@@ -1596,18 +1620,20 @@ object Actions {
      */
     private fun maybeLoadRequestedSource() {
         val st = Store.state.value
-        val source = listOf(com.vlesscardvpn.model.Subs.CLOUD_WORKS,com.vlesscardvpn.model.Subs.DIMAN).firstOrNull { u -> u in st.settings.subscriptions && st.servers.none { it.source == u } } ?: return
-        val now = android.os.SystemClock.elapsedRealtime()
-        if (!st.settings.autoUpdateSubs || source !in st.settings.subscriptions ||
-            st.servers.any { it.source == source } || requestedSourceJob?.isActive == true ||
-            now - requestedSourceAttempt < 60000L) return
-        requestedSourceAttempt = now
-        requestedSourceJob = scope.launch(Bg.io) {
-            val got = fetchFull(source) ?: return@launch
-            val list = LinkParser.parseMany(got.first,source).take(MAX_PER_SUB)
-            if (list.isNotEmpty() && source in Store.state.value.settings.subscriptions) {
-                Store.replaceSource(source,list)
-                got.second?.let { info -> Store.update { it.copy(settings = it.settings.copy(subInfo = it.settings.subInfo + (source to info))) } }
+        val sources=listOf(com.vlesscardvpn.model.Subs.CLOUD_WORKS,com.vlesscardvpn.model.Subs.DIMAN,com.vlesscardvpn.model.Subs.DARLENE)
+            .filter { u -> u in st.settings.subscriptions && st.servers.none { u in it.sources || it.source==u } }
+        val now=android.os.SystemClock.elapsedRealtime()
+        if(sources.isEmpty() || !st.settings.autoUpdateSubs || requestedSourceJob?.isActive==true || now-requestedSourceAttempt<60000L) return
+        requestedSourceAttempt=now
+        requestedSourceJob=scope.launch(Bg.io) {
+            for(source in sources) {
+                if(source !in Store.state.value.settings.subscriptions) continue
+                val got=fetchFull(source) ?: continue
+                val list=LinkParser.parseMany(got.first,source).take(MAX_PER_SUB)
+                if(list.isNotEmpty() && source in Store.state.value.settings.subscriptions) {
+                    Store.replaceSource(source,list)
+                    got.second?.let { info -> Store.update { it.copy(settings=it.settings.copy(subInfo=it.settings.subInfo+(source to info))) } }
+                }
             }
         }
     }

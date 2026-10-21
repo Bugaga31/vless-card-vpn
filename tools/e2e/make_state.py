@@ -41,3 +41,7 @@ write(f"{out}/warp.json", [], [], {}, autoUpdateSubs=False, lastSubRefresh=41024
 # Eight real authenticated outbounds; the foreground may start early but background must fill the pool.
 pool=[dict(reality,name=f"e2e-pool-{i}",secret=f"00000000-0000-0000-0000-{i+2:012d}") for i in range(8)]
 write(f"{out}/auto-eight.json",pool,[],{},mode="AUTO",autoUpdateSubs=False,lastSubRefresh=4102444800000)
+
+# Wide Auto regression: the only real route sits after 40 unusable configurations.
+wide=[dict(dead,name=f"e2e-wide-dead-{i}",secret=f"00000000-0000-0000-0001-{i+2:012d}") for i in range(40)]+[reality]
+write(f"{out}/auto-wide.json",wide,[],{},mode="AUTO",autoUpdateSubs=False,lastSubRefresh=4102444800000)

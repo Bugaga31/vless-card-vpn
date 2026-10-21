@@ -6,6 +6,7 @@ data class SubSource(val url: String, val title: String, val group: String, val 
 object Subs {
     private fun gh(path: String) = "https://raw.githubusercontent.com/$path"
     private const val IG = "igareck/vpn-configs-for-russia/main"
+    const val DARLENE = "https://gist.githubusercontent.com/Darlene-Alderson-FSOCIETY/2b6bd8622af25a1da773d549937cf713/raw/Secret_Telegram_RE_s_B.txt"
     const val DIMAN = "https://gist.githubusercontent.com/Diman331/8c868070c0b5a5ec0c7d94507717b67b/raw/subscription.txt"
     const val CLOUD_WORKS = "https://raw.githubusercontent.com/Bugaga31/vless-card-vpn/servers/works.txt"
     const val RU = "Для России"
@@ -16,6 +17,7 @@ object Subs {
         // Public cloud checks all collected reachable Xray-supported configurations; local ISP checks still decide.
         SubSource(CLOUD_WORKS, "VLESS Card · проверенные HTTPS, весь мир", WORLD, default = true),
         SubSource(gh("Bugaga31/vless-card-vpn/servers/alive_ru.txt"), "VLESS Card · облачная проверка (для России)", RU, default = true),
+        SubSource(DARLENE, "Darlene · Secret Telegram (сейчас Mieru)", WORLD, default = true),
         SubSource(DIMAN, "Diman331 · подписка", WORLD, default = true),
         SubSource(gh("$IG/BLACK_VLESS_RUS_mobile.txt"), "igareck · VLESS для мобильного", RU, default = true),
         SubSource(gh("$IG/BLACK_VLESS_RUS.txt"), "igareck · VLESS", RU, default = true),

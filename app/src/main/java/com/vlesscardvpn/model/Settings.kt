@@ -165,7 +165,7 @@ data class Settings(
         /** "https://www.Site.com/path" → "site.com"; null when it is not a domain. */
         fun host(input: String): String? = input.trim().lowercase().substringAfter("://").substringBefore('/').substringBefore('?')
             .substringBefore(':').removePrefix("www.").trim('.').takeIf { Regex("^[a-z0-9а-яё-]+(\\.[a-z0-9а-яё-]+)+$").matches(it) }
-        const val REV = 75
+        const val REV = 76
         /** YouTube video, pictures and player — what «Умный YouTube» sends through the DPI bypass. */
         val YT_DOMAINS = listOf("geosite:youtube", "domain:googlevideo.com", "domain:ytimg.com", "domain:ggpht.com", "domain:youtu.be", "domain:youtube.com")
         /**
@@ -183,6 +183,8 @@ data class Settings(
             // Add the requested source once; a later removal by the user is respected.
             if (s.rev < 74 && Subs.DIMAN !in s.subscriptions) s = s.copy(subscriptions = s.subscriptions + Subs.DIMAN)
             if (s.rev < 75 && Subs.CLOUD_WORKS !in s.subscriptions) s = s.copy(subscriptions = listOf(Subs.CLOUD_WORKS) + s.subscriptions)
+            // Owner-requested public sources, once. Later user removal is respected.
+            if (s.rev < 76) s=s.copy(subscriptions=(s.subscriptions+listOf(Subs.DARLENE,Subs.DIMAN)).distinct())
             return if (s.rev >= REV) s else s.copy(rev = REV)
         }
         const val DPI_AUTO = "auto"
@@ -238,13 +240,13 @@ data class Settings(
 }
 
 /** What a paid subscription says about itself: used/total bytes, expiry (unix s), its own name. 0 = unknown. */
-data class SubInfo(val used: Long = 0, val total: Long = 0, val expire: Long = 0, val title: String = "", val at: Long = 0) {
+data class SubInfo(val used: Long = 0, val total: Long = 0, val expire: Long = 0, val title: String = "", val at: Long = 0, val lastError: String = "", val attemptedAt: Long = 0) {
     val left: Long get() = (total - used).coerceAtLeast(0)
-    fun toJson(): JSONObject = JSONObject().put("used", used).put("total", total).put("expire", expire).put("title", title).put("at", at)
+    fun toJson(): JSONObject = JSONObject().put("used", used).put("total", total).put("expire", expire).put("title", title).put("at", at).put("lastError",lastError).put("attemptedAt",attemptedAt)
     /** Close to the end: under 10 % of the traffic left or under 3 days. */
     fun ending(nowSec: Long): Boolean = total > 0 && left < total / 10 || expire > 0 && expire - nowSec < 3 * 86400
     companion object {
-        fun fromJson(o: JSONObject) = SubInfo(o.optLong("used"), o.optLong("total"), o.optLong("expire"), o.optString("title"), o.optLong("at"))
+        fun fromJson(o: JSONObject) = SubInfo(o.optLong("used"), o.optLong("total"), o.optLong("expire"), o.optString("title"), o.optLong("at"), o.optString("lastError"), o.optLong("attemptedAt"))
         /** "upload=1; download=2; total=3; expire=4" + "profile-title" (plain or base64:…). Null when the server says nothing. */
         fun parse(userInfo: String?, title: String?, now: Long = System.currentTimeMillis()): SubInfo? {
             val kv = userInfo.orEmpty().split(';').mapNotNull { p -> p.split('=', limit = 2).takeIf { it.size == 2 }?.let { it[0].trim().lowercase() to it[1].trim() } }.toMap()

@@ -21,6 +21,7 @@ import com.vlesscardvpn.core.Tunnel
 @Composable
 fun ConnectionOverview(status: Tunnel.Status, summary: Store.Summary, cloud: String, openServers: () -> Unit) {
     var showCloud by rememberSaveable { mutableStateOf(false) }
+    val searchCoverage by com.vlesscardvpn.core.AutoSearchReport.coverage.collectAsState()
     val history by com.vlesscardvpn.core.ServiceHealth.history.collectAsState()
     val health by com.vlesscardvpn.core.ServiceHealth.state.collectAsState()
     var now by remember { mutableStateOf(System.currentTimeMillis()) }
@@ -78,6 +79,9 @@ fun ConnectionOverview(status: Tunnel.Status, summary: Store.Summary, cloud: Str
                 Text(com.vlesscardvpn.core.ServiceProbePolicy.reason(health.youtubeReason), color = scheme.onSurfaceVariant, fontSize = 12.sp)
             Text("Проверка транспорта без аккаунта; не проверяет сообщения и звонки. Медиа: до 128 КиБ, бюджет ${health.budgetMs / 1000} с." +
                 if (health.checkedAt > 0) " Проверено ${(now - health.checkedAt).coerceAtLeast(0) / 1000} с назад." else " Результата ещё нет.",
+                color = scheme.onSurfaceVariant, fontSize = 12.sp)
+            if (searchCoverage.catalog > 0) Text("Последний поиск: " + searchCoverage.text() +
+                ". Размер финального пула не ограничивает каталог; непроверенные маршруты не объявлены нерабочими.",
                 color = scheme.onSurfaceVariant, fontSize = 12.sp)
             HorizontalDivider(color = scheme.outline.copy(alpha = .3f))
             // Stack on narrow screens and with enlarged system text. Never label the pool as active tunnels.

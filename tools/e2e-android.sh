@@ -132,6 +132,12 @@ adb logcat -d -s E2E:I | grep "socks port=" | tail -1 | grep -q "mode=SERVERS" |
 c=$(grep -c "email: u8443" $W/access.log); echo "auto: server :8443 accepted $c"
 [ "$c" -gt 0 ] || fail "auto: traffic did not go through the auto-picked server"
 
+# Only one route behind forty unusable links. Catalog breadth is not inferred from pool checkboxes.
+: > $W/access.log
+run_case auto-wide auto-wide.json 90
+adb logcat -d -s E2E:I | grep -q "catalog-scan total=41 started=41 reachable=1 finalists=1" || fail "auto-wide: whole fixture catalog was not scanned"
+adb logcat -d -s E2E:I | grep "socks port=" | tail -1 | grep -q "mode=SERVERS" || fail "auto-wide: real route after initial eight was not connected"
+
 # Do not merely assert the selected checkboxes: this log is emitted after the real Xray core starts.
 : > $W/access.log
 run_case auto-eight auto-eight.json 180

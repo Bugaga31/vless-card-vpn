@@ -43,6 +43,24 @@ class ServiceProofException(val proof: Probe) : IllegalStateException("HTTPS-р�
 
 /** Per-search diagnostics only, not proof of the current tunnel and never persisted or uploaded. */
 class AutoSearchReport {
+    data class Coverage(val catalog: Int=0,val eligible: Int=0,val tcp: Int=0,val reachable: Int=0,val https: Int=0,val data: Int=0) {
+        fun text()="Каталог $catalog · допущено в Auto $eligible · TCP/адреса $tcp · доступны $reachable · HTTPS $https · передача данных $data"
+    }
+    companion object {
+        val coverage=kotlinx.coroutines.flow.MutableStateFlow(Coverage())
+        private val sequence=java.util.concurrent.atomic.AtomicLong()
+    }
+    private val token=sequence.incrementAndGet()
+    private var all=0;private var eligible=0;private var lastPublish=0L
+    private val tcpIds=HashSet<String>();private val reachableIds=HashSet<String>();private val httpsIds=HashSet<String>();private val dataIds=HashSet<String>()
+    init { if(sequence.get()==token) coverage.value=Coverage() }
+    @Synchronized fun catalog(total: Int, eligible: Int) { all=maxOf(all,total);this.eligible=maxOf(this.eligible,eligible);flush() }
+    @Synchronized fun tcpStarted(id: String) { tcpIds+=id;publish() }
+    @Synchronized fun tcpResult(id: String, ms: Int) { if(ms>0)reachableIds+=id;publish() }
+    @Synchronized fun httpsResult(id: String, p: Probe) { httpsIds+=id;if(p.httpsHosts>=2)dataIds+=id;publish() }
+    private fun publish() { if(System.nanoTime()-lastPublish>=150000000L) flush() }
+    @Synchronized fun snapshot()=Coverage(all,eligible,tcpIds.size,reachableIds.size,httpsIds.size,dataIds.size)
+    @Synchronized fun flush() { lastPublish=System.nanoTime();if(sequence.get()==token)coverage.value=snapshot() }
     private val results = linkedMapOf<String, Probe>()
     @Synchronized fun record(route: String, probe: Probe) {
         results[route] = probe
@@ -57,7 +75,8 @@ class AutoSearchReport {
         val note = values.lastOrNull { it.ytReason.startsWith("player-") && it.ytOk == null }?.let {
             " " + ServiceProbePolicy.reason(it.ytReason) + ". Это не доказательство отказа всех серверов."
         }.orEmpty()
-        return "Проверено маршрутов: ${values.size}; HTTPS: $https; Telegram MTProto: $tg; YouTube-медиа: $yt. " +
+        flush()
+        return snapshot().text()+". Сервисные проверки: " + "Проверено маршрутов: ${values.size}; HTTPS: $https; Telegram MTProto: $tg; YouTube-медиа: $yt. " +
             "Это отдельные результаты, не подтверждение общей цепочки." + note
     }
 }

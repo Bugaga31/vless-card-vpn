@@ -351,7 +351,7 @@ fun SettingsScreen() {
         }
         val catalog = remember { com.vlesscardvpn.model.Subs.CATALOG.map { it.url }.toSet() }
         s.subInfo.filter { it.key in s.subscriptions }.forEach { (u, i) ->
-            val line = Actions.subLine(i)
+            val line = listOf(Actions.subLine(i),com.vlesscardvpn.core.SubscriptionImport.label(i.lastError)).filter { it.isNotBlank() }.joinToString(" · ")
             if (line.isNotEmpty()) Hint("«${i.title.ifEmpty { com.vlesscardvpn.model.Subs.title(u) }}»: $line")
         }
         var subs by remember(s.subscriptions) { mutableStateOf(s.subscriptions.filter { it !in catalog }.joinToString("\n")) }
