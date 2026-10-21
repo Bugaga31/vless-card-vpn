@@ -105,8 +105,14 @@ object Actions {
                         check="Пригодный маршрут не подтверждён за эту попытку. Это не отказ всего каталога")
                 }
                 "Бюджет Auto исчерпан; полный каталог проверяется отдельно"
+            } catch (e: AutoBudgetExpired) {
+                if (attempt != null) finishAutoAttempt(attempt,"budget-exhausted")
+                Tunnel.status.value = Tunnel.Status(Tunnel.State.ERROR,"Бюджет Auto исчерпан",check=e.message.orEmpty())
+                e.message.orEmpty()
             } catch (e: kotlinx.coroutines.CancellationException) { throw e }
             catch (e: Throwable) { Errors.human(e).replaceFirstChar { it.uppercase() } }
+            if (attempt != null && Tunnel.status.value.state == Tunnel.State.ERROR)
+                finishAutoAttempt(attempt,"no-eligible-candidates")
             android.util.Log.i("E2E", "action[$title]: $msg")
             progress.value = progress.value.copy(running = false, message = msg)
         }
@@ -1360,7 +1366,6 @@ object Actions {
             if (pool.isEmpty()) {
                 val reason = if (searchFinished || preferred(snapshot,snapshot.servers).isEmpty()) "no-eligible-candidates" else "budget-exhausted"
                 AutoDiagnostics.record(attempt.generation,"search",AutoDiagnostics.Verdict.UNKNOWN,reason)
-                finishAutoAttempt(attempt,reason)
                 val message = if (snapshot.servers.isEmpty()) "Каталог пуст. Обновите подписки или добавьте конфигурацию; загрузка не является проверкой маршрута"
                     else "Пригодный маршрут в этой попытке не подтверждён. " + report.summary() + " Полный каталог проверяется отдельно"
                 Tunnel.status.value = Tunnel.Status(Tunnel.State.ERROR,"Маршрут пока не подтверждён",check=message)

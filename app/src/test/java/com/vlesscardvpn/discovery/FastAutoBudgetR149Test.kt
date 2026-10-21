@@ -72,6 +72,11 @@ class FastAutoBudgetR149Test {
         try { a.within { a.close("cancelled");42 };fail("late success") } catch (_:CancellationException) {}
         assertFalse(a.valid("wifi","h"));assertEquals("cancelled",a.reason())
     }
+    @Test fun successfulServiceHandoffCanFinishBeforeSearchBookkeeping()=runBlocking {
+        val a=AutoForegroundAttempt(1,"wifi","h",{0L})
+        assertEquals(42,a.within { a.close("connected");42 })
+        assertFalse(a.valid("wifi","h")) // cannot perform another handoff
+    }
     @Test fun oldNetworkHandleAndOldGenerationCannotBecomeFresh() {
         val a=AutoForegroundAttempt(1,"wifi","h1",{0L})
         assertFalse(a.valid("wifi","h2"));assertFalse(a.valid("cell","h1"))
