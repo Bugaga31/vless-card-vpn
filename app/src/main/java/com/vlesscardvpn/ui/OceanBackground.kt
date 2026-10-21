@@ -55,7 +55,7 @@ fun OceanBackground(motion: Boolean) {
         runCatching { ctx.contentResolver.registerContentObserver(android.provider.Settings.Global.getUriFor(android.provider.Settings.Global.ANIMATOR_DURATION_SCALE), false, scaleObserver) }
         val pm = ctx.getSystemService(Context.POWER_SERVICE) as PowerManager
         val thermalListener = if (android.os.Build.VERSION.SDK_INT >= 29) PowerManager.OnThermalStatusChangedListener { update() } else null
-        if (thermalListener != null) runCatching { pm.addThermalStatusListener(thermalListener) }
+        if (android.os.Build.VERSION.SDK_INT >= 29 && thermalListener != null) runCatching { pm.addThermalStatusListener(thermalListener) }
         update()
         onDispose {
             if (thermalListener != null && android.os.Build.VERSION.SDK_INT >= 29) runCatching { pm.removeThermalStatusListener(thermalListener) }

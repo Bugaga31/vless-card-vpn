@@ -195,6 +195,8 @@ class DpiProxy(private val context: Context) : AutoCloseable {
             port = p; strategy = s
             return@withContext p
         }
+        // Native child-process APIs start at 26; the in-process Xray path above still supports 24.
+        if (Build.VERSION.SDK_INT < 26) error("${s.engine.title} требует Android 8+")
         val b = ProcessBuilder(listOf(exe(s.engine).absolutePath) + s.argv(p, mask))
             .redirectOutput(File("/dev/null")).redirectError(File("/dev/null"))
         if (allowLocal) b.environment()["VCVPN_TPWS_ALLOW_LOCAL"] = "1"
@@ -213,7 +215,7 @@ class DpiProxy(private val context: Context) : AutoCloseable {
         } catch (e: Throwable) { close(); throw e }
     }
 
-    val alive: Boolean get() = process?.isAlive == true || xray?.running == true
+    val alive: Boolean get() = (Build.VERSION.SDK_INT >= 26 && process?.isAlive == true) || xray?.running == true
 
     /**
      * The engine process died (not closed by us): start it again on the same port, so Xray's dialer and the
@@ -221,7 +223,7 @@ class DpiProxy(private val context: Context) : AutoCloseable {
      */
     suspend fun reviveIfDead(): Boolean {
         val (s, mask, local) = last ?: return true
-        val dead = process?.let { !it.isAlive } ?: return true // Xray strategies run in-process
+        val dead = process?.let { Build.VERSION.SDK_INT >= 26 && !it.isAlive } ?: return true // Xray strategies run in-process
         if (!dead) return true
         val p = port
         if (p <= 0) return false

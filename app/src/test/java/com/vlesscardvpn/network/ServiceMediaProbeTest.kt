@@ -71,6 +71,24 @@ class ServiceMediaProbeTest {
         assertFalse(YouTubeMediaProbe.freshProof(100, 600100))
         assertTrue(YouTubeMediaProbe.freshProof(100, 200))
     }
+    @Test fun playerApiFallbackFindsMediaWhenWatchPageIsUseless() {
+        val seen = mutableListOf<String>()
+        val methods = mutableListOf<String>()
+        val result = YouTubeMediaProbe.check { req ->
+            seen += req.url.toString(); methods += req.method
+            when (seen.size) {
+                1 -> FakeCall(req, 200, "text/html", "consent".toByteArray())
+                2 -> FakeCall(req, 200, "application/json", """
+                    {"playabilityStatus":{"status":"OK"},"streamingData":{"adaptiveFormats":[{"mimeType":"video/mp4","url":"$url"}]}}
+                """.trimIndent().toByteArray())
+                else -> FakeCall(req, 206, "video/mp4", ByteArray(YouTubeMediaProbe.SAMPLE_BYTES))
+            }
+        }
+        assertEquals(true, result.ok)
+        assertEquals(listOf("GET", "POST", "GET"), methods)
+        assertEquals(YouTubeMediaProbe.WATCH, seen[0])
+        assertEquals(YouTubeMediaProbe.PLAYER_API, seen[1])
+    }
     @Test fun mtprotoRequestUsesFreshNonceAndUnencryptedFraming() {
         val nonce = ByteArray(16) { it.toByte() }
         val req = TelegramProbe.request(nonce, 1700000000123)
@@ -96,5 +114,47 @@ class ServiceMediaProbeTest {
         assertNull(TelegramProbe.check(0))
         assertNull(TelegramProbe.check(65536))
         assertNull(TelegramProbe.check(1080, 50))
+    }
+
+    @Test fun failedApiPreservesOriginalDiagnosticAndNeverPasses() {
+        var calls = 0
+        val result = YouTubeMediaProbe.check { req ->
+            calls++
+            if (calls == 1) FakeCall(req, 200, "text/html", "ytInitialPlayerResponse = {\"playabilityStatus\":{\"status\":\"LOGIN_REQUIRED\"}};".toByteArray())
+            else FakeCall(req, 403, "application/json", "{}".toByteArray())
+        }
+        assertNull(result.ok); assertEquals("player-login-required", result.reason); assertEquals(2, calls)
+    }
+    @Test fun apiRejectsOversizeAndNonVideoWithoutFetchingMedia() {
+        for (payload in listOf(" ".repeat(1048577), "{\"playabilityStatus\":{\"status\":\"OK\"},\"streamingData\":{\"formats\":[{\"mimeType\":\"audio/mp4\",\"url\":\"$url\"}]}}")) {
+            var calls = 0
+            val result = YouTubeMediaProbe.check { req ->
+                calls++
+                if (calls == 1) FakeCall(req, 200, "text/html", "consent".toByteArray())
+                else FakeCall(req, 200, "application/json", payload.toByteArray())
+            }
+            assertNull(result.ok); assertEquals(2, calls)
+        }
+    }
+    @Test fun validWatchPlayerSkipsApiAndStillRequiresFullVideo() {
+        val seen = mutableListOf<String>()
+        val result = YouTubeMediaProbe.check { req ->
+            seen += req.url.toString()
+            if (seen.size == 1) FakeCall(req, 200, "text/html", html().toByteArray())
+            else FakeCall(req, 206, "video/mp4", ByteArray(16384))
+        }
+        assertEquals(false, result.ok)
+        assertEquals(listOf(YouTubeMediaProbe.WATCH, url), seen)
+    }
+    @Test fun interruptedDiscoveryDoesNotStartApiFallback() {
+        var calls = 0
+        Thread.currentThread().interrupt()
+        try {
+            val result = YouTubeMediaProbe.discoverResult { req ->
+                calls++; FakeCall(req, 200, "text/html", "consent".toByteArray())
+            }
+            assertNull(result.url); assertEquals("cancelled", result.reason)
+            assertEquals(1, calls)
+        } finally { Thread.interrupted() }
     }
 }

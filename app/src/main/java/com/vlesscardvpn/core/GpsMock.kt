@@ -44,7 +44,7 @@ object GpsMock {
             PROVIDERS.forEach { p ->
                 runCatching { lm.removeTestProvider(p) }
                 @Suppress("DEPRECATION")
-                lm.addTestProvider(p, false, false, false, false, true, true, true, 1, 1)
+                lm.addTestProvider(p, false, false, false, false, true, true, true, android.location.Criteria.POWER_LOW, android.location.Criteria.ACCURACY_FINE)
                 lm.setTestProviderEnabled(p, true)
             }
         } catch (e: SecurityException) {

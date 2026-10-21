@@ -166,4 +166,14 @@ class AutoServiceBudgetRegressionTest {
         assertTrue(r.summary().contains("маршрутов: 64"))
         assertTrue(AutoSearchReport().summary().contains("маршрутов: 0"))
     }
+    @Test fun fastDcFailuresTryMoreAddressesWithoutCuttingSlowHandshakeAllowance() {
+        var clock = 0L; val hosts = mutableListOf<String>()
+        val result = TelegramProbe.evaluate(8000, { clock }) { host, allowance ->
+            hosts += host
+            assertEquals(4000L, allowance)
+            clock += 100
+            TelegramProbe.Result(hosts.size == 4, if (hosts.size == 4) "mtproto-response" else "mtproto-connect")
+        }
+        assertEquals(true, result.ok); assertEquals(4, hosts.distinct().size); assertEquals(400L, clock)
+    }
 }

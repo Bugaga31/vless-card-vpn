@@ -91,7 +91,7 @@ class AutoSearchRegressionR145Test {
                         input.readUnsignedShort();out.write(byteArrayOf(5,0,0,1,127,0,0,1,0,1));out.flush()
                         when {
                             host=="probe.invalid" -> { while(!input.readLine().isNullOrEmpty()){};out.write("HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n".toByteArray());out.flush() }
-                            host.startsWith("149.154.") -> {input.readFully(ByteArray(42));check(mediaStarted.await(2,TimeUnit.SECONDS));out.write(1);out.flush()}
+                            host in setOf("149.154.167.51", "149.154.175.50", "149.154.175.100", "149.154.167.91", "149.154.171.5", "91.108.56.130") -> {input.readFully(ByteArray(42));check(mediaStarted.await(2,TimeUnit.SECONDS));out.write(1);out.flush()}
                             else -> {mediaStarted.countDown();while(input.read()>=0){};mediaClosed.countDown()}
                         }
                     } }

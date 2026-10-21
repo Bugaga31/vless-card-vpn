@@ -1,5 +1,7 @@
 package com.vlesscardvpn.core
 
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Call
 import okhttp3.Request
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
@@ -10,6 +12,7 @@ import org.json.JSONObject
  */
 object YouTubeMediaProbe {
     const val WATCH = "https://www.youtube.com/watch?v=jNQXAC9IVRw"
+    const val PLAYER_API = "https://www.youtube.com/youtubei/v1/player?prettyPrint=false"
     const val SAMPLE_BYTES = 131072
     const val PROOF_PREFS = "youtube_media_proof_v1"
     data class Result(val ok: Boolean?, val kbps: Int = 0, val reason: String = "", val firstByteMs: Long = 0)
@@ -43,7 +46,10 @@ object YouTubeMediaProbe {
     }
 
     internal fun mediaUrl(html: String): String? = runCatching {
-        val root = JSONObject(playerJson(html) ?: return null)
+        mediaUrlFromPlayer(JSONObject(playerJson(html) ?: return null))
+    }.getOrNull()
+
+    internal fun mediaUrlFromPlayer(root: JSONObject): String? {
         if (root.optJSONObject("playabilityStatus")?.optString("status") != "OK") return null
         val data = root.optJSONObject("streamingData") ?: return null
         // Prefer video; an audio-only URL doesn't prove that video playback can fetch media.
@@ -55,8 +61,8 @@ object YouTubeMediaProbe {
                 if (f.optString("mimeType").startsWith("video/") && allowedUrl(url)) return url
             }
         }
-        null
-    }.getOrNull()
+        return null
+    }
 
     data class Discovery(val url: String? = null, val reason: String = "player-incomplete")
 
@@ -71,7 +77,34 @@ object YouTubeMediaProbe {
 
     fun discover(call: (Request) -> Call): String? = discoverResult(call).url
 
-    fun discoverResult(call: (Request) -> Call): Discovery = try {
+    fun discoverResult(call: (Request) -> Call): Discovery {
+        val watch = discoverWatchPage(call)
+        if (watch.url != null || watch.reason == "cancelled" || Thread.currentThread().isInterrupted) return watch
+        // Same caller and shared deadline: no direct-network fallback or separate timeout window.
+        return discoverPlayerApi(call)?.let { Discovery(it, "player-api-url") } ?: watch
+    }
+
+    private fun discoverPlayerApi(call: (Request) -> Call): String? = runCatching {
+        val body = """{"videoId":"jNQXAC9IVRw","contentCheckOk":true,"racyCheckOk":true,"context":{"client":{"clientName":"ANDROID","clientVersion":"19.09.37","hl":"en","gl":"US"}}}"""
+        val request = Request.Builder().url(PLAYER_API)
+            .header("User-Agent", "com.google.android.youtube/19.09.37")
+            .header("Accept", "application/json")
+            .post(body.toRequestBody("application/json; charset=utf-8".toMediaType())).build()
+        call(request).execute().use { r ->
+            if (r.code != 200 || !r.header("Content-Type").orEmpty().contains("json", true)) return null
+            val input = r.body?.byteStream() ?: return null
+            val out = java.io.ByteArrayOutputStream(); val buf = ByteArray(8192)
+            while (out.size() <= 1048576) {
+                if (Thread.currentThread().isInterrupted) return null
+                val n = input.read(buf, 0, minOf(buf.size, 1048577 - out.size()))
+                if (n < 0) return mediaUrlFromPlayer(JSONObject(out.toString("UTF-8")))
+                out.write(buf, 0, n)
+            }
+            null
+        }
+    }.getOrNull()
+
+    private fun discoverWatchPage(call: (Request) -> Call): Discovery = try {
         call(Request.Builder().url(WATCH).header("User-Agent", "Mozilla/5.0").build()).execute().use { r ->
             if (r.code != 200) return Discovery(reason="player-http-${r.code}")
             if (!r.header("Content-Type").orEmpty().startsWith("text/html",true)) return Discovery(reason="player-unavailable")

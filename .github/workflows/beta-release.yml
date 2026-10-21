@@ -46,7 +46,7 @@ jobs:
           bash tools/test-vibe-foreground.sh
           python3 tools/test_ui_layout.py
           PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p 'test_cloud_*.py'
-          ./gradlew -PbetaPreview=true -PemulatorAbis=true -PsplitAbi=true --no-daemon --max-workers=2 :app:testDebugUnitTest :app:assembleRelease :security-test-probe:assembleDebug
+          ./gradlew -PbetaPreview=true -PemulatorAbis=true -PsplitAbi=true --no-daemon --max-workers=2 :app:testDebugUnitTest :app:lintRelease :app:assembleRelease :security-test-probe:assembleDebug
       - name: Sign with persistent Beta key (v1+v2+v3)
         env:
           KS_B64: ${{ secrets.BETA_KEYSTORE_B64 }}

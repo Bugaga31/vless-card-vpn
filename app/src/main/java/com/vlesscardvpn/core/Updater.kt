@@ -56,7 +56,11 @@ object Updater {
         val js = ctx.getSystemService(Context.JOB_SCHEDULER_SERVICE) as android.app.job.JobScheduler
         if (!autoDownload(ctx)) { js.cancel(13901); return }
         val job = android.app.job.JobInfo.Builder(13901, android.content.ComponentName(ctx, UpdateJob::class.java))
-            .setRequiredNetworkType(android.app.job.JobInfo.NETWORK_TYPE_UNMETERED).setRequiresBatteryNotLow(true)
+            .setRequiredNetworkType(android.app.job.JobInfo.NETWORK_TYPE_UNMETERED)
+            .apply {
+                if (android.os.Build.VERSION.SDK_INT >= 26) setRequiresBatteryNotLow(true)
+                else setRequiresCharging(true) // API 24–25: conservative battery-safe background fallback.
+            }
             .setPeriodic(3600_000L, 15 * 60_000L).setPersisted(true).build()
         runCatching { js.schedule(job) }
     }

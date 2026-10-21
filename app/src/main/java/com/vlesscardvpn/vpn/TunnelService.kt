@@ -343,7 +343,7 @@ class TunnelService : VpnService() {
         val network = Net.underlying(this)
         val caps = cm?.getNetworkCapabilities(network)
         val mtu = com.vlesscardvpn.core.TransportPolicy.mtu(caps?.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) == true,
-            warpChained || usedServers.any { Masks.isWarp(it) }, cm?.getLinkProperties(network)?.mtu ?: 0)
+            warpChained || usedServers.any { Masks.isWarp(it) }, if (android.os.Build.VERSION.SDK_INT >= 29) cm?.getLinkProperties(network)?.mtu ?: 0 else 0)
         val b = Builder().setSession(if (settings.randomTun || settings.quietNotification) "Sync" else "VLESS Card").setMtu(mtu)
             .addAddress(v4, 30).addRoute("0.0.0.0", 0)
             // No IPv6 in the tunnel: Android then refuses IPv6 at once and apps (Chrome) fall back to IPv4 instantly.

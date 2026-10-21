@@ -10,6 +10,7 @@ import com.vlesscardvpn.core.Tunnel
 /** Quick settings tile: one tap to connect / disconnect. */
 class ToggleTileService : TileService() {
     override fun onStartListening() { refresh() }
+    @android.annotation.SuppressLint("StartActivityAndCollapseDeprecated") // Intent branch is strictly below API 34.
     override fun onClick() {
         val on = Tunnel.status.value.state.let { it == Tunnel.State.CONNECTED || it == Tunnel.State.CONNECTING }
         if (on) TunnelService.stop(this)

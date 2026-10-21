@@ -14,7 +14,8 @@ import java.util.concurrent.TimeUnit
  * All traffic uses the supplied local SOCKS listener; never direct fallback or account data.
  */
 object TelegramProbe {
-    private val dc = listOf("149.154.167.51", "149.154.175.50")
+    private val dc = listOf("149.154.167.51", "149.154.175.50",
+        "149.154.175.100", "149.154.167.91", "149.154.171.5", "91.108.56.130")
     private val timer = Executors.newSingleThreadScheduledExecutor { r -> Thread(r, "tg-probe-timeout").apply { isDaemon = true } }
     private val random = SecureRandom()
 

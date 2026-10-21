@@ -158,6 +158,7 @@ private fun AddDialog(onDismiss: () -> Unit, onAdd: (String) -> Unit) {
 @Composable
 private fun ServerMenu(s: Server, st: ServerState, onDismiss: () -> Unit) {
     val ctx = LocalContext.current
+    val app by Store.ui.collectAsState()
     var masks by remember { mutableStateOf(false) }
     var fork by remember { mutableStateOf(false) }
     var qr by remember { mutableStateOf(false) }
@@ -192,7 +193,7 @@ private fun ServerMenu(s: Server, st: ServerState, onDismiss: () -> Unit) {
                     (ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("link", LinkParser.toLink(s)))
                     Toast.makeText(ctx, "Ссылка скопирована", Toast.LENGTH_SHORT).show(); onDismiss()
                 }) { Text("Копировать ссылку") }
-                val fav = s.id in Store.state.value.settings.favorites
+                val fav = s.id in app.settings.favorites
                 TextButton(onClick = { Actions.toggleFavorite(s.id); onDismiss() }) {
                     Text(if (fav) "Убрать из избранного" else "★ В избранное (Авто всегда берёт его, если работает)")
                 }
