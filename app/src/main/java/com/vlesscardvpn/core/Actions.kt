@@ -374,44 +374,46 @@ object Actions {
         return set to (running ?: set.currentPort)
     }
 
-    /** TCP ping of all servers, then real test of the [realLimit] fastest. */
-    fun testAll(onlySelected: Boolean = false, realLimit: Int = 150) = launch("Проверка серверов") {
-        val st0 = Store.state.value
-        val r = doTestAll(if (onlySelected) st0.selected else st0.servers, realLimit)
-        // Few work: masks for the reachable ones right away (no separate button to find)
-        val st1 = Store.state.value
-        val cand = st1.servers.filter { st1.state(it).tcpMs > 0 && !st1.state(it).works }.sortedBy { st1.state(it).tcpMs }.take(8)
-        if (!onlySelected && st1.servers.count { st1.state(it).works } < 5 && cand.isNotEmpty()) r + ". " + doFindMasks(cand, 24, budgetMs = 120_000) else r
+    /** Every requested configuration receives a real protocol check; TCP is only an ordering hint. */
+    fun testAll(onlySelected: Boolean = false) = launch("Проверка серверов") {
+        val st = Store.state.value
+        doTestAll(if (onlySelected) st.selected else st.servers)
     }
 
-    private suspend fun doTestAll(list: List<Server>, realLimit: Int, big: Boolean = true): String {
+    private suspend fun doTestAll(list: List<Server>, big: Boolean = true): String {
         if (list.isEmpty()) return "Нет серверов — добавьте ссылку или обновите подписки"
-        progress.value = progress.value.copy(title = "TCP-пинг")
-        val done = AtomicInteger()
+        val net = Net.key(app); val network = Net.underlying(app)?.toString()
         val tcp = java.util.concurrent.ConcurrentHashMap<String, Int>()
-        val batch = StateBatch()
-        Tester.tcp(list, parallel = 192, timeoutMs = 2000) { s, ms ->
-            tcp[s.id] = ms
-            batch.put(s.id) { it.copy(tcpMs = ms, realMs = if (ms == 0) 0 else it.realMs, checkedAt = System.currentTimeMillis()) }
-            step(done.incrementAndGet(), list.size)
+        val hints = StateBatch()
+        progress.value = progress.value.copy(title = "Доступность каталога", done = 0, total = list.size)
+        CancellableProbe.run { bind ->
+            CatalogTcpProbe.scan(list, budgetMs = 6000, window = PowerPolicy.cap(192, PhonePower.refresh(app).tcpParallel), bindCancel = bind) { i, ms ->
+                tcp[list[i].id] = ms
+                if (ms >= 0 && Net.key(app) == net && Net.underlying(app)?.toString() == network)
+                    hints.put(list[i].id) { it.copy(tcpMs = ms) }
+            }
         }
-        batch.flush()
-        // which of the TCP-reachable ones get the (slower) real check: the mini model's favourites first, then by ping
-        val alive = list.filter { (tcp[it.id] ?: 0) > 0 }.let { l -> runCatching { Brain.load(app) }; val now = Store.state.value
-            if (Brain.seen >= 50 && l.size > realLimit) Brain.order(Net.key(app), l) { now.state(it) } else l.sortedBy { tcp[it.id] } }
-            .let { ServerChoice.diverse(it, realLimit) }
-        // one attempt for all (fast), a second one only for those that failed although TCP answers
-        var working = realTest(alive, "Проверка через Xray", big, attempts = 1)
-        val again = Store.state.value.let { s -> alive.filter { !s.state(it).works } }
-        if (again.isNotEmpty() && again.size < alive.size * 3 / 4 + 4) working += realTest(again, "Повторная проверка", big, attempts = 2)
-        return "Работают: $working из ${alive.size} доступных по TCP (всего ${list.size})"
+        hints.flush()
+        val ordered = FullCatalogChecks.ordered(list, tcp)
+        var checked = 0; var working = 0
+        for (wave in FullCatalogChecks.waves(ordered)) {
+            kotlinx.coroutines.currentCoroutineContext().ensureActive()
+            if (Net.key(app) != net || Net.underlying(app)?.toString() != network) return selectionNetworkChanged()
+            val completed = AtomicInteger()
+            working += realTest(wave, "Проверка всех серверов через Xray", big = big, attempts = 1,
+                parallel = ServiceProbePolicy.PARALLEL, budgetMs = ServiceProbePolicy.SERVICE_MS,
+                onResult = { _, _ -> completed.incrementAndGet() }, progressOffset = checked, progressTotal = ordered.size)
+            checked += completed.get()
+        }
+        return "Работают: $working из ${ordered.size}. " + if (checked == ordered.size) "Проверен весь каталог"
+            else "Проверено $checked; ${ordered.size - checked} пропущено (например, ключ используется активным VPN)"
     }
 
     private suspend fun realTest(servers: List<Server>, title: String, big: Boolean = true, attempts: Int = 2, parallel: Int = 32, youtube: Boolean = true,
                                  stopAfter: Int = Int.MAX_VALUE, budgetMs: Long = 0, onFirst: ((Server) -> Unit)? = null, onSuccess: ((Server) -> Unit)? = null,
-                                 onResult: ((Server, Probe) -> Unit)? = null): Int {
+                                 onResult: ((Server, Probe) -> Unit)? = null, progressOffset: Int = 0, progressTotal: Int = servers.size): Int {
         if (servers.isEmpty()) return 0
-        progress.value = progress.value.copy(title = title, done = 0, total = servers.size)
+        progress.value = progress.value.copy(title = title, done = progressOffset, total = progressTotal)
         val net = Net.key(app)
         val underlying = Net.underlying(app)?.toString()
         val pinned = pinCertificates(servers)
@@ -467,7 +469,7 @@ object Actions {
                         }
                 }
                 if (firstSuccess && onFirst != null) { states.flush(); onFirst(s) }
-                step(done.incrementAndGet(), variants.size)
+                step(progressOffset + done.incrementAndGet(), progressTotal)
             }
         } finally {
             own?.close(); states.flush(); runCatching { Brain.save(app) }
@@ -1222,7 +1224,7 @@ object Actions {
         if (level < 3) return 0
         onStep("обновляю подписки и перепроверяю все серверы")
         if (now - st.settings.lastSubRefresh > 3600_000L || st.servers.size < 20) doRefresh()
-        doTestAll(Store.state.value.servers, 80)
+        doTestAll(Store.state.value.servers)
         Store.state.value.let { s3 -> s3.servers.filter { s3.state(it).works } }.takeIf { it.isNotEmpty() }?.let { return selectBest(10, close = true, among = it) }
         val s4 = Store.state.value
         val c2 = s4.servers.filter { s4.state(it).tcpMs > 0 }.sortedBy { s4.state(it).tcpMs }.take(10)
@@ -1358,14 +1360,8 @@ object Actions {
         activeSearchReport = report
         report.catalog(Store.state.value.servers.size,Store.state.value.servers.count(AutoEligibility::allowed))
         try {
-            val result = kotlinx.coroutines.withTimeoutOrNull(ServiceProbePolicy.FOREGROUND_MS) {
-                doAutoPrepareWithinBudget { if (handoff.claim()) onReady() }
-            }
-            if (result != null) return result
-            if (!handoff.expire()) return "Маршрут выбран — проверяю фактическую цепочку"
-            val message = "Бюджет поиска исчерпан. " + report.summary() + " Можно повторить или выбрать сервер вручную."
-            Tunnel.status.value = Tunnel.Status(Tunnel.State.ERROR, "Авто: подтверждённый маршрут не найден", check = message)
-            return message
+            // The catalogue has no global deadline. Each request is bounded and the user can cancel.
+            return doAutoPrepareWithinBudget { if (handoff.claim()) onReady() }
         } finally { report.flush(); handoff.expire(); if (activeSearchReport === report) activeSearchReport = null }
     }
 
@@ -1437,7 +1433,7 @@ object Actions {
         return if (n > 0) "Авто: выбрано $n лучших серверов — подключаюсь" else "Авто: проверяю Telegram и видео через сохранённую стратегию обхода DPI"
     }
 
-    /** Broad bounded reachability first, then real HTTPS finalists; fresh proven routes may bypass discovery. */
+    /** TCP prioritizes, never excludes. Real checks continue in bounded waves until success or catalogue exhaustion. */
     suspend fun quickTest(list: List<Server>, onFirst: ((Server) -> Unit)? = null, attempted: MutableSet<String> = mutableSetOf()): String {
         CloudSpeed.loadCached(app)
         val st = Store.state.value
@@ -1445,7 +1441,7 @@ object Actions {
         val untried = list.filter { it.id !in attempted }
         if (untried.isEmpty()) return "Эти маршруты уже проверены в текущем поиске"
         val net = Net.key(app); val network = Net.underlying(app)?.toString()
-        val eligible = preferred(st, untried).filterNot { CloudSpeed.blocked(it) }.ifEmpty { preferred(st, untried) }
+        val eligible = preferred(st, untried).sortedBy { CloudSpeed.blocked(it) }
         val affinity = SourceAffinity.order(eligible,Store.state.value.servers,{Store.state.value.state(it)},net,System.currentTimeMillis()) { CloudControl.sources(it) }
         val cloud = (CloudSpeed.pick(eligible, emptyList(), n = 4) + affinity.take(4) + CloudControl.ranked(eligible,8)).distinctBy { it.id }.take(ConnectPolicy.FIRST)
         val remembered = (st.settings.netServers[net] ?: st.settings.netServers[Net.family(net)]).orEmpty().toSet()
@@ -1463,8 +1459,7 @@ object Actions {
             probeMemory.cooling(net, server.id, st.state(server).maskFor(net), time) ||
                 (e.streak > 0 && time >= e.at && time - e.at < ProbeMemory.cooldownMs(e.streak))
         }) { s -> learned[s.id] ?: Int.MAX_VALUE }
-        // 1.0.100's useful baseline: reachability across the catalog BEFORE choosing up to 30 routes.
-        // Keep its breadth, not its unbounded DNS wait or ping-only evidence. Expensive checks stay bounded.
+        // A cheap bounded scan orders the entire catalogue, including failed or unknown TCP hints.
         val catalog=foregroundDiscovery.catalog((first+eligible).distinctBy { it.id },net)
         report?.catalog(Store.state.value.servers.size,eligible.size)
         progress.value=progress.value.copy(title="Авто: доступность каталога ${catalog.size}",done=0,total=catalog.size)
@@ -1491,22 +1486,32 @@ object Actions {
         }
         states.flush();foregroundDiscovery.advanceCatalog(net,summary.started,catalog.size)
         if(!sameNetwork()) return selectionNetworkChanged()
-        val reachable=catalog.filter { (tcp[it.id] ?: -1)>0 }
-        val candidates=ServerChoice.diverse(reachable.sortedWith(compareBy<Server> { tcp[it.id] }.thenBy { learned[it.id] ?: Int.MAX_VALUE }),ForegroundDiscovery.HTTPS_FINALISTS)
+        val candidates = FullCatalogChecks.ordered(catalog, tcp, learned)
         if(com.vlesscardvpn.BuildConfig.DEBUG) android.util.Log.i("E2E",
-            "catalog-scan total=${catalog.size} started=${summary.started} reachable=${summary.reachable} finalists=${candidates.size}")
-        val passed=java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
-        attempted.addAll(candidates.map { it.id }) // A TCP hint alone is NOT an attempted real route.
-        val ok=realTest(candidates,"Авто: HTTPS ${candidates.size} кандидатов из ${catalog.size}",big=false,youtube=false,
-            attempts=1,parallel=6,stopAfter=Int.MAX_VALUE,budgetMs=ConnectPolicy.QUICK_BUDGET_MS,onSuccess={passed.add(it.id)})
-        if(!sameNetwork()) return selectionNetworkChanged()
-        val verified=if(ok>0) chooseCompared(candidates.filter { it.id in passed },onFirst,
-            reachable.filter { it.id !in attempted }) else null
-        if(verified!=null) deepPending=true
+            "catalog-scan total=${catalog.size} started=${summary.started} reachable=${summary.reachable} queued=${candidates.size}")
+        var checked = 0
+        for (wave in FullCatalogChecks.waves(candidates)) {
+            kotlinx.coroutines.currentCoroutineContext().ensureActive()
+            if (!sameNetwork()) return selectionNetworkChanged()
+            val passed = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+            val completed = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+            realTest(wave, "Авто: проверка всего каталога", big=false, youtube=false,
+                attempts=1, parallel=6, budgetMs=ServiceProbePolicy.SERVICE_MS,
+                onSuccess={ passed.add(it.id) }, onResult={ server, _ -> completed.add(server.id) },
+                progressOffset=checked, progressTotal=candidates.size)
+            attempted.addAll(completed)
+            checked += completed.size
+            if (com.vlesscardvpn.BuildConfig.DEBUG) android.util.Log.i("E2E", "catalog-real checked=$checked total=${candidates.size}")
+            if (!sameNetwork()) return selectionNetworkChanged()
+            val verified = if (passed.isNotEmpty()) chooseCompared(wave.filter { it.id in passed }, onFirst) else null
+            if (verified != null) {
+                deepPending = true
+                report?.flush()
+                return "Передача HTTPS и скорость подтверждены. Проверено $checked из ${candidates.size}; остальные — в фоновой очереди"
+            }
+        }
         report?.flush()
-        return (if(verified!=null) "Передача HTTPS и скорость подтверждены; сервисы — отдельно. "
-            else "В текущем бюджете маршрут не подтверждён. ")+
-            "Каталог ${catalog.size}: проверена доступность ${summary.started}, доступны ${summary.reachable}; HTTPS-кандидатов ${candidates.size}. Остальные не объявлены нерабочими."
+        return "Каталог ${candidates.size}: проверено $checked, пропущено ${candidates.size - checked}. Подтверждённый маршрут не найден"
     }
 
     private fun expireUnreproducedSpeed(server: Server, net: String, at: Long) {

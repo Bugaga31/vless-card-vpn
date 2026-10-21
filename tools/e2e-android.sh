@@ -146,8 +146,15 @@ c=$(grep -c "email: u8443" $W/access.log); echo "auto: server :8443 accepted $c"
 # Only one route behind forty unusable links. Catalog breadth is not inferred from pool checkboxes.
 : > $W/access.log
 run_case auto-wide auto-wide.json 90
-adb logcat -d -s E2E:I | grep -q "catalog-scan total=41 started=41 reachable=1 finalists=1" || fail "auto-wide: whole fixture catalog was not scanned"
+adb logcat -d -s E2E:I | grep -q "catalog-scan total=41 started=41 reachable=1 queued=41" || fail "auto-wide: whole fixture catalog was not scanned"
 adb logcat -d -s E2E:I | grep "socks port=" | tail -1 | grep -q "mode=SERVERS" || fail "auto-wide: real route after initial eight was not connected"
+
+# Every endpoint answers TCP; a usable authenticated route lies beyond the old 30-route cap.
+: > $W/access.log
+run_case auto-auth-tail auto-auth-tail.json 240
+adb logcat -d -s E2E:I | grep -q "catalog-scan total=41 started=41 reachable=41 queued=41" || fail "auth-tail: not all TCP-reachable configurations queued"
+adb logcat -d -s E2E:I | grep -q "catalog-real checked=41 total=41" || fail "auth-tail: not all 41 configurations received real protocol results"
+adb logcat -d -s E2E:I | grep "socks port=" | tail -1 | grep -q "mode=SERVERS" || fail "auth-tail: real authenticated route beyond 30 did not connect"
 
 # Do not merely assert the selected checkboxes: this log is emitted after the real Xray core starts.
 : > $W/access.log
@@ -234,7 +241,7 @@ load test.json; adb logcat -c
 adb shell am start -n $PKG/.MainActivity --ez e2e_test true >/dev/null
 T=$(waitlog "action\[Проверка серверов\]" 120) || fail "tester: no result"
 echo "tester: $T"
-echo "$T" | grep -q "Работают: 3 из 3" || fail "tester: expected 3 working of 3 reachable"
+echo "$T" | grep -q "Работают: 3 из 4" || fail "tester: expected all 4 configurations checked, 3 working"
 
 adb logcat -c
 adb shell am start -n $PKG/.MainActivity --ez e2e_masks true >/dev/null

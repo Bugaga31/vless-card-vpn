@@ -46,6 +46,11 @@ write(f"{out}/auto-eight.json",pool,[],{},mode="AUTO",autoUpdateSubs=False,lastS
 wide=[dict(dead,name=f"e2e-wide-dead-{i}",secret=f"00000000-0000-0000-0001-{i+2:012d}") for i in range(40)]+[reality]
 write(f"{out}/auto-wide.json",wide,[],{},mode="AUTO",autoUpdateSubs=False,lastSubRefresh=4102444800000)
 
+# All 41 links answer TCP on the SAME endpoint. The first 40 use rejected credentials.
+# This detects a real-protocol cap of 30 (the old closed-port case did not).
+auth_tail=[dict(reality,name=f"e2e-rejected-{i}",secret=f"00000000-0000-0000-0001-{i+2:012d}") for i in range(40)]+[reality]
+write(f"{out}/auto-auth-tail.json",auth_tail,[],{},mode="AUTO",autoUpdateSubs=False,lastSubRefresh=4102444800000)
+
 # Full selected pool must not stop real background checks of the rest of a 16-route catalogue.
 background=[dict(reality,name=f"e2e-background-{i}",secret=f"00000000-0000-0000-0000-{i+2:012d}") for i in range(16)]
 # This case tests real queue coverage, not optional active-traffic deferral. Emulator/system/probe
