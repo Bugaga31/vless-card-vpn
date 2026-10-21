@@ -41,6 +41,15 @@ class ServiceFixtureTest(unittest.TestCase):
             self.assertEqual([{'action':'allow','network':'tcp','port':str(port),'ip':['127.0.0.1/32']}],settings['finalRules'])
         self.assertNotIn('finalRules',next(o for o in patched['outbounds'] if o['tag']=='qa-other').get('settings',{}))
 
+    def test_live_warp_failure_retains_diagnostics_before_the_next_case(self):
+        script = (ROOT / 'tools/e2e-android.sh').read_text()
+        warp = script[script.index('echo "=== case warp'):script.index('echo "=== DPI strategy')]
+        self.assertIn('okprobe "$R" || fail "warp: probe app traffic through WARP failed"',warp)
+        self.assertIn('else fail "warp: no working WARP endpoint"; fi',warp)
+        self.assertLess(warp.index('warp-registration.log'),warp.index('  adb logcat -c'))
+        self.assertGreater(warp.index('save_case warp'),warp.index('else fail'))
+        self.assertIn('exit $FAILS',script)
+
     def test_trust_anchor_is_generated_only_in_debug_and_never_in_release(self):
         self.assertNotIn('networkSecurityConfig',(ROOT / 'app/src/main/AndroidManifest.xml').read_text())
         workflow = (ROOT / '.github/workflows/beta-release.yml').read_text()

@@ -1390,7 +1390,7 @@ object Actions {
         return if (n > 0) "Авто: выбрано $n лучших серверов — подключаюсь" else "Авто: проверяю Telegram и видео через сохранённую стратегию обхода DPI"
     }
 
-    /** Cached cloud/network candidates first; no whole-catalog TCP scan or video downloads before first connect. */
+    /** Broad bounded reachability first, then real HTTPS finalists; fresh proven routes may bypass discovery. */
     suspend fun quickTest(list: List<Server>, onFirst: ((Server) -> Unit)? = null, attempted: MutableSet<String> = mutableSetOf()): String {
         CloudSpeed.loadCached(app)
         val st = Store.state.value
