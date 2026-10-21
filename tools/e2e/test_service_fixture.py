@@ -28,6 +28,15 @@ class ServiceFixtureTest(unittest.TestCase):
         self.assertIn('completed=8 total=8', script)
         self.assertIn('remaining catalog did not complete real checks', script)
 
+    def test_optimizer_gate_checks_applied_core_not_a_racy_delta(self):
+        script = (ROOT / 'tools/e2e-android.sh').read_text()
+        self.assertIn('pool size=3 ', script)
+        self.assertIn('optimize sel=4 ok=3 .*changed=true', script)
+        self.assertIn('running Xray pool did not drop the dead server', script)
+        self.assertNotIn('grep -q "result=true" || fail "optimize:', script)
+        service = (ROOT / 'app/src/main/java/com/vlesscardvpn/vpn/TunnelService.kt').read_text()
+        self.assertIn('AutoRoutePolicy.selectionPending(s.settings.mode', service)
+
     def test_mtproto_frame_contains_fresh_request_nonce(self):
         nonce = bytes(range(16))
         response = fixture.response(nonce)

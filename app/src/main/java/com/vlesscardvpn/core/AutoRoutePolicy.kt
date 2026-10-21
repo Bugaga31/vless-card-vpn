@@ -1,5 +1,6 @@
 package com.vlesscardvpn.core
 
+import com.vlesscardvpn.model.Mode
 import com.vlesscardvpn.model.Server
 import com.vlesscardvpn.model.ServerState
 import com.vlesscardvpn.model.Settings
@@ -7,6 +8,12 @@ import com.vlesscardvpn.xray.Masks
 
 /** Soft exploration target, not a promised minimum speed or a connectivity requirement. */
 object AutoRoutePolicy {
+    /** A saved selection can be ahead of the running core after traffic deferred a reconnect.
+     * A later no-op optimizer pass must still apply it in Servers/Hybrid as well as Auto.
+     */
+    fun selectionPending(mode: Mode, selected: Set<String>, running: Set<String>): Boolean =
+        mode != Mode.BYEDPI && selected.isNotEmpty() && selected != running
+
     const val TARGET_KBPS = 5000
     const val SEARCH_MS = 14000L
     const val MASK_MS = 4000L

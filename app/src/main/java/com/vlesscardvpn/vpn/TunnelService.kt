@@ -524,12 +524,15 @@ class TunnelService : VpnService() {
                 }
                 // An earlier pass may have deferred applying a changed pool during a call/download.
                 // Compare with the running engine, not only with the already-updated Store selection.
-                val pending = Store.state.value.let { s -> s.settings.mode == Mode.AUTO &&
-                    (s.selected.map { it.id }.toSet() != usedServers.map { it.id }.toSet() ||
-                    appliedAutoWeights != com.vlesscardvpn.core.SpeedBalance.fingerprint(
-                        if (!com.vlesscardvpn.core.GameSession.active()) usedServers.map {
-                            com.vlesscardvpn.core.ServerChoice.measuredSpeed(s.state(it),Net.key(this@TunnelService),System.currentTimeMillis()) } else emptyList(),
-                        usedServers.map { s.state(it).realMs })) }
+                val pending = Store.state.value.let { s ->
+                    val expected = com.vlesscardvpn.core.AutoEligibility.independent(
+                        s.selected.filter(com.vlesscardvpn.core.AutoEligibility::allowed)).map { it.id }.toSet()
+                    com.vlesscardvpn.core.AutoRoutePolicy.selectionPending(s.settings.mode, expected,
+                        usedServers.map { it.id }.toSet()) || (s.settings.mode == Mode.AUTO &&
+                        appliedAutoWeights != com.vlesscardvpn.core.SpeedBalance.fingerprint(
+                            if (!com.vlesscardvpn.core.GameSession.active()) usedServers.map {
+                                com.vlesscardvpn.core.ServerChoice.measuredSpeed(s.state(it),Net.key(this@TunnelService),System.currentTimeMillis()) } else emptyList(),
+                            usedServers.map { s.state(it).realMs })) }
                 val reconnect = result || pending
                 // the user is in a call / watching video: wait a minute; still busy → skip, the next pass decides again
                 val busyNow = reconnect && userActive() && run { Log.i("E2E", "optimize: user is busy — switch postponed"); delay(60_000); userActive() }
