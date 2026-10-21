@@ -98,6 +98,8 @@ class TunnelService : VpnService() {
     /** Servers of the running connection (selected or the best ones taken automatically). */
     @Volatile private var usedServers: List<com.vlesscardvpn.model.Server> = emptyList()
     @Volatile private var appliedAutoWeights = ""
+    @Volatile private var appliedMasks: Map<String,String> = emptyMap()
+    @Volatile private var appliedRouteContext = ""
     @Volatile private var warpChained = false
     /** DPI-strategy repairs in a row (reset by a good check). */
     private var dpiHeals = 0
@@ -290,6 +292,8 @@ class TunnelService : VpnService() {
             kotlinx.coroutines.currentCoroutineContext().ensureActive()
             check(c.running) { "Xray не запустился: ${c.lastStatus}" }
             usedServers = used.map { it.first }
+            appliedMasks = used.associate { it.first.id to (it.second?.id ?: "") }
+            appliedRouteContext = com.vlesscardvpn.core.RouteContext.key(st.settings)
             appliedAutoWeights = com.vlesscardvpn.core.SpeedBalance.fingerprint(downloadSpeeds,downloadLatencies)
             Tunnel.socks = socks
             if (BuildConfig.DEBUG) Log.i("E2E", "pool size=${used.size} ids=${used.map { it.first.id }}")
@@ -428,6 +432,9 @@ class TunnelService : VpnService() {
             val sampledNet = Net.key(this@TunnelService)
             val sampledHandle = Net.underlying(this@TunnelService)?.toString()
             val sampledServers = usedServers.toList()
+            val sampledMasks = appliedMasks.toMap()
+            val sampledChain = appliedRouteContext
+            val proofStartedAt = System.currentTimeMillis()
             val sampledCore = core
             if (sampledCore !== expectedCore) return@launch
             val recent = verified?.takeIf { it.matches(sampledNet, sampledHandle, System.currentTimeMillis()) }
@@ -447,7 +454,7 @@ class TunnelService : VpnService() {
             // mobile network): one calm second try before calling the route bad and starting a heal or a reconnect
             if (verdict(p) == false) { delay(3000); if (Tunnel.socks?.port == port) p = probe() }
             val cur = Tunnel.status.value
-            if (cur.state != Tunnel.State.CONNECTED || core !== sampledCore || Net.key(this@TunnelService) != sampledNet ||
+            if (cur.state != Tunnel.State.CONNECTED || core !== sampledCore || sampledChain != com.vlesscardvpn.core.RouteContext.key(Store.state.value.settings) || Net.key(this@TunnelService) != sampledNet ||
                 Net.underlying(this@TunnelService)?.toString() != sampledHandle) return@launch
             // WARP: ask Cloudflare itself whether the traffic comes through WARP (warp=on / plus), so it's clear it works.
             val warp = if (p.realMs > 0 && (warpChained || usedServers.any { Masks.isWarp(it) }))
@@ -456,11 +463,20 @@ class TunnelService : VpnService() {
             } else ""
             if (Tunnel.status.value.state != Tunnel.State.CONNECTED || core !== sampledCore ||
                 Net.key(this@TunnelService) != sampledNet || Net.underlying(this@TunnelService)?.toString() != sampledHandle) return@launch
-            if (checkServices && recent == null) com.vlesscardvpn.core.ServiceHealth.finish(p, System.currentTimeMillis(), budget)
+            if (sampledChain != com.vlesscardvpn.core.RouteContext.key(Store.state.value.settings)) return@launch
+            if (checkServices && recent == null) {
+                com.vlesscardvpn.core.ServiceHealth.finish(p, System.currentTimeMillis(), budget)
+                if (st.mode == Mode.AUTO) Store.update { current ->
+                    current.copy(states=current.states.mapValues { (id,value) ->
+                        sampledMasks[id]?.let { mask -> com.vlesscardvpn.core.AutoEligibility.recordChainServices(
+                            value,sampledNet,mask,proofStartedAt,System.currentTimeMillis(),p,sampledServers.size==1) } ?: value
+                    })
+                }
+            }
             val text = if (p.realMs > 0) "HTTPS · ${p.realMs} мс · ${com.vlesscardvpn.core.ServiceProbePolicy.describe(p)}$warp"
                 else "Нет ответа через выбранный маршрут (${p.error}). " + if (st.mode == Mode.AUTO && st.autoHeal) "Ищу рабочий вариант сам…" else "Проверьте серверы или включите маскировку."
             Tunnel.status.value = cur.copy(check = text, checkOk = verdict(p))
-            verdict(p)?.takeIf { recent == null }?.let { observed -> runCatching { val stv = Store.state.value; com.vlesscardvpn.core.Brain.lived(sampledNet, sampledServers, { stv.state(it) }, observed); com.vlesscardvpn.core.Brain.save(this@TunnelService) } }
+            verdict(p)?.takeIf { recent == null && (it || sampledServers.size == 1) }?.let { observed -> runCatching { val stv = Store.state.value; com.vlesscardvpn.core.Brain.lived(sampledNet, sampledServers, { stv.state(it) }, observed); com.vlesscardvpn.core.Brain.save(this@TunnelService) } }
             Log.i("E2E", "check ok=${p.works} ms=${p.realMs} big=${p.bigOk} yt=${p.ytOk} tg=${p.tgOk} err=${p.error} warp=$warp")
             if (accepted(p) && st.mode == Mode.AUTO) Actions.rememberNet(sampledNet)
             // «Умный YouTube» broke YouTube here (the bypass stopped working): back to the servers for YouTube

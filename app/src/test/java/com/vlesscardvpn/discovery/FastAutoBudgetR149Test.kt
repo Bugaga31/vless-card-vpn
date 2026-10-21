@@ -101,6 +101,27 @@ class FastAutoBudgetR149Test {
         val old=proven().copy(maskId="chrome.h4",okCount=20,failCount=3)
         assertFalse(AutoEligibility.httpsFresh(old,"wifi",now));assertEquals(20,old.okCount);assertEquals(3,old.failCount)
     }
+    @Test fun backgroundConfirmedFailureExcludesTheSingleFallback() {
+        val p=Probe(20,true,null,tgOk=false,httpsHosts=2,httpsChecked=true)
+        val updated=AutoEligibility.recordChainServices(base(),"wifi","",now,now+10,p,true)
+        assertEquals(2,AutoEligibility.serviceRank(updated,"wifi",now+10))
+        assertTrue(AutoEligibility.connectionPool(listOf(route(0)),{updated},"wifi",now+10).isEmpty())
+    }
+    @Test fun sharedBalancerFailureRevokesProofWithoutInventingMemberFailure() {
+        val s=proven().copy(okCount=15,failCount=2)
+        val p=Probe(20,true,null,tgOk=false,httpsHosts=2,httpsChecked=true)
+        val updated=AutoEligibility.recordChainServices(s,"wifi","",now,now+10,p,false)
+        assertEquals(0L,updated.serviceCheckedAt);assertEquals(2,updated.failCount);assertEquals(15,updated.okCount)
+        assertEquals(true,updated.serviceTgOk) // old boolean retained as history, not usable current proof
+        assertEquals(1,AutoEligibility.serviceRank(updated,"wifi",now+10))
+    }
+    @Test fun newerReceiptOrNewMaskCannotBeOverwrittenByLateBackgroundFailure() {
+        val p=Probe(20,true,null,tgOk=false,httpsHosts=2,httpsChecked=true)
+        val newer=proven().copy(serviceCheckedAt=now+20)
+        assertEquals(newer,AutoEligibility.recordChainServices(newer,"wifi","",now,now+10,p,true))
+        val changed=base().copy(maskId="chrome.h4")
+        assertEquals(changed,AutoEligibility.recordChainServices(changed,"wifi","",now,now+10,p,true))
+    }
     @Test fun resultReasonsCannotContainSecrets() {
         try { AutoDiagnostics.record(1,"search",AutoDiagnostics.Verdict.UNKNOWN,"vless://secret");fail("unsafe reason") }
         catch (_:IllegalArgumentException) {}
