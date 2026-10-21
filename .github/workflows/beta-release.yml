@@ -82,6 +82,12 @@ jobs:
           done
           $BT/apksigner verify --print-certs -v release/VLESS-Card-Beta.apk | grep -E "key size|SHA-256 digest"
           $BT/apksigner verify --print-certs -v release/VLESS-Card-Beta.apk | grep -q "key size (bits): 2048"
+          # Upgrade compatibility requires the exact signer used by published 1.2.37.
+          curl -fsL -o previous-1.2.37.apk https://github.com/Bugaga31/vless-card-vpn/releases/download/v1.2.37/VLESS-Card-Beta-1.2.37.apk
+          PREV_CERT=$($BT/apksigner verify --print-certs previous-1.2.37.apk | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | head -1)
+          NEXT_CERT=$($BT/apksigner verify --print-certs release/VLESS-Card-Beta.apk | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | head -1)
+          test -n "$PREV_CERT" && test "$PREV_CERT" = "$NEXT_CERT"
+          echo "CERTIFICATE MATCHES PUBLISHED 1.2.37: $NEXT_CERT"
           unzip -l release/VLESS-Card-Beta.apk | grep -E "META-INF/.*\.(RSA|SF)$"
           python3 - <<'PY'
           import glob, xml.etree.ElementTree as E
@@ -150,6 +156,8 @@ jobs:
             ui-*.xml
           if-no-files-found: ignore
   publish:
+    # Validation branch: keep the already-created 1.2.38 candidate draft private.
+    if: github.ref_name != 'beta-build-149'
     needs: [build, emulator-install, quality]
     runs-on: ubuntu-latest
     permissions:
