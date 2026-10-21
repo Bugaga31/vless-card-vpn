@@ -31,7 +31,8 @@ class ServiceFixtureTest(unittest.TestCase):
 
     def test_optimizer_gate_checks_applied_core_not_a_racy_delta(self):
         script = (ROOT / 'tools/e2e-android.sh').read_text()
-        self.assertIn('pool size=3 ', script)
+        self.assertIn('pool size=[1-3] ids=', script)
+        self.assertIn('python3 tools/e2e/validate_pool.py', script)
         self.assertIn('optimize sel=4 ok=3 .*changed=true', script)
         self.assertIn('running Xray pool did not drop the dead server', script)
         self.assertNotIn('grep -q "result=true" || fail "optimize:', script)

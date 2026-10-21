@@ -95,8 +95,9 @@ echo "optimize: $O"; adb logcat -d -s E2E:I | grep "optimize sel=" | tail -1
 # The scheduled optimizer may have already removed the dead selection before this explicit call.
 # A no-op return is not failure, but stored selection alone is not success: require the real core.
 adb logcat -d -s E2E:I | grep -q "optimize sel=4 ok=3 .*changed=true" || fail "optimize: dead selection was not removed"
-P=$(waitlog "pool size=3 " 180) || fail "optimize: running Xray pool did not drop the dead server"
+P=$(waitlog "pool size=[1-3] ids=" 180) || fail "optimize: running Xray pool did not drop the dead server"
 echo "optimized core: $P"
+printf '%s\n' "$P" | python3 tools/e2e/validate_pool.py "$W/multi.json" || fail "optimize: running core includes dead/unknown route"
 save_case multi # include the applied-pool outcome, not only the initial connect snapshot
 for p in 8443 8444 8447; do
   c=$(grep -c "email: u$p" $W/access.log); echo "multi: server :$p accepted $c"
