@@ -24,6 +24,7 @@ class AutoForegroundAttempt(val generation: Long, private val network: String, p
     fun close(reason: String) { closedReason = reason }
     fun reason(): String = closedReason ?: if (remainingMs() == 0L) "budget-exhausted" else "searching"
     fun ensureOpen() {
+        if (closedReason == "connected") return // final-chain success may beat the search coroutine's bookkeeping
         if (closedReason != null) throw kotlinx.coroutines.CancellationException(closedReason)
         if (remainingMs() <= 0) throw AutoBudgetExpired()
     }
