@@ -1,0 +1,34 @@
+name: Read catalog counters for release 148
+on:
+  push:
+    branches: [diagnostics-148]
+permissions:
+  contents: read
+  actions: read
+jobs:
+  counters:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: e2e-api-*
+          path: evidence
+          run-id: 39592229221
+          github-token: ${{ github.token }}
+      - name: Publish counters only, never configurations or raw logs
+        run: |
+          python3 - <<'PY'
+          import re
+          from pathlib import Path
+          patterns = [r'catalog-background cycle=\d+ issued=\d+ completed=\d+ total=\d+', r'pool size=\d+', r'optimize: user is busy', r'physical network changed', r'check ok=(?:true|false) ms=\d+ big=(?:true|false|null) yt=(?:true|false|null) tg=(?:true|false|null)', r'Фон через Xray, остальные вне пула: \d+ из \d+[^<"]{0,100}']
+          for path in sorted(Path('evidence').rglob('case-auto-background.*')):
+              if path.suffix not in ('.log','.xml'): continue
+              text=path.read_text(errors='replace')
+              matches=[]
+              for line in text.splitlines():
+                  hits=[m.group(0) for pattern in patterns for m in re.finditer(pattern,line)]
+                  if hits: matches.extend(hits)
+              value=path.parent.name+' '+path.name+': '+'; '.join(matches[-35:])
+              value=value.replace('%','%25').replace('\r','%0D').replace('\n','%0A')
+              print('::notice title=catalog diagnostics::'+value[:8000])
+          PY
