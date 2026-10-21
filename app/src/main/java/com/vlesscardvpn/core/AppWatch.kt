@@ -262,6 +262,9 @@ object AppWatch {
         when (pilot(fails, Store.summary.value.heavyMask, Actions.progress.value.running || (Thermal.cooling || ecoOn) && fails < 2, now - lastFix, now - lastLight, now - lastEvolve, slow, now - lastSpeedup)) {
             "speedup" -> { lastSpeedup = now; say(if (lastMbps > 0) "Автопилот: скорость всего %.1f Мбит/с — ищу серверы и маски быстрее".format(lastMbps) else "Автопилот: сайты открываются медленно (ответ ${slowMs / 1000.0} с) — ищу серверы и маски быстрее"); withContext(Dispatchers.Main) { Actions.boostYoutube() } }
             "evolve" -> {
+                val snapshot=Store.state.value
+                if (!AutoReservePolicy.periodicMaskChangeAllowed(snapshot.settings.mode==com.vlesscardvpn.model.Mode.AUTO,
+                        snapshot.selected.any { snapshot.state(it).works })) return
                 lastEvolve = now; evoN++
                 val st0 = Store.state.value
                 val sel = st0.selected
@@ -280,7 +283,13 @@ object AppWatch {
                 }
             }
             "fix" -> { lastFix = now; fails = 0; say("Автопилот: интернет через VPN пропал — чиню сам (серверы, маски, обход DPI)"); withContext(Dispatchers.Main) { Actions.fixAll { reconnect() } } }
-            "lighten" -> { lastLight = now; say("Автопилот: маска тяжёлая, видео может тормозить — ищу лёгкую"); withContext(Dispatchers.Main) { Actions.lighten() } }
+            "lighten" -> {
+                val snapshot=Store.state.value
+                if (!AutoReservePolicy.periodicMaskChangeAllowed(snapshot.settings.mode==com.vlesscardvpn.model.Mode.AUTO,
+                        snapshot.selected.any { snapshot.state(it).works })) return
+                lastLight = now; say("Автопилот: маска тяжёлая, видео может тормозить — ищу лёгкую")
+                withContext(Dispatchers.Main) { Actions.lighten() }
+            }
         }
     }
 

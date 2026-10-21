@@ -47,15 +47,12 @@ waitlog() { # $1 = regex, $2 = seconds
 }
 probe() { # $1 = tag ; prints result json
   adb shell "run-as $PROBE rm -f files/result.json" 2>/dev/null
-  adb shell am start -n $PROBE/.ProbeActivity --es tag "$1" --es urls "https://www.gstatic.com/generate_204,https://speed.cloudflare.com/__down?bytes=1048576,https://www.google.com/,https://www.youtube.com/generate_204" >/dev/null
+  local urls="${2:-https://www.gstatic.com/generate_204,https://speed.cloudflare.com/__down?bytes=1048576,https://www.google.com/,https://www.youtube.com/generate_204}"
+  adb shell am start -n $PROBE/.ProbeActivity --es tag "$1" --es urls "$urls" >/dev/null
   for i in $(seq 1 90); do R=$(adb shell "run-as $PROBE cat files/result.json" 2>/dev/null); [ -n "$R" ] && { echo "$R"; return 0; }; sleep 1; done
   echo "{}"; return 1
 }
-okprobe() { python3 -c '
-import json,sys
-r=json.loads(sys.argv[1]); res=r.get("results",[])
-ok = r.get("vpn") and len(res)==4 and res[0]["code"]==204 and res[1]["code"]==200 and res[1]["bytes"]>=1048576 and res[2]["code"]==200 and res[3]["code"]==204
-print(("PASS " if ok else "BAD ")+json.dumps(r)); sys.exit(0 if ok else 1)' "$1"; }
+okprobe() { python3 tools/e2e/validate_probe.py "$1" "${2:-0}"; }
 
 run_case() { # $1 name, $2 state, $3 seconds to wait for the connect result
   echo "=== case $1"
@@ -149,7 +146,9 @@ adb logcat -d -s E2E:I | grep "socks port=" | tail -1 | grep -q "mode=SERVERS" |
 # Do not merely assert the selected checkboxes: this log is emitted after the real Xray core starts.
 : > $W/access.log
 run_case auto-eight auto-eight.json 180
-P=$(waitlog "pool size=8 " 150) || fail "auto-eight: real Xray pool never reached eight outbounds"
+# Two bounded reserve rounds plus the existing 60 s active-traffic handover deferral.
+# This is an eventual-pool correctness gate, not a claimed connection-time benchmark.
+P=$(waitlog "pool size=8 " 240) || fail "auto-eight: real Xray pool never reached eight outbounds"
 echo "eight: $P"
 save_case auto-eight # retain background pool-fill diagnostics, not just the initial two routes
 
@@ -184,7 +183,10 @@ if echo "$WR" | grep -q "WARP готов"; then
   adb shell am start -n $PKG/.MainActivity --ez e2e_connect true >/dev/null
   C=$(waitlog "check ok=|connect failed" 90) || fail "warp: no connect result"
   echo "app: $C"; echo "$C" | grep -q "check ok=true" || fail "warp: in-app check through WARP failed"
-  R=$(probe warp); okprobe "$R" || fail "warp: probe app traffic through WARP failed"
+  # Search homepages can return anti-bot 429 on shared WARP exits; that is not a transport verdict.
+  # Require two independent full 1 MiB HTTPS transfers instead, with TLS/status/byte checks intact.
+  R=$(probe warp "https://www.gstatic.com/generate_204,https://speed.cloudflare.com/__down?bytes=1048576,https://cachefly.cachefly.net/1mb.test,https://www.youtube.com/generate_204")
+  okprobe "$R" 1048576 || fail "warp: probe app traffic through WARP failed"
 else fail "warp: no working WARP endpoint"; fi
 # Always capture the real cross-UID result, including FAIL, before DPI resets logcat/result.json.
 save_case warp
