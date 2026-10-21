@@ -15,13 +15,13 @@ jobs:
     timeout-minutes: 45
     env:
       SOURCE_SHA: 386c1ac71b24f5e837c68efb93aeb82d66d11808
-      ARTIFACT_DIR: ${{ runner.temp }}/candidate-149
       ORCHESTRATION_SHA: ${{ github.sha }}
     steps:
       - name: Require the exact successful source CI attempt
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          echo "ARTIFACT_DIR=$RUNNER_TEMP/candidate-149" >> "$GITHUB_ENV"
           python3 - <<'PY'
           import json, os, urllib.request
           u='https://api.github.com/repos/Bugaga31/vless-card-vpn/actions/runs/39654604838/attempts/2'
