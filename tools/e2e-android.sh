@@ -143,18 +143,25 @@ adb logcat -d -s E2E:I | grep "socks port=" | tail -1 | grep -q "mode=SERVERS" |
 c=$(grep -c "email: u8443" $W/access.log); echo "auto: server :8443 accepted $c"
 [ "$c" -gt 0 ] || fail "auto: traffic did not go through the auto-picked server"
 
-# Only one route behind forty unusable links. Catalog breadth is not inferred from pool checkboxes.
-: > $W/access.log
-run_case auto-wide auto-wide.json 90
-adb logcat -d -s E2E:I | grep -q "catalog-scan total=41 started=41 reachable=1 queued=41" || fail "auto-wide: whole fixture catalog was not scanned"
-adb logcat -d -s E2E:I | grep "socks port=" | tail -1 | grep -q "mode=SERVERS" || fail "auto-wide: real route after initial eight was not connected"
+# Revised contract: foreground Auto must NOT search all 41 configurations for a tail route.
+adb shell am start -n $PKG/.MainActivity --ez e2e_disconnect true >/dev/null; sleep 3
+load auto-auth-tail.json; adb logcat -c
+adb shell am start -n $PKG/.MainActivity --ez e2e_connect true >/dev/null
+F=$(waitlog "action\[Авто: проверяю соединение\]" 25) || fail "auto-budget: attempt did not terminate within bounded allowance"
+adb logcat -d -s E2E:I | grep -q "auto-fast catalog=41 candidates=8" || fail "auto-budget: foreground candidate bound missing"
+adb logcat -d -s E2E:I | grep -q "check ok=true" && fail "auto-budget: untested tail route was falsely connected"
+save_case auto-budget
 
-# Every endpoint answers TCP; a usable authenticated route lies beyond the old 30-route cap.
-: > $W/access.log
-run_case auto-auth-tail auto-auth-tail.json 240
-adb logcat -d -s E2E:I | grep -q "catalog-scan total=41 started=41 reachable=41 queued=41" || fail "auth-tail: not all TCP-reachable configurations queued"
-adb logcat -d -s E2E:I | grep -q "catalog-real checked=41 total=41" || fail "auth-tail: not all 41 configurations received real protocol results"
-adb logcat -d -s E2E:I | grep "socks port=" | tail -1 | grep -q "mode=SERVERS" || fail "auth-tail: real authenticated route beyond 30 did not connect"
+# Explicit full checking is separate: all 41 authenticated configurations receive results,
+# including the only valid credentials after the old 30-route limit.
+for fixture in auto-wide auto-auth-tail; do
+  adb shell am start -n $PKG/.MainActivity --ez e2e_disconnect true >/dev/null; sleep 3
+  load $fixture.json; adb logcat -c
+  adb shell am start -n $PKG/.MainActivity --ez e2e_test true >/dev/null
+  A=$(waitlog "action\[Проверка серверов\]" 300) || fail "$fixture: full check did not finish"
+  echo "$A" | grep -q "Работают: 1 из 41. Проверен весь каталог" || fail "$fixture: not all 41 protocol results obtained"
+  save_case $fixture
+ done
 
 # Do not merely assert the selected checkboxes: this log is emitted after the real Xray core starts.
 : > $W/access.log

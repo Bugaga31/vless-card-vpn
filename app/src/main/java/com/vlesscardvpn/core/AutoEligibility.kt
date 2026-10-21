@@ -45,10 +45,16 @@ object AutoEligibility {
             s.httpsCheckedAt > 0 && now - s.httpsCheckedAt in 0..SERVICE_TTL_MS
     fun recordConnection(s: ServerState, net: String, mask: String, now: Long, p: Probe): ServerState =
         if (!p.httpsChecked) s else s.copy(httpsNetwork=net,httpsMask=mask,httpsCheckedAt=now,httpsHosts=p.httpsHosts)
-    fun <T> connectionPool(list: List<T>, state: (T) -> ServerState, net: String, now: Long): List<T> {
+    /** Comparison may examine several B routes, but never mix A and B. */
+    fun <T> comparisonPool(list: List<T>, state: (T) -> ServerState, net: String, now: Long): List<T> {
         val proven = servicePool(list,state,net,now)
-        // Keep a fully proven pool intact. Otherwise allow explicitly unconfirmed-service HTTPS routes.
         return proven.ifEmpty { list.filter { state(it).works && httpsFresh(state(it),net,now) && serviceRank(state(it),net,now) != 2 } }
+    }
+    /** A fallback is one measured leader, not a balancer of unconfirmed configurations. */
+    fun <T> connectionPool(list: List<T>, state: (T) -> ServerState, net: String, now: Long): List<T> {
+        val candidates = comparisonPool(list,state,net,now)
+        return if (candidates.any { serviceRank(state(it),net,now)==0 }) candidates
+            else candidates.sortedWith(Comparator { a,b -> ServerChoice.compareDownload(state(a),state(b),net,now) }).take(1)
     }
     fun connectionVerdict(probe: Probe): Boolean? = when {
         Thread.currentThread().isInterrupted -> null
