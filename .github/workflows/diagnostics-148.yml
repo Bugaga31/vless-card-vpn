@@ -1,27 +1,22 @@
-name: Retry failed release emulator infrastructure
+name: Release 148 status (manual, read-only)
 on:
-  push:
-    branches: [diagnostics-148]
+  workflow_dispatch:
 permissions:
   contents: read
-  actions: write
+  actions: read
 jobs:
-  retry:
+  status:
     runs-on: ubuntu-latest
     steps:
-      - name: Retry only failed jobs on the unchanged release run
+      - name: Read verified release run status
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           python3 - <<'PY'
           import urllib.request, json, os
-          base='https://api.github.com/repos/Bugaga31/vless-card-vpn/actions/runs/39602335580'
-          headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],'Accept':'application/vnd.github+json'}
-          data=json.load(urllib.request.urlopen(urllib.request.Request(base,headers=headers),timeout=30))
-          assert data['head_sha']=='b5f040783f6b9efb64960e1a9dcba98d559f2851', 'Release commit changed'
-          assert data['status']=='completed' and data['conclusion']=='failure', 'Expected completed failed run'
-          request=urllib.request.Request(base+'/rerun-failed-jobs',data=json.dumps({'enable_debug_logging':False}).encode(),headers={**headers,'Content-Type':'application/json'},method='POST')
-          response=urllib.request.urlopen(request,timeout=30)
-          assert response.status==201
-          print('::notice title=release retry::Requested failed-job retry on the unchanged verified release commit; all publication gates retained')
+          url='https://api.github.com/repos/Bugaga31/vless-card-vpn/actions/runs/39602335580'
+          req=urllib.request.Request(url,headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],'Accept':'application/vnd.github+json'})
+          data=json.load(urllib.request.urlopen(req,timeout=30))
+          print('Release run:',data['status'],data['conclusion'],'attempt',data['run_attempt'])
+          print('Commit:',data['head_sha'])
           PY
