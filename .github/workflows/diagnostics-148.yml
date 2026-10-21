@@ -1,4 +1,4 @@
-name: Read catalog counters for release 148
+name: Read sanitized release failure
 on:
   push:
     branches: [diagnostics-148]
@@ -6,29 +6,38 @@ permissions:
   contents: read
   actions: read
 jobs:
-  counters:
+  diagnose:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v4
-        with:
-          pattern: e2e-api-*
-          path: evidence
-          run-id: 39595255929
-          github-token: ${{ github.token }}
-      - name: Publish counters only, never configurations or raw logs
+      - name: Read failing job log without publishing credentials
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           python3 - <<'PY'
-          import re
-          from pathlib import Path
-          patterns = [r'optimize result=error [a-zA-Zа-яА-Я0-9 :.,()_?=<>-]{0,180}', r'optimize result=(?:true|false)', r'optimize sel=\d+ ok=\d+ median=-?\d+ best=-?\d+ switch=(?:true|false) changed=(?:true|false)', r'catalog-background cycle=\d+ issued=\d+ completed=\d+ total=\d+', r'pool size=\d+', r'optimize: user is busy', r'physical network changed', r'check ok=(?:true|false) ms=\d+ big=(?:true|false|null) yt=(?:true|false|null) tg=(?:true|false|null)', r'Фон через Xray, остальные вне пула: \d+ из \d+[^<"]{0,100}']
-          for path in sorted(Path('evidence').rglob('case-multi.*')):
-              if path.suffix not in ('.log','.xml'): continue
-              text=path.read_text(errors='replace')
-              matches=[]
-              for line in text.splitlines():
-                  hits=[m.group(0) for pattern in patterns for m in re.finditer(pattern,line)]
-                  if hits: matches.extend(hits)
-              value=path.parent.name+' '+path.name+': '+'; '.join(matches[-35:])
-              value=value.replace('%','%25').replace('\r','%0D').replace('\n','%0A')
-              print('::notice title=catalog diagnostics::'+value[:8000])
+          import urllib.request, urllib.error, os, re, gzip, zipfile, io
+          class NoRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self, *args, **kwargs): return None
+          opener=urllib.request.build_opener(NoRedirect())
+          req=urllib.request.Request('https://api.github.com/repos/Bugaga31/vless-card-vpn/actions/jobs/119229701326/logs', headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],'Accept':'application/vnd.github+json'})
+          try:
+              data=opener.open(req,timeout=30).read(20000000)
+          except urllib.error.HTTPError as e:
+              if e.code != 302: raise
+              url=e.headers['Location']
+              if not url.startswith('https://'): raise RuntimeError('Expected HTTPS log download')
+              data=urllib.request.urlopen(url,timeout=60).read(20000000)
+          if data.startswith(b'\x1f\x8b'): data=gzip.decompress(data)
+          if zipfile.is_zipfile(io.BytesIO(data)):
+              z=zipfile.ZipFile(io.BytesIO(data)); data=b'\n'.join(z.read(n) for n in z.namelist())
+          lines=data.decode(errors='replace').splitlines()
+          hits=[(i,line) for i,line in enumerate(lines) if re.search(r'SyntaxError|Traceback|unbound variable|E2E failures:|E2E ALL OK|::error|FAIL:|Error:|error:|Exception|Process completed|failed with exit|killed|Killed|not found',line)]
+          chosen=sorted(set(i for i,_ in hits[-15:])|set(range(max(0,len(lines)-22),len(lines))))
+          text='\n'.join(lines[i] for i in chosen)
+          text=re.sub(r'https?://\S+','[URL]',text)
+          text=re.sub(r'[0-9a-fA-F]{8}-[0-9a-fA-F-]{27,}','[ID]',text)
+          text=re.sub(r'[A-Za-z0-9_+/=.-]{32,}','[TOKEN]',text)
+          text=text.replace(os.environ['GH_TOKEN'],'[TOKEN]')
+          for start in range(0,min(len(text),18000),3000):
+              chunk=text[start:start+3000].replace('%','%25').replace('\r','%0D').replace('\n','%0A')
+              print('::notice title=sanitized failure log::'+chunk)
           PY
