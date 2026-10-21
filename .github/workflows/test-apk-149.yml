@@ -119,7 +119,7 @@ jobs:
               checks=[]
               for name in ['VLESS-Card-1.2.38-candidate.apk','VLESS-Card-1.2.38-candidate-arm64.apk']:
                   apk=out/name
-                  verify=run(bt/'apksigner','verify','--verbose','--print-certs',apk)
+                  verify=run(bt/'apksigner','verify','--verbose','--print-certs','--min-sdk-version','21',apk)
                   certs=re.findall(r'^Signer #\d+ certificate SHA-256 digest: ([0-9a-f]+)$',verify,re.M)
                   if certs != [expected]: raise SystemExit('Release certificate mismatch')
                   for scheme in (1,2,3):
