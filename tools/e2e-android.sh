@@ -192,7 +192,16 @@ if echo "$WR" | grep -q "WARP готов"; then
   echo "app: $C"; echo "$C" | grep -q "check ok=true" || fail "warp: in-app check through WARP failed"
   # Search homepages can return anti-bot 429 on shared WARP exits; that is not a transport verdict.
   # Require two independent full 1 MiB HTTPS transfers instead, with TLS/status/byte checks intact.
-  R=$(probe warp "https://www.gstatic.com/generate_204,https://speed.cloudflare.com/__down?bytes=1048576,https://cachefly.cachefly.net/1mb.test,https://www.youtube.com/generate_204")
+  WARP_URLS="https://www.gstatic.com/generate_204,https://speed.cloudflare.com/__down?bytes=1048576,https://cachefly.cachefly.net/1mb.test,https://www.youtube.com/generate_204"
+  before=$(adb logcat -d -s E2E:I | grep -c "physical network changed")
+  R=$(probe warp "$WARP_URLS")
+  after=$(adb logcat -d -s E2E:I | grep -c "physical network changed")
+  if [ "$after" -gt "$before" ] && python3 tools/e2e/validate_probe.py --dns-handoff "$R"; then
+    printf '%s\n' "$R" > "$W/warp-initial-probe.json"
+    echo "WARP: one DNS miss during an observed physical handoff; retry the FULL strict probe once"
+    sleep 12 # let Android's negative DNS cache expire; no DNS/TLS bypass or direct fallback
+    R=$(probe warp-after-handoff "$WARP_URLS")
+  fi
   okprobe "$R" 1048576 || fail "warp: probe app traffic through WARP failed"
 else fail "warp: no working WARP endpoint"; fi
 # Always capture the real cross-UID result, including FAIL, before DPI resets logcat/result.json.
