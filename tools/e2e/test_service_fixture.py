@@ -44,7 +44,8 @@ class ServiceFixtureTest(unittest.TestCase):
     def test_live_warp_failure_retains_diagnostics_before_the_next_case(self):
         script = (ROOT / 'tools/e2e-android.sh').read_text()
         warp = script[script.index('echo "=== case warp'):script.index('echo "=== DPI strategy')]
-        self.assertIn('okprobe "$R" || fail "warp: probe app traffic through WARP failed"',warp)
+        self.assertIn('okprobe "$R" 1048576 || fail "warp: probe app traffic through WARP failed"',warp)
+        self.assertIn('https://cachefly.cachefly.net/1mb.test',warp)
         self.assertIn('else fail "warp: no working WARP endpoint"; fi',warp)
         self.assertLess(warp.index('warp-registration.log'),warp.index('  adb logcat -c'))
         self.assertGreater(warp.index('save_case warp'),warp.index('else fail'))

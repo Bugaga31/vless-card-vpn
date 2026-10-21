@@ -9,6 +9,11 @@ class AutoReserveR146Test {
     private val now=1_000_000L
     private fun server(i: Int)=Server("reserve-$i","vless","host-$i.invalid",443,"fixture-$i")
     private fun state()=ServerState(realMs=40,httpsHosts=2,httpsNetwork="wifi",httpsCheckedAt=now)
+    @Test fun periodicEvolutionCannotReplaceHealthyAutoMaskDuringPoolFill() {
+        assertFalse(AutoReservePolicy.periodicMaskChangeAllowed(true,true))
+        assertTrue(AutoReservePolicy.periodicMaskChangeAllowed(true,false))
+        assertTrue(AutoReservePolicy.periodicMaskChangeAllowed(false,true))
+    }
     @Test fun freshServicePassIsNotRepeatedForMissingReserveSlots() {
         val s=state().copy(serviceNetwork="wifi",serviceCheckedAt=now,serviceYtOk=true,serviceTgOk=true)
         assertTrue(AutoReservePolicy.pending(listOf(server(0)),{s},"wifi",now).isEmpty())

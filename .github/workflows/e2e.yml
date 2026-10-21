@@ -45,6 +45,7 @@ jobs:
         run: |
           command -v ffmpeg >/dev/null || (sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg)
           python3 tools/e2e/test_service_fixture.py
+          python3 tools/e2e/test_validate_probe.py
           python3 tools/e2e/service_fixture.py prepare /tmp/e2e-service
       - name: Build (all ABIs, debug) + JVM tests
         run: |

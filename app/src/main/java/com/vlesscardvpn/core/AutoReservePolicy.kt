@@ -7,6 +7,9 @@ import com.vlesscardvpn.model.ServerState
  * Never re-test a fresh service PASS just to fill another slot; UNKNOWN retries are paced, not penalized.
  */
 object AutoReservePolicy {
+    /** Periodic mask evolution is not recovery: do not invalidate a healthy Auto chain/proof.
+     * Explicit manual tests and measured Auto mask comparison remain available. */
+    fun periodicMaskChangeAllowed(automatic: Boolean, healthyRoute: Boolean): Boolean = !automatic || !healthyRoute
     const val BATCH = 4
     const val RETRY_MS = 30_000L
     const val ROUND_MS = 18_000L
