@@ -43,7 +43,8 @@ class TorRotationTest {
     fun `pick prefers the fastest ema`() {
         val r = rot()
         r.record("de", 100); r.record("us", 900); r.record("jp", 400)
-        assertEquals("de", r.pick())
+        // 2x faster than the next -> deterministic winner, no exploration gamble
+        for (i in 0 until 20) assertEquals("de", r.pick())
     }
 
     @Test
