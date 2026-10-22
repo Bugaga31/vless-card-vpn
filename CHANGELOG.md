@@ -1,3 +1,10 @@
+## 1.2.40
+
+Поглощение tor-rotator-vless: ротация выхода Tor как опциональный режим карточки
+(Tor Card). Клиент Control-протокола, адаптивная политика ротации (EMA-история,
+чёрный список с TTL, абсолютные floor'ы), измерение реальной страны выхода,
+фоновый цикл в сервисе за настройкой `torRotation`. См. [release notes](docs/release-1.2.40.md).
+
 ## 1.2.30
 
 Silent finite ocean intro, honest connection progress, reversible own-app resource presets and lower diagnostic/search overhead under pressure. No root/system-wide boost claims.
