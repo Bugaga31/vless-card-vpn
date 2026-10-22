@@ -22,11 +22,11 @@ jobs:
         run: |
           python3 - <<'PYCODE'
           import json, os, time, urllib.request
-          url='https://api.github.com/repos/Bugaga31/vless-card-vpn/actions/runs/39789829472'
+          url='https://api.github.com/repos/Bugaga31/vless-card-vpn/actions/runs/39794002151'
           for attempt in range(40):
               req=urllib.request.Request(url,headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],'User-Agent':'VLESS-release-150'})
               with urllib.request.urlopen(req,timeout=40) as response: result=json.load(response)
-              if result['head_sha'] != '4568e981e80b94b8b086abdb1f0ed4369b89f751':
+              if result['head_sha'] != '2c344a7f21ecea1c4268914058e28220619ab468':
                   raise SystemExit('Candidate CI SHA mismatch')
               if result['status'] == 'completed':
                   if result['conclusion'] != 'success': raise SystemExit('Candidate CI failed; publication blocked')
@@ -42,7 +42,7 @@ jobs:
       - name: Verify release contains the tested application unchanged
         run: |
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-          git diff --exit-code 4568e981e80b94b8b086abdb1f0ed4369b89f751 HEAD -- app native tools .github/workflows/e2e.yml
+          git diff --exit-code 2c344a7f21ecea1c4268914058e28220619ab468 HEAD -- app native tools .github/workflows/e2e.yml
   quality:
     needs: preflight
     uses: ./.github/workflows/e2e.yml

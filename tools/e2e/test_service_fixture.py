@@ -1,5 +1,7 @@
 """Fixture contract checks, not public-service availability measurements."""
 import importlib.util
+import hashlib
+from unittest import mock
 import json
 from pathlib import Path
 import struct
@@ -12,6 +14,32 @@ fixture = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(fixture)
 
 class ServiceFixtureTest(unittest.TestCase):
+    def test_pinned_media_is_real_bounded_mp4(self):
+        data = fixture.media_bytes()
+        self.assertGreaterEqual(len(data),131072)
+        self.assertLessEqual(len(data),1048576)
+        self.assertEqual(b'ftyp',data[4:8])
+        self.assertEqual(fixture.VIDEO_SHA256,hashlib.sha256(data).hexdigest())
+
+    def test_corrupt_or_replaced_media_fails_before_use(self):
+        import base64
+        data = fixture.media_bytes()
+        for encoded in (base64.b64encode(data[:-1]),base64.b64encode(b'fake video'),b'bad!'):
+            with self.assertRaises(ValueError): fixture.media_bytes(encoded)
+
+    def test_prepare_requires_no_ffmpeg_and_writes_only_debug_fixture(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            with mock.patch.object(fixture,'ROOT',root): fixture.prepare(root / 'work')
+            self.assertEqual(fixture.media_bytes(),(root / 'work/video.mp4').read_bytes())
+            for module in ('app','vpn-test-probe'):
+                self.assertTrue((root / module / 'src/debug/res/raw/e2e_service_ca.pem').is_file())
+                self.assertFalse((root / module / 'src/main').exists())
+        source = Path(__file__).with_name('service_fixture.py').read_text()
+        self.assertNotIn("['ffmpeg'",source)
+        self.assertNotIn('apt-get',(ROOT / '.github/workflows/e2e.yml').read_text())
+
+
     def test_maintenance_fixtures_explicitly_allow_work_without_changing_other_cases(self):
         import subprocess
         with tempfile.TemporaryDirectory() as folder:

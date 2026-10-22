@@ -6,6 +6,8 @@ Production probes, URL restrictions, nonce validation and certificate checks are
 No key or trust anchor is checked in, uploaded as diagnostics or added to a release APK.
 """
 import json
+import base64
+import hashlib
 import shutil
 import socketserver
 import ssl
@@ -20,14 +22,27 @@ ROOT = Path(__file__).resolve().parents[2]
 HTTPS_HOSTS = ['speed.cloudflare.com', 'cachefly.cachefly.net', 'proof.ovh.net']
 HOSTS = ['www.youtube.com', 'fixture.googlevideo.com'] + HTTPS_HOSTS
 
+# Synthetic testsrc2, 320x180 @24fps, 4s MPEG-4. Generated once with the original
+# ffmpeg fixture command; pinned bytes remove apt/mirror provisioning from E2E.
+VIDEO_SHA256 = '0d94f9b0789fc8fe56f83eb060fbd16f4894efd2f4b6d00926c08d3fff5ee7a4'
+
+def media_bytes(encoded=None):
+    if encoded is None:
+        encoded = Path(__file__).with_name('fixture-video.mp4.b64').read_bytes()
+    data = base64.b64decode(b''.join(encoded.split()), validate=True)
+    if hashlib.sha256(data).hexdigest() != VIDEO_SHA256:
+        raise ValueError('Synthetic media SHA-256 mismatch')
+    if not 131072 <= len(data) <= 1048576 or data[4:8] != b'ftyp':
+        raise ValueError('Synthetic media size/container mismatch')
+    return data
+
 def prepare(work):
+    media = media_bytes()
     work.mkdir(parents=True, exist_ok=True)
     subprocess.run(['openssl', 'req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-days', '2',
         '-keyout', str(work / 'key.pem'), '-out', str(work / 'cert.pem'), '-subj', '/CN=e2e-only.invalid',
         '-addext', 'subjectAltName=' + ','.join('DNS:' + h for h in HOSTS)], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    subprocess.run(['ffmpeg', '-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i',
-        'testsrc2=size=320x180:rate=24', '-t', '4', '-c:v', 'mpeg4', '-q:v', '2', str(work / 'video.mp4')], check=True)
-    assert (work / 'video.mp4').stat().st_size >= 131072
+    (work / 'video.mp4').write_bytes(media)
     for module in ("app", "vpn-test-probe"):
         debug = ROOT / module / 'src/debug'
         (debug / 'res/raw').mkdir(parents=True, exist_ok=True)
