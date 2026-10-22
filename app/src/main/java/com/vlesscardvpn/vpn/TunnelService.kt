@@ -155,7 +155,7 @@ class TunnelService : VpnService() {
                     val port = Tunnel.socks?.port ?: return@launch
                     val ok = Tester.probeSocks(port, Store.state.value.settings.testUrl, big = false, youtube = false, attempts = 1).realMs > 0
                     Log.i("E2E", "screen on: check ok=$ok")
-                    if (!ok) verifySoon(0) else { watchdog(); coverTraffic() }
+                    if (!ok) verifySoon(0) else { watchdog(); coverTraffic(); torLoop() }
                 }
             }
         }
@@ -397,7 +397,36 @@ class TunnelService : VpnService() {
                 if (sinceNet < 90_000L && !netHardDone) { netHardDone = true; hardRestart("новая сеть, а интернет не пошёл", force = true); return@launch }
                 if (System.currentTimeMillis() - lastHard > 5 * 60_000L) { hardRestart("после переподключения интернет не пошёл"); return@launch }
             }
-            if (p.works) { healStep = 0; dpiHeals = 0; connectFails = 0; warmUp(); scheduleOptimize(if (com.vlesscardvpn.core.Actions.deepPending || usedServers.size < com.vlesscardvpn.core.AutoEligibility.TOP) 5_000 else 60_000); com.vlesscardvpn.core.AppWatch.start(this@TunnelService) { scope.launch { lock.withLock { connect(soft = true) } } }; watchdog(); standbyScout(); coverTraffic(); serviceRoutes(); if (serverless()) rescueLater() } else heal()
+            if (p.works) { healStep = 0; dpiHeals = 0; connectFails = 0; warmUp(); scheduleOptimize(if (com.vlesscardvpn.core.Actions.deepPending || usedServers.size < com.vlesscardvpn.core.AutoEligibility.TOP) 5_000 else 60_000); com.vlesscardvpn.core.AppWatch.start(this@TunnelService) { scope.launch { lock.withLock { connect(soft = true) } } }; watchdog(); standbyScout(); coverTraffic(); torLoop(); serviceRoutes(); if (serverless()) rescueLater() } else heal()
+        }
+    }
+
+    private var torJob: Job? = null
+    /**
+     * Tor exit rotator, absorbed from tor-rotator-vless (docs/tor-rotator-absorption.md).
+     * Opt-in via settings.torRotation. Rotates the exit node of a locally started Tor
+     * (Termux SocksPort/ControlPort, see tor/TorCard) while the main VPN is connected.
+     */
+    private fun torLoop() {
+        if (torJob?.isActive == true || !Store.state.value.settings.torRotation) return
+        torJob = scope.launch {
+            val cookie = runCatching { com.vlesscardvpn.tor.TorControl.readCookieHex() }.getOrNull()
+            if (cookie == null) { Log.i("TOR", "no control cookie, rotator idle"); return@launch }
+            val rotator = com.vlesscardvpn.tor.TorRotator(
+                com.vlesscardvpn.tor.TorControl("127.0.0.1", com.vlesscardvpn.tor.TorCard.DEFAULT_CONTROL_PORT),
+                countries = com.vlesscardvpn.tor.TorCard.preferredCountries(Store.state.value.servers),
+                cookieHex = cookie,
+            )
+            try {
+                rotator.connect()
+                while (true) {
+                    delay(10_000L)
+                    if (Tunnel.status.value.state != Tunnel.State.CONNECTED || !Store.state.value.settings.torRotation) break
+                    if (com.vlesscardvpn.core.PhonePower.refresh(this@TunnelService).allowed) rotator.tick()
+                }
+            } catch (e: Exception) {
+                Log.i("TOR", "rotator stopped: ${e.message}")
+            } finally { runCatching { rotator.close() } }
         }
     }
 
