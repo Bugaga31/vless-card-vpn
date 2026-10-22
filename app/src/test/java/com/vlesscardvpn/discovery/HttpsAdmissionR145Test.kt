@@ -15,7 +15,7 @@ class HttpsAdmissionR145Test {
         override fun request() = request
         override fun execute() = Response.Builder().request(request).protocol(Protocol.HTTP_1_1).code(code).message("fixture")
             .header("Content-Type",type).body(ByteArray(size).toResponseBody(type.toMediaType())).build()
-        override fun enqueue(callback: Callback) = error("blocking fixture")
+        override fun enqueue(callback: Callback) { callback.onResponse(this, execute()) }
         override fun cancel() {}
         override fun isExecuted() = false
         override fun isCanceled() = false

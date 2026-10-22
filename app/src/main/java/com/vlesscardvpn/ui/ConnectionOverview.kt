@@ -33,7 +33,7 @@ fun ConnectionOverview(status: Tunnel.Status, summary: Store.Summary, cloud: Str
         }
     }
     fun serviceLabel(value: Boolean?): String = when (com.vlesscardvpn.core.ServiceHealth.verdict(value, health, now)) {
-        com.vlesscardvpn.core.ServiceHealth.Verdict.PASS -> "проверен"
+        com.vlesscardvpn.core.ServiceHealth.Verdict.PASS -> "работает"
         com.vlesscardvpn.core.ServiceHealth.Verdict.FAIL -> "недоступен в проверке"
         com.vlesscardvpn.core.ServiceHealth.Verdict.UNKNOWN -> "не удалось проверить"
         com.vlesscardvpn.core.ServiceHealth.Verdict.STALE -> "результат устарел"

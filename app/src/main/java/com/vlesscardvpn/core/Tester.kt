@@ -174,7 +174,8 @@ object Tester {
                     best = minOf(best, (System.nanoTime() - t0) / 1_000_000)
                 }.onFailure { err = Errors.human(it) }
             }
-            val https = if (connectionCheck) HttpsTransferProbe.check { request ->
+            val https = if (connectionCheck) HttpsTransferProbe.check(budgetMs = if (budgetDeadline == Long.MAX_VALUE) 4000L else
+                TimeUnit.NANOSECONDS.toMillis((budgetDeadline-System.nanoTime()).coerceAtLeast(0))) { request ->
                 boundedCall(mediaClient,request).also { call ->
                     val left = if (budgetDeadline == Long.MAX_VALUE) 4000L else
                         TimeUnit.NANOSECONDS.toMillis((budgetDeadline-System.nanoTime()).coerceAtLeast(1)).coerceAtLeast(1)
@@ -211,6 +212,7 @@ object Tester {
             ProbeTasks.cancel(tasks); workers.purge()
             // Private dispatcher/pool: cancellation cannot cancel another probe or the live VPN's HTTP calls.
             client.dispatcher.cancelAll(); client.connectionPool.evictAll()
+            client.dispatcher.executorService.shutdownNow() // do not retain per-probe async threads for 60 s
         }
     }
 

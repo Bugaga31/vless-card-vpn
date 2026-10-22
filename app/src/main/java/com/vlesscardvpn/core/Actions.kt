@@ -13,6 +13,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
@@ -1165,16 +1166,14 @@ object Actions {
     fun autoConnect(onReady: () -> Unit) {
         if (job?.isActive == true) cancel()
         val ticket = autoGeneration.incrementAndGet()
-        val attempt = AutoForegroundAttempt.begin(Net.key(app), Net.underlying(app)?.toString(), android.os.SystemClock::elapsedRealtime)
+        val attempt = AutoForegroundAttempt.continuing(Net.key(app), Net.underlying(app)?.toString(), android.os.SystemClock::elapsedRealtime)
         autoAttempt = attempt
         ServiceHealth.event(ServiceHealth.EventKind.SEARCH)
         Tunnel.status.value = Tunnel.Status(Tunnel.State.CONNECTING,"Проверяю соединение",
-            check="Память этой сети, свежие подсказки и совместимые стратегии; можно отменить")
+            check="Ищу рабочую цепочку по каталогу; до 2 минут, можно отменить")
         refreshPublicCloud() // asynchronous: never spend the button's budget waiting for cloud mirrors
         launch("Авто: проверяю соединение", attempt) {
-            doAutoPrepare {
-                if (autoGeneration.get() == ticket && attempt.valid(Net.key(app), Net.underlying(app)?.toString())) onReady()
-            }
+            doContinuingAutoSearch(attempt, ticket, onReady)
         }
     }
 
@@ -1346,6 +1345,70 @@ object Actions {
 
     private fun autoPrepare(onReady: () -> Unit) = launch("Авто-настройка") { doAutoPrepare(onReady) }
 
+    /** Explicit continuing button search. Legacy fast helpers retain their original 15 s contract. */
+    private suspend fun doContinuingAutoSearch(attempt: AutoForegroundAttempt, ticket: Int, onReady: () -> Unit): String {
+        val net = Net.key(app); val handle = Net.underlying(app)?.toString()
+        val report = AutoSearchReport(); activeSearchReport = report
+        val initial = Store.state.value
+        val catalogue = preferred(initial, initial.servers).distinctBy { it.id }
+        val remembered = initial.settings.netServers[net].orEmpty().toSet()
+        val ordered = catalogue.sortedWith(compareBy<Server> {
+            if (AutoEligibility.serviceRank(initial.state(it),net,System.currentTimeMillis()) == 0) 0 else 1
+        }.thenBy { if (it.id in remembered) 0 else 1 }
+            .then(ServerChoice.downloadOrder({initial.state(it)},net,System.currentTimeMillis())))
+        fun valid() = autoGeneration.get() == ticket && Net.key(app) == net && Net.underlying(app)?.toString() == handle
+        var handedOff = false
+        try {
+            val outcome = ContinuingAutoSearch.search(ordered, { it.id }, attempt::remainingMs, ::valid,
+                nextBatch = { pending ->
+                    val hints = (CloudSpeed.pick(pending,emptyList(),n=2)+CloudControl.ranked(pending,2)).distinctBy { it.id }
+                    PublicCloudQueue.merge(pending,hints,pending,AutoForegroundAttempt.MAX_CANDIDATES,slots=2)
+                },
+                probeBatch = { batch ->
+                    attempt.ensureOpen()
+                    Tunnel.status.value = Tunnel.Status(Tunnel.State.CONNECTING,"Ищу рабочий маршрут…",
+                        check="Проверяю следующие варианты каталога; до 2 минут, можно отменить")
+                    val phase = minOf(AutoForegroundAttempt.TARGET_MS - AutoForegroundAttempt.FINAL_RESERVE_MS, attempt.searchMs())
+                    if (phase > 0) kotlinx.coroutines.withTimeoutOrNull(phase) { quickTest(batch) }
+                },
+                confirmed = { AutoEligibility.serviceRank(Store.state.value.state(it),net,System.currentTimeMillis()) == 0 },
+                select = { observed ->
+                    val current = Store.state.value
+                    val present = current.servers.map { it.id }.toSet()
+                    AutoEligibility.connectionPool(observed.filter { it.id in present && current.state(it).works },
+                        {current.state(it)},net,System.currentTimeMillis())
+                },
+                connect = { pool ->
+                    attempt.ensureOpen()
+                    if (!valid()) throw kotlinx.coroutines.CancellationException("stale-network-result")
+                    selectBest(AutoEligibility.TOP, among=pool)
+                    deepPending = true
+                    // Set before sending the service command: never consume an old ERROR/CONNECTED receipt.
+                    Tunnel.status.value = Tunnel.Status(Tunnel.State.CONNECTING,"Проверяю конечную цепочку…")
+                    withContext(Dispatchers.Main) {
+                        if (!valid() || !attempt.valid(Net.key(app),Net.underlying(app)?.toString()))
+                            throw kotlinx.coroutines.CancellationException("stale-network-result")
+                        handedOff = true
+                        onReady()
+                    }
+                    val terminal = Tunnel.status.first { it.state == Tunnel.State.CONNECTED || it.state == Tunnel.State.ERROR }
+                    terminal.state == Tunnel.State.CONNECTED
+                })
+            if (outcome == ContinuingAutoSearch.Outcome.CONNECTED) return "Интернет работает; результаты Telegram и YouTube показываются отдельно"
+            if (outcome == ContinuingAutoSearch.Outcome.STALE) return selectionNetworkChanged()
+            val message = if (catalogue.isEmpty()) "Каталог пуст. Добавьте конфигурацию или обновите подписки"
+                else if (outcome == ContinuingAutoSearch.Outcome.DEADLINE) "Время поиска истекло. " + report.summary()
+                else "Доступные варианты проверены: рабочая передача данных не найдена. " + report.summary()
+            Tunnel.status.value = Tunnel.Status(Tunnel.State.ERROR,"Рабочий маршрут не найден",check=message)
+            finishAutoAttempt(attempt,if(outcome == ContinuingAutoSearch.Outcome.DEADLINE) "budget-exhausted" else "no-eligible-candidates")
+            return message
+        } finally {
+            report.flush(); if (activeSearchReport === report) activeSearchReport = null
+            if (handedOff && Tunnel.status.value.state != Tunnel.State.CONNECTED)
+                com.vlesscardvpn.vpn.TunnelService.stop(app)
+        }
+    }
+
     private suspend fun doAutoPrepare(onReady: () -> Unit): String {
         val attempt = autoAttempt ?: AutoForegroundAttempt.begin(Net.key(app),Net.underlying(app)?.toString(),android.os.SystemClock::elapsedRealtime)
             .also { autoAttempt = it }
@@ -1402,7 +1465,7 @@ object Actions {
         val dataPassed = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
         val attempt = autoAttempt
         val searchDeadline = android.os.SystemClock.elapsedRealtime() +
-            (attempt?.searchMs() ?: (AutoForegroundAttempt.TARGET_MS - AutoForegroundAttempt.FINAL_RESERVE_MS))
+            minOf(attempt?.searchMs() ?: Long.MAX_VALUE, AutoForegroundAttempt.TARGET_MS - AutoForegroundAttempt.FINAL_RESERVE_MS)
         fun remaining() = (searchDeadline - android.os.SystemClock.elapsedRealtime()).coerceAtLeast(0)
         val winner = DeferredAutoFallback.search(candidates, ::remaining,
             valid = { valid() && (attempt == null || attempt.reason() == "searching") },
@@ -1413,7 +1476,7 @@ object Actions {
                     onSuccess={dataPassed.add(it.id)}, onResult={server,_->visited.add(server.id)})
                 attempted.addAll(visited)
                 kotlinx.coroutines.currentCoroutineContext().ensureActive()
-                if (valid() && remaining() > 0) {
+                if (attempt?.continuing != true && valid() && remaining() > 0) {
                     val finalists = wave.filter { it.id in dataPassed }
                     if (finalists.isNotEmpty()) chooseCompared(finalists,null)
                 }
@@ -1427,6 +1490,12 @@ object Actions {
             confirmed = { AutoEligibility.serviceRank(Store.state.value.state(it),net,System.currentTimeMillis()) == 0 })
         kotlinx.coroutines.currentCoroutineContext().ensureActive()
         if (!valid()) return selectionNetworkChanged()
+        if (attempt?.continuing == true && remaining() > 0) {
+            // First test both data waves. A slow service discovery must not consume the
+            // entire batch before the next four routes even get their HTTPS check.
+            val finalists = candidates.filter { it.id in dataPassed }
+            if (finalists.isNotEmpty()) kotlinx.coroutines.withTimeoutOrNull(remaining()) { chooseCompared(finalists,null) }
+        }
         if (winner != null) {
             onFirst?.invoke(winner)
             return if (AutoEligibility.serviceRank(Store.state.value.state(winner),net,System.currentTimeMillis()) == 0)

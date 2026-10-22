@@ -5,19 +5,23 @@ import kotlinx.coroutines.withTimeout
 import java.util.concurrent.atomic.AtomicLong
 
 /** One button press, one monotonic deadline, including mutex/worker waits and actual-core handoff.
+ * Legacy fast attempt: 15 s. Explicit continuing search: at most 120 s, never reset between batches.
  * RAM only. Context values never appear in logs or diagnostics. Cleanup may outlive cancellation of JNI.
  */
 class AutoForegroundAttempt(val generation: Long, private val network: String, private val handle: String?,
-                            private val clock: () -> Long, budgetMs: Long = TARGET_MS) {
+                            private val clock: () -> Long, budgetMs: Long = TARGET_MS, val continuing: Boolean = false) {
     companion object {
         const val TARGET_MS = 15_000L
         const val FINAL_RESERVE_MS = 5_000L
+        const val CONTINUING_MS = 120_000L
         const val MAX_CANDIDATES = 8
         private val sequence = AtomicLong()
         fun begin(network: String, handle: String?, clock: () -> Long) =
             AutoForegroundAttempt(sequence.incrementAndGet(), network, handle, clock)
+        fun continuing(network: String, handle: String?, clock: () -> Long) =
+            AutoForegroundAttempt(sequence.incrementAndGet(), network, handle, clock, CONTINUING_MS, continuing = true)
     }
-    private val deadline = clock() + budgetMs.coerceIn(1, TARGET_MS)
+    private val deadline = clock() + budgetMs.coerceIn(1, if (continuing) CONTINUING_MS else TARGET_MS)
     @Volatile private var closedReason: String? = null
     fun remainingMs(): Long = if (closedReason != null) 0 else (deadline - clock()).coerceAtLeast(0)
     fun searchMs(): Long = (remainingMs() - FINAL_RESERVE_MS).coerceAtLeast(0)
@@ -30,6 +34,7 @@ class AutoForegroundAttempt(val generation: Long, private val network: String, p
         if (remainingMs() <= 0) throw AutoBudgetExpired()
     }
     suspend fun <T> within(block: suspend () -> T): T {
+        ensureOpen()
         val left = remainingMs()
         if (left <= 0) throw AutoBudgetExpired()
         return withTimeout(left) { block().also { ensureOpen() } }

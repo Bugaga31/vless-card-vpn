@@ -143,14 +143,23 @@ adb logcat -d -s E2E:I | grep "socks port=" | tail -1 | grep -q "mode=SERVERS" |
 c=$(grep -c "email: u8443" $W/access.log); echo "auto: server :8443 accepted $c"
 [ "$c" -gt 0 ] || fail "auto: traffic did not go through the auto-picked server"
 
-# Revised contract: foreground Auto must NOT search all 41 configurations for a tail route.
+# Continuing Auto regression: 40 TCP-reachable but wrongly authenticated routes precede
+# the sole working chain. Require actual app body traffic, not checkbox or TCP success.
 adb shell am start -n $PKG/.MainActivity --ez e2e_disconnect true >/dev/null; sleep 3
-load auto-auth-tail.json; adb logcat -c
+load auto-auth-tail.json; adb logcat -c; : > "$W/access.log"
 adb shell am start -n $PKG/.MainActivity --ez e2e_connect true >/dev/null
-F=$(waitlog "action\[Авто: проверяю соединение\]" 25) || fail "auto-budget: attempt did not terminate within bounded allowance"
-adb logcat -d -s E2E:I | grep -q "auto-fast catalog=41 candidates=8" || fail "auto-budget: foreground candidate bound missing"
-adb logcat -d -s E2E:I | grep -q "check ok=true" && fail "auto-budget: untested tail route was falsely connected"
-save_case auto-budget
+F=$(waitlog "action\[Авто: проверяю соединение\]" 135) || fail "auto-continuing: search exceeded total deadline allowance"
+echo "$F" | grep -q "Интернет работает" || fail "auto-continuing: tail route was not connected"
+C=$(waitlog "check ok=true" 30) || fail "auto-continuing: actual chain transfer was not confirmed"
+# Batches remain <=8; the complete search is no longer truncated to the first batch.
+if adb logcat -d -s E2E:I | grep "auto-fast catalog=" | grep -Ev "catalog=[1-8] candidates=[1-8]"; then
+  fail "auto-continuing: batch exceeded eight candidates"
+fi
+BATCHES=$(adb logcat -d -s E2E:I | grep -c "auto-fast catalog=")
+[ "$BATCHES" -gt 1 ] || fail "auto-continuing: next batch never started"
+R=$(probe auto-continuing); okprobe "$R" || fail "auto-continuing: independent app body transfer failed"
+grep -q "email: u8443" "$W/access.log" || fail "auto-continuing: authenticated server saw no traffic"
+save_case auto-continuing
 
 # Explicit full checking is separate: all 41 authenticated configurations receive results,
 # including the only valid credentials after the old 30-route limit.
