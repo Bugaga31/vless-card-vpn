@@ -14,7 +14,7 @@ data class SocksAuth(val port: Int, val user: String = "", val pass: String = ""
 object XrayConfigBuilder {
     const val BYEDPI_TAG = "byedpi"
     const val PROXY_PREFIX = "proxy-"
-    const val WARP_CHAIN = "warp-chain"    const val WARP_CHAIN = "warp-chain"
+    const val WARP_CHAIN = "warp-chain"
     const val TOR_TAG = "tor"
 
     const val RU_DNS = "77.88.8.8"

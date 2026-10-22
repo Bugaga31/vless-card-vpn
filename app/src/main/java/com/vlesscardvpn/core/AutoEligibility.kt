@@ -25,7 +25,10 @@ object AutoEligibility {
             freshSecret && freshSubnet && (s.sni.isBlank() || snis.add(s.sni))
         }
     }
-    private fun String.isIpv4() = split('.').size == 4 && all { it.toIntOrNull() in 0..255 }
+    private fun String.isIpv4(): Boolean {
+        val parts = split('.')
+        return parts.size == 4 && parts.all { p -> p.toIntOrNull() in 0..255 }
+    }
     fun clean(st: AppState): AppState {
         val keep = st.servers.filter(::allowed)
         if (keep.size == st.servers.size) return st
