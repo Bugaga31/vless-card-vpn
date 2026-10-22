@@ -8,7 +8,7 @@ object ServiceRoutes {
         Target("youtube", "Видео YouTube", "https://www.gstatic.com/generate_204", listOf("geosite:youtube", "domain:googlevideo.com", "domain:ytimg.com", "domain:ggpht.com", "domain:youtube.com", "domain:youtu.be")),
         Target("gemini", "Gemini", "https://gemini.google.com/", listOf("domain:gemini.google.com", "domain:generativelanguage.googleapis.com", "domain:aistudio.google.com", "domain:ai.google.dev", "domain:notebooklm.google", "domain:notebooklm.google.com"), true),
         Target("chatgpt", "ChatGPT", "https://chatgpt.com/", listOf("domain:chatgpt.com", "domain:openai.com", "domain:oaistatic.com", "domain:oaiusercontent.com"), true),
-        Target("claude", "Claude", "https://claude.ai/", listOf("domain:claude.ai", "domain:anthropic.com"), true),
+        Target("claude", "Claude", "https://claude.ai/", listOf("domain:claude.ai", "domain:anthropic.com"), true),        Target("discord", "Discord", "https://discord.com/", Services.domains(listOf("discord"))),
         Target("spotify", "Spotify", "https://open.spotify.com/", listOf("domain:spotify.com", "domain:scdn.co")))
     fun native(target: Target) = target.id == "youtube" || target.id == "telegram"
     /** Positive = measured pass, zero = explicit fail, null = inconclusive; never pin an HTML-only pass. */

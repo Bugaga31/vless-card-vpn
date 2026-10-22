@@ -96,6 +96,8 @@ data class Settings(
     val coverTraffic: Boolean = true,
     /** Tor exit rotator (absorbed tor-rotator-vless): rotate Tor exit via the ControlPort every ~10 min while connected. */
     val torRotation: Boolean = false,
+    /** Services picked in settings ride the local Tor SOCKS (Tor over the tunnel), not the main proxy route. */
+    val torRouting: Boolean = false,
     /** «Ускорение телефона»: big TUN MTU (fewer packets = less CPU), stale DNS answers at once, deep sleep with the screen off. */
     val turbo: Boolean = true,
     /** «Сайт не открывается?»: these sites always through the VPN / always directly (domains). */
@@ -155,7 +157,7 @@ data class Settings(
         .put("warpKeyOff", JSONArray(warpKeyOff)).put("warpKeyStatus", JSONObject(warpKeyStatus as Map<*, *>)).put("myMasks", JSONArray(myMasks))
         .put("maskEvolution", maskEvolution).put("autoMasks", JSONArray(autoMasks)).put("dpiEvoPool", JSONArray(dpiEvoPool)).put("theme", theme)
         .put("dpiRanking", JSONObject().apply { dpiRanking.forEach { (k, v) -> put(k, JSONArray(v)) } })
-        .put("ruAppsDirect", ruAppsDirect).put("randomTun", randomTun).put("coverTraffic", coverTraffic).put("torRotation", torRotation).put("rev", rev).put("turbo", turbo).put("autoStart", autoStart)
+        .put("ruAppsDirect", ruAppsDirect).put("randomTun", randomTun).put("coverTraffic", coverTraffic).put("torRotation", torRotation).put("torRouting", torRouting).put("rev", rev).put("turbo", turbo).put("autoStart", autoStart)
         .put("alwaysVpn", JSONArray(alwaysVpn)).put("alwaysDirect", JSONArray(alwaysDirect))
         .put("traffic", JSONObject().apply { traffic.forEach { (k, v) -> put(k, v) } }).put("monthLimitGb", monthLimitGb)
         .put("country", country).put("favorites", JSONArray(favorites)).put("smartYoutube", smartYoutube).put("appAware", appAware).put("autopilot", autopilot).put("oceanBackground", oceanBackground).put("oceanMotion", oceanMotion).put("welcomeSound", welcomeSound).put("phoneLearning", phoneLearning).put("powerProfile", powerProfile).put("batteryThreshold", batteryThreshold).put("quietScreen", quietScreen).put("chargeOnly", chargeOnly).put("wifiMaintenance", wifiMaintenance).put("protectActiveTraffic", protectActiveTraffic).put("autoCool", autoCool).put("gpsSpoof", gpsSpoof)
@@ -222,7 +224,7 @@ data class Settings(
                 myMasks = list("myMasks", emptyList()),
                 maskEvolution = o.optBoolean("maskEvolution", true), autoMasks = list("autoMasks", emptyList()), dpiEvoPool = list("dpiEvoPool", emptyList()), theme = o.optString("theme", "dark"),
                 dpiRanking = o.optJSONObject("dpiRanking")?.let { m -> m.keys().asSequence().associateWith { k -> m.optJSONArray(k)?.let { a -> (0 until a.length()).map { a.getString(it) } }.orEmpty() } } ?: emptyMap(),
-                ruAppsDirect = o.optBoolean("ruAppsDirect", true), randomTun = o.optBoolean("randomTun", true), coverTraffic = o.optBoolean("coverTraffic", true), torRotation = o.optBoolean("torRotation", false), rev = o.optInt("rev", 0), turbo = o.optBoolean("turbo", true), autoStart = o.optBoolean("autoStart", false),
+                ruAppsDirect = o.optBoolean("ruAppsDirect", true), randomTun = o.optBoolean("randomTun", true), coverTraffic = o.optBoolean("coverTraffic", true), torRotation = o.optBoolean("torRotation", false), torRouting = o.optBoolean("torRouting", false), rev = o.optInt("rev", 0), turbo = o.optBoolean("turbo", true), autoStart = o.optBoolean("autoStart", false),
                 alwaysVpn = list("alwaysVpn", emptyList()), alwaysDirect = list("alwaysDirect", emptyList()),
                 traffic = o.optJSONObject("traffic")?.let { m -> m.keys().asSequence().associateWith { m.optLong(it) } } ?: emptyMap(),
                 monthLimitGb = o.optInt("monthLimitGb", 0), country = o.optString("country", ""), favorites = list("favorites", emptyList()),

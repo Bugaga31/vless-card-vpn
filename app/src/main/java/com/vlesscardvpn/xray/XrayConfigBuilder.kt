@@ -14,7 +14,9 @@ data class SocksAuth(val port: Int, val user: String = "", val pass: String = ""
 object XrayConfigBuilder {
     const val BYEDPI_TAG = "byedpi"
     const val PROXY_PREFIX = "proxy-"
-    const val WARP_CHAIN = "warp-chain"
+    const val WARP_CHAIN = "warp-chain"    const val WARP_CHAIN = "warp-chain"
+    const val TOR_TAG = "tor"
+
     const val RU_DNS = "77.88.8.8"
     val DNS_FALLBACKS = listOf("https://8.8.8.8/dns-query", "https://9.9.9.9/dns-query", "8.8.8.8", "1.1.1.1")
     /** DoH/DoT names resolved without asking anyone (Private DNS and «свой DNS» by name work even when DNS is broken). */
@@ -227,7 +229,11 @@ object XrayConfigBuilder {
         val outs = JSONArray()
         val useServers = settings.mode != Mode.BYEDPI
         if (useServers) servers.forEachIndexed { i, (s, m) -> outs.put(outbound(s, "$PROXY_PREFIX$i", resolveMask(m, byeDpiPort, dpiPorts), settings.mux)) }
-        outs.put(JSONObject().put("tag", "direct").put("protocol", "freedom").put("settings", JSONObject().put("domainStrategy", "UseIPv4")))
+        outs.put(JSONObject().put("tag", "direct").put("protocol", "freedom").put("settings", JSONObject().put("domainStrategy", "UseIPv4")))        // Tor chain: services marked in settings go through the local Termux Tor SOCKS port. Tor's own
+        // circuits ride the TUN (the app uid is excluded, Termux is not), so Tor ends up wrapped in VLESS for free.
+        val torOn = useServers && settings.torRouting && settings.services.isNotEmpty()
+        if (torOn) outs.put(JSONObject().put("tag", TOR_TAG).put("protocol", "socks")
+            .put("settings", JSONObject().put("servers", arr(JSONObject().put("address", "127.0.0.1").put("port", com.vlesscardvpn.tor.TorCard.DEFAULT_SOCKS_PORT)))))
         outs.put(JSONObject().put("tag", "block").put("protocol", "blackhole"))
         // MX/TXT/SRV/HTTPS records are passed on instead of dropped (apps used to hang waiting for them)
         outs.put(JSONObject().put("tag", "dns-out").put("protocol", "dns").put("settings", JSONObject().put("nonIPQuery", "skip")))
@@ -282,8 +288,10 @@ object XrayConfigBuilder {
             // Keep explicit Hybrid / a proven Auto DPI video route. Server pins must not override it.
             val included = id !in setOf("youtube", "telegram") || settings.services.isEmpty() || id in settings.services
             if (included && (settings.mode != Mode.HYBRID || hybridDomains(settings).none { it in target.domains })) {
-                fun pinned(rule: JSONObject): JSONObject = rule.apply {
-                    if (pool.size == 1) put("outboundTag", "$PROXY_PREFIX${pool.first()}") else put("balancerTag", "service-$id")
+                fun pinned(rule: JSONObject): JSONObject = when {
+                    torOn && id in settings.services -> rule.put("outboundTag", TOR_TAG)
+                    pool.size == 1 -> rule.put("outboundTag", "$PROXY_PREFIX${pool.first()}")
+                    else -> rule.put("balancerTag", "service-$id")
                 }
                 rules.put(pinned(JSONObject().put("domain", JSONArray(target.domains))))
                 // Telegram's Android app commonly connects by DC IP, not by a web hostname.
