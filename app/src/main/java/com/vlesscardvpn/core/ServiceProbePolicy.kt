@@ -2,6 +2,14 @@ package com.vlesscardvpn.core
 
 /** Separate cheap reachability and actual service budgets; no positive result is invented on timeout. */
 object ServiceProbePolicy {
+    enum class Checks { NONE, WEB, PROTOCOL }
+    /** Transfer proof and service depth are independent: background pool checks remain real protocol checks. */
+    fun checks(enabled: Boolean, webOnly: Boolean = false): Checks = when {
+        !enabled -> Checks.NONE
+        webOnly -> Checks.WEB
+        else -> Checks.PROTOCOL
+    }
+
     const val SERVICE_MS = 8000L
     const val FINAL_MS = 10000L
     const val TELEGRAM_MS = 8000L
@@ -95,6 +103,11 @@ internal class AutoSearchHandoff {
 
 /** Only handed directly from final-chain verification to its immediate health check; RAM, 30s maximum. */
 internal data class RecentServiceProof(val probe: Probe, val network: String, val handle: String?, val at: Long) {
+    /** Web replies cannot manufacture MTProto/media PASS or a two-origin data receipt. */
+    fun withWeb(web: ServiceWebProbe.Result, network: String, handle: String?, now: Long): Probe? =
+        if (matches(network,handle,now) && AutoEligibility.connectionWorks(probe))
+            probe.copy(web=web,tgOk=null,ytOk=null,tgReason="",ytReason="",ytKbps=0)
+        else null
     fun matches(network: String, handle: String?, now: Long): Boolean =
         (AutoEligibility.servicesWork(probe) || AutoEligibility.connectionWorks(probe)) && this.network == network && this.handle == handle && now - at in 0..30_000
 }

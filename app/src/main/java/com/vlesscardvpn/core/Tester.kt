@@ -137,7 +137,7 @@ object Tester {
     }
 
     /** Requests through a local SOCKS port (the tester's or the running VPN's). */
-    fun probeSocks(port: Int, testUrl: String, big: Boolean = true, youtube: Boolean = true, attempts: Int = 2, budgetMs: Long = 0, strictServices: Boolean = false, connectionCheck: Boolean = false, onCall: ((okhttp3.Call) -> Unit)? = null): Probe {
+    fun probeSocks(port: Int, testUrl: String, big: Boolean = true, youtube: Boolean = true, attempts: Int = 2, budgetMs: Long = 0, strictServices: Boolean = false, connectionCheck: Boolean = false, webOnly: Boolean = false, onCall: ((okhttp3.Call) -> Unit)? = null): Probe {
         val budgetDeadline = if (budgetMs > 0) System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(budgetMs.coerceAtMost(60000)) else Long.MAX_VALUE
         fun boundedCall(client: OkHttpClient, request: Request): okhttp3.Call = client.newCall(request).also { call ->
             if (budgetDeadline != Long.MAX_VALUE) call.timeout().timeout(TimeUnit.NANOSECONDS.toMillis((budgetDeadline-System.nanoTime()).coerceAtLeast(1)).coerceAtLeast(1),TimeUnit.MILLISECONDS)
@@ -152,18 +152,19 @@ object Tester {
         val closed = java.util.concurrent.atomic.AtomicBoolean()
         val sockets = java.util.concurrent.ConcurrentLinkedQueue<Socket>()
         // Start independent service checks BEFORE the generic HTTPS check consumes its budget.
-        val webF = if (youtube && connectionCheck) workers.download(ServiceWebProbe.Result()) {
+        val checks = ServiceProbePolicy.checks(youtube,webOnly)
+        val webF = if (checks == ServiceProbePolicy.Checks.WEB) workers.download(ServiceWebProbe.Result()) {
             val webBudget = if (budgetDeadline == Long.MAX_VALUE) ServiceWebProbe.BUDGET_MS else
                 TimeUnit.NANOSECONDS.toMillis((budgetDeadline-System.nanoTime()).coerceAtLeast(0))
             ServiceWebProbe.check(webBudget) { boundedCall(mediaClient,it) }
         }.also { tasks += it } else null
-        val tgF = if (youtube && !connectionCheck) workers.telegram(TelegramProbe.Result(null,"worker-busy")) {
+        val tgF = if (checks == ServiceProbePolicy.Checks.PROTOCOL) workers.telegram(TelegramProbe.Result(null,"worker-busy")) {
             TelegramProbe.checkResult(port, if (budgetMs > 0) budgetMs else ServiceProbePolicy.TELEGRAM_MS) { socket ->
                 sockets += socket
                 if (closed.get()) runCatching { socket.close() }
             }
         }.also { tasks += it } else null
-        val ytF = if (youtube && !connectionCheck) workers.media(YouTubeMediaProbe.Result(null,reason="worker-busy")) {
+        val ytF = if (checks == ServiceProbePolicy.Checks.PROTOCOL) workers.media(YouTubeMediaProbe.Result(null,reason="worker-busy")) {
             YouTubeMediaProbe.check { boundedCall(mediaClient,it) }
         }.also { tasks += it } else null
         try {
@@ -220,6 +221,19 @@ object Tester {
             client.dispatcher.cancelAll(); client.connectionPool.evictAll()
             client.dispatcher.executorService.shutdownNow() // do not retain per-probe async threads for 60 s
         }
+    }
+
+    /** Live page check only; never trains service proofs or falls back to a direct client. */
+    fun webSocks(port: Int, budgetMs: Long = ServiceWebProbe.BUDGET_MS,
+                 onCall: ((okhttp3.Call) -> Unit)? = null): ServiceWebProbe.Result {
+        if (port !in 1..65535 || budgetMs <= 0) return ServiceWebProbe.Result()
+        val budget = budgetMs.coerceAtMost(ServiceWebProbe.BUDGET_MS)
+        val client = base.newBuilder().proxy(Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1",port)))
+            .dispatcher(okhttp3.Dispatcher()).connectionPool(okhttp3.ConnectionPool(0,1,TimeUnit.SECONDS))
+            .connectTimeout(budget,TimeUnit.MILLISECONDS).readTimeout(budget,TimeUnit.MILLISECONDS)
+            .callTimeout(budget,TimeUnit.MILLISECONDS).followRedirects(false).followSslRedirects(false).build()
+        return try { ServiceWebProbe.check(budget) { req -> client.newCall(req).also { onCall?.invoke(it) } } }
+        finally { client.dispatcher.cancelAll(); client.connectionPool.evictAll(); client.dispatcher.executorService.shutdownNow() }
     }
 
     private val workers = ProbeWorkerSet()
