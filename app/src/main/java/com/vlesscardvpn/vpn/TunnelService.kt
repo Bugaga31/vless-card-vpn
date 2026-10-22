@@ -364,9 +364,9 @@ class TunnelService : VpnService() {
             foreground(if (settings.quietNotification) "Активно" else "Подключено · $route")
             liveNotification(route)
             watchNetwork()
-            // Final admission proves HTTPS only. Start actual-chain MTProto/media checks
-            // immediately, rather than reusing UNKNOWN receipts and waiting another 30 s.
-            verifySoon(0)
+            // Reuse only this just-measured data receipt, while checking both web pages now.
+            // Deep background MTProto/media proofs are separate and must not be overwritten by web checks.
+            verifySoon(0, finalProof)
         } catch (e: Throwable) {
             if (e is kotlinx.coroutines.CancellationException) throw e
             Log.w(TAG, "connect failed", e)
@@ -457,20 +457,32 @@ class TunnelService : VpnService() {
             fun accepted(probe: com.vlesscardvpn.core.Probe) = if (st.mode == Mode.AUTO) com.vlesscardvpn.core.AutoEligibility.connectionWorks(probe) else probe.works
             val budget = if (checkServices) com.vlesscardvpn.core.ServiceProbePolicy.SERVICE_MS else 5000L
             fun verdict(probe: com.vlesscardvpn.core.Probe): Boolean? = if (st.mode == Mode.AUTO) com.vlesscardvpn.core.AutoEligibility.connectionVerdict(probe) else com.vlesscardvpn.core.AutoEligibility.learningVerdict(probe, false)
-            if (checkServices && recent == null) com.vlesscardvpn.core.ServiceHealth.begin(budget)
-            fun probe(): com.vlesscardvpn.core.Probe {
-                val result = Tester.probeSocks(port, st.testUrl, big = false, youtube = checkServices && recent == null, attempts = 1, budgetMs = budget, connectionCheck = st.mode == Mode.AUTO && recent == null)
-                return if (result.works && recent?.matches(sampledNet, sampledHandle, System.currentTimeMillis()) == true)
-                    result.copy(httpsHosts=recent.probe.httpsHosts,httpsChecked=recent.probe.httpsChecked,ytOk=recent.probe.ytOk, tgOk=recent.probe.tgOk, ytReason=recent.probe.ytReason, tgReason=recent.probe.tgReason)
-                else result
+            if (checkServices) com.vlesscardvpn.core.ServiceHealth.begin(budget)
+            suspend fun probe(): com.vlesscardvpn.core.Probe {
+                if (st.mode == Mode.AUTO && recent != null) {
+                    val web = com.vlesscardvpn.core.CancellableProbe.run { bind ->
+                        Tester.webSocks(port) { call -> bind { call.cancel() } }
+                    }
+                    if (core === sampledCore && sampledCore?.running == true && Tunnel.socks?.port == port)
+                        recent.withWeb(web,Net.key(this@TunnelService),Net.underlying(this@TunnelService)?.toString(),System.currentTimeMillis())?.let { return it }
+                }
+                if (core !== sampledCore || Tunnel.socks?.port != port || Net.key(this@TunnelService) != sampledNet ||
+                    Net.underlying(this@TunnelService)?.toString() != sampledHandle)
+                    throw kotlinx.coroutines.CancellationException("stale-network-result")
+                return com.vlesscardvpn.core.CancellableProbe.run { bind ->
+                    Tester.probeSocks(port, st.testUrl, big = false, youtube = checkServices,
+                        attempts = 1, budgetMs = budget, connectionCheck = st.mode == Mode.AUTO,
+                        webOnly = st.mode == Mode.AUTO, onCall = { call -> bind { call.cancel() } })
+                }
             }
-            var p = recent?.probe ?: probe()
+            var p = probe()
             if (com.vlesscardvpn.BuildConfig.DEBUG) Log.i("E2E", "auto-verify event=sampled hosts=${p.httpsHosts.coerceIn(0,3)}")
             // right after connecting the first packets may still be on their way (WireGuard/WARP handshake, a slow
             // mobile network): one calm second try before calling the route bad and starting a heal or a reconnect
             if (verdict(p) == false) { delay(3000); if (Tunnel.socks?.port == port) p = probe() }
             val cur = Tunnel.status.value
-            if (cur.state != Tunnel.State.CONNECTED || core !== sampledCore || sampledChain != com.vlesscardvpn.core.RouteContext.key(Store.state.value.settings) || Net.key(this@TunnelService) != sampledNet ||
+            if (cur.state != Tunnel.State.CONNECTED || core !== sampledCore || Tunnel.socks?.port != port ||
+                (st.mode == Mode.AUTO && sampledCore?.running != true) || sampledChain != com.vlesscardvpn.core.RouteContext.key(Store.state.value.settings) || Net.key(this@TunnelService) != sampledNet ||
                 Net.underlying(this@TunnelService)?.toString() != sampledHandle) {
                 if (com.vlesscardvpn.BuildConfig.DEBUG) Log.i("E2E", "auto-verify event=discarded reason=context-changed")
                 return@launch
@@ -480,12 +492,13 @@ class TunnelService : VpnService() {
                 when (Tester.warpTrace(port).let { t -> if (t == "plus" || t == "on" || t == "off") t else { delay(2000); Tester.warpTrace(port) } }) {
                 "plus" -> " · WARP+: включён ✓"; "on" -> " · WARP: включён ✓"; "off" -> " · WARP: не через Cloudflare ✗"; else -> " · WARP: Cloudflare не ответил"
             } else ""
-            if (Tunnel.status.value.state != Tunnel.State.CONNECTED || core !== sampledCore ||
-                Net.key(this@TunnelService) != sampledNet || Net.underlying(this@TunnelService)?.toString() != sampledHandle) return@launch
+            if (Tunnel.status.value.state != Tunnel.State.CONNECTED || core !== sampledCore || Tunnel.socks?.port != port ||
+                (st.mode == Mode.AUTO && sampledCore?.running != true) || Net.key(this@TunnelService) != sampledNet || Net.underlying(this@TunnelService)?.toString() != sampledHandle) return@launch
             if (sampledChain != com.vlesscardvpn.core.RouteContext.key(Store.state.value.settings)) return@launch
-            if (checkServices && recent == null) {
+            if (checkServices) {
                 com.vlesscardvpn.core.ServiceHealth.finish(p, System.currentTimeMillis(), budget)
-                if (st.mode == Mode.AUTO) Store.update { current ->
+                // Web UNKNOWN/PASS is not a replacement for per-route MTProto/media evidence.
+                if (st.mode == Mode.AUTO && p.web == null) Store.update { current ->
                     current.copy(states=current.states.mapValues { (id,value) ->
                         sampledMasks[id]?.let { mask -> com.vlesscardvpn.core.AutoEligibility.recordChainServices(
                             value,sampledNet,mask,proofStartedAt,System.currentTimeMillis(),p,sampledServers.size==1) } ?: value

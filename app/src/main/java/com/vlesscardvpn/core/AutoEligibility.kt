@@ -75,7 +75,7 @@ object AutoEligibility {
 
     /** A new attempted check replaces old proof even when both service results are inconclusive. */
     fun recordServices(state: ServerState, net: String, mask: String, now: Long, probe: Probe): ServerState =
-        state.copy(serviceNetwork = net, serviceMask = mask, serviceCheckedAt = now,
+        if (probe.web != null) state else state.copy(serviceNetwork = net, serviceMask = mask, serviceCheckedAt = now,
             serviceYtOk = probe.ytOk, serviceTgOk = probe.tgOk)
 
     /** A failed actual chain cannot keep cached positive evidence for the next button press.
@@ -94,6 +94,7 @@ object AutoEligibility {
      * A balancer failure revokes shared proof but never invents per-member FAIL observations.
      */
     fun recordChainServices(s: ServerState, net: String, mask: String, startedAt: Long, now: Long, p: Probe, isolated: Boolean): ServerState {
+        if (p.web != null) return s // website status cannot revoke/restamp protocol receipts
         if (s.maskFor(net) != mask || s.serviceNetwork == net && s.serviceMask == mask && s.serviceCheckedAt > startedAt) return s
         if (isolated) return recordServices(s,net,mask,now,p)
         return if (p.ytOk == false || p.tgOk == false) invalidateChainProof(s,net,mask,startedAt) else s
