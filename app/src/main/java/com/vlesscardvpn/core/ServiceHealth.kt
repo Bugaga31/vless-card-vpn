@@ -4,7 +4,7 @@ package com.vlesscardvpn.core
 object ServiceHealth {
     enum class Verdict { PASS, FAIL, UNKNOWN, STALE, CHECKING }
     data class Snapshot(val checkedAt: Long = 0, val youtube: Boolean? = null, val telegram: Boolean? = null,
-                        val checking: Boolean = false, val budgetMs: Long = 0, val youtubeReason: String = "", val telegramReason: String = "")
+                        val checking: Boolean = false, val budgetMs: Long = 0, val youtubeReason: String = "", val telegramReason: String = "", val webOnly: Boolean = false)
     enum class EventKind { SEARCH, CHECK, UNKNOWN, FAILURE, CONNECTED, NETWORK_CHANGE }
     data class Event(val at: Long, val kind: EventKind)
     val history = kotlinx.coroutines.flow.MutableStateFlow<List<Event>>(emptyList())
@@ -23,9 +23,11 @@ object ServiceHealth {
     }
     fun begin(budgetMs: Long) { event(EventKind.CHECK); state.value = Snapshot(checking = true, budgetMs = budgetMs) }
     fun finish(probe: Probe, now: Long, budgetMs: Long) {
-        state.value = Snapshot(now, probe.ytOk, probe.tgOk, budgetMs = budgetMs, youtubeReason = probe.ytReason, telegramReason = probe.tgReason)
-        if (probe.ytOk == false || probe.tgOk == false) event(EventKind.FAILURE, now)
-        else if (probe.ytOk == null || probe.tgOk == null) event(EventKind.UNKNOWN, now)
+        state.value = Snapshot(now, if (probe.web != null) probe.web.youtube else probe.ytOk, if (probe.web != null) probe.web.telegram else probe.tgOk, budgetMs = budgetMs, youtubeReason = probe.ytReason, telegramReason = probe.tgReason, webOnly = probe.web != null)
+        val youtube = if (probe.web != null) probe.web.youtube else probe.ytOk
+        val telegram = if (probe.web != null) probe.web.telegram else probe.tgOk
+        if (youtube == false || telegram == false) event(EventKind.FAILURE, now)
+        else if (youtube == null || telegram == null) event(EventKind.UNKNOWN, now)
     }
     fun reset() { state.value = Snapshot() }
 }

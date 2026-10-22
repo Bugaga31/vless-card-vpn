@@ -23,7 +23,7 @@ import java.net.ServerSocket
 import java.net.Socket
 import java.util.concurrent.TimeUnit
 
-data class Probe(val realMs: Int, val bigOk: Boolean?, val ytOk: Boolean?, val error: String = "", val tgOk: Boolean? = null, val kbps: Int = 0, val ytKbps: Int = 0, val ytReason: String = "", val tgReason: String = "", val httpsHosts: Int = 0, val httpsChecked: Boolean = false) {
+data class Probe(val realMs: Int, val bigOk: Boolean?, val ytOk: Boolean?, val error: String = "", val tgOk: Boolean? = null, val kbps: Int = 0, val ytKbps: Int = 0, val ytReason: String = "", val tgReason: String = "", val httpsHosts: Int = 0, val httpsChecked: Boolean = false, val web: ServiceWebProbe.Result? = null) {
     val works: Boolean get() = realMs > 0 && bigOk != false
 }
 
@@ -152,13 +152,18 @@ object Tester {
         val closed = java.util.concurrent.atomic.AtomicBoolean()
         val sockets = java.util.concurrent.ConcurrentLinkedQueue<Socket>()
         // Start independent service checks BEFORE the generic HTTPS check consumes its budget.
-        val tgF = if (youtube) workers.telegram(TelegramProbe.Result(null,"worker-busy")) {
+        val webF = if (youtube && connectionCheck) workers.download(ServiceWebProbe.Result()) {
+            val webBudget = if (budgetDeadline == Long.MAX_VALUE) ServiceWebProbe.BUDGET_MS else
+                TimeUnit.NANOSECONDS.toMillis((budgetDeadline-System.nanoTime()).coerceAtLeast(0))
+            ServiceWebProbe.check(webBudget) { boundedCall(mediaClient,it) }
+        }.also { tasks += it } else null
+        val tgF = if (youtube && !connectionCheck) workers.telegram(TelegramProbe.Result(null,"worker-busy")) {
             TelegramProbe.checkResult(port, if (budgetMs > 0) budgetMs else ServiceProbePolicy.TELEGRAM_MS) { socket ->
                 sockets += socket
                 if (closed.get()) runCatching { socket.close() }
             }
         }.also { tasks += it } else null
-        val ytF = if (youtube) workers.media(YouTubeMediaProbe.Result(null,reason="worker-busy")) {
+        val ytF = if (youtube && !connectionCheck) workers.media(YouTubeMediaProbe.Result(null,reason="worker-busy")) {
             YouTubeMediaProbe.check { boundedCall(mediaClient,it) }
         }.also { tasks += it } else null
         try {
@@ -186,7 +191,7 @@ object Tester {
             if (best == Long.MAX_VALUE) {
                 val media = ProbeTasks.await(ytF?.takeIf { it.isDone },1,YouTubeMediaProbe.Result(null,reason="deadline"))
                 val telegram = ProbeTasks.await(tgF?.takeIf { it.isDone },1,TelegramProbe.Result(null,"deadline"))
-                return Probe(0,null,media.ok,err,tgOk=telegram.ok,ytReason=media.reason,tgReason=telegram.reason,httpsHosts=https.hosts,httpsChecked=connectionCheck)
+                return Probe(0,null,media.ok,err,tgOk=telegram.ok,ytReason=media.reason,tgReason=telegram.reason,httpsHosts=https.hosts,httpsChecked=connectionCheck,web=ProbeTasks.await(webF?.takeIf { it.isDone },1,ServiceWebProbe.Result()).takeIf { webF != null })
             }
             val deadline = if (budgetDeadline == Long.MAX_VALUE) System.nanoTime() + TimeUnit.SECONDS.toNanos(40) else budgetDeadline
             fun remaining() = TimeUnit.NANOSECONDS.toMillis((deadline - System.nanoTime()).coerceAtLeast(1)).coerceAtLeast(1)
@@ -206,7 +211,8 @@ object Tester {
             val bigResult = ProbeTasks.await(bigF, remaining(), false to 0)
             return Probe(best.toInt().coerceAtLeast(1), if (connectionCheck) true else if (big) bigResult.first else null, ytResult.ok, tgOk = tgResult.ok,
                 kbps = if (connectionCheck) https.kbps else bigResult.second, ytKbps = ytResult.kbps, ytReason = ytResult.reason, tgReason = tgResult.reason,
-                httpsHosts = https.hosts, httpsChecked = connectionCheck)
+                httpsHosts = https.hosts, httpsChecked = connectionCheck,
+                web = webF?.let { ProbeTasks.await(it,remaining(),ServiceWebProbe.Result()) })
         } finally {
             closed.set(true); sockets.forEach { runCatching { it.close() } }
             ProbeTasks.cancel(tasks); workers.purge()

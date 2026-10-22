@@ -27,6 +27,10 @@ object ServiceProbePolicy {
         else "подтверждения пока нет"
     }
     fun describe(probe: Probe): String {
+        probe.web?.let { web ->
+            fun label(value: Boolean?) = when(value) { true -> "доступен"; false -> "сайт отказал в доступе"; null -> "не удалось проверить" }
+            return "Telegram Web: ${label(web.telegram)}. YouTube сайт: ${label(web.youtube)}. Это не проверка сообщений и воспроизведения видео."
+        }
         fun label(value: Boolean?, reasonCode: String) = when (value) { true -> "проверен"; false -> "не прошёл: ${reason(reasonCode)}"; null -> "не подтверждён: не удалось проверить — ${reason(reasonCode)}" }
         return "Telegram MTProto: ${label(probe.tgOk,probe.tgReason)}. YouTube-медиа: ${label(probe.ytOk,probe.ytReason)}."
     }

@@ -6,6 +6,24 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class ContinuingAutoSearchTest {
+    @Test fun fastFinalizationDoesNotWaitForWholeCatalogueWhenDataIsProven() = runBlocking {
+        var ready = false; var waves = 0; var connects = 0
+        val result = ContinuingAutoSearch.search((1..40).toList(), {"$it"}, {110000}, {true},
+            probeBatch = { waves++; ready = true }, confirmed = { false },
+            select = { it.take(1) }, fallbackReady = { ready },
+            connect = { connects++; true })
+        assertEquals(ContinuingAutoSearch.Outcome.CONNECTED,result)
+        assertEquals(1,waves); assertEquals(1,connects)
+    }
+    @Test fun fastWindowWithoutDataProofContinuesSearchingLaterBatches() = runBlocking {
+        var waves = 0
+        val result = ContinuingAutoSearch.search((1..24).toList(), {"$it"}, {100000}, {true},
+            probeBatch = { waves++ }, confirmed = { false },
+            select = { it.filter { id -> id == 21 } }, fallbackReady = { true },
+            connect = { assertEquals(listOf(21),it); true })
+        assertEquals(ContinuingAutoSearch.Outcome.CONNECTED,result); assertEquals(3,waves)
+    }
+
     @Test fun routeBeyondFirstEightIsActuallyConnected() = runBlocking {
         val waves = mutableListOf<List<Int>>(); val connected = mutableListOf<Int>()
         val result = ContinuingAutoSearch.search((1..20).toList(), {"$it"}, {120000}, {true},

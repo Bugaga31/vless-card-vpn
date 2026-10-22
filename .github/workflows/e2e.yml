@@ -1,7 +1,7 @@
 name: E2E (Xray chain on emulator)
 on:
   push:
-    branches: ['rebuild-*', 'release-*', '!release-build-*', 'fix/auto-deferred-fallback-149', 'fix/auto-search-controls-150']
+    branches: ['rebuild-*', 'release-*', '!release-build-*', 'fix/auto-deferred-fallback-149', 'fix/auto-search-controls-150', 'fix/auto-fast-web-checks-150']
   workflow_dispatch:
   workflow_call:
 permissions:
@@ -74,7 +74,10 @@ jobs:
         if: always()
         run: |
           python3 tools/e2e/test_auto_diagnostics.py
+          echo "Auto continuing diagnostics"
           python3 tools/e2e/auto_diagnostics.py /tmp/e2e/case-auto-continuing.log
+          echo "Auto eight diagnostics"
+          python3 tools/e2e/auto_diagnostics.py /tmp/e2e/case-auto-eight.log
       - if: always()
         uses: actions/upload-artifact@v4
         with:

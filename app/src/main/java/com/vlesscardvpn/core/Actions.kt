@@ -1358,6 +1358,7 @@ object Actions {
             .then(ServerChoice.downloadOrder({initial.state(it)},net,System.currentTimeMillis())))
         fun valid() = autoGeneration.get() == ticket && Net.key(app) == net && Net.underlying(app)?.toString() == handle
         var handedOff = false
+        val fastSearchEnd = attempt.remainingMs() - (AutoForegroundAttempt.TARGET_MS - AutoForegroundAttempt.FINAL_RESERVE_MS)
         try {
             val outcome = ContinuingAutoSearch.search(ordered, { it.id }, attempt::remainingMs, ::valid,
                 nextBatch = { pending ->
@@ -1368,10 +1369,12 @@ object Actions {
                     attempt.ensureOpen()
                     Tunnel.status.value = Tunnel.Status(Tunnel.State.CONNECTING,"Ищу рабочий маршрут…",
                         check="Проверяю следующие варианты каталога; до 2 минут, можно отменить")
-                    val phase = minOf(AutoForegroundAttempt.TARGET_MS - AutoForegroundAttempt.FINAL_RESERVE_MS, attempt.searchMs())
+                    val fastLeft = attempt.remainingMs() - fastSearchEnd
+                    val phase = minOf(if (fastLeft > 0) fastLeft else 10000L, 10000L, attempt.searchMs())
                     if (phase > 0) kotlinx.coroutines.withTimeoutOrNull(phase) { quickTest(batch) }
                 },
                 confirmed = { AutoEligibility.serviceRank(Store.state.value.state(it),net,System.currentTimeMillis()) == 0 },
+                fallbackReady = { attempt.remainingMs() <= fastSearchEnd },
                 select = { observed ->
                     val current = Store.state.value
                     val present = current.servers.map { it.id }.toSet()
