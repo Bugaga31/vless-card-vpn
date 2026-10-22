@@ -1,22 +1,59 @@
-name: Release (signed, emulator-verified)
+name: Release 1.2.39 (gated, signed, emulator-verified)
 on:
   push:
-    tags: ['beta-build-*', 'release-build-*']
-    # A branch with the same name also starts a release (for tools that can create branches but not tags).
-    branches: ['beta-build-*', 'release-build-*']
+    branches: ['release-build-150']
+concurrency:
+  group: release-150
+  cancel-in-progress: false
 env:
   VERSION: ${{ github.ref_name }}
 permissions:
   contents: read
+  actions: read
 jobs:
+  preflight:
+    if: github.repository == 'Bugaga31/vless-card-vpn' && github.ref == 'refs/heads/release-build-150'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Require exact successful candidate CI, never override a failure
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'PYCODE'
+          import json, os, time, urllib.request
+          url='https://api.github.com/repos/Bugaga31/vless-card-vpn/actions/runs/39783115106'
+          for attempt in range(40):
+              req=urllib.request.Request(url,headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],'User-Agent':'VLESS-release-150'})
+              with urllib.request.urlopen(req,timeout=40) as response: result=json.load(response)
+              if result['head_sha'] != 'ccc6fc7a3d40d6e77aca3ac126f52349432b4406':
+                  raise SystemExit('Candidate CI SHA mismatch')
+              if result['status'] == 'completed':
+                  if result['conclusion'] != 'success': raise SystemExit('Candidate CI failed; publication blocked')
+                  print('Exact candidate CI passed'); break
+              time.sleep(60)
+          else: raise SystemExit('Candidate CI not completed; publication blocked')
+          PYCODE
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify release contains the tested application unchanged
+        run: |
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          git diff --exit-code ccc6fc7a3d40d6e77aca3ac126f52349432b4406 HEAD -- app native tools .github/workflows/e2e.yml
   quality:
+    needs: preflight
     uses: ./.github/workflows/e2e.yml
   build:
+    needs: quality
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.sha }}
           persist-credentials: false
       - uses: actions/setup-java@v4
         with:
@@ -52,6 +89,14 @@ jobs:
           KS_B64: ${{ secrets.BETA_KEYSTORE_B64 }}
           KSP: ${{ secrets.BETA_KEYSTORE_PASSWORD }}
         run: |
+          set +x
+          set -euo pipefail
+          umask 077
+          cleanup() { rm -f beta.jks aligned.apk; unset KS_B64 KSP; }
+          trap cleanup EXIT
+          trap 'exit 130' INT
+          trap 'exit 143' TERM
+          test -n "$KS_B64" && test -n "$KSP" || { echo 'Existing release key unavailable'; exit 1; }
           BT=$ANDROID_HOME/build-tools/34.0.0
           echo "$KS_B64" | base64 -d > beta.jks
           mkdir -p release
@@ -89,7 +134,82 @@ jobs:
           for p in glob.glob('app/build/test-results/testDebugUnitTest/*.xml'):
               r=E.parse(p).getroot(); t+=int(r.get('tests')); f+=int(r.get('failures'))+int(r.get('errors'))
           print(f"JVM tests: {t}, failures: {f}"); open('release/tests.txt','w').write(f"{t} {f}")
-          assert f == 0
+          if f != 0: raise SystemExit('JVM failure')
+          PY
+      - name: Verify exact version, all signatures, published certificate and release contents
+        run: |
+          set -euo pipefail
+          curl -fL --retry 0 --max-time 180 -o "$RUNNER_TEMP/baseline-1.2.37.apk" \
+            https://github.com/Bugaga31/vless-card-vpn/releases/download/v1.2.37/VLESS-Card-Beta-1.2.37-arm64.apk
+          echo "b36e12088c619bb74851f08faa7e18d0aec0236466d0f4fd6e1ef1a314e48689  $RUNNER_TEMP/baseline-1.2.37.apk" | sha256sum -c -
+          "$ANDROID_HOME/build-tools/34.0.0/apksigner" verify --print-certs "$RUNNER_TEMP/baseline-1.2.37.apk" > release/baseline-cert.txt
+          grep -q 'certificate SHA-256 digest: 3b9f1771645de07cb01b2303a868363e97cfa8d3ca4d6079dae307066f4f1e6b' release/baseline-cert.txt
+          python3 - <<'PYCOUNTS'
+          import glob,json,xml.etree.ElementTree as E
+          counts={k:0 for k in ('tests','failures','errors','skipped')}
+          for p in glob.glob('app/build/test-results/testDebugUnitTest/TEST-*.xml'):
+              r=E.parse(p).getroot()
+              for k in counts: counts[k]+=int(r.get(k,0))
+          if counts != {'tests':567,'failures':0,'errors':0,'skipped':0}: raise SystemExit('Unexpected JVM counters: '+json.dumps(counts))
+          lint={}
+          for i in E.parse('app/build/reports/lint-results-release.xml').getroot().findall('issue'):
+              s=i.get('severity');lint[s]=lint.get(s,0)+1
+          if lint.get('Error',0) or lint.get('Fatal',0): raise SystemExit('Release lint failed')
+          open('release/tests.json','w').write(json.dumps({'jvm':counts,'lint':lint},indent=2))
+          PYCOUNTS
+          python3 - <<'PY'
+          try:
+              import hashlib, json, os, pathlib, re, subprocess, zipfile
+              out=pathlib.Path('release');bt=pathlib.Path(os.environ['ANDROID_HOME'])/'build-tools/34.0.0'
+              expected='3b9f1771645de07cb01b2303a868363e97cfa8d3ca4d6079dae307066f4f1e6b'
+              def run(*args):return subprocess.check_output([str(a) for a in args],text=True,stderr=subprocess.STDOUT)
+              baseline=run(bt/'aapt2','dump','badging',pathlib.Path(os.environ['RUNNER_TEMP'])/'baseline-1.2.37.apk').splitlines()[0]
+              if "name='com.vlesscardvpn.beta2' versionCode='148' versionName='1.2.37'" not in baseline:
+                  raise SystemExit('Baseline package/version mismatch')
+              checks=[]
+              for name in ['VLESS-Card-Beta.apk','VLESS-Card-Beta-arm64.apk']:
+                  apk=out/name
+                  verify=run(bt/'apksigner','verify','--verbose','--print-certs','--min-sdk-version','21',apk)
+                  certs=re.findall(r'^Signer #\d+ certificate SHA-256 digest: ([0-9a-f]+)$',verify,re.M)
+                  if certs != [expected]: raise SystemExit('Release certificate mismatch')
+                  for scheme in (1,2,3):
+                      if not re.search(r'v'+str(scheme)+r' scheme.*: true',verify):raise SystemExit('Required signature scheme absent')
+                  run(bt/'zipalign','-c','-p','4',apk)
+                  package=run(bt/'aapt2','dump','badging',apk).splitlines()[0]
+                  if "name='com.vlesscardvpn.beta2' versionCode='150' versionName='1.2.39'" not in package:
+                      raise SystemExit('Candidate package/version mismatch')
+                  manifest=run(bt/'aapt2','dump','xmltree',apk,'--file','AndroidManifest.xml')
+                  if re.search(r'android:(?:debuggable|testOnly|networkSecurityConfig)',manifest):
+                      raise SystemExit('Unexpected debug/test/network-security override')
+                  with zipfile.ZipFile(apk) as z:
+                      suspicious=[n for n in z.namelist() if re.search(r'fixture|e2e|\.(pem|crt|cer|der|jks|p12|pfx)$',n,re.I)]
+                      if suspicious:raise SystemExit('Unexpected fixture/certificate file in release APK')
+                      for n in z.namelist():
+                          if n.endswith('.dex'):
+                              data=z.read(n)
+                              if any(m in data for m in (b'e2e_reload',b'e2e_connect',b'e2e_select',b'e2e_masks')):
+                                  raise SystemExit('Debug E2E marker in release DEX')
+                      if name == 'VLESS-Card-Beta.apk':
+                          for lib in ('libgojni.so','libhev-socks5-tunnel.so'):
+                              if 'lib/x86_64/'+lib not in z.namelist():raise SystemExit('Universal APK native ABI missing')
+                  digest=hashlib.sha256(apk.read_bytes()).hexdigest()
+                  checks.append({'file':name,'sha256':digest,'certificate_sha256':expected,'package':package,'signature_schemes':[1,2,3],'targeted_release_content_checks':'PASS'})
+                  (out/(name+'.verify.txt')).write_text(verify)
+                  print('::notice title=Verified signed release APK::'+name+' SHA-256='+digest+' certificate='+expected+' package=com.vlesscardvpn.beta2 version=1.2.39 code=150')
+              provenance={'candidate_sha':os.environ['GITHUB_SHA'],'workflow_sha':os.environ['GITHUB_SHA'],'run_id':os.environ['GITHUB_RUN_ID'],'run_attempt':os.environ['GITHUB_RUN_ATTEMPT'],'baseline_apk_sha256':'b36e12088c619bb74851f08faa7e18d0aec0236466d0f4fd6e1ef1a314e48689','apks':checks,'physical_phone_tested':False,'verification_stage':'before_publication'}
+              (out/'provenance.json').write_text(json.dumps(provenance,indent=2)+'\n')
+              (out/'SHA256SUMS.txt').write_text(''.join(x['sha256']+'  '+x['file']+'\n' for x in checks))
+              (out/'README.txt').write_text('Verified release APK. Physical phone has NOT been tested. Tor is NOT included. Source SHA: '+os.environ['GITHUB_SHA']+'\n')
+          except BaseException as exc:
+              import re
+              detail=str(exc)
+              output=getattr(exc,'output','') or ''
+              if isinstance(output,bytes): output=output.decode('utf-8',errors='replace')
+              detail=(detail+' '+output[-1800:]).strip()
+              detail=re.sub(r'https?://\S+','[URL]',detail)
+              detail=detail.replace('%','%25').replace('\r','%0D').replace('\n','%0A')
+              print('::error title=Signed APK validation failure::'+detail,flush=True)
+              raise
           PY
       - uses: actions/upload-artifact@v4
         with:
@@ -108,11 +228,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.sha }}
           persist-credentials: false
       - uses: actions/download-artifact@v4
         with:
           name: beta-apk
           path: release
+      - name: Download pinned published universal APK for upgrade test
+        run: |
+          curl -fL --retry 0 --max-time 180 -o "$RUNNER_TEMP/baseline-1.2.37-universal.apk" https://github.com/Bugaga31/vless-card-vpn/releases/download/v1.2.37/VLESS-Card-Beta-1.2.37.apk
+          echo "be7cfb38ce9c7daef354bcbcb9f66bad3c4b7a933b8cee26618d37fcfcca6bb4  $RUNNER_TEMP/baseline-1.2.37-universal.apk" | sha256sum -c -
       - name: Enable KVM
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
@@ -125,7 +250,7 @@ jobs:
           arch: x86_64
           disable-animations: true
           emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
-          script: bash tools/security-storage-check.sh && bash tools/beta-install-check.sh
+          script: adb install "$RUNNER_TEMP/baseline-1.2.37-universal.apk" && adb install -r release/VLESS-Card-Beta.apk && adb uninstall com.vlesscardvpn.beta2 && bash tools/security-storage-check.sh && bash tools/beta-install-check.sh
       - if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -154,9 +279,11 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      actions: read
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.sha }}
           persist-credentials: false
       - uses: actions/download-artifact@v4
         with:
@@ -180,7 +307,12 @@ jobs:
             cp "ui-checks/install-check-api-$api/intro-large-text.png" "release/Android-intro-large-api-$api.png"
             cp "ui-checks/install-check-api-$api/intro-320dp-font-scale-2.png" "release/Android-intro-320dp-font-scale-2-api-$api.png"
           done
-      - name: Create prerelease
+      - name: Require immutable release head
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          test "$(gh api repos/$GITHUB_REPOSITORY/git/ref/heads/release-build-150 --jq .object.sha)" = "$GITHUB_SHA"
+      - name: Create verified release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -190,6 +322,14 @@ jobs:
           mv VLESS-Card-Beta.apk VLESS-Card-Beta-1.$V.apk
           mv VLESS-Card-Beta-arm64.apk VLESS-Card-Beta-1.$V-arm64.apk
           sha256sum VLESS-Card-Beta-1.$V.apk VLESS-Card-Beta-1.$V-arm64.apk > SHA256SUMS-Beta.txt
+          python3 - <<'PYPROVENANCE'
+          import hashlib,json,pathlib
+          p=pathlib.Path('provenance.json');data=json.loads(p.read_text())
+          for apk in data['apks']:
+              apk['file']={'VLESS-Card-Beta.apk':'VLESS-Card-Beta-1.2.39.apk','VLESS-Card-Beta-arm64.apk':'VLESS-Card-Beta-1.2.39-arm64.apk'}[apk['file']]
+              if hashlib.sha256(pathlib.Path(apk['file']).read_bytes()).hexdigest()!=apk['sha256']:raise SystemExit('Publish APK hash mismatch')
+          p.write_text(json.dumps(data,indent=2)+'\n')
+          PYPROVENANCE
           read T F < tests.txt || true
           NOTES=../docs/release-1.$V.md; [ -f "$NOTES" ] || NOTES=../docs/release-1.0.$D.md; [ -f "$NOTES" ] || NOTES=../docs/beta-1.0.$D.md
           if [ ! -f "$NOTES" ]; then
@@ -197,12 +337,12 @@ jobs:
             [ -f "$NOTES" ] || NOTES=../docs/archive/releases/beta-1.0.$D.md
           fi
           [ -f "$NOTES" ] || NOTES=/dev/null
-          { cat "$NOTES"; echo; echo "### Автоматические проверки этой сборки"; echo "- JVM-тесты: $T, ошибок: $F"; echo "- Подписи v1 + v2 + v3, постоянный ключ Beta (следующие версии ставятся поверх)"; echo "- Файл *-arm64.apk — то же приложение только для 64-битных телефонов (почти все с 2017 года), качать примерно вдвое меньше"; echo "- Суммы SHA-256 обоих файлов — в SHA256SUMS-Beta.txt"; echo "- Универсальный файл установлен и запущен на эмуляторах Android 11 и 14 (нативный x86_64, без ARM-трансляции)"; echo "- Реальный телефон и сети РФ этим не проверяются"; } > notes.md
+          { cat "$NOTES"; echo; echo "### Автоматические проверки этой сборки"; echo "- JVM-тесты: $T, ошибок: $F"; echo "- Подписи v1 + v2 + v3, постоянный ключ Beta (следующие версии ставятся поверх)"; echo "- Файл *-arm64.apk — то же приложение только для 64-битных телефонов (почти все с 2017 года), качать примерно вдвое меньше"; echo "- Суммы SHA-256 обоих файлов — в SHA256SUMS-Beta.txt"; echo "- Универсальный файл установлен и запущен на эмуляторах Android 11 и 14 (нативный x86_64, без ARM-трансляции)"; echo "- SHA исходников и workflow: $GITHUB_SHA"; echo "- Реальный телефон и сети РФ этим не проверяются"; } > notes.md
           case "$VERSION" in
-            release-build-*) gh release create "v1.$V" VLESS-Card-Beta-1.$V.apk VLESS-Card-Beta-1.$V-arm64.apk SHA256SUMS-Beta.txt Android-*.png \
+            release-build-*) gh release create "v1.$V" VLESS-Card-Beta-1.$V.apk VLESS-Card-Beta-1.$V-arm64.apk SHA256SUMS-Beta.txt provenance.json tests.json Android-*.png \
                 --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --latest \
                 --title "VLESS Card 1.$V" --notes-file notes.md --generate-notes ;;
-            *) gh release create "beta-v1.$V" VLESS-Card-Beta-1.$V.apk VLESS-Card-Beta-1.$V-arm64.apk SHA256SUMS-Beta.txt Android-*.png \
+            *) gh release create "beta-v1.$V" VLESS-Card-Beta-1.$V.apk VLESS-Card-Beta-1.$V-arm64.apk SHA256SUMS-Beta.txt provenance.json tests.json Android-*.png \
                 --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease --draft \
                 --title "VLESS Card · Beta 1.$V" --notes-file notes.md ;;
           esac
