@@ -26,9 +26,11 @@ class TorRoutingR152Test {
         assertEquals(com.vlesscardvpn.tor.TorCard.DEFAULT_SOCKS_PORT,
             tor!!.getJSONObject("settings").getJSONArray("servers").getJSONObject(0).getInt("port"))
         val rules = cfg.getJSONObject("routing").getJSONArray("rules")
-        val discord = (0 until rules.length()).map { rules.getJSONObject(it) }
-            .first { it.optJSONArray("domain")?.toString()?.contains("discord") == true }
-        assertEquals("tor", discord.getString("outboundTag"))
+        val withDiscord = (0 until rules.length()).map { rules.getJSONObject(it) }
+            .filter { it.optJSONArray("domain")?.toString()?.contains("discord") == true }
+        println("DISCORD-RULES: ${withDiscord} torOn-check: tor tag present=${(0 until outs.length()).any { outs.getJSONObject(it).optString("tag") == "tor" }}")
+        val discord = withDiscord.first()
+        assertEquals("tor", discord.optString("outboundTag", "<missing>")) // full rule: ${discord}
     }
 
     @Test fun withoutTorRoutingServicesRideTheMainProxy() {
@@ -44,7 +46,7 @@ class TorRoutingR152Test {
         val sameSni = listOf(server(4).copy(sni = "cdn.example"), server(5).copy(sni = "cdn.example"))
         val kept = AutoEligibility.independent(listOf(a, b, c) + sameSni)
         val hosts = kept.map { it.host }.toSet()
-        assertTrue(hosts.contains("203.0.113.7") xor hosts.contains("203.0.113.99"))
+        assertTrue("kept hosts were: $hosts", hosts.contains("203.0.113.7") xor hosts.contains("203.0.113.99"))
         assertTrue(hosts.contains("198.51.100.4"))
         assertTrue("one representative per SNI", kept.count { it.sni == "cdn.example" } <= 1)
         assertEquals(kept.size, kept.map { it.id }.toSet().size)
