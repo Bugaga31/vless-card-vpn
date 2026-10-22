@@ -30,7 +30,7 @@ class TorRoutingR152Test {
             .filter { it.optJSONArray("domain")?.toString()?.contains("discord") == true }
         println("DISCORD-RULES: ${withDiscord} torOn-check: tor tag present=${(0 until outs.length()).any { outs.getJSONObject(it).optString("tag") == "tor" }}")
         val discord = withDiscord.first()
-        assertEquals("tor", discord.optString("outboundTag", "<missing>")) // full rule: ${discord}
+        assertEquals("tor", discord.optString("outboundTag", "<missing> RULE=" + discord.toString()))
     }
 
     @Test fun withoutTorRoutingServicesRideTheMainProxy() {
