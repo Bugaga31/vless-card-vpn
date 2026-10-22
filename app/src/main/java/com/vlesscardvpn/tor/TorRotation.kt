@@ -92,6 +92,11 @@ class TorRotation(
         }
         // inverse-latency weights over the top-N
         val head = sorted.take(topN)
+        val best = head.minByOrNull { history[it]?.ema ?: ceilingMs.toDouble() } ?: return head.last()
+        val bestEma = history[best]?.ema ?: ceilingMs.toDouble()
+        val runnerUp = head.filter { it != best }.minOfOrNull { history[it]?.ema ?: ceilingMs.toDouble() } ?: Double.MAX_VALUE
+        // clear winner (at least 2× faster than the runner-up) is deterministic; otherwise weighted
+        if (runnerUp >= bestEma * 2) return best
         val weights = head.map { 1.0 / (1.0 + (history[it]?.ema ?: ceilingMs.toDouble())) }
         val total = weights.sum()
         var x = Math.random() * total
