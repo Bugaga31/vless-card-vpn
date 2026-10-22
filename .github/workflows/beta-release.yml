@@ -1,9 +1,10 @@
 name: Release 1.2.39 (gated, signed, emulator-verified)
 on:
-  workflow_dispatch:
+  push:
+    branches: ['release-build-150']
 concurrency:
   group: release-150
-  cancel-in-progress: false
+  cancel-in-progress: true
 env:
   VERSION: ${{ github.ref_name }}
 permissions:
@@ -274,7 +275,6 @@ jobs:
             ui-*.xml
           if-no-files-found: ignore
   publish:
-    if: ${{ false }}
     needs: [build, emulator-install, quality]
     runs-on: ubuntu-latest
     permissions:
