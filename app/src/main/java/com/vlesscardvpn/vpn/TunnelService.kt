@@ -334,6 +334,7 @@ class TunnelService : VpnService() {
                     throw com.vlesscardvpn.core.ServiceProofException(proof)
                 }
                 finalProof = com.vlesscardvpn.core.RecentServiceProof(proof, network, handle, System.currentTimeMillis())
+                if (com.vlesscardvpn.BuildConfig.DEBUG) Log.i("E2E", "auto-verify event=admitted hosts=${proof.httpsHosts.coerceIn(0,3)}")
             }
             attempt?.ensureOpen()
             if (attempt != null && !attempt.valid(Net.key(this),Net.underlying(this)?.toString()))
@@ -430,11 +431,16 @@ class TunnelService : VpnService() {
     /** End-to-end check through the running chain (app → 127.0.0.1:socks → Xray → server → internet). */
     private fun verifySoon(delayMs: Long, verified: com.vlesscardvpn.core.RecentServiceProof? = null) {
         val expectedCore = core
+        if (com.vlesscardvpn.BuildConfig.DEBUG && checkJob?.isActive == true) Log.i("E2E", "auto-verify event=replaced")
         checkJob?.cancel()
         checkJob = scope.launch {
             delay(delayMs)
+            if (com.vlesscardvpn.BuildConfig.DEBUG) Log.i("E2E", "auto-verify event=started")
             val st = Store.state.value.settings
-            val port = Tunnel.socks?.port ?: return@launch
+            val port = Tunnel.socks?.port ?: run {
+                if (com.vlesscardvpn.BuildConfig.DEBUG) Log.i("E2E", "auto-verify event=discarded reason=no-socks")
+                return@launch
+            }
             val sampledNet = Net.key(this@TunnelService)
             val sampledHandle = Net.underlying(this@TunnelService)?.toString()
             val sampledServers = usedServers.toList()
@@ -442,7 +448,10 @@ class TunnelService : VpnService() {
             val sampledChain = appliedRouteContext
             val proofStartedAt = System.currentTimeMillis()
             val sampledCore = core
-            if (sampledCore !== expectedCore) return@launch
+            if (sampledCore !== expectedCore) {
+                if (com.vlesscardvpn.BuildConfig.DEBUG) Log.i("E2E", "auto-verify event=discarded reason=core-changed")
+                return@launch
+            }
             val recent = verified?.takeIf { it.matches(sampledNet, sampledHandle, System.currentTimeMillis()) }
             val checkServices = st.mode == Mode.AUTO || Tunnel.ytViaDpi
             fun accepted(probe: com.vlesscardvpn.core.Probe) = if (st.mode == Mode.AUTO) com.vlesscardvpn.core.AutoEligibility.connectionWorks(probe) else probe.works
@@ -456,12 +465,16 @@ class TunnelService : VpnService() {
                 else result
             }
             var p = recent?.probe ?: probe()
+            if (com.vlesscardvpn.BuildConfig.DEBUG) Log.i("E2E", "auto-verify event=sampled hosts=${p.httpsHosts.coerceIn(0,3)}")
             // right after connecting the first packets may still be on their way (WireGuard/WARP handshake, a slow
             // mobile network): one calm second try before calling the route bad and starting a heal or a reconnect
             if (verdict(p) == false) { delay(3000); if (Tunnel.socks?.port == port) p = probe() }
             val cur = Tunnel.status.value
             if (cur.state != Tunnel.State.CONNECTED || core !== sampledCore || sampledChain != com.vlesscardvpn.core.RouteContext.key(Store.state.value.settings) || Net.key(this@TunnelService) != sampledNet ||
-                Net.underlying(this@TunnelService)?.toString() != sampledHandle) return@launch
+                Net.underlying(this@TunnelService)?.toString() != sampledHandle) {
+                if (com.vlesscardvpn.BuildConfig.DEBUG) Log.i("E2E", "auto-verify event=discarded reason=context-changed")
+                return@launch
+            }
             // WARP: ask Cloudflare itself whether the traffic comes through WARP (warp=on / plus), so it's clear it works.
             val warp = if (p.realMs > 0 && (warpChained || usedServers.any { Masks.isWarp(it) }))
                 when (Tester.warpTrace(port).let { t -> if (t == "plus" || t == "on" || t == "off") t else { delay(2000); Tester.warpTrace(port) } }) {
@@ -526,6 +539,15 @@ class TunnelService : VpnService() {
                 }
             }
             if (accepted(p)) { healStep = 0; dpiHeals = 0; connectFails = 0; warmUp(); scheduleOptimize(if (com.vlesscardvpn.core.Actions.deepPending || usedServers.size < com.vlesscardvpn.core.AutoEligibility.TOP) 5_000 else 60_000); com.vlesscardvpn.core.AppWatch.start(this@TunnelService) { scope.launch { lock.withLock { connect(soft = true) } } }; watchdog(); standbyScout(); coverTraffic(); serviceRoutes(); if (serverless()) rescueLater() } else heal()
+        }.also { task ->
+            if (com.vlesscardvpn.BuildConfig.DEBUG) task.invokeOnCompletion { cause ->
+                val result = when (cause) {
+                    null -> "finished"
+                    is kotlinx.coroutines.CancellationException -> "cancelled"
+                    else -> "failed"
+                }
+                Log.i("E2E", "auto-verify event=$result")
+            }
         }
     }
 

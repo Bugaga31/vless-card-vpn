@@ -70,6 +70,11 @@ jobs:
           disable-animations: true
           emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
           script: E2E_SERVICE_FIXTURE=/tmp/e2e-service bash tools/e2e-android.sh
+      - name: Publish fixed-vocabulary Auto diagnostic counts
+        if: always()
+        run: |
+          python3 tools/e2e/test_auto_diagnostics.py
+          python3 tools/e2e/auto_diagnostics.py /tmp/e2e/case-auto-continuing.log
       - if: always()
         uses: actions/upload-artifact@v4
         with:
