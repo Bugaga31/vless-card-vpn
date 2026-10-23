@@ -29,7 +29,8 @@ class TorCardTorcR154Test {
     fun `snowflake ships the built-in bridge line`() {
         val snow = TorCard.torrc(bridge = "snowflake")
         assertTrue(snow.contains("Bridge snowflake 192.0.2.3:1"))
-        assertTrue(snow.contains("ice=stun:stun.l.google.com:19302"))
+        assertTrue(snow.contains("-ice stun:stun.l.google.com:19302"))
+        assertTrue(snow.contains("-front cdn.sstatic.net"))
     }
 
     @Test
