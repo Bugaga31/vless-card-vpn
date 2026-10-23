@@ -333,7 +333,9 @@ class TunnelService : VpnService() {
             b.addDisallowedApplication(packageName); apps.forEach { runCatching { b.addDisallowedApplication(it) } }
             // banks, Госуслуги, маркетплейсы: around the VPN — they see a normal Russian user (skipped if not installed)
             if (settings.ruAppsDirect) (com.vlesscardvpn.core.Disguise.RU_APPS - apps.toSet()).forEach { runCatching { b.addDisallowedApplication(it) } }
-        }
+        }        // Отдельный путь Tor: демон Tor (Termux) исключается из туннеля — его цепочки идут в интернет
+        // напрямую, своим шифрованием (или мостами), а не через VLESS; Tor остаётся жив даже при упавшем VPN.
+        if (settings.torRouting && settings.torDirect) runCatching { b.addDisallowedApplication("com.termux") }
         if (Build.VERSION.SDK_INT >= 29) b.setMetered(false)
         val fd = b.establish() ?: error("Система не дала создать VPN (нет разрешения)")
         tun = fd
