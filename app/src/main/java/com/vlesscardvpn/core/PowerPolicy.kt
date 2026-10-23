@@ -26,7 +26,7 @@ object PowerPolicy {
         var since = if (!trigger && prev.hot && cool) prev.coolSince.takeIf { it >= 0 } ?: i.now else -1
         if (hot && since >= 0 && i.now - since >= 120000) { hot = false; since = -1 }
         // On the charger with the screen off is the best heavy-work window: cool, idle, and free.
-        val chargeWork = i.charging && !hot && !i.lowMemory && !i.gaming && !i.saver && !low && i.now >= pauseUntil
+        val chargeWork = i.charging && !hot && !i.lowMemory && !i.gaming && !i.saver && !low && i.now >= pauseUntil && !i.dataSaver && !(o.wifiOnly && i.metered) && !(o.protectTraffic && i.activeTraffic)
         val reason = when {
             hot -> "Тепловая защита: ждём устойчивого остывания"
             i.lowMemory -> "Нехватка памяти: откладываем необязательную работу"
