@@ -19,7 +19,7 @@ class TorRoutingR152Test {
     @Test fun torRoutingSendsSelectedServicesThroughTheTorOutbound() {
         val s = Settings(mode = Mode.SERVERS, services = listOf("discord"), torRouting = true)
         val cfg = JSONObject(XrayConfigBuilder.vpnConfig(listOf(server(1) to null), s, null,
-            serviceRoutes = mapOf("discord" to listOf("NL-1"))))
+            serviceRoutes = mapOf("discord" to listOf(server(1).id))))
         val outs = cfg.getJSONArray("outbounds")
         val tor = (0 until outs.length()).map { outs.getJSONObject(it) }.firstOrNull { it.optString("tag") == "tor" }
         assertNotNull("tor outbound must exist when torRouting is on", tor)
@@ -36,7 +36,7 @@ class TorRoutingR152Test {
     @Test fun withoutTorRoutingServicesRideTheMainProxy() {
         val s = Settings(mode = Mode.SERVERS, services = listOf("discord"), torRouting = false)
         val cfg = JSONObject(XrayConfigBuilder.vpnConfig(listOf(server(1) to null), s, null,
-            serviceRoutes = mapOf("discord" to listOf("NL-1"))))
+            serviceRoutes = mapOf("discord" to listOf(server(1).id))))
         assertFalse("no tor outbound when the flag is off", cfg.getJSONArray("outbounds").toString().contains("\"tor\""))
     }
 
@@ -45,7 +45,7 @@ class TorRoutingR152Test {
         val c = server(3, "198.51.100.4")                                     // different /24
         val sameSni = listOf(server(4).copy(sni = "cdn.example"), server(5).copy(sni = "cdn.example"))
         val kept = AutoEligibility.independent(listOf(a, b, c) + sameSni)
-        val hosts = kept.map { it.host }.toSet()
+        val hosts = kept.map { it.address }.toSet()
         assertTrue("kept hosts were: $hosts", hosts.contains("203.0.113.7") xor hosts.contains("203.0.113.99"))
         assertTrue(hosts.contains("198.51.100.4"))
         assertTrue("one representative per SNI", kept.count { it.sni == "cdn.example" } <= 1)

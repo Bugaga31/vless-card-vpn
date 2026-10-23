@@ -21,7 +21,7 @@ object AutoEligibility {
         val secrets = HashSet<String>(); val subnets = HashSet<String>(); val snis = HashSet<String>()
         return servers.filter { s ->
             val freshSecret = s.protocol != "wireguard" || secrets.add(s.secret)
-            val freshSubnet = if (s.host.isIpv4()) subnets.add(s.host.substringBeforeLast('.')) else true
+            val freshSubnet = if (s.address.isIpv4()) subnets.add(s.address.substringBeforeLast('.')) else true
             freshSecret && freshSubnet && (s.sni.isBlank() || snis.add(s.sni))
         }
     }
