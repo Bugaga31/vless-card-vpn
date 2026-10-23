@@ -33,17 +33,22 @@ object Warmup {
     }
 
     /** One-shot TLS warm-up through the SOCKS tunnel: DNS + handshake, then close. ~1–2 KB per domain. */
-    suspend fun warm(port: Int, domains: List<String>) = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-        domains.forEach { d ->
-            runCatching {
+    suspend fun warm(port: Int, domains: List<String>): Unit = kotlinx.coroutines.withContext<Unit>(kotlinx.coroutines.Dispatchers.IO) {
+        for (d in domains) {
+            try {
                 val proxy = java.net.Proxy(java.net.Proxy.Type.SOCKS, java.net.InetSocketAddress("127.0.0.1", port))
-                java.net.Socket(proxy).use { s ->
+                val s = java.net.Socket(proxy)
+                try {
                     s.soTimeout = 4000
                     s.connect(java.net.InetSocketAddress.createUnresolved(d, 443), 4000)
-                    javax.net.ssl.SSLSocketFactory.getDefault().createSocket(s, d, 443, true).use { tls ->
-                        tls.startHandshake()
-                    }
+                    val f = javax.net.ssl.SSLSocketFactory.getDefault() as javax.net.ssl.SSLSocketFactory
+                    val tls = f.createSocket(s, d, 443, true) as javax.net.ssl.SSLSocket
+                    tls.startHandshake()
+                    tls.close()
+                } finally {
+                    s.close()
                 }
+            } catch (t: Throwable) {
             }
         }
     }
