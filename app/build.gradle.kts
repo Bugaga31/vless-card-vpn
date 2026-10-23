@@ -85,6 +85,13 @@ android {
     sourceSets["main"].jniLibs.srcDir(layout.buildDirectory.dir("generated/hev"))
 }
 
+
+tasks.withType<Test> {
+    testLogging {
+        events("failed", "standard_out")
+        exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
+    }
+}
 dependencies {
     implementation(files(xrayAar).builtBy(fetchXray))
     implementation("androidx.core:core-ktx:1.13.1")

@@ -86,6 +86,9 @@ class TorRotation(
         val cs = candidates(nowMs)
         if (cs.isEmpty()) return null
         val sorted = cs.sortedBy { history[it]?.ema ?: Double.MAX_VALUE }
+        // a clear winner (≥2x faster than the next) is picked deterministically
+        val best = history[sorted.first()]?.ema
+        if (sorted.size > 1 && best != null && best * 2.0 < (history[sorted[1]]?.ema ?: best * 2.0)) return sorted.first()
         // exploration: 20% chance to try anything outside the top-N
         if (sorted.size > topN && Math.random() < 0.2) {
             return sorted.drop(topN).random()
