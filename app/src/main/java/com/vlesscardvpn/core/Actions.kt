@@ -582,6 +582,23 @@ object Actions {
         }
         return changed
     }
+    /** «Кости»: instead of a proven mask — a random compatible one for this server (a lucky try; the proven ones stay in goodMasks). */
+    fun rollDice(servers: List<Server>): Int {
+        val net = Net.key(app)
+        var rolled = 0
+        Store.update { st ->
+            st.copy(states = st.states + servers.mapNotNull { s ->
+                val ss = st.state(s)
+                val pool = com.vlesscardvpn.xray.Masks.searchOrder(true, s).filter { it.id != ss.maskId }
+                if (pool.isEmpty()) return@mapNotNull null
+                rolled++
+                val dice = pool.random()
+                s.id to ss.copy(maskId = dice.id, netMasks = ss.netMasks + (net to dice.id),
+                    goodMasks = if (ss.maskId in ss.goodMasks) ss.goodMasks else ss.goodMasks + ss.maskId)
+            })
+        }
+        return rolled
+    }
 
     /** Collects per-server results from parallel callbacks and applies them to the store in chunks. */
     class StateBatch(private val size: Int = 200, private val maxAgeMs: Long = 700) {
