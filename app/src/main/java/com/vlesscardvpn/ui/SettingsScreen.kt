@@ -182,7 +182,8 @@ fun SettingsScreen() {
         Toggle("Фон обычного пользователя", "Пока VPN включён, изредка (раз в 1–3 мин, ≤32 КБ) открывает обычный российский сайт напрямую: у провайдера обычная картина, а не один поток за границу", s.coverTraffic) { v -> set { it.copy(coverTraffic = v) } }
         Hint("Tor: выбранные сервисы через локальный Tor поверх туннеля, выход ротируется сам")
         Toggle("Tor для сервисов", "Discord и другие выбранные сервисы идут через Tor поверх VPN: сайты видят адрес Tor-выхода, оператор — только маску VLESS", s.torRouting) { v -> set { it.copy(torRouting = v) } }
-        Toggle("Tor в Авто", "Если сервис перестаёт работать через все серверы — сам переключаю его на Tor, пока связь не восстановится", s.torAuto) { v -> set { it.copy(torAuto = v) } }        Toggle("Отдельный путь Tor", "Демон Tor ходит в интернет сам, минуя VPN: своё шифрование и мосты, работает даже при недоступных серверах", s.torDirect) { v -> set { it.copy(torDirect = v) } }
+        Toggle("Tor в Авто", "Если сервис перестаёт работать через все серверы — сам переключаю его на Tor, пока связь не восстановится", s.torAuto) { v -> set { it.copy(torAuto = v) } }
+        Toggle("Отдельный путь Tor", "Демон Tor ходит в интернет сам, минуя VPN: своё шифрование и мосты, работает даже при недоступных серверах", s.torDirect) { v -> set { it.copy(torDirect = v) } }
         Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             listOf("none" to "Без мостов", "obfs4" to "obfs4", "snowflake" to "Snowflake").forEach { (id, t) ->
                 FilterChip(selected = s.torBridge == id, onClick = { set { it.copy(torBridge = id) } }, label = { Text(t) })
