@@ -46,7 +46,7 @@ object Offers {
         if (all.isEmpty()) return emptyList()
         val fresh = ctx.getSharedPreferences("brain", 0).getLong("first", 0L) == 0L ||
             System.currentTimeMillis() - ctx.getSharedPreferences("brain", 0).getLong("first", 0L) < 14 * 86400_000L
-        val yt = Store.state.value.maskStats.values.any { it.ok >= 3 }
+        val yt = Store.state.value.maskStats.values.any { s -> s.ok >= 3 }
         return all.filter { when (it.need) {
             "new" -> fresh
             "yt" -> yt

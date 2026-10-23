@@ -202,7 +202,7 @@ object Report {
             } }
         // Elite offers: read-only, hash-stamped with the same cloud stamp, opt-in by tap.
         Offers.update(o)
-        p.edit().putString("stamp", stamp).apply()        p.edit().putString("stamp", stamp).apply()
+        p.edit().putString("stamp", stamp).apply()
         runCatching { Brain.save(ctx) }
     }
 }

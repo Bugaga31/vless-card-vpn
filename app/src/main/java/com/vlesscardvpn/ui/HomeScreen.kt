@@ -48,7 +48,7 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
             // Elite offers: opt-in banner, only when the cloud actually has something for this phone.
             val octx = androidx.compose.ui.platform.LocalContext.current
-            val offers = com.vlesscardvpn.core.Offers.eligible(com.vlesscardvpn.core.Offers.items, octx)
+            val offers = com.vlesscardvpn.core.Offers.eligible(com.vlesscardvpn.core.Offers.items.value, octx)
             val offerPrefs = octx.getSharedPreferences("offers", 0)
             val offer = offers.firstOrNull { !offerPrefs.getBoolean(it.id, false) }
             if (offer != null) {
