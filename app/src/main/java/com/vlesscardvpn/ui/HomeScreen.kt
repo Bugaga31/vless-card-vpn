@@ -46,6 +46,27 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
     val working = busy
     val mode = cfg.mode
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            // Elite offers: opt-in banner, only when the cloud actually has something for this phone.
+            val octx = androidx.compose.ui.platform.LocalContext.current
+            val offers = com.vlesscardvpn.core.Offers.eligible(com.vlesscardvpn.core.Offers.items, octx)
+            val offerPrefs = octx.getSharedPreferences("offers", 0)
+            val offer = offers.firstOrNull { !offerPrefs.getBoolean(it.id, false) }
+            if (offer != null) {
+                Card(shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)) {
+                    Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text("🎁 " + offer.title, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+                        Text(offer.text, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            TextButton(onClick = { runCatching {
+                                android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(offer.link))
+                                    .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK).let { octx.startActivity(it) }
+                                offerPrefs.edit().putBoolean(offer.id, true).apply()
+                            } }) { Text("Забрать") }
+                            TextButton(onClick = { offerPrefs.edit().putBoolean(offer.id, true).apply() }) { Text("Скрыть") }
+                        }
+                    }
+                }
+            }
         BoxWithConstraints(Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 8.dp)) {
             val compact = maxWidth < 320.dp || androidx.compose.ui.platform.LocalDensity.current.fontScale > 1.2f
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {

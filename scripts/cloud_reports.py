@@ -139,10 +139,25 @@ def public_net(net):
     return out
 
 
+
+
+def public_offers(cloud):
+    """Elite offers curated by hand in the private repo; the phone shows ≤3, sanitized on the client."""
+    raw = cloud.get("offers") or []
+    if not isinstance(raw, list): return []
+    out = []
+    for e in raw:
+        if len(out) >= 3: break
+        if not isinstance(e, dict): continue
+        o = {k: str(e.get(k, ""))[: (40 if k == "id" else 60 if k == "title" else 160 if k == "text" else 300 if k == "link" else 10)]
+             for k in ("id", "title", "text", "link", "need")}
+        if not o["id"] or not o["title"] or not o["link"].startswith("https://") or o["need"] not in ("yt", "chat", "new", "any"): continue
+        out.append(o)
+    return out
 def public(cloud):
     """What phones download (small, every 20 min with ETag): the stamp changes only when the content does."""
     o = {"phones": cloud["phones"], "brain": cloud["brain"], "profiles": cloud["profiles"], "servers": [x["l"] for x in cloud["servers"][:40]],
-         "load": cloud.get("load", {}), "net": public_net(cloud.get("net", {}))}
+         "load": cloud.get("load", {}), "net": public_net(cloud.get("net", {})), "offers": public_offers(cloud)}
     o["stamp"] = __import__("hashlib").sha256(json.dumps(o, sort_keys=True).encode()).hexdigest()[:12]
     return o
 
