@@ -11,7 +11,7 @@ import org.junit.Test
 class TorAllRoutingR160Test {
     private val reality = "vless://11111111-2222-3333-4444-555555555555@1.2.3.4:443?encryption=none&flow=xtls-rprx-vision&security=reality&sni=www.microsoft.com&fp=chrome&pbk=SbVKOEMjK0sIlbwg4akyBg5mL5KZwwB-ed4eEE7YnRc&sid=6ba85179e30d4fc2&type=tcp#Reality%20NL"
 
-    private fun rules(cfg: String) = JSONObject(cfg).getJSONArray("rules").let { r -> (0 until r.length()).map { r.getJSONObject(it) } }
+    private fun rules(cfg: String) = JSONObject(cfg).getJSONObject("routing").getJSONArray("rules").let { r -> (0 until r.length()).map { r.getJSONObject(it) } }
 
     @Test fun torAllRoutesDefaultThroughTor() {
         val cfg = JSONObject(XrayConfigBuilder.vpnConfig(listOf(LinkParser.parse(reality)!! to null), Settings(torAll = true, torRouting = true), null))

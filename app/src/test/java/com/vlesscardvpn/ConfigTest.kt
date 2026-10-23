@@ -213,7 +213,7 @@ class ConfigTest {
     /** Local e2e: XRAY_LOCAL_LINKS=file with links → every link × every mask on ports 30000+ (checked by tools/xray-local-e2e.sh). */
     @Test fun dumpLocalMatrix() {
         val f = System.getenv("XRAY_LOCAL_LINKS") ?: return
-        File(System.getenv("XRAY_CONFIG_DUMP")).mkdirs()
+        File(System.getenv("XRAY_CONFIG_DUMP")!!).mkdirs()
         val servers = File(f).readLines().mapNotNull { LinkParser.parse(it) }
         val variants = servers.flatMap { s -> (listOf<com.vlesscardvpn.xray.Mask?>(null) + Masks.ALL).filter { System.getenv("XRAY_MATRIX_OFFERED_ONLY") != "1" || it == null || Masks.compatible(it, s) }.map { s to it } }
         // Fixed DPI strategies in front of the server: one host engine per strategy on 1100+i (tools/masks-matrix-ci.sh starts them).

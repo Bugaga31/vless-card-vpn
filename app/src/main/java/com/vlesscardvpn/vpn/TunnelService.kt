@@ -577,7 +577,7 @@ class TunnelService : VpnService() {
                     offline = true
                     continue
                 }
-                if (ok && offline) { offline = false; verifySoon(0); break } // internet is back: full check (WARP, YouTube…)
+                if (ok && offline) { verifySoon(0); break } // internet is back: full check (WARP, YouTube…)
                 miss = if (ok) 0 else miss + 1
                 if (miss >= 2) {
                     // no answer twice in ~25 s: rebuild at once like the big button (seconds); if that already
