@@ -25,7 +25,8 @@ object Offers {
         stamp = s
         val list = mutableListOf<Offer>()
         o.optJSONArray("offers")?.let { a ->
-            for (i in 0 until minOf(a.length(), 3)) {
+            for (i in 0 until a.length()) {
+                if (list.size >= 3) break
                 val e = a.optJSONObject(i) ?: continue
                 val id = e.optString("id").take(40)
                 val title = e.optString("title").take(60)
