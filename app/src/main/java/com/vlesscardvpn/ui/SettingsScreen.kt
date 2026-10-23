@@ -185,7 +185,7 @@ fun SettingsScreen() {
         Toggle("Tor в Авто", "Если сервис перестаёт работать через все серверы — сам переключаю его на Tor, пока связь не восстановится", s.torAuto) { v -> set { it.copy(torAuto = v) } }
         Toggle("Отдельный путь Tor", "Демон Tor ходит в интернет сам, минуя VPN: своё шифрование и мосты, работает даже при недоступных серверах", s.torDirect) { v -> set { it.copy(torDirect = v) } }
         Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            listOf("none" to "Без мостов", "obfs4" to "obfs4", "snowflake" to "Snowflake").forEach { (id, t) ->
+            listOf("none" to "Без мостов", "obfs4" to "obfs4", "snowflake" to "Snowflake", "webtunnel" to "WebTunnel").forEach { (id, t) ->
                 FilterChip(selected = s.torBridge == id, onClick = { set { it.copy(torBridge = id) } }, label = { Text(t) })
             }
         }

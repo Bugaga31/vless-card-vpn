@@ -1,5 +1,6 @@
 import java.security.MessageDigest
 import java.util.Properties
+import java.util.zip.ZipFile
 
 plugins {
     id("com.android.application")
@@ -21,6 +22,12 @@ val targetAbis = if (armOnly) listOf("arm64-v8a", "armeabi-v7a") else listOf("ar
 val xrayVersion = "v26.9.30"
 val xraySha256 = "cf71680b776b9ca583747ba652f816b047a655eab875d8951e6141636d88bbd6"
 val xrayAar = layout.buildDirectory.file("xray/libv2ray-$xrayVersion.aar")
+val torVersion = "15.0.26"
+val torApks = mapOf(
+    "arm64-v8a" to Triple("tor-browser-android-aarch64", "76cab5bed1def6289eacc6a6acad62156d5aae74669e69af5eb63ae76692b306", listOf("libTor.so", "libLyrebird.so", "libConjure.so")),
+    "armeabi-v7a" to Triple("tor-browser-android-armv7", "a6479ad4f871081a4b66107523188cb2523b4fd4fff1c04f5cee0b10e83b1af2", listOf("libTor.so", "libLyrebird.so", "libConjure.so")),
+    "x86_64" to Triple("tor-browser-android-x86_64", "5b292e0fa91ed40a30435058f79f2bb88481e0be43d430761aa586c36cd156c7", listOf("libTor.so", "libLyrebird.so")),
+)
 val fetchXray by tasks.registering {
     outputs.file(xrayAar)
     doLast {
@@ -33,6 +40,33 @@ val fetchXray by tasks.registering {
         uri(url).toURL().openStream().use { input -> tmp.outputStream().use { input.copyTo(it) } }
         check(sha(tmp) == xraySha256) { "libv2ray.aar checksum mismatch" }
         tmp.renameTo(dest)
+    }
+}
+val fetchTor by tasks.registering {
+    outputs.dir(layout.buildDirectory.dir("generated/tor"))
+    doLast {
+        val out = layout.buildDirectory.dir("generated/tor").get().asFile
+        fun sha(f: File) = MessageDigest.getInstance("SHA-256").digest(f.readBytes()).joinToString("") { "%02x".format(it) }
+        fun valid(abi: String, libs: List<String>) = libs.all { l ->
+            val f = File(out, "$abi/$l"); f.isFile && f.length() > 1_000_000 &&
+                f.readBytes().copyOfRange(0, 4).contentEquals(byteArrayOf(0x7f.toByte(), 'E'.code.toByte(), 'L'.code.toByte(), 'F'.code.toByte()))
+        }
+        for ((abi, spec) in torApks) {
+            val (name, want, libs) = spec
+            if (valid(abi, libs)) continue
+            val tmp = File(out, "$abi.apk.part"); tmp.parentFile.mkdirs()
+            val url = "https://dist.torproject.org/torbrowser/$torVersion/$name-$torVersion.apk"
+            uri(url).toURL().openStream().use { input -> tmp.outputStream().use { input.copyTo(it) } }
+            check(sha(tmp) == want) { "Tor Browser APK checksum mismatch for $abi" }
+            val dir = File(out, abi); dir.mkdirs()
+            ZipFile(tmp).use { z ->
+                for (l in libs) {
+                    val e = z.getEntry("lib/$abi/$l") ?: if (l == "libConjure.so") continue else error("$l missing in $abi APK")
+                    z.getInputStream(e).use { input -> File(dir, l).outputStream().use { input.copyTo(it) } }
+                }
+            }
+            tmp.delete()
+        }
     }
 }
 
@@ -83,6 +117,7 @@ android {
     }
     sourceSets["main"].jniLibs.srcDir(layout.buildDirectory.dir("generated/byedpi"))
     sourceSets["main"].jniLibs.srcDir(layout.buildDirectory.dir("generated/hev"))
+    sourceSets["main"].jniLibs.srcDir(layout.buildDirectory.dir("generated/tor"))
 }
 
 
@@ -140,7 +175,7 @@ val buildHev by tasks.registering(Exec::class) {
         "${sdkDir()}/ndk/27.2.12479018", layout.buildDirectory.dir("generated/hev").get().asFile.absolutePath,
         if (armOnly) "arm" else "all")
 }
-tasks.named("preBuild").configure { dependsOn(buildByeDpi, buildHev, fetchXray) }
+tasks.named("preBuild").configure { dependsOn(buildByeDpi, buildHev, fetchXray, fetchTor) }
 
 tasks.withType<org.gradle.api.tasks.testing.Test>().configureEach {
     if (System.getenv("GITHUB_ACTIONS") == "true") {
