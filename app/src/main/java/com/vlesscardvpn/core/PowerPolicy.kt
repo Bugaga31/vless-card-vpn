@@ -44,7 +44,7 @@ object PowerPolicy {
         }
         val pressure = hot || i.lowMemory || i.gaming || i.saver || low || o.profile == "eco" || (!i.screen && !chargeWork) || i.dataSaver || (o.protectTraffic && i.activeTraffic)
         val tcp = if (hot || i.lowMemory || i.gaming) 2 else if (pressure) 16 else if (o.profile == "fast") 128 else 64
-        return Plan(Memory(low, hot, since), reason == "Готов к фоновым улучшениям", reason,
+        return Plan(Memory(low, hot, since), reason == "Готов к фоновым улучшениям" || (chargeWork && !i.screen), reason,
             tcp, if (pressure) 2 else if (o.profile == "fast") 12 else 6,
             if (!i.screen && !chargeWork) 15000 else if (pressure) 5000 else 3000,
             if (pressure) 45000 else 20000,
