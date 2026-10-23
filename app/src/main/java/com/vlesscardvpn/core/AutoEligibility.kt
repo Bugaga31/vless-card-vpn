@@ -13,10 +13,21 @@ object AutoEligibility {
             if (gaming) routes.sortedBy { ServerChoice.latencyScore(state(it).evidenceFor(net),state(it).realMs) }
             else routes.sortedWith(ServerChoice.downloadOrder(state,net,now))
         }.let(::independent).take(TOP)
-    /** WireGuard endpoints of one account are alternatives, not independent channels. */
+    /** WireGuard endpoints of one account are alternatives, not independent channels.
+     *  Same for the rest of the catalog: one /24 subnet or one SNI is a single blocking
+     *  blast radius (community RKN scanners harvest by ASN and by TLS fingerprint), so
+     *  Auto keeps at most one representative of each. */
     fun independent(servers: List<Server>): List<Server> {
-        val keys = HashSet<String>()
-        return servers.filter { it.protocol != "wireguard" || keys.add(it.secret) }
+        val secrets = HashSet<String>(); val subnets = HashSet<String>(); val snis = HashSet<String>()
+        return servers.filter { s ->
+            val freshSecret = s.protocol != "wireguard" || secrets.add(s.secret)
+            val freshSubnet = if (s.address.isIpv4()) subnets.add(s.address.substringBeforeLast('.')) else true
+            freshSecret && freshSubnet && (s.sni.isBlank() || snis.add(s.sni))
+        }
+    }
+    private fun String.isIpv4(): Boolean {
+        val parts = split('.')
+        return parts.size == 4 && parts.all { p -> p.toIntOrNull() in 0..255 }
     }
     fun clean(st: AppState): AppState {
         val keep = st.servers.filter(::allowed)

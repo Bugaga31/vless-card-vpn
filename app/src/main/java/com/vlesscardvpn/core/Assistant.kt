@@ -97,6 +97,14 @@ object Assistant {
             }
             has(q, "телефон", "устройств", "батаре", "памят", "андроид", "android", "смартфон", "заряд", "озу") -> Msg(false, phone(f),
                 (if (f.phone?.batteryOptimized == true) listOf(Btn("Разрешить работу в фоне", "!battery")) else emptyList()) + Btn("Ускорить YouTube", "!yt"))
+            has(q, "тор", "tor", "лук", "луковичн", "onion", "анонимн") -> {
+                val off = has(q, "выключи", "отключи", "не надо", "убери")
+                when {
+                    off -> Msg(false, "Выключаю Tor-режим для сервисов: выбранные приложения снова пойдут через основной VPN-маршрут.", listOf(Btn("Применить", "!set torRouting off")), auto = true)
+                    has(q, "мост", "маски тор", "obfs", "снежинк", "snowflake", "бридж") -> Msg(false, "Мосты Tor (obfs4/snowflake) прячут сам факт подключения к Tor от оператора — полезно, когда Tor напрямую не соединяется. Включаются в настройках Tor-режима.", listOf(Btn("Открыть настройки", "!settings")))
+                    else -> Msg(false, "Tor-режим: выбранные сервисы пойдут через локальный Tor поверх VPN-туннеля (Tor в VLESS). Выход Tor сам ротируется каждые ~10 минут, страны выхода — по вашим привычкам.", listOf(Btn("Включить Tor", "!set torRouting on"), Btn("Мосты Tor", "тор мосты")))
+                }
+            }
             has(q, "привет", "здравств", "кто ты", "ты кто") -> Msg(false, HELLO, START)
             has(q, "умеешь", "помощь", "help", "команд", "что можешь") -> Msg(false, HELP, START)
             has(q, "обуч", "статист", "сколько провер") -> Msg(false, "Знаю результаты ${f.stats.values.sumOf { it.ok + it.fail }} проверок масок в сети «${f.net}» (${f.stats.size} разных масок). Каждый подбор маскировки добавляет новые.", listOf(Btn("Что режут в моей сети?", "что режут")))
@@ -290,9 +298,9 @@ object Assistant {
             cmd == "!disconnect" -> { com.vlesscardvpn.vpn.TunnelService.stop(app); post(Msg(false, "VPN отключён.")) }
             cmd.startsWith("!set ") -> {
                 val (key, v) = cmd.removePrefix("!set ").split(" ").let { it[0] to (it.getOrNull(1) == "on") }
-                Store.update { s -> s.copy(settings = when (key) { "blockAds" -> s.settings.copy(blockAds = v); "blockQuic" -> s.settings.copy(blockQuic = v); "gps" -> s.settings.copy(gpsSpoof = v); "warpChain" -> s.settings.copy(warpChain = v); "autopilot" -> s.settings.copy(autopilot = v); "appAware" -> s.settings.copy(appAware = v); else -> s.settings.copy(turbo = v) }) }
+                Store.update { s -> s.copy(settings = when (key) { "blockAds" -> s.settings.copy(blockAds = v); "blockQuic" -> s.settings.copy(blockQuic = v); "gps" -> s.settings.copy(gpsSpoof = v); "torRouting" -> s.settings.copy(torRouting = v); "torAuto" -> s.settings.copy(torAuto = v); "warpChain" -> s.settings.copy(warpChain = v); "autopilot" -> s.settings.copy(autopilot = v); "appAware" -> s.settings.copy(appAware = v); else -> s.settings.copy(turbo = v) }) }
                 reconnect(app)
-                post(Msg(false, (when (key) { "blockAds" -> "Блокировка рекламы"; "blockQuic" -> "Блокировка QUIC"; "gps" -> "Подмена GPS"; "warpChain" -> "WARP через сервер"; "autopilot" -> "Автопилот"; "appAware" -> "Подстройка под приложения"; else -> "Ускорение телефона" }) + if (v) " включена." else " выключена."))
+                post(Msg(false, (when (key) { "blockAds" -> "Блокировка рекламы"; "blockQuic" -> "Блокировка QUIC"; "gps" -> "Подмена GPS"; "warpChain" -> "WARP через сервер"; "autopilot" -> "Автопилот"; "appAware" -> "Подстройка под приложения"; "torRouting" -> "Tor для сервисов"; "torAuto" -> "Tor в Авто"; else -> "Ускорение телефона" }) + if (v) " включена." else " выключена."))
                 if (v && key == "autopilot") { Actions.boostYoutube(); post(Msg(false, "Начал улучшать соединение — результат напишу здесь.")) }
                 if (v && key == "gps") post(Msg(false, "Подмена GPS работает, пока включён VPN: телефон «окажется» в столице страны сервера. Нужно один раз разрешить: Параметры разработчика → «Приложение для фиктивных местоположений» → VLESS Card." +
                     GpsMock.state.value.let { if (it.isNotEmpty()) "\nСейчас: $it" else "" }, listOf(Btn("Открыть параметры разработчика", "!devsettings"))))

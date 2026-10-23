@@ -41,12 +41,32 @@ object TorCard {
             .keys.take(6)
             .toList()
 
-    /** torrc for Termux: SOCKS on loopback, authenticated control port, safe defaults. */
-    fun torrc(controlPort: Int = DEFAULT_CONTROL_PORT, socksPort: Int = DEFAULT_SOCKS_PORT, allowLan: Boolean = false): String = buildString {
+    /** Public bridge transports the local daemon understands; "none" = plain Tor. */
+    val BRIDGES = listOf("none", "obfs4", "snowflake")
+
+    /**
+     * torrc for Termux: SOCKS on loopback, authenticated control port, safe defaults.
+     * [bridge] picks a pluggable transport: obfs4/snowflake hide the Tor handshake from
+     * DPI that blocks the tor protocol itself (the same reason the app masks VLESS).
+     */
+    fun torrc(controlPort: Int = DEFAULT_CONTROL_PORT, socksPort: Int = DEFAULT_SOCKS_PORT,
+              allowLan: Boolean = false, bridge: String = "none"): String = buildString {
         val socksBind = if (allowLan) "0.0.0.0:$socksPort" else "127.0.0.1:$socksPort"
         appendLine("SocksPort $socksBind")
         appendLine("ControlPort 127.0.0.1:$controlPort")
         appendLine("CookieAuthentication 1")
         appendLine("SafeLogging 1")
+        when (bridge) {
+            "snowflake" -> {
+                appendLine("ClientTransportPlugin snowflake exec /data/data/com.termux/files/usr/bin/snowflake-client -url https://1098762253-765532153-cloudflare-voip.tor-project.org/ -front cdn.sstatic.net -ice stun:stun.l.google.com:19302,stun:stun.voipgate.com:3478,stun:stun.voys.nl:3478 utls-imitate=hellorandomizedalpn")
+                appendLine("Bridge snowflake 192.0.2.3:1 2B280B23E1107BB62ABFC40DDCC8824814F80A72")
+                appendLine("UseBridges 1")
+            }
+            "obfs4" -> {
+                appendLine("ClientTransportPlugin obfs4 exec /data/data/com.termux/files/usr/bin/obfs4proxy")
+                appendLine("# obfs4: мосты выдаёт bridges.torproject.org — вставьте их строками «Bridge obfs4 …» ниже (настройки Tor-режима → «Получить мосты»)")
+                appendLine("UseBridges 1")
+            }
+        }
     }
 }
