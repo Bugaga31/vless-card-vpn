@@ -289,6 +289,8 @@ class TunnelService : VpnService() {
             liveNotification(route)
             watchNetwork()
             verifySoon(0)
+            // One-shot TLS warm-up: the first YouTube/Discord request opens much faster (see Warmup).
+            scope.launch { kotlinx.coroutines.delay(800); runCatching { com.vlesscardvpn.core.Warmup.warm(socks.port, com.vlesscardvpn.core.Warmup.plan(settings)) } }
         } catch (e: Throwable) {
             if (e is kotlinx.coroutines.CancellationException) throw e
             Log.w(TAG, "connect failed", e)

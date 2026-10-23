@@ -237,7 +237,7 @@ object XrayConfigBuilder {
         outs.put(JSONObject().put("tag", "direct").put("protocol", "freedom").put("settings", JSONObject().put("domainStrategy", "UseIPv4")))
         // Tor chain: services marked in settings go through the local Tor SOCKS port (Termux). Tor's
         // own circuits ride the TUN (the app uid is excluded, Termux is not), so Tor ends up wrapped in VLESS for free.
-        val torOn = useServers && settings.torRouting && settings.services.isNotEmpty()
+        val torOn = useServers && (settings.torAll || settings.torRouting && settings.services.isNotEmpty())
         if (torOn) outs.put(JSONObject().put("tag", TOR_TAG).put("protocol", "socks")
             .put("settings", JSONObject().put("servers", arr(JSONObject().put("address", "127.0.0.1").put("port", com.vlesscardvpn.tor.TorCard.DEFAULT_SOCKS_PORT)))))
         outs.put(JSONObject().put("tag", "block").put("protocol", "blackhole"))
@@ -257,6 +257,7 @@ object XrayConfigBuilder {
 
         val many = useServers && servers.size > 1
         fun toMain(rule: JSONObject): JSONObject = when {
+            settings.torAll && torOn -> rule.put("outboundTag", TOR_TAG)
             !useServers -> rule.put("outboundTag", BYEDPI_TAG)
             hopIdx >= 0 -> rule.put("outboundTag", WARP_CHAIN)
             many -> rule.put("balancerTag", "balancer")

@@ -104,8 +104,11 @@ data class Settings(
     val torAuto: Boolean = false,
     /** Tor pluggable transport: none, obfs4, snowflake (Termux) or webtunnel (embedded libLyrebird). */
     val torBridge: String = "none",
+    /** «Весь трафик через Tor»: max-anonymity mode — the default route goes to the local Tor SOCKS too (not just picked services). */
+    val torAll: Boolean = false,
     /** Отдельный путь Tor: демон Tor исключается из туннеля и ходит в интернет напрямую (своё шифрование/мосты), не заворачиваясь в VLESS. */
     val torDirect: Boolean = false,
+
     /** «Ускорение телефона»: big TUN MTU (fewer packets = less CPU), stale DNS answers at once, deep sleep with the screen off. */
     val turbo: Boolean = true,
     /** «Сайт не открывается?»: these sites always through the VPN / always directly (domains). */
