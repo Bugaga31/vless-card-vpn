@@ -48,7 +48,13 @@ object XrayConfigBuilder {
      *  servers as the video itself — no VPN can cut those without breaking video. */
     val YT_ADS = listOf("full:ads.youtube.com", "full:pagead2.googlesyndication.com", "full:googleads.g.doubleclick.net",
         "full:pubads.g.doubleclick.net", "full:securepubads.g.doubleclick.net", "full:ad.doubleclick.net", "full:static.doubleclick.net",
-        "full:pagead.googlesyndication.com", "full:adservice.google.com", "full:admob.googleapis.com", "full:imasdk.googleapis.com", "full:googleadservices.com", "full:www.googleadservices.com", "full:tpc.googlesyndication.com")
+        "full:pagead.googlesyndication.com", "full:adservice.google.com", "full:admob.googleapis.com", "full:imasdk.googleapis.com", "full:googleadservices.com", "full:www.googleadservices.com", "full:tpc.googlesyndication.com")    /** Telemetry beacons + crash trackers: apps phone home even when «everything else is direct». */
+    /** Telemetry beacons and ad identities, not user content; blocked when the anti-tracker switch is on. */
+    val TRACKERS = listOf("full:app-measurement.com", "full:app-measurement-admob.googleapis.com", "full:crashlytics.com", "full:crashlyticsreports-pa.googleapis.com",
+        "full:update.crashlytics.com", "full:report.crashlytics.com", "full:sentry.io", "full:ingest.sentry.io", "full:o1069899.ingest.sentry.io",
+        "full:api.amplitude.com", "full:api2.amplitude.com", "full:app.appsflyer.com", "full:sdk.adjust.com",
+        "full:mobile-events-gw.android.googleservices.com", "full:firebaseremoteconfig.googleapis.com", "full:analytics.tiktok.com", "full:app-analytics.vk.com",
+        "full:ads.yahoo.com", "full:graph.facebook.com", "full:pixel.facebook.com", "full:ctldl.windowsupdate.com", "full:dc.ads.linkedin.com")
     private fun arr(vararg v: Any): JSONArray = JSONArray().apply { v.forEach { put(it) } }
     private fun csv(s: String) = s.split(',').map { it.trim() }.filter { it.isNotEmpty() }
 
@@ -300,6 +306,11 @@ object XrayConfigBuilder {
         }
         if (useServers) rules.put(toMain(JSONObject().put("domain", JSONArray(com.vlesscardvpn.core.AppWatch.AI_DOMAINS))))
         if (settings.blockAds) rules.put(JSONObject().put("domain", JSONArray(listOf("geosite:category-ads-all") + YT_ADS)).put("outboundTag", "block"))
+        // «Не отслеживаются»: mobile telemetry beacons + encrypted-DNS bypass. Beats RU direct and service pins alike.
+        if (settings.blockTrackers) {
+            rules.put(JSONObject().put("domain", JSONArray(TRACKERS)).put("outboundTag", "block"))
+            rules.put(JSONObject().put("network", "tcp,udp").put("port", "853").put("outboundTag", "block"))
+        }
         if (settings.mode == Mode.HYBRID && hybridDomains(settings).isNotEmpty())
             rules.put(JSONObject().put("domain", JSONArray(hybridDomains(settings))).put("outboundTag", BYEDPI_TAG))
         if (useServers && (settings.services.isEmpty() || "telegram" in settings.services)) {
@@ -320,6 +331,8 @@ object XrayConfigBuilder {
             // "Only YouTube + Telegram through the VPN": those services → main route, everything else direct.
             rules.put(toMain(JSONObject().put("domain", JSONArray(only))))
             com.vlesscardvpn.core.Services.ips(settings.services).takeIf { it.isNotEmpty() }?.let { rules.put(toMain(JSONObject().put("ip", JSONArray(it)))) }
+            // Discord voice: datagrams go to raw voice-server IPs, no hostname to sniff — without this the catch-all direct below kills the mic.
+            if ("discord" in settings.services) rules.put(toMain(JSONObject().put("network", "udp").put("port", "50000-65535")))
             rules.put(JSONObject().put("network", "tcp,udp").put("outboundTag", "direct"))
         } else rules.put(toMain(JSONObject().put("network", "tcp,udp")))
         val routing = JSONObject().put("domainStrategy", "AsIs").put("rules", rules)

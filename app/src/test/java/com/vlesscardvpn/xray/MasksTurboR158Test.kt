@@ -20,7 +20,7 @@ class MasksTurboR158Test {
         }
         // turbo leads the curated order, right after the plain baseline (SNI/TFO variants need a pinned server)
         val first = Masks.searchOrder(true, tls).take(6).map { it.id }
-        assertTrue(first, "vc.turbo.v6.tfo" in first || "vc.turbo.mux.v6" in first)
+        assertTrue("turbo mask in top-6: $first", "vc.turbo.v6.tfo" in first || "vc.turbo.mux.v6" in first)
     }
 
     @Test
