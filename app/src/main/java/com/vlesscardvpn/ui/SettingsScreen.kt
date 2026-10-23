@@ -180,6 +180,16 @@ fun SettingsScreen() {
         Toggle("Российские приложения мимо VPN", "Сбер, Т-Банк, ВТБ, Госуслуги, Ozon, WB, Яндекс, VK, операторы… идут напрямую: видят обычного абонента и не ругаются на VPN", s.ruAppsDirect) { v -> set { it.copy(ruAppsDirect = v) } }
         Toggle("Случайный адрес VPN-интерфейса", "Новый внутренний адрес при каждом подключении и нейтральное имя сеанса — нет постоянных признаков, по которым ищут VPN-клиенты", s.randomTun) { v -> set { it.copy(randomTun = v) } }
         Toggle("Фон обычного пользователя", "Пока VPN включён, изредка (раз в 1–3 мин, ≤32 КБ) открывает обычный российский сайт напрямую: у провайдера обычная картина, а не один поток за границу", s.coverTraffic) { v -> set { it.copy(coverTraffic = v) } }
+        Hint("Tor: выбранные сервисы через локальный Tor поверх туннеля, выход ротируется сам")
+        Toggle("Tor для сервисов", "Discord и другие выбранные сервисы идут через Tor поверх VPN: сайты видят адрес Tor-выхода, оператор — только маску VLESS", s.torRouting) { v -> set { it.copy(torRouting = v) } }
+        Toggle("Tor в Авто", "Если сервис перестаёт работать через все серверы — сам переключаю его на Tor, пока связь не восстановится", s.torAuto) { v -> set { it.copy(torAuto = v) } }
+        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            listOf("none" to "Без мостов", "obfs4" to "obfs4", "snowflake" to "Snowflake").forEach { (id, t) ->
+                FilterChip(selected = s.torBridge == id, onClick = { set { it.copy(torBridge = id) } }, label = { Text(t) })
+            }
+        }        if (s.torBridge != "none") OutlinedButton(onClick = {
+            runCatching { ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://bridges.torproject.org/options"))) }
+        }, modifier = Modifier.fillMaxWidth()) { Text("Получить мосты (bridges.torproject.org)") }
         OutlinedButton(onClick = { set { it.copy(stealthSocks = true, ruDirect = true, ruDns = true, blockQuic = true, rotateMasks = true, ruAppsDirect = true, randomTun = true, coverTraffic = true, autoHeal = true, maskEvolution = true) } }) {
             Text("Включить всю маскировку")
         }

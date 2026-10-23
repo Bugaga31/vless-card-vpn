@@ -830,6 +830,12 @@ object Actions {
         if (eligible.any { current.state(it).maskFor(net) != st.state(it).maskFor(net) } ||
             current.selected.map { it.id }.toSet() != selected.map { it.id }.toSet()) return false
         val changed = ServiceRoutes.update(net, target.id, results.entries.map { it.key to it.value }, now)
+        // Tor in Auto: a service that no VLESS route can reach falls back to the local Tor
+        // SOCKS (Tor over the tunnel) once, instead of silently staying broken.
+        val st2 = Store.state.value
+        if (st2.settings.torAuto && !changed && st2.settings.services.contains(target.id) &&
+            results.values.none { it > 0 } && !st2.settings.torRouting)
+            Store.update { it.copy(settings = it.settings.copy(torRouting = true)) }
         AppWatch.note("${target.title}: ${if (ServiceRoutes.native(target)) "протокол/медиаданные" else "HTTPS"} доступны через ${results.values.count { it > 0 }} из ${results.size} проверенных маршрутов; это не проверка аккаунта")
         return changed && selected.size > 1
     }
