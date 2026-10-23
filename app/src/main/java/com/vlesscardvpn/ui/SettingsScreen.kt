@@ -187,7 +187,8 @@ fun SettingsScreen() {
             listOf("none" to "Без мостов", "obfs4" to "obfs4", "snowflake" to "Snowflake").forEach { (id, t) ->
                 FilterChip(selected = s.torBridge == id, onClick = { set { it.copy(torBridge = id) } }, label = { Text(t) })
             }
-        }        if (s.torBridge != "none") OutlinedButton(onClick = {
+        }
+        if (s.torBridge != "none") OutlinedButton(onClick = {
             runCatching { ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://bridges.torproject.org/options"))) }
         }, modifier = Modifier.fillMaxWidth()) { Text("Получить мосты (bridges.torproject.org)") }
         OutlinedButton(onClick = { set { it.copy(stealthSocks = true, ruDirect = true, ruDns = true, blockQuic = true, rotateMasks = true, ruAppsDirect = true, randomTun = true, coverTraffic = true, autoHeal = true, maskEvolution = true) } }) {
