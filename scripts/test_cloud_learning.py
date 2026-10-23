@@ -42,5 +42,28 @@ class CloudLearningTest(unittest.TestCase):
         self.assertEqual(0, out["route_reports_devices_3h"])
         self.assertIsNone(out["online_devices"])
 
+    def test_public_offers_are_sanitized_and_capped(self):
+        cloud = {"offers": [{"id": "ok", "title": "t", "text": "x", "link": "https://e", "need": "any"},
+                           {"id": "b", "link": "http://no", "need": "any"},
+                           {"id": "n", "link": "https://e", "need": "nope"}]}
+        pub = c.public(dict(cloud, phones=1, brain={}, profiles={}, load={}, net={}, servers=[]))
+        self.assertEqual(1, len(pub["offers"]))
+        self.assertEqual("ok", pub["offers"][0]["id"])
+        self.assertEqual([], c.public_offers({"offers": "junk"}))
+
+
+    def test_offers_are_sanitized_and_capped(self):
+        ok = {"id": "a", "title": "t", "text": "x", "link": "https://e/x", "need": "yt"}
+        bad = [{"id": "", "title": "t", "text": "x", "link": "https://e/x", "need": "any"},
+               {"id": "b", "title": "t", "text": "x", "link": "http://e/x", "need": "any"},
+               {"id": "c", "title": "t", "text": "x", "link": "https://e/x", "need": "weird"},
+               {"id": "d", "title": "t", "text": "x", "link": "https://e/x", "need": "any"},
+               ok]
+        out = c.public_offers({"offers": bad})
+        self.assertEqual(["d", "a"], [o["id"] for o in out])
+        self.assertEqual(3, len(c.public_offers({"offers": [ok] * 5})))
+        self.assertEqual([], c.public_offers({"offers": "junk"}))
+
+
 if __name__ == "__main__":
     unittest.main()

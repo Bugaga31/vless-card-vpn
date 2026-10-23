@@ -200,6 +200,8 @@ object Report {
                 val keep = st.servers.filter { it.source != PHONES || st.state(it).selected }; val ids = keep.map { it.id }.toHashSet()
                 st.copy(servers = keep + list.filter { ids.add(it.id) })
             } }
+        // Elite offers: read-only, hash-stamped with the same cloud stamp, opt-in by tap.
+        Offers.update(o)
         p.edit().putString("stamp", stamp).apply()
         runCatching { Brain.save(ctx) }
     }
