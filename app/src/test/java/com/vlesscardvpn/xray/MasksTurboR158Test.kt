@@ -12,7 +12,8 @@ class MasksTurboR158Test {
 
     @Test
     fun turboMasksAreZeroCostAndCompatible() {
-        val ids = listOf("vc.turbo.sni.tfo", "vc.turbo.v6.tfo", "vc.turbo.sni.v6", "vc.turbo.mux.v6")
+        val ids = listOf("vc.turbo.sni.tfo", "vc.turbo.v6.tfo", "vc.turbo.sni.v6")
+        assertEquals(1, Masks.cost(Masks.byId("vc.turbo.mux.v6")!!)) // single-stream mux: one extra stream, still zero-latency
         for (id in ids) {
             val m = Masks.byId(id)
             assertTrue(id, m != null)
