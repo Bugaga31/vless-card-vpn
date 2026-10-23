@@ -34,11 +34,11 @@ object PowerPolicy {
             i.saver -> "Системная экономия энергии"
             low -> "Низкий заряд батареи"
             i.now < pauseUntil -> "Пауза улучшений: ${(pauseUntil - i.now + 59999) / 60000} мин"
+            i.dataSaver -> "Системная экономия трафика"
+            o.wifiOnly && i.metered -> "Ожидание сети без тарификации"
             chargeWork && !i.screen -> "Зарядка и выключенный экран: работаем на максимум"
             !i.screen && o.quietScreen -> "Экран выключен: тихий режим"
             o.chargeOnly && !i.charging -> "Улучшения только на зарядке"
-            i.dataSaver -> "Системная экономия трафика"
-            o.wifiOnly && i.metered -> "Ожидание сети без тарификации"
             o.protectTraffic && i.activeTraffic -> "Активный трафик: не мешаем загрузке"
             else -> "Готов к фоновым улучшениям"
         }
