@@ -1,5 +1,6 @@
 import java.security.MessageDigest
 import java.util.Properties
+import java.util.zip.ZipFile
 
 plugins {
     id("com.android.application")
@@ -58,7 +59,7 @@ val fetchTor by tasks.registering {
             uri(url).toURL().openStream().use { input -> tmp.outputStream().use { input.copyTo(it) } }
             check(sha(tmp) == want) { "Tor Browser APK checksum mismatch for $abi" }
             val dir = File(out, abi); dir.mkdirs()
-            java.util.zip.ZipFile(tmp).use { z ->
+            ZipFile(tmp).use { z ->
                 for (l in libs) {
                     val e = z.getEntry("lib/$abi/$l") ?: if (l == "libConjure.so") continue else error("$l missing in $abi APK")
                     z.getInputStream(e).use { input -> File(dir, l).outputStream().use { input.copyTo(it) } }
