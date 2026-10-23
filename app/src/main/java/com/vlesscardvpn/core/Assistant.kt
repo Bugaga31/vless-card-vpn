@@ -52,6 +52,8 @@ object Assistant {
                 Msg(false, "Ускоряю YouTube: включаю «Умный YouTube» и ускорение телефона, облегчаю тяжёлые маски, меряю реальную скорость лучших серверов и выбираю самые быстрые.", listOf(Btn("Ускорить YouTube", "!yt")), auto = true)
             has(q, "облегч", "легкую маск", "легче маск") -> Msg(false, "Пробую лёгкие маски вместо тяжёлых (мелкие пакеты, один поток) — они быстрее.", listOf(Btn("Облегчить маски", "!lighten")), auto = true)
             has(q, "смени маск", "другую маск", "поменяй маск", "следующую маск", "переключи маск") -> Msg(false, "Переключаю серверы на следующую проверенную маску.", listOf(Btn("Сменить маску", "!nextmask")), auto = true)
+            has(q, "кости", "брось кости", "случайную маск", "рандомную маск", "рулетка") -> Msg(false, "Брошу кости: случайная лёгкая маска на каждый выбранный сервер — самый быстрый способ найти работающую.", listOf(Btn("Бросить кости", "!dice"), Btn("Сменить маску", "!nextmask")), auto = true)
+            has(q, "кости", "брось", "подкинь кости", "угадай маску", "рулетка") -> Msg(false, "Бросаю кости: случайная маска из подходящих. Проверенные не потеряются — вернуться можно «Сменить маску».", listOf(Btn("Бросить кости", "!dice")), auto = true)
             has(q, "включи авто", "режим авто", "на авто", "авто режим", "поставь авто") -> Msg(false, "Включаю режим «Авто».", listOf(Btn("Режим «Авто»", "!auto")), auto = true)
             has(q, "отключи впн", "выключи впн", "отключи vpn", "выключи vpn", "отключись") -> Msg(false, "Отключаю VPN.", listOf(Btn("Отключить", "!disconnect")), auto = true)
             has(q, "подключи", "включи впн", "включи vpn", "подключись", "запусти впн") -> Msg(false, "Подключаю VPN.", listOf(Btn("Подключить", "!connect")), auto = true)
@@ -290,6 +292,13 @@ object Assistant {
                 val sel = Store.state.value.selected
                 if (sel.isNotEmpty() && Actions.nextMasks(sel)) { reconnect(app); post(Msg(false, "Маска сменена" + if (Tunnel.socks != null) " — переподключаюсь." else ".")) }
                 else post(Msg(false, "Запасных масок нет — подберу новые.", listOf(Btn("Подобрать маскировку", "!masks"))))
+            }
+            cmd == "!dice" -> {
+                if (!quiet) post(Msg(true, "Бросить кости"))
+                val sel = Store.state.value.selected
+                val rolled = if (sel.isEmpty()) 0 else Actions.rollDice(sel)
+                if (rolled > 0) { reconnect(app); post(Msg(false, "Кости брошены: случайная маска на " + rolled + " сервер(а/ов)." + if (Tunnel.socks != null) " Переподключаюсь." else " Нажмите «Подключить».")) }
+                else post(Msg(false, "Нечего бросать — нет подходящих масок.", listOf(Btn("Подобрать маскировку", "!masks"))))
             }
             cmd == "!auto" -> { Store.update { it.copy(settings = it.settings.copy(mode = Mode.AUTO)) }; reconnect(app); post(Msg(false, "Режим «Авто» включён" + if (Tunnel.socks != null) " — переподключаюсь." else ". Нажмите «Подключить».")) }
             cmd == "!connect" -> {

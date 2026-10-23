@@ -161,6 +161,6 @@ class TorRotation(
         val b = j.optJSONObject("blacklist") ?: JSONObject()
         b.keys().forEachRemaining { k -> blacklist[k] = b.getLong(k) }
         lastRotationAt = j.optLong("lastRotationAt", 0L)
-        lastCountry = if (j.isNull("lastCountry")) null else j.optString("lastCountry", null)
+        lastCountry = if (j.isNull("lastCountry")) null else j.optString("lastCountry").ifEmpty { null }
     }
 }

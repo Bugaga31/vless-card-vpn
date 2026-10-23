@@ -54,7 +54,7 @@ class ConfigTest {
     }
 
     @Test fun maskCatalog() {
-        assertEquals(542, Masks.ALL.size)
+        assertEquals(556, Masks.ALL.size)
         assertEquals(161, Masks.ALL.count { it.viaByeDpi && it.dpi != Masks.CURRENT_DPI })
         val r = LinkParser.parse(reality)!!
         val ws = LinkParser.parse(links[1])!!
@@ -173,7 +173,7 @@ class ConfigTest {
         val all = listOf(wg, wc, sk) + js
         all.forEach { sv -> Masks.searchOrder(true, sv).forEach { m -> assertTrue("${sv.name} ${m.id}", Masks.compatible(m, sv)) } }
         assertEquals(listOf("chrome.n"), Masks.searchOrder(true, js[0]).map { it.id })
-        assertEquals(24, Masks.searchOrder(true, wg).size) // plain + 4 UDP noise + 10 WireGuard noise (2 real QUIC Initial) + port hopping (×9)
+        assertEquals(30, Masks.searchOrder(true, wg).size) // plain + 4 turbo + 4 UDP noise + 10 WireGuard noise (2 real QUIC Initial) + port hopping (×9)
         val c = XrayConfigBuilder.vpnConfig(all.map { it to Masks.byId(if (!it.isTcpBased && it.protocol != "xray") "chrome.z2" else "chrome.n") }, Settings(), null)
         assertTrue(c.contains("\"noise\"")); assertTrue(c.contains("\"secretKey\""))
         dump("vpn-formats", c)
@@ -213,7 +213,7 @@ class ConfigTest {
     /** Local e2e: XRAY_LOCAL_LINKS=file with links → every link × every mask on ports 30000+ (checked by tools/xray-local-e2e.sh). */
     @Test fun dumpLocalMatrix() {
         val f = System.getenv("XRAY_LOCAL_LINKS") ?: return
-        File(System.getenv("XRAY_CONFIG_DUMP")).mkdirs()
+        File(System.getenv("XRAY_CONFIG_DUMP")!!).mkdirs()
         val servers = File(f).readLines().mapNotNull { LinkParser.parse(it) }
         val variants = servers.flatMap { s -> (listOf<com.vlesscardvpn.xray.Mask?>(null) + Masks.ALL).filter { System.getenv("XRAY_MATRIX_OFFERED_ONLY") != "1" || it == null || Masks.compatible(it, s) }.map { s to it } }
         // Fixed DPI strategies in front of the server: one host engine per strategy on 1100+i (tools/masks-matrix-ci.sh starts them).

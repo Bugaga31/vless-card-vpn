@@ -20,6 +20,8 @@ data class Settings(
     val socksPort: Int = 10808,
     val ruDirect: Boolean = true,
     val blockAds: Boolean = true,
+    /** Tracker/telemetry block + DoT port 853: apps can't bypass the app's DNS to phone home unseen. */
+    val blockTrackers: Boolean = true,
     val byeDpiArgs: String = DEFAULT_BYEDPI,
     val byeDpiSni: String = "ya.ru",
     /** Domains that go through ByeDPI in hybrid mode (geosite tags or domains). */
@@ -102,8 +104,11 @@ data class Settings(
     val torAuto: Boolean = false,
     /** Tor pluggable transport: none, obfs4, snowflake (Termux) or webtunnel (embedded libLyrebird). */
     val torBridge: String = "none",
+    /** «Весь трафик через Tor»: max-anonymity mode — the default route goes to the local Tor SOCKS too (not just picked services). */
+    val torAll: Boolean = false,
     /** Отдельный путь Tor: демон Tor исключается из туннеля и ходит в интернет напрямую (своё шифрование/мосты), не заворачиваясь в VLESS. */
     val torDirect: Boolean = false,
+
     /** «Ускорение телефона»: big TUN MTU (fewer packets = less CPU), stale DNS answers at once, deep sleep with the screen off. */
     val turbo: Boolean = true,
     /** «Сайт не открывается?»: these sites always through the VPN / always directly (domains). */
@@ -149,7 +154,7 @@ data class Settings(
 ) {
     val httpPort: Int get() = if (socksPort < 65535) socksPort + 1 else socksPort - 1
     fun toJson(): JSONObject = JSONObject().put("mode", mode.name).put("balance", balance.name).put("socksPort", socksPort)
-        .put("ruDirect", ruDirect).put("blockAds", blockAds).put("byeDpiArgs", byeDpiArgs).put("byeDpiSni", byeDpiSni)
+        .put("ruDirect", ruDirect).put("blockAds", blockAds).put("blockTrackers", blockTrackers).put("byeDpiArgs", byeDpiArgs).put("byeDpiSni", byeDpiSni)
         .put("hybridDomains", JSONArray(hybridDomains)).put("testUrl", testUrl).put("dnsUrl", dnsUrl)
         .put("subscriptions", JSONArray(subscriptions))
         .put("dpiStrategy", dpiStrategy).put("dpiRemembered", JSONObject(dpiRemembered as Map<*, *>))
@@ -210,7 +215,7 @@ data class Settings(
                 mode = runCatching { Mode.valueOf(o.getString("mode")) }.getOrDefault(d.mode),
                 balance = runCatching { Balance.valueOf(o.getString("balance")) }.getOrDefault(d.balance),
                 socksPort = o.optInt("socksPort", d.socksPort).takeIf { it in 1024..65535 } ?: d.socksPort,
-                ruDirect = o.optBoolean("ruDirect", d.ruDirect), blockAds = o.optBoolean("blockAds", d.blockAds),
+                ruDirect = o.optBoolean("ruDirect", d.ruDirect), blockAds = o.optBoolean("blockAds", d.blockAds), blockTrackers = o.optBoolean("blockTrackers", d.blockTrackers),
                 byeDpiArgs = o.optString("byeDpiArgs", d.byeDpiArgs), byeDpiSni = o.optString("byeDpiSni", d.byeDpiSni),
                 hybridDomains = list("hybridDomains", d.hybridDomains), testUrl = o.optString("testUrl", d.testUrl),
                 dnsUrl = o.optString("dnsUrl", d.dnsUrl), subscriptions = list("subscriptions", d.subscriptions),

@@ -180,18 +180,6 @@ fun SettingsScreen() {
         Toggle("Российские приложения мимо VPN", "Сбер, Т-Банк, ВТБ, Госуслуги, Ozon, WB, Яндекс, VK, операторы… идут напрямую: видят обычного абонента и не ругаются на VPN", s.ruAppsDirect) { v -> set { it.copy(ruAppsDirect = v) } }
         Toggle("Случайный адрес VPN-интерфейса", "Новый внутренний адрес при каждом подключении и нейтральное имя сеанса — нет постоянных признаков, по которым ищут VPN-клиенты", s.randomTun) { v -> set { it.copy(randomTun = v) } }
         Toggle("Фон обычного пользователя", "Пока VPN включён, изредка (раз в 1–3 мин, ≤32 КБ) открывает обычный российский сайт напрямую: у провайдера обычная картина, а не один поток за границу", s.coverTraffic) { v -> set { it.copy(coverTraffic = v) } }
-        Hint("Tor: выбранные сервисы через локальный Tor поверх туннеля, выход ротируется сам")
-        Toggle("Tor для сервисов", "Discord и другие выбранные сервисы идут через Tor поверх VPN: сайты видят адрес Tor-выхода, оператор — только маску VLESS", s.torRouting) { v -> set { it.copy(torRouting = v) } }
-        Toggle("Tor в Авто", "Если сервис перестаёт работать через все серверы — сам переключаю его на Tor, пока связь не восстановится", s.torAuto) { v -> set { it.copy(torAuto = v) } }
-        Toggle("Отдельный путь Tor", "Демон Tor ходит в интернет сам, минуя VPN: своё шифрование и мосты, работает даже при недоступных серверах", s.torDirect) { v -> set { it.copy(torDirect = v) } }
-        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            listOf("none" to "Без мостов", "obfs4" to "obfs4", "snowflake" to "Snowflake", "webtunnel" to "WebTunnel").forEach { (id, t) ->
-                FilterChip(selected = s.torBridge == id, onClick = { set { it.copy(torBridge = id) } }, label = { Text(t) })
-            }
-        }
-        if (s.torBridge != "none") OutlinedButton(onClick = {
-            runCatching { ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://bridges.torproject.org/options"))) }
-        }, modifier = Modifier.fillMaxWidth()) { Text("Получить мосты (bridges.torproject.org)") }
         OutlinedButton(onClick = { set { it.copy(stealthSocks = true, ruDirect = true, ruDns = true, blockQuic = true, rotateMasks = true, ruAppsDirect = true, randomTun = true, coverTraffic = true, autoHeal = true, maskEvolution = true) } }) {
             Text("Включить всю маскировку")
         }
@@ -224,6 +212,21 @@ fun SettingsScreen() {
         OutlinedButton(onClick = { wipeDialog = true }, colors = ButtonDefaults.outlinedButtonColors(contentColor = Bad), modifier = Modifier.fillMaxWidth()) { Text("Стереть все данные") }
 
         // ---------------- servers
+        }
+        Group("Tor — отдельный путь (встроенный, без Termux)") {
+            Hint("Tor уже встроен в приложение: Termux не нужен. Выбранные сервисы (Discord и др.) идут через собственный демон Tor поверх туннеля, выход ротируется сам.")
+            Toggle("Tor для сервисов", "Discord и другие выбранные сервисы идут через Tor поверх VPN: сайты видят адрес Tor-выхода, оператор — только маску VLESS", s.torRouting) { v -> set { it.copy(torRouting = v) } }
+            Toggle("Tor в Авто", "Если сервис перестаёт работать через все серверы — сам переключаю его на Tor, пока связь не восстановится", s.torAuto) { v -> set { it.copy(torAuto = v) } }
+            Toggle("Отдельный путь Tor", "Демон Tor ходит в интернет сам, минуя VPN: своё шифрование и мосты, работает даже при недоступных серверах", s.torDirect) { v -> set { it.copy(torDirect = v) } }
+            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                listOf("none" to "Без мостов", "obfs4" to "obfs4", "snowflake" to "Snowflake", "webtunnel" to "WebTunnel").forEach { (id, t) ->
+                    FilterChip(selected = s.torBridge == id, onClick = { set { it.copy(torBridge = id) } }, label = { Text(t) })
+                }
+            }
+            if (s.torBridge != "none") OutlinedButton(onClick = {
+                runCatching { ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://bridges.torproject.org/options"))) }
+            }, modifier = Modifier.fillMaxWidth()) { Text("Получить мосты (bridges.torproject.org)") }
+            Toggle("Весь трафик через Tor", "Максимальная анонимность: всё через Tor поверх туннеля. Медленно — только когда анонимность важнее скорости", s.torAll) { v -> set { it.copy(torAll = v) } }
         }
         Group("Нагрузка VPN и батарея") {
         val power by com.vlesscardvpn.core.PhonePower.state.collectAsState()
@@ -261,6 +264,7 @@ fun SettingsScreen() {
         Toggle("Мультиплексирование (mux)", "Меньше новых соединений — меньше рукопожатий, которые видит DPI. Не для Vision/XHTTP", s.mux) { v -> set { it.copy(mux = v) } }
         Toggle("Менять маскировку при каждом подключении", "Случайная из рабочих, найденных «Подобрать маскировку», — у трафика нет постоянного отпечатка", s.rotateMasks) { v -> set { it.copy(rotateMasks = v) } }
         Toggle("Блокировать рекламу и трекеры", "Блокирует отдельные рекламные домены. Рекламу внутри видео YouTube гарантированно не удаляет: она может идти с теми же адресами, что и видео. При сбое сайта выключите", s.blockAds) { v -> set { it.copy(blockAds = v) } }
+        Toggle("Режим «Не отслеживается»", "Режет мобильную телеметрию (Firebase/Crashlytics/Sentry/AppsFlyer/TikTok-аналитика) и DoT 853 — приложения не могут обойти DNS приложения и слить телеметрию мимо VPN", s.blockTrackers) { v -> set { it.copy(blockTrackers = v) } }
         Toggle("Ускорение телефона", "Кэш DNS снижает повторные ожидания. MTU выбирается по сети (1280–1400), без гигантских пакетов. Это оптимизация VPN, не ускорение других приложений", s.turbo) { v -> set { it.copy(turbo = v) } }
         var lim by remember(s.monthLimitGb) { mutableStateOf(if (s.monthLimitGb > 0) s.monthLimitGb.toString() else "") }
         OutlinedTextField(lim, { v -> lim = v.filter { it.isDigit() }.take(5); set { it.copy(monthLimitGb = lim.toIntOrNull() ?: 0) } }, singleLine = true,

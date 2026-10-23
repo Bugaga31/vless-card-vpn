@@ -18,7 +18,8 @@ object PhonePower {
     private var sampledAt = -10000L
     private var dirty = true
     private var bytes = -1L
-    private var pauseUntil = 0L
+    private var pauseUntil = 0L    /** The phone recently lagged (game / low memory / heat): pause background work for a bit so it recovers fast. */
+    private var lagUntil = 0L
     private var started = false
     private val events = android.os.Handler(android.os.Looper.getMainLooper())
     private var eventRefresh: Runnable? = null
@@ -71,7 +72,9 @@ object PhonePower {
             sensors.value = "Батарея: ${sample.battery.takeIf { it in 1..100 }?.let { "$it%" } ?: "неизвестно"} · ${if (sample.charging) "заряжается" else "без зарядки"}\nТемпература батареи / Android: ${Thermal.label(sample.temp, sample.thermal).ifEmpty { "нет данных" }}"
         }
         val s = Store.state.value.settings
-        val plan = PowerPolicy.evaluate(sample.copy(now = now, gaming = GameSession.active()), PowerPolicy.Options(s.powerProfile, s.batteryThreshold,
+        val gaming = GameSession.active()
+        if (gaming || sample.lowMemory) lagUntil = now + 120000
+        val plan = PowerPolicy.evaluate(sample.copy(now = now, gaming = gaming, recentLag = now < lagUntil), PowerPolicy.Options(s.powerProfile, s.batteryThreshold,
             s.quietScreen, s.chargeOnly, s.wifiMaintenance, s.protectActiveTraffic, s.autoCool), memory, pauseUntil)
         memory = plan.memory
         Thermal.cooling = plan.memory.hot

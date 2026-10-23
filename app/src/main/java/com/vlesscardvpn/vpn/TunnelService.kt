@@ -289,6 +289,8 @@ class TunnelService : VpnService() {
             liveNotification(route)
             watchNetwork()
             verifySoon(0)
+            // One-shot TLS warm-up: the first YouTube/Discord request opens much faster (see Warmup).
+            scope.launch { kotlinx.coroutines.delay(800); runCatching { com.vlesscardvpn.core.Warmup.warm(socks.port, com.vlesscardvpn.core.Warmup.plan(settings)) } }
         } catch (e: Throwable) {
             if (e is kotlinx.coroutines.CancellationException) throw e
             Log.w(TAG, "connect failed", e)
@@ -575,7 +577,7 @@ class TunnelService : VpnService() {
                     offline = true
                     continue
                 }
-                if (ok && offline) { offline = false; verifySoon(0); break } // internet is back: full check (WARP, YouTube…)
+                if (ok && offline) { verifySoon(0); break } // internet is back: full check (WARP, YouTube…)
                 miss = if (ok) 0 else miss + 1
                 if (miss >= 2) {
                     // no answer twice in ~25 s: rebuild at once like the big button (seconds); if that already
