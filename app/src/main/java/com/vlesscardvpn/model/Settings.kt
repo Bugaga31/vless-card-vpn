@@ -100,8 +100,9 @@ data class Settings(
     val torRouting: Boolean = false,
     /** Auto mode may switch a broken service to Tor by itself (once measured routes are all dead). */
     val torAuto: Boolean = false,
-    /** Tor pluggable transport: none, obfs4 or snowflake (written into the Termux torrc). */
-    val torBridge: String = "none",    /** Отдельный путь Tor: демон Tor исключается из туннеля и ходит в интернет напрямую (своё шифрование/мосты), не заворачиваясь в VLESS. */
+    /** Tor pluggable transport: none, obfs4, snowflake (Termux) or webtunnel (embedded libLyrebird). */
+    val torBridge: String = "none",
+    /** Отдельный путь Tor: демон Tor исключается из туннеля и ходит в интернет напрямую (своё шифрование/мосты), не заворачиваясь в VLESS. */
     val torDirect: Boolean = false,
     /** «Ускорение телефона»: big TUN MTU (fewer packets = less CPU), stale DNS answers at once, deep sleep with the screen off. */
     val turbo: Boolean = true,

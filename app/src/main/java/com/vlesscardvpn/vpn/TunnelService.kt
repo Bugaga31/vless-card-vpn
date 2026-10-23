@@ -169,6 +169,7 @@ class TunnelService : VpnService() {
         runCatching { kotlinx.coroutines.runBlocking { kotlinx.coroutines.withTimeoutOrNull(1500) { lock.withLock { teardown(null) } } ?: teardown(null) } }
         netCallback?.let { cb -> runCatching { getSystemService(ConnectivityManager::class.java)?.unregisterNetworkCallback(cb) } }; netCallback = null
         scope.cancel()
+        com.vlesscardvpn.tor.TorCard.stopEmbedded()
         super.onDestroy()
     }
 
@@ -407,13 +408,18 @@ class TunnelService : VpnService() {
     /**
      * Tor exit rotator, absorbed from tor-rotator-vless (docs/tor-rotator-absorption.md).
      * Opt-in via settings.torRotation. Rotates the exit node of a locally started Tor
-     * (Termux SocksPort/ControlPort, see tor/TorCard) while the main VPN is connected.
+     * (embedded libTor.so, or Termux SocksPort/ControlPort — see tor/TorCard) while connected.
      */
     private fun torLoop() {
-        if (torJob?.isActive == true || !Store.state.value.settings.torRotation) return
+        if (torJob?.isActive == true) return
+        val st = Store.state.value.settings
+        if (!st.torRotation && !st.torRouting) return
         torJob = scope.launch {
-            val cookie = runCatching { com.vlesscardvpn.tor.TorControl.readCookieHex() }.getOrNull()
+            // Embedded daemon (no Termux needed); Termux instance wins when its cookie is readable.
+            runCatching { com.vlesscardvpn.tor.TorCard.ensureStarted(this@TunnelService, st.torBridge) }
+            val cookie = runCatching { com.vlesscardvpn.tor.TorCard.readCookieHex(this@TunnelService) }.getOrNull()
             if (cookie == null) { Log.i("TOR", "no control cookie, rotator idle"); return@launch }
+            if (!st.torRotation) return@launch
             val rotator = com.vlesscardvpn.tor.TorRotator(
                 com.vlesscardvpn.tor.TorControl("127.0.0.1", com.vlesscardvpn.tor.TorCard.DEFAULT_CONTROL_PORT),
                 countries = com.vlesscardvpn.tor.TorCard.preferredCountries(Store.state.value.servers),

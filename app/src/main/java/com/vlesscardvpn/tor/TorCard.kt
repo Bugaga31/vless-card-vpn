@@ -5,8 +5,9 @@ import com.vlesscardvpn.model.LinkParser
 
 /**
  * Tor as a regular card in the deck: a synthetic SOCKS5 server pointing at the
- * local Termux Tor instance. Rotations happen behind the card — the app only
- * sees a SOCKS proxy that changes exits over time.
+ * local Termux Tor instance (embedded daemon libTor.so from the APK is started
+ * automatically when Termux is absent). Rotations happen behind the card — the
+ * app only sees a SOCKS proxy that changes exits over time.
  */
 object TorCard {
     const val CARD_NAME = "Tor · ротатор"
@@ -18,6 +19,15 @@ object TorCard {
 
     /** Termux data dir holding the ControlPort authentication cookie. */
     const val TERMUX_COOKIE_PATH = "/data/data/com.termux/files/usr/var/lib/tor/control_auth_cookie"
+
+    /** Control cookie: Termux instance first, then the embedded daemon's own cookie. */
+    fun readCookieHex(ctx: android.content.Context?): String? {
+        runCatching { return TorControl.readCookieHex(TERMUX_COOKIE_PATH) }
+        if (ctx != null) runCatching {
+            return TorControl.readCookieHex(java.io.File(java.io.File(ctx.filesDir, "tor"), "cookie").absolutePath)
+        }
+        return null
+    }
 
     /** Preferred exit countries, best first (measured by the app's own probes). */
     fun preferredCountries() = listOf("de", "nl", "fi", "se", "ch")
@@ -43,6 +53,79 @@ object TorCard {
 
     /** Public bridge transports the local daemon understands; "none" = plain Tor. */
     val BRIDGES = listOf("none", "obfs4", "snowflake")
+
+    /** Bridge transports built into the APK (Termux additionally provides snowflake). */
+    val EMBEDDED_BRIDGES = listOf("none", "obfs4", "webtunnel")
+
+    /** Native dir where the packaged daemon binaries live (same files as for ByeDPI). */
+    fun nativeDir(ctx: android.content.Context): String =
+        ctx.applicationInfo.nativeLibraryDir
+
+    /** libTor.so ships inside the APK (Tor Browser for Android) — Tor needs no Termux. */
+    fun available(ctx: android.content.Context): Boolean =
+        java.io.File(nativeDir(ctx), "libTor.so").let { it.isFile && it.canExecute() }
+
+    /** Absolute torrc inside the app's private dir; embedded daemon reads it directly. */
+    fun torrcPath(ctx: android.content.Context) =
+        java.io.File(java.io.File(ctx.filesDir, "tor"), "torrc").absolutePath
+
+    /**
+     * torrc for the embedded daemon: private data dir, loopback-only ports, safe defaults.
+     * Bridges use libLyrebird.so from the APK (obfs4/webtunnel); real Bridge lines still
+     * come from bridges.torproject.org, as with Termux.
+     */
+    fun torrcEmbedded(ctx: android.content.Context, controlPort: Int = DEFAULT_CONTROL_PORT,
+                      socksPort: Int = DEFAULT_SOCKS_PORT, bridge: String = "none"): String {
+        val dir = java.io.File(ctx.filesDir, "tor")
+        return torrcEmbedded(java.io.File(dir, "data").absolutePath, java.io.File(dir, "cookie").absolutePath,
+            nativeDir(ctx), controlPort, socksPort, bridge)
+    }
+
+    /** Pure overload — testable on the JVM without an Android context. */
+    fun torrcEmbedded(dataDir: String, cookieFile: String, nativeBinDir: String,
+                      controlPort: Int = DEFAULT_CONTROL_PORT,
+                      socksPort: Int = DEFAULT_SOCKS_PORT, bridge: String = "none"): String = buildString {
+        appendLine("SocksPort 127.0.0.1:$socksPort")
+        appendLine("ControlPort 127.0.0.1:$controlPort")
+        appendLine("CookieAuthentication 1")
+        appendLine("CookieAuthFile $cookieFile")
+        appendLine("DataDirectory $dataDir")
+        appendLine("SafeLogging 1")
+        val bin = nativeBinDir
+        when (bridge) {
+            "obfs4", "webtunnel" -> {
+                appendLine("ClientTransportPlugin obfs4,webtunnel exec $bin/libLyrebird.so")
+                appendLine("# obfs4/webtunnel: мосты выдаёт bridges.torproject.org — вставьте их строками «Bridge …» ниже (настройки Tor-режима → «Получить мосты»)")
+                appendLine("UseBridges 1")
+            }
+        }
+    }
+
+    /** Starts the embedded daemon; returns the process (caller keeps it alive). */
+    fun startEmbedded(ctx: android.content.Context, bridge: String = "none",
+                      controlPort: Int = DEFAULT_CONTROL_PORT, socksPort: Int = DEFAULT_SOCKS_PORT): java.lang.Process {
+        val dir = java.io.File(ctx.filesDir, "tor"); dir.mkdirs()
+        java.io.File(dir, "torrc").writeText(torrcEmbedded(ctx, controlPort, socksPort, bridge))
+        val b = java.lang.ProcessBuilder(listOf(java.io.File(nativeDir(ctx), "libTor.so").absolutePath,
+            "-f", java.io.File(dir, "torrc").absolutePath))
+            .redirectOutput(java.io.File(dir, "tor.log")).redirectErrorStream(true)
+        return b.start()
+    }
+
+    /** True when something already listens on the SOCKS port (Termux tor or our daemon). */
+    fun portUp(socksPort: Int = DEFAULT_SOCKS_PORT): Boolean =
+        runCatching { java.net.Socket().use { it.connect(java.net.InetSocketAddress("127.0.0.1", socksPort), 200); true } }.getOrDefault(false)
+
+    /** Starts the embedded daemon unless a local Tor already answers on [socksPort]. */
+    fun ensureStarted(ctx: android.content.Context, bridge: String = "none",
+                      controlPort: Int = DEFAULT_CONTROL_PORT, socksPort: Int = DEFAULT_SOCKS_PORT): java.lang.Process? {
+        if (!available(ctx) || portUp(socksPort)) return null
+        return runCatching { startEmbedded(ctx, bridge, controlPort, socksPort).also { embedded = it } }.getOrNull()
+    }
+
+    /** Stops the embedded daemon (Termux tor is managed by Termux itself). */
+    fun stopEmbedded() { embedded?.let { runCatching { it.destroy() } }; embedded = null }
+    @Volatile private var embedded: java.lang.Process? = null
 
     /**
      * torrc for Termux: SOCKS on loopback, authenticated control port, safe defaults.
