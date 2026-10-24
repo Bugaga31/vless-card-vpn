@@ -40,7 +40,7 @@ LIB=""
 CANDIDATES=$(adb shell dumpsys package "$PKG" | tr -d '\r' | sed -n -e 's/^ *nativeLibraryDir=//p' -e 's/^ *legacyNativeLibraryDir=//p')
 for base in $CANDIDATES "$(dirname "$PACKAGE_APK")/lib"; do
   for dir in "$base" "$base/x86_64"; do
-    if adb shell run-as "$PKG" test -x "$dir/libTor.so"; then LIB=$dir; break 2; fi
+    if adb shell run-as "$PKG" test -x "$dir/libTor.so" 2>> "$W/tor-native-locate.txt"; then LIB=$dir; break 2; fi
   done
 done
 test -n "$LIB"
