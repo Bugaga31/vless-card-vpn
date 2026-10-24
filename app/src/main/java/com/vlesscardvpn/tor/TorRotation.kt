@@ -107,7 +107,7 @@ class TorRotation(
 
     /** Adaptive rotate decision: cadence floor, absolute threshold floor, hysteresis vs the best alternative. */
     fun shouldRotate(nowMs: Long = now()): Boolean {
-        if (lastRotationAt != 0L && nowMs - lastRotationAt < rotateEveryMs) return false
+        if (nowMs - lastRotationAt < rotateEveryMs) return false
         val cur = lastCountry ?: return candidates(nowMs).isNotEmpty()
         val curEma = history[cur]?.ema ?: return candidates(nowMs).isNotEmpty()
         val best = candidates(nowMs).minByOrNull { history[it]?.ema ?: Double.MAX_VALUE } ?: return false

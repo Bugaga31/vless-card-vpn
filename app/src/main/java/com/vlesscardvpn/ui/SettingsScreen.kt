@@ -223,9 +223,15 @@ fun SettingsScreen() {
                     FilterChip(selected = s.torBridge == id, onClick = { set { it.copy(torBridge = id) } }, label = { Text(t) })
                 }
             }
-            if (s.torBridge != "none") OutlinedButton(onClick = {
-                runCatching { ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://bridges.torproject.org/options"))) }
-            }, modifier = Modifier.fillMaxWidth()) { Text("Получить мосты (bridges.torproject.org)") }
+            if (s.torBridge != "none") {
+                OutlinedButton(onClick = {
+                    runCatching { ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://bridges.torproject.org/options"))) }
+                }, modifier = Modifier.fillMaxWidth()) { Text("Получить мосты (bridges.torproject.org)") }
+                var bridges by remember { mutableStateOf(s.torBridgeLines) }
+                androidx.compose.material3.OutlinedTextField(bridges, { v -> bridges = v; set { it.copy(torBridgeLines = v) } },
+                    modifier = Modifier.fillMaxWidth(), label = { Text("Мосты: строки «Bridge …» (до 12)") }, minLines = 2, maxLines = 6)
+                Hint("Скопируйте строки «Bridge obfs4 …» / «Bridge webtunnel …» с bridges.torproject.org сюда — по одной в строке. Применится при следующем подключении.")
+            }
             Toggle("Весь трафик через Tor", "Максимальная анонимность: всё через Tor поверх туннеля. Медленно — только когда анонимность важнее скорости", s.torAll) { v -> set { it.copy(torAll = v) } }
         }
         Group("Нагрузка VPN и батарея") {

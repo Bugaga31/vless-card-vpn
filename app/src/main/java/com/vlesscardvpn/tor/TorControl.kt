@@ -12,12 +12,12 @@ import java.net.Socket
  * SIGNAL NEWNYM, SETCONF ExitNodes, GETINFO status/circuit-established.
  * Speaks the raw line protocol — no dependencies beyond a TCP socket.
  */
-class TorControl(private val host: String = "127.0.0.1", private val port: Int = DEFAULT_CONTROL_PORT) {
+open class TorControl(private val host: String = "127.0.0.1", private val port: Int = DEFAULT_CONTROL_PORT) {
     private var socket: Socket? = null
     private var reader: BufferedReader? = null
     private var out: java.io.OutputStream? = null
 
-    fun connect(cookieHex: String) {
+    open fun connect(cookieHex: String) {
         val s = Socket()
         s.connect(InetSocketAddress(host, port), 5000)
         s.soTimeout = 5000
@@ -28,12 +28,12 @@ class TorControl(private val host: String = "127.0.0.1", private val port: Int =
         if (!auth.startsWith("250")) throw IOException("Tor auth failed: $auth")
     }
 
-    fun signalNewNym() {
+    open fun signalNewNym() {
         val r = command("SIGNAL", "NEWNYM")
         if (!r.startsWith("250")) throw IOException("NEWNYM failed: $r")
     }
 
-    fun setExitCountries(countries: List<String>) {
+    open fun setExitCountries(countries: List<String>) {
         if (countries.isEmpty()) return
         val value = countries.joinToString(",") { "{${it.lowercase()}}" }
         val r = command("SETCONF", "ExitNodes=\"$value\"")
@@ -47,7 +47,7 @@ class TorControl(private val host: String = "127.0.0.1", private val port: Int =
         false
     }
 
-    fun close() {
+    open fun close() {
         runCatching { command("QUIT") }
         runCatching { socket?.close() }
         socket = null; reader = null; out = null
