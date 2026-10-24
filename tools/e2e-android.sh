@@ -155,7 +155,15 @@ if echo "$WR" | grep -q "WARP готов"; then
   adb shell am start -n $PKG/.MainActivity --ez e2e_connect true >/dev/null
   C=$(waitlog "check ok=|connect failed" 90) || fail "warp: no connect result"
   echo "app: $C"; echo "$C" | grep -q "check ok=true" || fail "warp: in-app check through WARP failed"
-  R=$(probe warp); okprobe "$R" || fail "warp: probe app traffic through WARP failed"
+  R=$(probe warp)
+  # Proven CI failure: Google 429, while VPN/data/YouTube checks pass. One bounded backoff,
+  # not a bypass: the original four exact status/body checks still decide success.
+  if printf '%s' "$R" | python3 tools/e2e/http429_retry.py; then
+    echo "::notice title=E2E HTTP rate limit::Google returned 429; one 15-second backoff before the unchanged full probe"
+    sleep 15
+    R=$(probe warp-rate-limit-retry)
+  fi
+  okprobe "$R" || fail "warp: probe app traffic through WARP failed"
 else fail "warp: no working WARP endpoint"; fi
 
 echo "=== DPI strategy search (all engines start and carry HTTPS)"
