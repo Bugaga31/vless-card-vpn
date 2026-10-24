@@ -97,7 +97,7 @@ object TorCard {
             "obfs4", "webtunnel" -> {
                 appendLine("ClientTransportPlugin obfs4,webtunnel exec $bin/libLyrebird.so")
                 appendLine("# obfs4/webtunnel: мосты выдаёт bridges.torproject.org — вставьте их в настройках Tor-режима → «Мосты»")
-                bridgeLines.filter { it.startsWith("Bridge ") }.forEach { appendLine(it.trim()) }
+                bridgeLines.map { it.trim() }.filter { it.startsWith("Bridge ") }.forEach { appendLine(it) }
                 appendLine("UseBridges 1")
             }
         }
@@ -146,14 +146,14 @@ object TorCard {
         when (bridge) {
             "snowflake" -> {
                 appendLine("ClientTransportPlugin snowflake exec /data/data/com.termux/files/usr/bin/snowflake-client -url https://1098762253-765532153-cloudflare-voip.tor-project.org/ -front cdn.sstatic.net -ice stun:stun.l.google.com:19302,stun:stun.voipgate.com:3478,stun:stun.voys.nl:3478 utls-imitate=hellorandomizedalpn")
-                val custom = bridgeLines.filter { it.startsWith("Bridge ") }.map { it.trim() }
+                val custom = bridgeLines.map { it.trim() }.filter { it.startsWith("Bridge ") }
                 if (custom.isEmpty()) appendLine("Bridge snowflake 192.0.2.3:1 2B280B23E1107BB62ABFC40DDCC8824814F80A72")
                 else custom.forEach { appendLine(it) }
                 appendLine("UseBridges 1")
             }
             "obfs4" -> {
                 appendLine("ClientTransportPlugin obfs4 exec /data/data/com.termux/files/usr/bin/obfs4proxy")
-                bridgeLines.filter { it.startsWith("Bridge ") }.forEach { appendLine(it.trim()) }
+                bridgeLines.map { it.trim() }.filter { it.startsWith("Bridge ") }.forEach { appendLine(it) }
                 appendLine("UseBridges 1")
             }
         }
