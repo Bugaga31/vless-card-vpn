@@ -27,7 +27,7 @@ class TorRotatorAlgorithmR160Test {
         rotator.connect()
         rotator.recordExit(200, "nl")
         rotator.recordExit(1000, "de")
-        rotator.markRotated(t)
+        rotation.markRotated(t)
         t += 61_000
         assertTrue(rotator.tick(t))
         assertEquals(listOf("nl"), control.exitNodes) // fastest EMA wins, pinned via SETCONF
@@ -40,7 +40,7 @@ class TorRotatorAlgorithmR160Test {
         val rotator = TorRotator(control, TorRotation(rotateEveryMs = 600_000, now = { 0 }), cookieHex = "01")
         rotator.connect()
         rotator.recordExit(100, "nl")
-        rotator.markRotated(0)
+        rotation.markRotated(0)
         assertFalse(rotator.tick(1000))
         assertEquals(0, control.newnym)
         assertTrue(control.exitNodes.isEmpty())
