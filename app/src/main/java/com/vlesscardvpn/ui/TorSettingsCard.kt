@@ -62,7 +62,7 @@ fun TorSettingsCard(settings: Settings, set: ((Settings) -> Settings) -> Unit) {
                             try {
                                 val result = withContext(Dispatchers.IO) {
                                     val cookie = TorCard.readCookieHex(ctx) ?: return@withContext false
-                                    val control = TorControl()
+                                    val control = TorControl("127.0.0.1", TorCard.DEFAULT_CONTROL_PORT)
                                     try { control.connect(cookie); control.circuitEstablished() }
                                     catch (_: Exception) { false } finally { control.close() }
                                 }
@@ -79,6 +79,24 @@ fun TorSettingsCard(settings: Settings, set: ((Settings) -> Settings) -> Unit) {
             }
             TorOption("Tor для сервисов", "Направлять выбранные сервисы через локальный Tor.", settings.torRouting) { v -> set { it.copy(torRouting = v) } }
             TorOption("Tor в Авто", "Разрешить Tor как резервный путь. UNKNOWN не считается подтверждением.", settings.torAuto) { v -> set { it.copy(torAuto = v) } }
+            TorOption("Ротация цепочек", "Запрашивать новую цепочку для новых соединений. Активные загрузки не обрываются; новый IP не гарантируется.", settings.torRotation) { v -> set { it.copy(torRotation = v) } }
+            var seconds by remember(settings.torRotationSeconds) { mutableStateOf(settings.torRotationSeconds.toString()) }
+            var latency by remember(settings.torMaxLatencyMs) { mutableStateOf(settings.torMaxLatencyMs.toString()) }
+            val validSeconds = seconds.toIntOrNull()?.takeIf { it in 30..86400 }
+            val validLatency = latency.toIntOrNull()?.takeIf { it in 250..15000 }
+            OutlinedTextField(value = seconds, onValueChange = { if (it.length <= 5) seconds = it }, singleLine = true,
+                label = { Text("Запрашивать новую цепочку каждые N секунд") },
+                supportingText = { Text("30–86400 секунд. В режиме энергосбережения ротация может откладываться.") },
+                isError = validSeconds == null, modifier = Modifier.fillMaxWidth(),
+                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number))
+            TorOption("Предпочитать быстрые выходы", "Выбирать лучшую страну по свежим HTTPS-замерам Cloudflare, без исследования более медленных стран. Это задержка, не скорость скачивания и не гарантия каждого узла.", settings.torFastOnly) { v -> set { it.copy(torFastOnly = v) } }
+            OutlinedTextField(value = latency, onValueChange = { if (it.length <= 5) latency = it }, singleLine = true,
+                label = { Text("Порог задержки HTTPS, мс") }, supportingText = { Text("250–15000 мс. Медленные измерения временно исключаются; если быстрых пока нет, продолжается обычное создание цепочек.") },
+                isError = validLatency == null, modifier = Modifier.fillMaxWidth(),
+                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number))
+            OutlinedButton(onClick = { if (validSeconds != null && validLatency != null) set { it.copy(torRotationSeconds = validSeconds, torMaxLatencyMs = validLatency) } },
+                enabled = validSeconds != null && validLatency != null, modifier = Modifier.fillMaxWidth()) { Text("Сохранить интервал и порог") }
+            Text("Параметры ротации и транспорта применяются при следующем подключении. Tor работает и по Wi-Fi, и по мобильной сети; мосты могут понадобиться в обеих.", style = MaterialTheme.typography.bodyMedium)
             Text("Транспорт и мосты", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
             listOf("obfs4" to "obfs4 · маскировка Tor", "webtunnel" to "WebTunnel · HTTPS-транспорт", "none" to "Без мостов · прямой Tor").forEach { (id, label) ->
                 Surface(onClick = { circuit = null; set { it.copy(torBridge = id) } }, shape = RoundedCornerShape(12.dp),

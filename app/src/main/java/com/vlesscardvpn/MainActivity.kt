@@ -22,7 +22,7 @@ class MainActivity : ComponentActivity() {
 
     /** Auto mode prepares servers/masks/DPI first (Actions.autoConnect), the other modes connect right away. */
     private fun start() {
-        if (com.vlesscardvpn.core.Store.state.value.settings.mode == com.vlesscardvpn.model.Mode.AUTO)
+        if (com.vlesscardvpn.tor.TorConnectionPolicy.needsAutoSearch(com.vlesscardvpn.core.Store.state.value.settings))
             com.vlesscardvpn.core.Actions.autoConnect { TunnelService.start(this) }
         else TunnelService.start(this)
     }

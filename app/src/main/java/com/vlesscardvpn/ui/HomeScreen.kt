@@ -46,6 +46,15 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
     val availableOffers by com.vlesscardvpn.core.Offers.items.collectAsState()
     val working = busy
     val mode = cfg.mode
+    var torDialog by remember { mutableStateOf(false) }
+    if (torDialog) AlertDialog(onDismissRequest = { torDialog = false },
+        title = { Text("Настройки Tor") },
+        text = { Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
+            TorSettingsCard(cfg) { change -> Store.update { it.copy(settings = change(it.settings)) } }
+        } },
+        confirmButton = { TextButton(onClick = { torDialog = false; if (status.state == Tunnel.State.CONNECTED) onConnect() }) {
+            Text(if (status.state == Tunnel.State.CONNECTED) "Применить и переподключить" else "Готово")
+        } })
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
             // Elite offers: opt-in banner, only when the cloud actually has something for this phone.
             val octx = androidx.compose.ui.platform.LocalContext.current
@@ -167,7 +176,7 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
                 Row(Modifier.fillMaxWidth().clickable { opts = !opts }, verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Text("Как подключаться", fontWeight = FontWeight.SemiBold)
-                        Text(listOf(when (mode) { Mode.AUTO -> "Авто"; Mode.SERVERS -> "Серверы"; Mode.BYEDPI -> "ByeDPI"; Mode.HYBRID -> "Гибрид" },
+                        Text(listOf(if (cfg.torAll) "Tor" else when (mode) { Mode.AUTO -> "Авто"; Mode.SERVERS -> "Серверы"; Mode.BYEDPI -> "ByeDPI"; Mode.HYBRID -> "Гибрид" },
                             if (cfg.proxyOnly) "Прокси" else "VPN",
                             if (!cfg.perApp || cfg.apps.isEmpty()) "все приложения" else if (cfg.onlyApps) "только ${cfg.apps.size} прил." else "кроме ${cfg.apps.size} прил.",
                             if (cfg.services.isEmpty()) "весь трафик" else com.vlesscardvpn.core.Services.label(cfg.services)).joinToString(" · "),
@@ -178,20 +187,26 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
                 if (opts) {
                     Spacer(Modifier.height(10.dp))
                 Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(selected = cfg.torAll, onClick = {
+                        Store.update { it.copy(settings = com.vlesscardvpn.tor.TorConnectionPolicy.selectTor(it.settings)) }
+                        if (!cfg.torAll && status.state == Tunnel.State.CONNECTED) onConnect()
+                    }, label = { Text("Tor") })
                     Mode.values().forEach { m ->
-                        FilterChip(selected = mode == m, onClick = {
-                            Store.update { it.copy(settings = it.settings.copy(mode = m)) }
-                            if (m != mode && status.state == Tunnel.State.CONNECTED) onConnect() // reconnect with the new mode
+                        FilterChip(selected = !cfg.torAll && mode == m, onClick = {
+                            Store.update { it.copy(settings = com.vlesscardvpn.tor.TorConnectionPolicy.selectMode(it.settings, m)) }
+                            if ((cfg.torAll || m != mode) && status.state == Tunnel.State.CONNECTED) onConnect() // reconnect with the new mode
                         },
                             label = { Text(when (m) { Mode.AUTO -> "Авто"; Mode.SERVERS -> "Серверы"; Mode.BYEDPI -> "ByeDPI"; Mode.HYBRID -> "Гибрид" }) })
                     }
                 }
-                Text(when (mode) {
+                Text(if (cfg.torAll) "Встроенный Tor без VLESS-сервера. TCP идёт через Tor, кроме сохранённых прямых исключений. Произвольный UDP не поддерживается; на мобильной сети могут понадобиться мосты."
+                else when (mode) {
                     Mode.AUTO -> "Сам обновит подписки, проверит серверы, подберёт маскировку и обход DPI. Если маскировку распознают — сменит её сам"
                     Mode.SERVERS -> "Весь трафик через выбранные серверы (запросы распределяются между ними)"
                     Mode.BYEDPI -> "Без сервера: обход DPI встроенными ByeDPI/zapret (YouTube, Discord и т.п.). Не помогает от блокировки по IP"
                     Mode.HYBRID -> "YouTube/Discord — через обход DPI, остальное (и Telegram) — через серверы"
                 }, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 6.dp))
+                if (cfg.torAll) TextButton(onClick = { torDialog = true }) { Text("Настроить Tor: мосты и ротация") }
                 Spacer(Modifier.height(10.dp))
                 val st = cfg
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -237,7 +252,7 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
         }
         Spacer(Modifier.height(12.dp))
 
-        if (mode != Mode.BYEDPI) {
+        if (!cfg.torAll && mode != Mode.BYEDPI) {
             Card(Modifier.fillMaxWidth().clickable { openServers() }, shape = RoundedCornerShape(14.dp),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
                 Column(Modifier.padding(14.dp)) {
@@ -262,7 +277,7 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
                 }
             }
         }
-        if (mode != Mode.SERVERS) {
+        if (!cfg.torAll && mode != Mode.SERVERS) {
             Spacer(Modifier.height(10.dp))
             OutlinedButton(onClick = { Actions.findDpi() }, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text("Подобрать обход DPI для этой сети") }
         }

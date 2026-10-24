@@ -20,8 +20,12 @@ class TorRotator(
     /** Restrict exits to these ISO countries; empty = worldwide NEWNYM rotation. */
     private val countries: List<String> = emptyList(),
     private val cookieHex: String,
+    /** Runtime opts in; reset only the exit preference managed by the rotator. */
+    private val clearInheritedCountries: Boolean = false,
 ) {
     private var connected = false
+    private var pinnedByRotation = false
+    private var lastAttemptAt: Long? = null
     private var lastError: String? = null
 
     val lastErrorOr: String? get() = lastError
@@ -31,9 +35,12 @@ class TorRotator(
         try {
             control.connect(cookieHex)
             if (countries.isNotEmpty()) control.setExitCountries(countries)
+            else if (clearInheritedCountries) control.clearExitCountries()
+            pinnedByRotation = false
+            lastAttemptAt = null
             // Seed the cadence clock at connect: the first rotation lands after the
             // interval, not instantly — the freshly started Tor already has a circuit.
-            rotation.markRotated(System.currentTimeMillis())
+            rotation.markRotated()
             connected = true
             lastError = null
             return true
@@ -60,10 +67,17 @@ class TorRotator(
     fun tick(nowMs: Long = System.currentTimeMillis()): Boolean {
         if (!connected) return false
         if (!rotation.shouldRotate(nowMs)) return false
+        if (lastAttemptAt?.let { nowMs < it || nowMs - it < 30_000L } == true) return false
+        lastAttemptAt = nowMs
         return try {
-            rotation.pick(nowMs)?.let { best ->
+            val best = rotation.pick(nowMs)
+            if (best != null) {
                 control.setExitCountries(listOf(best))
+                pinnedByRotation = true
                 rotation.notePicked(best)
+            } else if (pinnedByRotation && countries.isEmpty()) {
+                control.clearExitCountries()
+                pinnedByRotation = false
             }
             control.signalNewNym()
             rotation.markRotated(nowMs)

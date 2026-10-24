@@ -26,6 +26,10 @@ class TorRotation(
     private val thresholdFloorMs: Long = 1500,
     /** Extra patience multiplier for slow-but-working transports like Snowflake. */
     private val snowflakeFactor: Double = 2.0,
+    /** Periodic user requests are independent of the adaptive improvement gate. */
+    private val periodic: Boolean = false,
+    private val fastOnly: Boolean = false,
+    private val freshnessMs: Long = 15 * 60 * 1000,
     private val now: () -> Long = System::currentTimeMillis,
 ) {
     enum class Transport { DIRECT, OBFS4, SNOWFLAKE }
@@ -49,7 +53,7 @@ class TorRotation(
      * gets blacklisted instead of polluting the history).
      */
     fun record(country: String, latencyMs: Long, transport: Transport = Transport.DIRECT, nowMs: Long = now()): Boolean {
-        if (!country.matches(Regex("[a-z]{2}")) || latencyMs <= 0) return false
+        if (!online || !country.matches(Regex("[a-z]{2}")) || latencyMs <= 0) return false
         val lim = ceilingMs(transport)
         if (latencyMs > lim) {
             blacklist[country] = nowMs
@@ -77,7 +81,10 @@ class TorRotation(
 
     /** Countries eligible for picking: have history, not blacklisted (expired entries pruned). */
     fun candidates(nowMs: Long = now()): List<String> =
-        history.keys.filter { !isBlacklisted(it, nowMs) }
+        history.keys.filter { country ->
+            val seen = history.getValue(country).lastSeenMs
+            nowMs >= seen && nowMs - seen <= freshnessMs && !isBlacklisted(country, nowMs)
+        }
 
     /**
      * Weighted pick biased to the fastest EMA, with exploration: a random candidate
@@ -87,6 +94,8 @@ class TorRotation(
         val cs = candidates(nowMs)
         if (cs.isEmpty()) return null
         val sorted = cs.sortedBy { history[it]?.ema ?: Double.MAX_VALUE }
+        // Strict preference never explores slower countries outside the measured winner.
+        if (fastOnly) return sorted.first()
         // a clear winner (≥2x faster than the next) is picked deterministically
         val best = history[sorted.first()]?.ema
         if (sorted.size > 1 && best != null && best * 2.0 < (history[sorted[1]]?.ema ?: best * 2.0)) return sorted.first()
@@ -109,6 +118,7 @@ class TorRotation(
     /** Adaptive rotate decision: cadence floor, absolute threshold floor, hysteresis vs the best alternative. */
     fun shouldRotate(nowMs: Long = now()): Boolean {
         if (!online || nowMs - lastRotationAt < rotateEveryMs) return false
+        if (periodic) return true // NEWNYM may still reuse an exit; existing streams are not killed.
         val cur = lastCountry ?: return candidates(nowMs).isNotEmpty()
         val curEma = history[cur]?.ema ?: return candidates(nowMs).isNotEmpty()
         val best = candidates(nowMs).minByOrNull { history[it]?.ema ?: Double.MAX_VALUE } ?: return false

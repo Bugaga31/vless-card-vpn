@@ -32,25 +32,25 @@ class TorSafetyR162Test {
         }
     }
     @Test fun `offline rotation does not send NEWNYM`() {
-        val r = TorRotation(rotateEveryMs = 1)
+        val r = TorRotation(rotateEveryMs = 1, now = { 0L })
         r.record("de", 100); r.markRotated(0); r.setOnline(false)
         assertFalse(r.shouldRotate(100)); r.setOnline(true); assertTrue(r.shouldRotate(100))
     }
     @Test fun `closed rotator cannot rotate`() {
-        val c = Control(); val r = TorRotation(rotateEveryMs = 1)
+        val c = Control(); val r = TorRotation(rotateEveryMs = 1, now = { 0L })
         val f = TorRotator(c, r, cookieHex = "01")
         f.connect(); r.record("de", 100); r.markRotated(0); f.close()
         assertFalse(f.tick(100)); assertEquals(0, c.signals)
     }
     @Test fun `failed reconnect invalidates previous connection`() {
-        val c = Control(); val r = TorRotation(rotateEveryMs = 1)
+        val c = Control(); val r = TorRotation(rotateEveryMs = 1, now = { 0L })
         val f = TorRotator(c, r, cookieHex = "01")
         f.connect(); r.record("de", 100); r.markRotated(0)
         c.failConnect = true; f.connect()
         assertFalse(f.tick(100)); assertEquals(0, c.signals)
     }
     @Test fun `failed control connection is retryable without rotating`() {
-        val c = Control(); val r = TorRotation(rotateEveryMs = 1)
+        val c = Control(); val r = TorRotation(rotateEveryMs = 1, now = { 0L })
         val f = TorRotator(c, r, cookieHex = "01")
         c.failConnect = true; assertFalse(f.connect())
         c.failConnect = false; assertTrue(f.connect())

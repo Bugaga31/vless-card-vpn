@@ -49,6 +49,12 @@ open class TorControl(private val host: String = "127.0.0.1", private val port: 
         if (!r.startsWith("250")) throw IOException("SETCONF failed: $r")
     }
 
+    /** Remove our previous country preference after a physical-network/session change. */
+    open fun clearExitCountries() {
+        val r = command("RESETCONF", "ExitNodes")
+        if (!r.startsWith("250 ")) throw IOException("RESETCONF failed: $r")
+    }
+
     /** true when at least one circuit is established. */
     fun circuitEstablished(): Boolean = try {
         command("GETINFO", "status/circuit-established").contains("status/circuit-established=1")
