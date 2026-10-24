@@ -131,12 +131,12 @@ object XrayConfigBuilder {
         if (security == "tls" || security == "reality") {
             val sni0 = s.sni.ifEmpty { hostSni.takeIf { it.isNotEmpty() } ?: s.address.takeIf { !IPV4_LITERAL.matches(it) && ':' !in it }.orEmpty() }
             // «Белый SNI»: the certificate is pinned by hash, so the name in the hello is free to look like a Russian site
-            val sni = if (mask != null && mask.sni.isNotEmpty() && security == "tls" && s.pcs.isNotEmpty() && s.protocol != "hysteria2") mask.sni else sni0
+            val sni = if (mask != null && mask.sni.isNotEmpty() && security == "tls" && s.pcs.isNotEmpty() && s.ech.isEmpty() && s.protocol != "hysteria2") mask.sni else sni0
             val t = JSONObject()
             if (sni.isNotEmpty()) t.put("serverName", sni)
             if (s.protocol != "hysteria2") t.put("fingerprint", fp)
             if (security == "tls") {
-                val alpn = if (mask != null && mask.alpn.isNotEmpty() && s.protocol != "hysteria2") csv(mask.alpn)
+                val alpn = if (mask != null && mask.alpn.isNotEmpty() && s.protocol != "hysteria2" && Masks.signatureOk(mask, s)) csv(mask.alpn)
                     else csv(s.alpn).ifEmpty { if (s.protocol == "hysteria2") listOf("h3") else emptyList() }
                 if (alpn.isNotEmpty()) t.put("alpn", JSONArray(alpn))
                 // Xray 26 removed allowInsecure: self-signed servers are pinned by certificate SHA-256 instead.

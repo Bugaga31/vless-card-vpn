@@ -54,7 +54,10 @@ class ConfigTest {
     }
 
     @Test fun maskCatalog() {
-        assertEquals(556, Masks.ALL.size)
+        assertEquals(570, Masks.ALL.size) // 556 existing + 7 fingerprints × (direct/current engine).
+        val fastIds = Masks.FINGERPRINTS.flatMap { listOf("$it.hello.fast", "$it.hello.fast.b") }.toSet()
+        assertEquals(fastIds, Masks.ALL.filter { ".hello.fast" in it.id }.map { it.id }.toSet())
+        fastIds.forEach { id -> val mask = Masks.byId(id)!!; assertEquals("0-1", mask.delay); assertEquals("10", mask.maxSplit) }
         assertEquals(161, Masks.ALL.count { it.viaByeDpi && it.dpi != Masks.CURRENT_DPI })
         val r = LinkParser.parse(reality)!!
         val ws = LinkParser.parse(links[1])!!

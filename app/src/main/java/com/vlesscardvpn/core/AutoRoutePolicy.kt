@@ -30,7 +30,7 @@ object AutoRoutePolicy {
         if (server.protocol !in setOf("vless", "vmess", "trojan")) return emptyList()
         val allowed = Masks.searchOrder(false, server, settings.maskFamilies, settings.maskFps).map { it.id }.toSet()
         val nativeChrome = server.fp.ifEmpty { "chrome" } == "chrome"
-        return listOf("", "chrome.n", "chrome.h6").filter { id ->
+        return listOf("", "chrome.n", "chrome.hello.fast").filter { id ->
             id != current && (id.isEmpty() || id in allowed) &&
                 !(nativeChrome && (id == "chrome.n" || id.isEmpty() && current == "chrome.n"))
         }.take(2)

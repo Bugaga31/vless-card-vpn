@@ -14,6 +14,11 @@ object MyMasks {
     private val RANGE = Regex("^\\d{1,4}(-\\d{1,4})?$")
     private val LINK = Regex("vcmask://[A-Za-z0-9_\\-=]+(#[^\\s]*)?")
     private val SNI = Regex("^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$")
+    private fun orderedRange(value: String, minimum: Int): Boolean {
+        if (!RANGE.matches(value)) return false
+        val parts = value.split('-').map { it.toIntOrNull() ?: return false }
+        return parts.first() >= minimum && parts.last() >= parts.first()
+    }
     private val NOISE_KEYS = setOf("rand", "type", "packet", "delay")
 
     fun toJson(m: Mask): JSONObject = JSONObject().put("t", m.title).put("fp", m.fingerprint)
@@ -42,16 +47,16 @@ object MyMasks {
         val fp = o.optString("fp", "chrome").ifEmpty { "chrome" }
         require(fp in Masks.FINGERPRINTS) { "Неизвестный отпечаток: $fp" }
         val packets = o.optString("p")
-        require(packets.isEmpty() || packets == "tlshello" || RANGE.matches(packets)) { "Пакеты: «tlshello» или диапазон вида 1-3" }
+        require(packets.isEmpty() || packets == "tlshello" || orderedRange(packets, 1)) { "Пакеты: «tlshello» или диапазон вида 1-3" }
         val length = o.optString("l"); val delay = o.optString("d")
         val lengths = o.optString("ls"); val delays = o.optString("ds")
         if (packets.isNotEmpty()) {
             if (lengths.isNotEmpty()) {
                 val a = lengths.split(','); val b = delays.split(',')
-                require(a.all { RANGE.matches(it.trim()) } && b.all { RANGE.matches(it.trim()) }) { "Лесенка: диапазоны через запятую, например 1-1,2-4,5-10" }
+                require(a.all { orderedRange(it.trim(), 1) } && b.all { orderedRange(it.trim(), 0) }) { "Лесенка: диапазоны через запятую, например 1-1,2-4,5-10" }
                 require(a.size == b.size) { "Лесенка: длин ${a.size}, а пауз ${b.size} — должно быть поровну" }
                 require(a.size <= 16) { "Лесенка: не больше 16 ступенек" }
-            } else require(RANGE.matches(length) && RANGE.matches(delay)) { "Дробление: укажите размер и паузу, например 10-30 и 5-10" }
+            } else require(orderedRange(length, 1) && orderedRange(delay, 0)) { "Дробление: укажите размер и паузу, например 10-30 и 5-10" }
         }
         val maxSplit = o.optString("ms")
         require(maxSplit.isEmpty() || maxSplit.toIntOrNull()?.let { it in 0..64 } == true) { "Макс. кусков: число 0-64" }
@@ -70,6 +75,9 @@ object MyMasks {
         val hop = o.optString("h")
         require(hop.isEmpty() || hop == Masks.HOP_LOCAL || hop == Masks.HOP_WARP) { "Неизвестный режим смены порта" }
         val dpi = o.optString("dpi").takeIf { it == Masks.CURRENT_DPI }.orEmpty()
+        require(dpi.isEmpty() || (noise.isEmpty() && nj.isEmpty() && hop.isEmpty())) {
+            "Локальный TCP-движок DPI нельзя соединять с UDP-шумом или сменой портов"
+        }
         require(!(packets.isNotEmpty() && (noise.isNotEmpty() || nj.isNotEmpty() || hop.isNotEmpty()))) {
             "Дробление (TCP) и шум/порты (UDP) — для разных серверов: сделайте две маскировки"
         }

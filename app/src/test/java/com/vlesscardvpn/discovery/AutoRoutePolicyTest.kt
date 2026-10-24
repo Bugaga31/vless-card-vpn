@@ -32,16 +32,16 @@ class AutoRoutePolicyTest {
     }
     @Test fun trialsAreBoundedCompatibleAndDoNotRepeatNativeChrome() {
         val trials=AutoRoutePolicy.maskTrials(server,"chrome.h4",Settings())
-        assertEquals(listOf("","chrome.h6"),trials)
+        assertEquals(listOf("","chrome.hello.fast"),trials)
         assertTrue(trials.filter { it.isNotEmpty() }.all { Masks.compatible(Masks.byId(it)!!,server) })
-        assertEquals(listOf("chrome.h6"),AutoRoutePolicy.maskTrials(server,"chrome.n",Settings()))
+        assertEquals(listOf("chrome.hello.fast"),AutoRoutePolicy.maskTrials(server,"chrome.n",Settings()))
     }
     @Test fun datagramServersAreNotGivenTcpFragmentMasks() {
         assertTrue(AutoRoutePolicy.maskTrials(server.copy(protocol="wireguard"),"",Settings()).isEmpty())
     }
     @Test fun userFingerprintFilterIsRespectedForOptionalFragment() {
         val trials=AutoRoutePolicy.maskTrials(server,"chrome.h4",Settings(maskFps=listOf("firefox")))
-        assertFalse("chrome.h6" in trials)
+        assertFalse("chrome.hello.fast" in trials)
     }
     @Test fun onlySuccessfulFullFasterDownloadChangesMask() {
         assertFalse(AutoRoutePolicy.improved(state(),"wifi",now,Probe(10,null,null,kbps=9000)))

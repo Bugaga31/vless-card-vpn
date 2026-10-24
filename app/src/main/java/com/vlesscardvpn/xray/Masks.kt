@@ -79,9 +79,12 @@ object Masks {
     /** Signature layers need a suitable server; then the usual rules apply. */
     fun signatureOk(m: Mask, s: com.vlesscardvpn.model.Server): Boolean {
         val tls = s.security == "tls" && s.protocol != "hysteria2" && s.isTcpBased
-        if (m.sni.isNotEmpty() && !(tls && s.pcs.isNotEmpty())) return false
+        if (m.sni.isNotEmpty() && !(tls && s.pcs.isNotEmpty() && s.ech.isEmpty())) return false
         if (m.alpn.isNotEmpty()) {
             if (!tls) return false
+            // An explicitly configured ALPN is a server contract, not a cosmetic cover value.
+            fun tokens(value: String) = value.split(',').map { it.trim() }.filter { it.isNotEmpty() }
+            if (s.alpn.isNotBlank() && tokens(m.alpn) != tokens(s.alpn)) return false
             when (s.network) {
                 "ws", "httpupgrade" -> if (m.alpn != "http/1.1") return false
                 "grpc", "h2", "xhttp" -> if (!m.alpn.startsWith("h2")) return false
@@ -94,7 +97,15 @@ object Masks {
         return true
     }
 
-    fun compatible(m: Mask, s: com.vlesscardvpn.model.Server): Boolean = signatureOk(m, s) && compatible0(m, s)
+    fun compatible(m: Mask, s: com.vlesscardvpn.model.Server): Boolean {
+        if (!signatureOk(m, s)) return false
+        // Constraints intersect: a noise/hop early return must not bypass TCP-only engine checks.
+        if (m.viaByeDpi && !s.isTcpBased) return false
+        if (m.hop.isNotEmpty() && m.hop !in setOf(HOP_LOCAL, HOP_WARP)) return false
+        if (m.packets.isNotEmpty() && (m.hasNoise || m.hop.isNotEmpty())) return false
+        if (m.packets == "tlshello" && (s.security !in setOf("tls", "reality") || !s.isTcpBased)) return false
+        return compatible0(m, s)
+    }
 
     private fun compatible0(m: Mask, s: com.vlesscardvpn.model.Server): Boolean = when {
         m.hop == HOP_WARP -> isWarp(s)
@@ -115,6 +126,7 @@ object Masks {
     /** (id, title, packets, length, delay, maxSplit). */
     private val FRAGMENTS = listOf(
         listOf("n", "без дробления", "", "", "", ""),
+        listOf("hello.fast", "лёгкое Hello 100–200 байт · пауза 0–1 мс", "tlshello", "100-200", "0-1", "10"),
         listOf("h1", "дробление Hello 1-3 байт", "tlshello", "1-3", "1-3", "0"),
         listOf("h2", "дробление Hello 3-8", "tlshello", "3-8", "2-5", "0"),
         listOf("h3", "дробление Hello 10-30", "tlshello", "10-30", "5-10", "0"),
@@ -171,9 +183,8 @@ object Masks {
     private val NOISE_BY_ID = (NOISES + WG_NOISES).associate { it[0] to it[2] }
     fun noiseItems(id: String): String? = NOISE_BY_ID[id]
 
-    /**
-     * 7 fingerprints × 22 fragment modes × (direct | via the current DPI strategy) = 308, 4 UDP + 10 WireGuard noise masks, 18 port-hopping,
-     * plus 7 fingerprints × 21 fixed strategies (5 own VLESS Card, 7 zapret, 9 ByeDPI) = 147. Total 487 + 33 signature (SNI, MSS, ALPN, one stream, TFO, IPv6) = 520 (+ «Мои маскировки» and auto masks of MaskLab).
+    /** Registered combinations: existing fingerprints × fragment profiles × direct/current DPI,
+     * plus compatible UDP, signature and fixed-engine variants. ConfigTest checks exact IDs/counts.
      */
     val ALL: List<Mask> = buildList {
         for (via in listOf(false, true)) for (f in FRAGMENTS) for (fp in FINGERPRINTS) {
@@ -280,7 +291,14 @@ object Masks {
      * bytes (not only the handshake) — pages still open fast, but video crawls. Such masks are tried later and lose
      * to a lighter one that also passes.
      */
-    fun cost(m: Mask): Int = (when { m.mss in 1..200 -> 3; m.mss in 201..400 -> 2; m.mss > 0 -> 1; else -> 0 }) + (if (m.mux) 1 else 0) + (if (m.viaByeDpi) 1 else 0)
+    private fun fragmentCost(m: Mask): Int {
+        if (m.packets.isEmpty()) return 0
+        val ranges = m.delays.ifEmpty { m.delay }.split(',')
+        val pause = ranges.mapNotNull { it.trim().substringAfterLast('-').toIntOrNull() }.maxOrNull() ?: 0
+        // Heuristic startup overhead only; a real full-body sample still decides the winner.
+        return when { pause > 60 -> 3; pause > 20 -> 2; pause > 1 -> 1; else -> 0 }
+    }
+    fun cost(m: Mask): Int = fragmentCost(m) + (when { m.mss in 1..200 -> 3; m.mss in 201..400 -> 2; m.mss > 0 -> 1; else -> 0 }) + (if (m.mux) 1 else 0) + (if (m.viaByeDpi) 1 else 0)
 
     /** Finer than [family]: what kind of trick it is (the mask search tries one of every kind first). */
     fun kind(m: Mask): String = family(m).let { f ->
@@ -303,7 +321,7 @@ object Masks {
         }
 
     fun searchOrder(byeDpiAvailable: Boolean, server: com.vlesscardvpn.model.Server? = null): List<Mask> {
-        val first = listOf("chrome.n", "vc.turbo.sni.tfo", "vc.turbo.v6.tfo", "vc.turbo.sni.v6", "vc.turbo.mux.v6", "vc.sni.vk.com.fast", "vc.sni.ya.ru.fast", "vc.sni.yandex.ru.fast", "vc.sni.vkvideo.ru.fast", "vc.sni.vk.com", "vc.sni.yandex.ru", "vc.sni.vkvideo.ru", "vc.mss300", "vc.ghost", "vc.sni.ya.ru.l2", "vc.mss120", "vc.alpn.br", "vc.mux", "vc.ghost.sni", "vc.mss120.l6", "vc.ghost.v6", "vc.sni.vk.com.mss120", "vc.tfo", "vc.v6", "vc.ghost.tfo", "vc.alpn.br.h1", "vc.mux.l5", "chrome.z5", "chrome.z10", "chrome.z1", "chrome.z5.hw", "chrome.z6.hw", "chrome.z9", "chrome.z1.hl", "chrome.z11.hw", "chrome.z12", "chrome.z15", "chrome.z16", "chrome.z7", "chrome.hw", "chrome.z2", "chrome.z3", "chrome.z4", "chrome.h4", "chrome.l1", "firefox.l2", "chrome.l4", "safari.l5", "firefox.l6", "chrome.p6", "firefox.l7", "chrome.h7", "safari.p7", "chrome.p2", "firefox.h2", "safari.p3", "edge.h5", "chrome.h1", "ios.p1", "safari.l3", "chrome.l2.b",
+        val first = listOf("chrome.n", "chrome.hello.fast", "vc.turbo.sni.tfo", "vc.turbo.v6.tfo", "vc.turbo.sni.v6", "vc.turbo.mux.v6", "vc.sni.vk.com.fast", "vc.sni.ya.ru.fast", "vc.sni.yandex.ru.fast", "vc.sni.vkvideo.ru.fast", "vc.sni.vk.com", "vc.sni.yandex.ru", "vc.sni.vkvideo.ru", "vc.mss300", "vc.ghost", "vc.sni.ya.ru.l2", "vc.mss120", "vc.alpn.br", "vc.mux", "vc.ghost.sni", "vc.mss120.l6", "vc.ghost.v6", "vc.sni.vk.com.mss120", "vc.tfo", "vc.v6", "vc.ghost.tfo", "vc.alpn.br.h1", "vc.mux.l5", "chrome.z5", "chrome.z10", "chrome.z1", "chrome.z5.hw", "chrome.z6.hw", "chrome.z9", "chrome.z1.hl", "chrome.z11.hw", "chrome.z12", "chrome.z15", "chrome.z16", "chrome.z7", "chrome.hw", "chrome.z2", "chrome.z3", "chrome.z4", "chrome.h4", "chrome.l1", "firefox.l2", "chrome.l4", "safari.l5", "firefox.l6", "chrome.p6", "firefox.l7", "chrome.h7", "safari.p7", "chrome.p2", "firefox.h2", "safari.p3", "edge.h5", "chrome.h1", "ios.p1", "safari.l3", "chrome.l2.b",
             "android.h3", "firefox.h4", "chrome.n.b", "chrome.h4.b", "firefox.p4", "chrome.p5", "chrome.h6", "qq.h2",
             "safari.n", "firefox.n", "edge.p2", "ios.h4", "android.p3", "safari.h1", "chrome.p1.b", "firefox.h3.b",
             // own VLESS Card masking and zapret in front of the server connection

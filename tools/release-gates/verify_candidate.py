@@ -25,7 +25,7 @@ def test_totals(paths):
         r = ET.parse(path).getroot()
         for k in totals:
             totals[k] += int(r.get(k, '0'))
-    require(totals['tests'] >= 482, 'Missing JVM regressions')
+    require(totals['tests'] >= 494, 'Missing JVM regressions')
     require(not any(totals[k] for k in ('failures', 'errors', 'skipped')), 'JVM gate failed')
     return totals
 

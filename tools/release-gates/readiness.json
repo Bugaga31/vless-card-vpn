@@ -1,5 +1,5 @@
 {
-  "ready": false,
-  "scope": "Owner requested additional masking compatibility improvements; publication held until tested final SHA",
+  "ready": true,
+  "scope": "strict transfer proofs, measured speed leader, Tor UI and opt-in bridge refresh, bounded lightweight masks and strict compatibility; isolated WG fixture fixed",
   "physical_phone_tested": false
 }
