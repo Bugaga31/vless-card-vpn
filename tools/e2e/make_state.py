@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
 """Writes app state.json files for the emulator e2e cases (servers on the host = 10.0.2.2)."""
-import json, sys
+import hashlib, json, ssl, sys
+from pathlib import Path
 U = "a00975c5-597e-4c22-a7a7-a84ce5e0691e"
 PBK = sys.argv[2]
+# Pin the exact ephemeral host fixture certificate; synthetic aliases need no public DNS.
+CERT_PIN = hashlib.sha256(ssl.PEM_cert_to_DER_cert((Path(sys.argv[1]) / "c.pem").read_text())).hexdigest()
 H = "10.0.2.2"
 reality = {"name": "e2e-reality", "protocol": "vless", "address": H, "port": 8443, "secret": U, "flow": "xtls-rprx-vision",
            "security": "reality", "sni": "www.microsoft.com", "fp": "chrome", "pbk": PBK, "sid": "6ba85179e30d4fc2"}
 ws = {"name": "e2e-ws-tls", "protocol": "vless", "address": H, "port": 8444, "secret": U, "network": "ws", "path": "/ws",
-      "security": "tls", "sni": "test.local", "insecure": True}
+      "security": "tls", "sni": "test.local", "insecure": True, "pcs": CERT_PIN}
 xhttp = {"name": "e2e-xhttp", "protocol": "vless", "address": H, "port": 8447, "secret": U, "network": "xhttp", "path": "/x",
          "mode": "auto", "security": "reality", "sni": "www.microsoft.com", "pbk": PBK, "sid": "ab"}
 dead = {"name": "e2e-dead", "protocol": "vless", "address": H, "port": 8999, "secret": U, "security": "reality",
