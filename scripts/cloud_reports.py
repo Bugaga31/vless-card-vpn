@@ -184,10 +184,8 @@ def problems(reports):
 
 def main():
     os.makedirs("out", exist_ok=True)
-    try:
-        prev = json.load(urllib.request.urlopen(PREV, timeout=20))
-    except Exception:
-        prev = {}
+    from cloud_state import prior
+    prev = prior('cloud_state.json')
     if not TOKEN:
         print("REPORT_TOKEN is empty: no reports read")
         reports, issues = [], []
@@ -239,11 +237,30 @@ def main():
             else: api("POST", "/issues", {"title": title[:200], "body": body})
         except Exception as ex:
             print("problem issue failed:", ex)
-    for i in issues:
-        if i.get("title", "").startswith("[r]"):
-            try: api("PATCH", f"/issues/{i['number']}", {"state": "closed", "state_reason": "completed"})
-            except Exception as ex: print("close failed:", ex)
+    acknowledgements = [i['number'] for i in issues if i.get('title', '').startswith('[r]')
+                        and isinstance(parse(i.get('body')), dict)]
+    # Do not consume reports before the durable servers commit has succeeded.
+    if os.environ.get('CLOUD_DEFER_ACK') == '1':
+        with open('out/report-acks.json', 'w') as f:
+            json.dump(acknowledgements, f)
+    else:
+        acknowledge(acknowledgements)
+
+
+def acknowledge(numbers):
+    for number in numbers:
+        if type(number) is not int or number <= 0:
+            raise ValueError('Invalid report acknowledgement')
+        try:
+            api('PATCH', f'/issues/{number}', {'state': 'closed', 'state_reason': 'completed'})
+        except Exception:
+            # Keep the report open for recovery; never print response bodies or credentials.
+            print('Warning: report acknowledgement failed; report remains open')
 
 
 if __name__ == "__main__":
-    main()
+    if sys.argv[1:] == ['--ack']:
+        with open('out/report-acks.json') as f:
+            acknowledge(json.load(f))
+    else:
+        main()

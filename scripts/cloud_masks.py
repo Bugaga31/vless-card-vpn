@@ -86,11 +86,8 @@ def measure(ob, root):
 
 def main():
     now = int(time.time()); root = pathlib.Path('out'); stats = {}
-    try:
-        with urllib.request.urlopen('https://raw.githubusercontent.com/Bugaga31/vless-card-vpn/servers/mask-stats.json', timeout=8) as response:
-            raw = response.read(1000001)
-        if len(raw) <= 1000000: stats = trusted_stats(json.loads(raw), now)
-    except Exception: print('Mask history unavailable; starting with no measured prior')
+    from cloud_state import prior
+    stats = trusted_stats(prior('mask-stats.json'), now)
     hist = json.loads((root/'history.json').read_text())
     links = [l for l, h in hist.items() if h.get('samples') and h['samples'][-1][1] is True and now - h.get('t', 0) in range(1801)]
     links.sort(key=lambda l: -measured_kbps(hist[l], now))

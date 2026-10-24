@@ -204,11 +204,8 @@ def speeds(links):
 
 def load_history():
     """link -> {"ok": runs it worked, "n": runs checked, "ms": smoothed ms, "t": last seen}: the cloud's memory."""
-    try:
-        import urllib.request
-        with urllib.request.urlopen(HIST_URL, timeout=20) as r: return json.loads(r.read())
-    except Exception:
-        return {}
+    from cloud_state import prior
+    return prior('history.json')
 
 
 def learn(hist, res, now):

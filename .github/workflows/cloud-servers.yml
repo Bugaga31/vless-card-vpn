@@ -3,25 +3,40 @@ on:
   schedule: [{ cron: '*/10 * * * *' }]
   workflow_dispatch:
   push:
-    branches: [main]
-    paths: ['scripts/cloud_servers.py', 'scripts/cloud_reports.py', 'scripts/cloud_real.py', 'scripts/cloud_manifest.py', 'scripts/cloud_masks.py', 'config/cloud-recipes.json', '.github/workflows/cloud-servers.yml']
+    branches: [main, fix/cloud-continuity-163]
+    paths: ['scripts/cloud_servers.py', 'scripts/cloud_reports.py', 'scripts/cloud_real.py', 'scripts/cloud_manifest.py', 'scripts/cloud_masks.py', 'scripts/cloud_state.py', 'scripts/test_cloud_continuity.py', 'config/cloud-recipes.json', '.github/workflows/cloud-servers.yml']
 permissions:
-  contents: write
-  actions: write
+  contents: read
 concurrency: { group: cloud-servers, cancel-in-progress: false }
 jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p 'test_cloud_*.py'
   collect:
+    needs: validate
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: Read persistent cloud branch (independent of APK version)
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: servers
+          path: .cloud-state
+          persist-credentials: false
+      - name: Freeze one prior for every shard and learner
+        run: python3 scripts/cloud_state.py freeze .cloud-state out/prior
       - name: Validate cloud policies
         run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p 'test_cloud_*.py'
       - name: Collect every public catalog and ping every endpoint
         run: mkdir -p out && python3 scripts/cloud_servers.py
       - name: Freeze history and exact shard assignments
         run: CLOUD_PREPARE=1 python3 scripts/cloud_real.py
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: cloud-catalog
           path: out/
@@ -35,8 +50,8 @@ jobs:
       matrix:
         shard: [0, 1, 2, 3]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           name: cloud-catalog
           path: out/
@@ -48,23 +63,25 @@ jobs:
           curl -fsSL -o /tmp/xray.zip https://github.com/XTLS/Xray-core/releases/download/v26.9.30/Xray-linux-64.zip
           mkdir -p /tmp/xray && unzip -qo /tmp/xray.zip -d /tmp/xray
           XRAY=/tmp/xray/xray python3 scripts/cloud_real.py
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: cloud-result-${{ matrix.shard }}
           path: out/result-*.json
           if-no-files-found: error
           retention-days: 1
   publish:
+    permissions:
+      contents: write
     needs: [collect, check]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           name: cloud-catalog
           path: out/
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           pattern: cloud-result-*
           merge-multiple: true
@@ -79,7 +96,8 @@ jobs:
       - name: Merge measured phone reports
         env:
           REPORT_TOKEN: ${{ secrets.REPORT_TOKEN }}
-        run: python3 scripts/cloud_reports.py || echo "::warning::reports merge failed"
+          CLOUD_DEFER_ACK: '1'
+        run: python3 scripts/cloud_reports.py
       - name: Learn bounded safe mask recipes from working routes (independent of APK)
         env:
           XRAY: /tmp/xray/xray
@@ -88,13 +106,29 @@ jobs:
         run: python3 scripts/cloud_manifest.py
       - name: Publish to the servers branch only after all checks succeeded
         run: |
-          cd out
-          rm -f check-queue.json
-          git init -q -b servers
-          git config user.name "cloud-check"; git config user.email "cloud-check@users.noreply.github.com"
-          git add -A && git commit -qm "cloud check $(date -u +%F' '%H:%M)"
-          git push -qf "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" servers
+          set -euo pipefail
+          base=$(python3 -c 'import json; print(json.load(open("out/prior/snapshot.json"))["revision"])')
+          git fetch --no-tags origin servers
+          test "$(git rev-parse FETCH_HEAD)" = "$base" || { echo "::error::Cloud branch advanced; refusing stale publication"; exit 1; }
+          dest="$RUNNER_TEMP/cloud-publish"
+          git worktree add --detach "$dest" "$base"
+          python3 scripts/cloud_state.py stage out "$dest"
+          git -C "$dest" config user.name "cloud-check"
+          git -C "$dest" config user.email "cloud-check@users.noreply.github.com"
+          git -C "$dest" add -A
+          if ! git -C "$dest" diff --cached --quiet; then
+            git -C "$dest" commit -qm "cloud check $(date -u +%F' '%H:%M)"
+            # Normal fast-forward push: concurrent changes are rejected, never overwritten.
+            git -C "$dest" push origin HEAD:servers
+          fi
+      - name: Acknowledge reports only after durable publication
+        env:
+          REPORT_TOKEN: ${{ secrets.REPORT_TOKEN }}
+        run: |
+          if test -f out/report-acks.json; then python3 scripts/cloud_reports.py --ack; fi
   next:
+    permissions:
+      actions: write
     needs: [collect, check, publish]
     if: always() && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
