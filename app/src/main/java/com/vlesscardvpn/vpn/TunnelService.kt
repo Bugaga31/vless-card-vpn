@@ -326,7 +326,7 @@ class TunnelService : VpnService() {
         val caps = cm?.getNetworkCapabilities(network)
         val mtu = com.vlesscardvpn.core.TransportPolicy.mtu(caps?.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) == true,
             warpChained || usedServers.any { Masks.isWarp(it) }, if (Build.VERSION.SDK_INT >= 29) cm?.getLinkProperties(network)?.mtu ?: 0 else 0)
-        val b = Builder().setSession(if (settings.randomTun || settings.quietNotification) "Sync" else "VLESS Card").setMtu(mtu)
+        val b = Builder().setSession(if (settings.randomTun || settings.quietNotification) "Sync" else "Equalizer VPN").setMtu(mtu)
             .addAddress(v4, 30).addRoute("0.0.0.0", 0)
             // No IPv6 in the tunnel: Android then refuses IPv6 at once and apps (Chrome) fall back to IPv4 instantly.
             // With an IPv6 route the local TUN «accepted» IPv6 connections and Xray dropped them — Chrome saw a
@@ -942,7 +942,7 @@ class TunnelService : VpnService() {
         val stop = PendingIntent.getService(this, 1, Intent(this, TunnelService::class.java).setAction(ACTION_STOP), PendingIntent.FLAG_IMMUTABLE)
         val n = (if (Build.VERSION.SDK_INT >= 26) Notification.Builder(this, CHANNEL) else @Suppress("DEPRECATION") Notification.Builder(this))
             .setSmallIcon(if (quiet) android.R.drawable.stat_notify_sync_noanim else android.R.drawable.ic_lock_lock)
-            .setContentTitle(if (quiet) "Синхронизация" else "VLESS Card").setContentText(if (quiet) "Активно" else text)
+            .setContentTitle(if (quiet) "Синхронизация" else "Equalizer VPN").setContentText(if (quiet) "Активно" else text)
             .setContentIntent(open).setOngoing(true).setOnlyAlertOnce(true)
             .apply {
                 if (paused) addAction(Notification.Action.Builder(null, "Включить сейчас",

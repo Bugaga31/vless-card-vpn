@@ -71,7 +71,7 @@ fun DeviceScreen() {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text("Ресурсы под контролем", fontSize = 20.sp)
                 Text(power.reason, color = MaterialTheme.colorScheme.primary, fontSize = 14.sp)
-                Text("Профиль VLESS Card: " + when (settings.powerProfile) {
+                Text("Профиль Equalizer VPN: " + when (settings.powerProfile) {
                     "eco" -> "Экономный"; "fast" -> "Быстрый поиск"; else -> "Баланс"
                 }, fontSize = 16.sp)
                 // A column remains readable at 320 dp and enlarged system fonts.
@@ -80,7 +80,7 @@ fun DeviceScreen() {
                         previousPreset = Store.settings.value
                         Store.update { it.copy(settings = DeviceEfficiency.preset(it.settings, id)) }
                         PhonePower.refresh(ctx)
-                        message = "Профиль применён без перезапуска VPN. Изменена только работа VLESS Card."
+                        message = "Профиль применён без перезапуска VPN. Изменена только работа Equalizer VPN."
                     }, modifier = Modifier.fillMaxWidth(), enabled = settings.powerProfile != id) { Text(title) }
                 }
                 previousPreset?.let { previous ->

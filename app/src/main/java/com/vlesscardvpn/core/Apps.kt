@@ -36,7 +36,7 @@ object Apps {
     // ---- launcher icon disguise (activity-aliases in the manifest)
     data class Disguise(val id: String, val alias: String, val title: String)
     val DISGUISES = listOf(
-        Disguise("", ".LauncherDefault", "VLESS Card"),
+        Disguise("", ".LauncherDefault", "Equalizer VPN"),
         Disguise("calc", ".LauncherCalc", "Калькулятор"),
         Disguise("notes", ".LauncherNotes", "Заметки"),
         Disguise("weather", ".LauncherWeather", "Погода"),

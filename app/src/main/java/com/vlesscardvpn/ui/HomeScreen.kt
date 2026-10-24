@@ -72,7 +72,7 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
             val compact = maxWidth < 320.dp || androidx.compose.ui.platform.LocalDensity.current.fontScale > 1.2f
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("VLESS Card", Modifier.weight(1f), fontSize = if (compact) 22.sp else 28.sp,
+                    Text("Equalizer VPN", Modifier.weight(1f), fontSize = if (compact) 22.sp else 28.sp,
                         maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis,
                         fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onBackground)
                     if (!compact) Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
@@ -360,7 +360,7 @@ private fun NetCard(on: Boolean, cfgKey: Int) {
                     val link = Actions.shareNetProfile()
                     if (link == null) android.widget.Toast.makeText(ctx, "Пока нечего передать: сначала подключитесь или подберите обход", android.widget.Toast.LENGTH_SHORT).show()
                     else ctx.startActivity(android.content.Intent.createChooser(android.content.Intent(android.content.Intent.ACTION_SEND).setType("text/plain")
-                        .putExtra(android.content.Intent.EXTRA_TEXT, "Настройка VLESS Card для сети «${info.net.substringBefore(" · ")}» (вставьте в приложении: Серверы → Добавить):\n$link"), "Поделиться настройкой сети"))
+                        .putExtra(android.content.Intent.EXTRA_TEXT, "Настройка Equalizer VPN для сети «${info.net.substringBefore(" · ")}» (вставьте в приложении: Серверы → Добавить):\n$link"), "Поделиться настройкой сети"))
                 }) { Text("Поделиться настройкой") }
             }
             Text("Друг на том же провайдере вставит ссылку и сразу получит рабочий обход и маскировки — без серверов и ключей.", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)

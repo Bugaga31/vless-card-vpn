@@ -48,7 +48,7 @@ object GpsMock {
                 lm.setTestProviderEnabled(p, true)
             }
         } catch (e: SecurityException) {
-            state.value = "Нужно разрешение: Параметры разработчика → «Приложение для фиктивных местоположений» → VLESS Card"
+            state.value = "Нужно разрешение: Параметры разработчика → «Приложение для фиктивных местоположений» → Equalizer VPN"
             return
         } catch (e: Exception) { state.value = "GPS не подменить: ${e.message}"; return }
         country = iso

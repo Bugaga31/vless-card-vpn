@@ -78,7 +78,7 @@ import com.vlesscardvpn.core.Store
                     Icon(Icons.Filled.PowerSettingsNew, contentDescription = null, tint = Accent, modifier = Modifier.size(42.dp))
                 }
             }
-            Text("VLESS Card", fontSize = 30.sp, fontWeight = FontWeight.Bold, color = scheme.onBackground, textAlign = TextAlign.Center)
+            Text("Equalizer VPN", fontSize = 30.sp, fontWeight = FontWeight.Bold, color = scheme.onBackground, textAlign = TextAlign.Center)
             Text("На одной волне", fontSize = 20.sp, color = scheme.primary, textAlign = TextAlign.Center)
             Text("Спокойный интерфейс.\nВаш маршрут к связи.", fontSize = 16.sp, color = scheme.onSurfaceVariant, textAlign = TextAlign.Center)
             OutlinedButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("Открыть приложение") }

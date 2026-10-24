@@ -196,7 +196,7 @@ fun SettingsScreen() {
         OutlinedButton(onClick = {
             runCatching { ctx.startActivity(Intent(AndroidSettings.ACTION_VPN_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
         }, modifier = Modifier.fillMaxWidth()) { Text("Kill switch: «Постоянная VPN» + «Блокировать без VPN»") }
-        Hint("В системных настройках VPN нажмите ⚙ у VLESS Card и включите оба переключателя: при обрыве интернет не пойдёт мимо VPN.")
+        Hint("В системных настройках VPN нажмите ⚙ у Equalizer VPN и включите оба переключателя: при обрыве интернет не пойдёт мимо VPN.")
         if (s.alwaysVpn.isNotEmpty() || s.alwaysDirect.isNotEmpty()) {
             Section("Сайты: всегда через VPN / напрямую")
             Hint("Добавляются кнопкой на главном экране «Сайт не открывается?». Нажмите, чтобы убрать (действует со следующего подключения).")
@@ -206,7 +206,7 @@ fun SettingsScreen() {
         }
         OutlinedButton(onClick = {
             ctx.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT,
-                "Резервная копия VLESS Card (вставьте в приложении: Серверы → Добавить). Внутри ключи серверов — не пересылайте чужим:\n" + Actions.backup()), "Сохранить резервную копию"))
+                "Резервная копия Equalizer VPN (вставьте в приложении: Серверы → Добавить). Внутри ключи серверов — не пересылайте чужим:\n" + Actions.backup()), "Сохранить резервную копию"))
         }, modifier = Modifier.fillMaxWidth()) { Text("Резервная копия (в Избранное / заметки)") }
         Hint("Копия не зашифрована и содержит ключи серверов и ссылки подписок — храните её только у себя. Настройки, свои серверы и WARP, выученные маскировки и обходы — одной ссылкой. Для нового телефона или после переустановки.")
         OutlinedButton(onClick = { wipeDialog = true }, colors = ButtonDefaults.outlinedButtonColors(contentColor = Bad), modifier = Modifier.fillMaxWidth()) { Text("Стереть все данные") }
@@ -262,7 +262,7 @@ fun SettingsScreen() {
         Toggle("Охлаждение", "Снижает только нагрузку VPN: пауза необязательных задач, ограничение параллелизма, возврат после устойчивого остывания. Настройки пакетов и масок не меняются; критическая защита действует всегда", s.autoCool) { v -> set { it.copy(autoCool = v) } }
         Toggle("Под приложение", "Видит, что открыто: Gemini, ChatGPT, Claude, Spotify, Netflix — сам переключит на серверы страны, где они работают (США, Нидерланды…); YouTube — ускорит видео для этой сети", s.appAware) { v -> set { it.copy(appAware = v) } }
         if (s.appAware && !com.vlesscardvpn.core.AppWatch.hasAccess(ctx)) TextButton(onClick = { com.vlesscardvpn.core.AppWatch.openAccess(ctx) }) { Text("Разрешить «Доступ к истории использования»") }
-        Toggle("GPS под страну сервера", "Пока включён VPN, телефон «окажется» в столице страны сервера (подмена местоположения Android). Нужно выбрать VLESS Card в Параметрах разработчика → «Приложение для фиктивных местоположений»", s.gpsSpoof) { v -> set { it.copy(gpsSpoof = v) }; if (!v) com.vlesscardvpn.core.GpsMock.stop(ctx) }
+        Toggle("GPS под страну сервера", "Пока включён VPN, телефон «окажется» в столице страны сервера (подмена местоположения Android). Нужно выбрать Equalizer VPN в Параметрах разработчика → «Приложение для фиктивных местоположений»", s.gpsSpoof) { v -> set { it.copy(gpsSpoof = v) }; if (!v) com.vlesscardvpn.core.GpsMock.stop(ctx) }
         if (s.gpsSpoof) {
             val g by com.vlesscardvpn.core.GpsMock.state.collectAsState()
             if (g.isNotEmpty()) Text(g, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)

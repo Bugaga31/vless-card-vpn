@@ -19,7 +19,7 @@ object Assistant {
     /** [auto]: an order («ускорь YouTube») — the first button runs right away. */
     data class Msg(val mine: Boolean, val text: String, val buttons: List<Btn> = emptyList(), val auto: Boolean = false)
 
-    const val HELLO = "Привет! Я помощник VLESS Card. Спросите, что режут в вашей сети, какая маска лучше, почему медленно, " +
+    const val HELLO = "Привет! Я Equalizer — помощник Equalizer VPN. Помогу разобраться со связью без обещаний, которых проверки не подтвердили. Спросите, какая маска лучше, почему медленно, " +
         "что с телефоном — или скажите, что сделать: «ускорь YouTube», «смени маску», «облегчи маску», «включи авто», «включи турбо»."
     val START = listOf(Btn("Что режут в моей сети?", "что режут в моей сети"), Btn("Лучшие маски", "какие маски лучше"),
         Btn("Почему медленно?", "почему медленно"), Btn("Что ты умеешь?", "помощь"))
@@ -98,6 +98,11 @@ object Assistant {
                 val key = when { has(q, "реклам") -> "blockAds"; has(q, "quic") -> "blockQuic"; else -> "turbo" }
                 Msg(false, "Меняю настройку.", listOf(Btn("Применить", "!set $key ${if (off) "off" else "on"}")), auto = true)
             }
+            has(q, "характер", "человеческ", "чувствуешь", "эмоции", "личность", "уравнитель") ->
+                Msg(false, "Я Equalizer, помощник Equalizer VPN. Мой стиль — спокойствие, внимательность и понятные объяснения без обвинений пользователя. " +
+                    "У меня нет человеческих чувств или сознания. Учёт ошибок — это история измерений, а не воспоминания о личной жизни. " +
+                    "Если данных не хватает, я так и скажу. Не объявлю Telegram или YouTube рабочими без соответствующей проверки и не запущу бесконечный поиск. " +
+                    "Обучение на стороннем сервере допустимо только с разрешением владельца и без выгрузки ваших ключей и трафика.")
             has(q, "как учишься", "как ты обуч", "нейрон", "сознани", "думать", "мыслить", "почему выбран маршрут", "почему выбрал маршрут") ->
                 Msg(false, learning(f), listOf(Btn("Проверить серверы", "!test")))
             has(q, "телефон", "устройств", "батаре", "памят", "андроид", "android", "смартфон", "заряд", "озу") -> Msg(false, phone(f),
@@ -329,9 +334,9 @@ object Assistant {
                 reconnect(app)
                 post(Msg(false, (when (key) { "blockAds" -> "Блокировка рекламы"; "blockQuic" -> "Блокировка QUIC"; "gps" -> "Подмена GPS"; "warpChain" -> "WARP через сервер"; "autopilot" -> "Автопилот"; "appAware" -> "Подстройка под приложения"; "torRouting" -> "Tor для сервисов"; "torAuto" -> "Tor в Авто"; "torDirect" -> "Отдельный путь Tor"; else -> "Ускорение телефона" }) + if (v) " включена." else " выключена."))
                 if (v && key == "autopilot") { Actions.boostYoutube(); post(Msg(false, "Начал улучшать соединение — результат напишу здесь.")) }
-                if (v && key == "gps") post(Msg(false, "Подмена GPS работает, пока включён VPN: телефон «окажется» в столице страны сервера. Нужно один раз разрешить: Параметры разработчика → «Приложение для фиктивных местоположений» → VLESS Card." +
+                if (v && key == "gps") post(Msg(false, "Подмена GPS работает, пока включён VPN: телефон «окажется» в столице страны сервера. Нужно один раз разрешить: Параметры разработчика → «Приложение для фиктивных местоположений» → Equalizer VPN." +
                     GpsMock.state.value.let { if (it.isNotEmpty()) "\nСейчас: $it" else "" }, listOf(Btn("Открыть параметры разработчика", "!devsettings"))))
-                if (v && key == "appAware" && !AppWatch.hasAccess(app)) post(Msg(false, "Чтобы видеть, какое приложение открыто, нужен «Доступ к истории использования» для VLESS Card.", listOf(Btn("Разрешить доступ", "!usage"))))
+                if (v && key == "appAware" && !AppWatch.hasAccess(app)) post(Msg(false, "Чтобы видеть, какое приложение открыто, нужен «Доступ к истории использования» для Equalizer VPN.", listOf(Btn("Разрешить доступ", "!usage"))))
             }
             cmd == "!warp" -> { Store.update { it.copy(settings = it.settings.copy(warpChain = true)) }; job(app, null) { Actions.setupWarp() } }
             cmd == "!diag" -> scope.launch {
@@ -357,10 +362,10 @@ object Assistant {
                     if (PhoneInfo.collect(app).batteryOptimized) listOf(Btn("Разрешить работу в фоне", "!battery")) else emptyList()))
             }
             cmd == "!devsettings" -> { GpsMock.openDevSettings(app); post(Msg(false, "Если пункта нет — включите режим разработчика: О телефоне → 7 раз нажать «Номер сборки».")) }
-            cmd == "!usage" -> { AppWatch.openAccess(app); post(Msg(false, "Найдите VLESS Card и включите доступ.")) }
+            cmd == "!usage" -> { AppWatch.openAccess(app); post(Msg(false, "Найдите Equalizer VPN и включите доступ.")) }
             cmd == "!battery" -> runCatching {
                 app.startActivity(android.content.Intent(android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
-                post(Msg(false, "Открыл настройки: найдите VLESS Card → «Не оптимизировать» / «Без ограничений»."))
+                post(Msg(false, "Открыл настройки: найдите Equalizer VPN → «Не оптимизировать» / «Без ограничений»."))
             }
             cmd == "!speed" -> {
                 post(Msg(true, "Измерь скорость")); Actions.speedTest()

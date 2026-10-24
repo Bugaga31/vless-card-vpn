@@ -46,4 +46,11 @@ class AdaptiveExplanationTest {
         val a = Assistant.answer("как учишься", f.copy(learning = Brain.Explanation(0.9, 0.2, listOf(Brain.Contribution("Задержка TCP", -0.1)))))
         assertTrue(a.text, a.text.contains("мало данных")); assertTrue(a.text, a.text.contains("не процент надёжности"))
     }
+    @Test fun equalizerIntroducesItselfWithoutClaimingConsciousness() {
+        assertTrue(Assistant.HELLO.contains("Equalizer"))
+        val a = Assistant.answer("какой у тебя характер?", f)
+        assertFalse(a.auto); assertTrue(a.text, a.text.contains("нет человеческих чувств или сознания"))
+        assertTrue(a.text, a.text.contains("разрешением владельца"))
+    }
+
 }

@@ -46,7 +46,7 @@
                 <data android:scheme="hysteria2" /><data android:scheme="hy2" /><data android:scheme="vcmask" /><data android:scheme="vcnet" />
                 <data android:scheme="vcbackup" />
             </intent-filter>
-            <!-- «Поделиться» → VLESS Card: a text with links. -->
+            <!-- «Поделиться» → Equalizer VPN: a text with links. -->
             <intent-filter>
                 <action android:name="android.intent.action.SEND" />
                 <category android:name="android.intent.category.DEFAULT" />
@@ -82,12 +82,12 @@
         <service
             android:name=".vpn.ToggleTileService"
             android:icon="@mipmap/ic_launcher"
-            android:label="VLESS Card"
+            android:label="Equalizer VPN"
             android:permission="android.permission.BIND_QUICK_SETTINGS_TILE"
             android:exported="true">
             <intent-filter><action android:name="android.service.quicksettings.action.QS_TILE" /></intent-filter>
         </service>
-        <receiver android:name=".vpn.VpnWidget" android:exported="false" android:label="VLESS Card">
+        <receiver android:name=".vpn.VpnWidget" android:exported="false" android:label="Equalizer VPN">
             <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter>
             <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_vpn_info" />
         </receiver>

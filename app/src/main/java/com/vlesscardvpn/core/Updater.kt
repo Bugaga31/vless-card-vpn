@@ -177,7 +177,7 @@ object Updater {
         if (s.latest.isEmpty() || s.busy) return
         val app = ctx.applicationContext
         if (android.os.Build.VERSION.SDK_INT >= 26 && !app.packageManager.canRequestPackageInstalls()) {
-            state.value = s.copy(text = "Разрешите VLESS Card устанавливать обновления (один раз) и нажмите «Обновить» снова")
+            state.value = s.copy(text = "Разрешите Equalizer VPN устанавливать обновления (один раз) и нажмите «Обновить» снова")
             runCatching { app.startActivity(Intent(android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, android.net.Uri.parse("package:" + app.packageName)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
             return
         }

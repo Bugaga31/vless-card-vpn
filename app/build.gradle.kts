@@ -75,7 +75,7 @@ android {
     compileSdk = 34
     defaultConfig {
         applicationId = if (betaPreview) "com.vlesscardvpn.beta2" else "com.vlesscardvpn"
-        manifestPlaceholders["vpnAppLabel"] = if (betaPreview) "VLESS Card · Beta" else "VLESS Card"
+        manifestPlaceholders["vpnAppLabel"] = if (betaPreview) "Equalizer VPN · Beta" else "Equalizer VPN"
         minSdk = 24
         targetSdk = 34
         versionCode = releaseNumber

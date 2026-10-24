@@ -49,7 +49,7 @@ fun shareMyMask(ctx: Context, m: Mask) {
     Toast.makeText(ctx, "Ссылка на маскировку скопирована", Toast.LENGTH_SHORT).show()
     runCatching {
         ctx.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain")
-            .putExtra(Intent.EXTRA_TEXT, "Маскировка для VLESS Card «${m.title}»: $link"), "Поделиться маскировкой").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            .putExtra(Intent.EXTRA_TEXT, "Маскировка для Equalizer VPN «${m.title}»: $link"), "Поделиться маскировкой").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
     }
 }
 
