@@ -46,7 +46,7 @@ socks5://mu:mp@127.0.0.1:8451#socks
 L
 chmod +x gradlew
 STAGE=generate-matrix
-XRAY_MATRIX_OFFERED_ONLY=1 XRAY_CONFIG_DUMP=/tmp/xcfg XRAY_LOCAL_LINKS=/tmp/links.txt ./gradlew --no-daemon -q :app:testDebugUnitTest --tests 'com.vlesscardvpn.ConfigTest' --tests 'com.vlesscardvpn.R62Test'
+XRAY_MATRIX_OFFERED_ONLY=1 XRAY_CONFIG_DUMP=/tmp/xcfg XRAY_LOCAL_LINKS=/tmp/links.txt ./gradlew --no-daemon -q :app:testDebugUnitTest --tests 'com.vlesscardvpn.ConfigTest' --tests 'com.vlesscardvpn.CryptoWarpRegressionR62Test'
 STAGE=start-engines
 # One engine per fixed strategy (the app's own argv: VLESS Card, zapret, ByeDPI); servers are on loopback.
 while read -r eng args; do
@@ -152,6 +152,11 @@ with open('/tmp/xcfg/wg-result.txt', 'w') as out:
         ok = a == '204' and b.isdigit() and int(b) >= 262144
         wall += 1; wok += ok
         print(('OK' if ok else 'FAIL'), port, name, mask, a, b, file=out)
+        if not ok:
+            # Only registered mask ID and transfer predicates, never configs or response bodies.
+            import re
+            safe_mask = mask if re.fullmatch(r'[A-Za-z0-9_.:#-]{1,120}', mask) else 'redacted'
+            print(f"::error title=Matrix bounded WireGuard failure::mask={safe_mask}; check204={a == '204'}; body262144={b.isdigit() and int(b) >= 262144}")
 print(f"WireGuard (sequential, own instance): {wok}/{wall}")
 print(f"::notice title=Matrix bounded counters::wireguard-pass={wok}; total={wall}")
 print(open('/tmp/xcfg/wg-result.txt').read())
@@ -159,6 +164,9 @@ if wall == 0 or wok != wall: raise SystemExit('WireGuard variants failed')
 PY
 
 
+# The named JVM generator must have run before contacting the external WARP service.
+STAGE=validate-warp-fixtures
+[ -s /tmp/xcfg/warp-masks.txt ] || { echo "::error title=Matrix bounded failure::missing-warp-fixture-manifest"; exit 1; }
 # Real Cloudflare WARP from the runner: every WireGuard/WARP mask the app offers (noise, QUIC/DTLS/RTP look-alikes, port hopping).
 STAGE=warp-register
 K=$($X wg); WPRIV=$(echo "$K" | sed -n 's/PrivateKey: //p'); WPUB=$(echo "$K" | sed -n 's/.*PublicKey): //p')
@@ -169,7 +177,7 @@ WPEER=$(echo "$R" | jq -r .config.peers[0].public_key)
 WV4=$(echo "$R" | jq -r .config.interface.addresses.v4); WRES=$(echo "$R" | jq -r .config.client_id | base64 -d | od -An -tu1 | awk '{print $1","$2","$3}')
 STAGE=warp-transfer
 WOK=0; WALL=0
-while read -r id; do
+while IFS= read -r id || [ -n "$id" ]; do
   [ -n "$id" ] || continue
   sed -e "s#@WPRIV@#$WPRIV#" -e "s#@WV4@#$WV4#" -e "s#\[11,22,33\]#[$WRES]#" /tmp/xcfg/warp-$id.json > /tmp/w1.json
   python3 - "$WPEER" <<'PEER'
