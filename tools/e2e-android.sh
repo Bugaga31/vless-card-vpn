@@ -21,6 +21,7 @@ python3 tools/e2e/make_state.py $W "$PBK"
 adb wait-for-device
 adb install -r -g app/build/outputs/apk/debug/app-debug.apk | tail -1
 adb install -r -t vpn-test-probe/build/outputs/apk/debug/vpn-test-probe-debug.apk | tail -1
+bash tools/e2e/tor-native-smoke.sh "$PKG" || exit 1
 adb shell appops set $PKG ACTIVATE_VPN allow
 adb shell am start -W -n $PKG/.MainActivity >/dev/null; sleep 3
 

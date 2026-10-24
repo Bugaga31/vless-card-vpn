@@ -18,9 +18,17 @@ class ToggleTileService : TileService() {
             val i = Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             if (android.os.Build.VERSION.SDK_INT >= 34)
                 startActivityAndCollapse(android.app.PendingIntent.getActivity(this, 0, i, android.app.PendingIntent.FLAG_IMMUTABLE))
-            else @Suppress("DEPRECATION") startActivityAndCollapse(i)
+            else collapseBeforeAndroid14(i)
         }
         refresh()
+    }
+    // The PendingIntent overload exists only on API 34+. This legacy call is required
+    // on supported API 24-33; the guard above never uses it on Android 14+.
+    @android.annotation.SuppressLint("StartActivityAndCollapseDeprecated")
+    @Suppress("DEPRECATION")
+    private fun collapseBeforeAndroid14(intent: Intent) {
+        check(android.os.Build.VERSION.SDK_INT < 34)
+        startActivityAndCollapse(intent)
     }
     private fun refresh() {
         val t = qsTile ?: return

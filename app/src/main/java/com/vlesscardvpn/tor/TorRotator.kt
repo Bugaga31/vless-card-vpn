@@ -26,7 +26,8 @@ class TorRotator(
 
     val lastErrorOr: String? get() = lastError
 
-    fun connect() {
+    fun connect(): Boolean {
+        connected = false
         try {
             control.connect(cookieHex)
             if (countries.isNotEmpty()) control.setExitCountries(countries)
@@ -35,8 +36,11 @@ class TorRotator(
             rotation.markRotated(System.currentTimeMillis())
             connected = true
             lastError = null
+            return true
         } catch (e: IOException) {
             lastError = e.message
+            control.close()
+            return false
         }
     }
 
@@ -72,5 +76,8 @@ class TorRotator(
 
     fun stats(): JSONObject = rotation.statsSnapshot()
 
-    fun close() = control.close()
+    fun close() {
+        connected = false
+        control.close()
+    }
 }

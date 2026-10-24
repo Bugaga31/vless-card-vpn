@@ -214,15 +214,16 @@ fun SettingsScreen() {
         // ---------------- servers
         }
         Group("Tor — отдельный путь (встроенный, без Termux)") {
-            Hint("Tor уже встроен в приложение: Termux не нужен. Выбранные сервисы (Discord и др.) идут через собственный демон Tor поверх туннеля, выход ротируется сам.")
-            Toggle("Tor для сервисов", "Discord и другие выбранные сервисы идут через Tor поверх VPN: сайты видят адрес Tor-выхода, оператор — только маску VLESS", s.torRouting) { v -> set { it.copy(torRouting = v) } }
+            Hint("Tor встроен в приложение: Termux не нужен. Выбранные сервисы используют локальный Tor. Встроенный демон работает от UID приложения: автоматическая обёртка его соединений в VLESS не гарантируется.")
+            Toggle("Tor для сервисов", "Выбранные сервисы идут через локальный Tor. Это не подтверждает доступность Discord-голоса: Tor передаёт TCP, но не произвольный UDP.", s.torRouting) { v -> set { it.copy(torRouting = v) } }
             Toggle("Tor в Авто", "Если сервис перестаёт работать через все серверы — сам переключаю его на Tor, пока связь не восстановится", s.torAuto) { v -> set { it.copy(torAuto = v) } }
             Toggle("Отдельный путь Tor", "Демон Tor ходит в интернет сам, минуя VPN: своё шифрование и мосты, работает даже при недоступных серверах", s.torDirect) { v -> set { it.copy(torDirect = v) } }
             Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                listOf("none" to "Без мостов", "obfs4" to "obfs4", "snowflake" to "Snowflake", "webtunnel" to "WebTunnel").forEach { (id, t) ->
+                listOf("none" to "Без мостов", "obfs4" to "obfs4", "webtunnel" to "WebTunnel").forEach { (id, t) ->
                     FilterChip(selected = s.torBridge == id, onClick = { set { it.copy(torBridge = id) } }, label = { Text(t) })
                 }
             }
+            if (s.torBridge !in com.vlesscardvpn.tor.TorCard.EMBEDDED_BRIDGES) Hint("Выбранный транспорт не встроен. Выберите obfs4, WebTunnel или режим без мостов; автоматического перехода на прямой Tor нет.")
             if (s.torBridge != "none") {
                 OutlinedButton(onClick = {
                     runCatching { ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://bridges.torproject.org/options"))) }
@@ -232,7 +233,7 @@ fun SettingsScreen() {
                     modifier = Modifier.fillMaxWidth(), label = { Text("Мосты: строки «Bridge …» (до 12)") }, minLines = 2, maxLines = 6)
                 Hint("Скопируйте строки «Bridge obfs4 …» / «Bridge webtunnel …» с bridges.torproject.org сюда — по одной в строке. Применится при следующем подключении.")
             }
-            Toggle("Весь трафик через Tor", "Максимальная анонимность: всё через Tor поверх туннеля. Медленно — только когда анонимность важнее скорости", s.torAll) { v -> set { it.copy(torAll = v) } }
+            Toggle("Весь трафик через Tor", "Направлять поддерживаемый TCP-трафик через Tor. UDP не поддерживается; абсолютная анонимность и цепочка Tor поверх VLESS не гарантируются.", s.torAll) { v -> set { it.copy(torAll = v) } }
         }
         Group("Нагрузка VPN и батарея") {
         val power by com.vlesscardvpn.core.PhonePower.state.collectAsState()

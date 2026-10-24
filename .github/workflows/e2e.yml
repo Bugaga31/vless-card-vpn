@@ -1,8 +1,9 @@
 name: E2E (Xray chain on emulator)
 on:
   push:
-    branches: ['rebuild-*', 'release-*']
+    branches: ['rebuild-*', 'release-*', '!release-build-*']
   workflow_dispatch:
+  workflow_call:
 permissions:
   contents: read
 concurrency:
@@ -17,10 +18,10 @@ jobs:
       matrix:
         api: [33, 29]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
         with:
           distribution: temurin
           java-version: '17'
@@ -28,9 +29,9 @@ jobs:
         with:
           packages: platform-tools platforms;android-34 build-tools;34.0.0
           log-accepted-android-sdk-licenses: false
-      - uses: gradle/actions/setup-gradle@v3
+      - uses: gradle/actions/setup-gradle@d9c87d481d55275bb5441eef3fe0e46805f9ef70
       - name: Restore native libraries (validated before use)
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: |
             app/build/generated/byedpi
@@ -62,22 +63,23 @@ jobs:
           emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
           script: bash tools/e2e-android.sh
       - if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: e2e-api-${{ matrix.api }}
           path: |
             /tmp/e2e/logcat.txt
             /tmp/e2e/server.log
             /tmp/e2e/access.log
+            /tmp/e2e/tor-*.txt
           if-no-files-found: ignore
   masks-matrix:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
         with:
           distribution: temurin
           java-version: '17'
@@ -85,9 +87,9 @@ jobs:
         with:
           packages: platform-tools platforms;android-34 build-tools;34.0.0
           log-accepted-android-sdk-licenses: false
-      - uses: gradle/actions/setup-gradle@v3
+      - uses: gradle/actions/setup-gradle@d9c87d481d55275bb5441eef3fe0e46805f9ef70
       - name: Restore native libraries (validated before use)
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: |
             app/build/generated/byedpi

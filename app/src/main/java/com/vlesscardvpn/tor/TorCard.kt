@@ -22,9 +22,9 @@ object TorCard {
 
     /** Control cookie: Termux instance first, then the embedded daemon's own cookie. */
     fun readCookieHex(ctx: android.content.Context?): String? {
-        runCatching { return TorControl.readCookieHex(TERMUX_COOKIE_PATH) }
+        runCatching { TorControl.readCookieHex(TERMUX_COOKIE_PATH).takeIf { it.length == 64 }?.let { return it } }
         if (ctx != null) runCatching {
-            return TorControl.readCookieHex(java.io.File(java.io.File(ctx.filesDir, "tor"), "cookie").absolutePath)
+            TorControl.readCookieHex(java.io.File(java.io.File(ctx.filesDir, "tor"), "cookie").absolutePath).takeIf { it.length == 64 }?.let { return it }
         }
         return null
     }
@@ -63,7 +63,7 @@ object TorCard {
 
     /** libTor.so ships inside the APK (Tor Browser for Android) — Tor needs no Termux. */
     fun available(ctx: android.content.Context): Boolean =
-        java.io.File(nativeDir(ctx), "libTor.so").let { it.isFile && it.canExecute() }
+        android.os.Build.VERSION.SDK_INT >= 26 && java.io.File(nativeDir(ctx), "libTor.so").let { it.isFile && it.canExecute() }
 
     /** Absolute torrc inside the app's private dir; embedded daemon reads it directly. */
     fun torrcPath(ctx: android.content.Context) =
@@ -86,6 +86,8 @@ object TorCard {
                       controlPort: Int = DEFAULT_CONTROL_PORT,
                       socksPort: Int = DEFAULT_SOCKS_PORT, bridge: String = "none",
                       bridgeLines: List<String> = emptyList()): String = buildString {
+        require(bridge in EMBEDDED_BRIDGES) { "Unsupported embedded Tor transport" }
+        validateBridgeLines(bridgeLines)
         appendLine("SocksPort 127.0.0.1:$socksPort")
         appendLine("ControlPort 127.0.0.1:$controlPort")
         appendLine("CookieAuthentication 1")
@@ -107,6 +109,7 @@ object TorCard {
     fun startEmbedded(ctx: android.content.Context, bridge: String = "none",
                       controlPort: Int = DEFAULT_CONTROL_PORT, socksPort: Int = DEFAULT_SOCKS_PORT,
                       bridgeLines: List<String> = emptyList()): java.lang.Process {
+        if (android.os.Build.VERSION.SDK_INT < 26) error("Embedded Tor requires Android 8+")
         val dir = java.io.File(ctx.filesDir, "tor"); dir.mkdirs()
         java.io.File(dir, "torrc").writeText(torrcEmbedded(ctx, controlPort, socksPort, bridge, bridgeLines))
         val b = java.lang.ProcessBuilder(listOf(java.io.File(nativeDir(ctx), "libTor.so").absolutePath,
@@ -120,15 +123,53 @@ object TorCard {
         runCatching { java.net.Socket().use { it.connect(java.net.InetSocketAddress("127.0.0.1", socksPort), 200); true } }.getOrDefault(false)
 
     /** Starts the embedded daemon unless a local Tor already answers on [socksPort]. */
+    @Synchronized
     fun ensureStarted(ctx: android.content.Context, bridge: String = "none",
                       controlPort: Int = DEFAULT_CONTROL_PORT, socksPort: Int = DEFAULT_SOCKS_PORT,
                       bridgeLines: List<String> = emptyList()): java.lang.Process? {
-        if (!available(ctx) || portUp(socksPort)) return null
-        return runCatching { startEmbedded(ctx, bridge, controlPort, socksPort, bridgeLines).also { embedded = it } }.getOrNull()
+        val ticket = generation.get()
+        require(bridge in EMBEDDED_BRIDGES) { "Unsupported embedded Tor transport" }
+        validateBridgeLines(bridgeLines)
+        val desired = torrcEmbedded(ctx, controlPort, socksPort, bridge, bridgeLines)
+        val owned = embedded
+        if (owned != null) {
+            val same = runCatching { java.io.File(torrcPath(ctx)).readText() == desired }.getOrDefault(false)
+            val alive = runCatching { owned.exitValue(); false }.getOrDefault(true)
+            if (alive && same && !stopping) return null
+            owned.destroy()
+            // Called from Dispatchers.IO: bounded wait avoids reusing a retiring listener.
+            val until = System.nanoTime() + 1_000_000_000L
+            while (runCatching { owned.exitValue(); false }.getOrDefault(true) && System.nanoTime() < until) Thread.sleep(25)
+            check(runCatching { owned.exitValue(); true }.getOrDefault(false)) { "Previous Tor process is still stopping" }
+            embedded = null
+        }
+        if (portUp(socksPort)) {
+            // A listening port alone is not evidence that it is an authenticated Tor instance.
+            val cookie = readCookieHex(ctx) ?: error("Tor port occupied without control authentication")
+            val control = TorControl("127.0.0.1", controlPort)
+            try { control.connect(cookie) } finally { control.close() }
+            return null
+        }
+        check(available(ctx)) { "Embedded Tor unavailable for this device" }
+        check(generation.get() == ticket) { "Tor startup cancelled" }
+        val process = startEmbedded(ctx, bridge, controlPort, socksPort, bridgeLines)
+        stopping = false
+        embedded = process
+        if (generation.get() != ticket) { process.destroy(); error("Tor startup cancelled") }
+        return process
+    }
+
+    private fun validateBridgeLines(lines: List<String>) {
+        require(lines.size <= 12 && lines.all { line -> line.length <= 4096 && line.none { it.code < 32 || it.code == 127 } }) {
+            "Invalid bridge line"
+        }
     }
 
     /** Stops the embedded daemon (Termux tor is managed by Termux itself). */
-    fun stopEmbedded() { embedded?.let { runCatching { it.destroy() } }; embedded = null }
+    fun invalidateStartup() { generation.incrementAndGet() }
+    fun stopEmbedded() { generation.incrementAndGet(); stopping = true; embedded?.let { runCatching { it.destroy() } } }
+    private val generation = java.util.concurrent.atomic.AtomicLong()
+    @Volatile private var stopping = false
     @Volatile private var embedded: java.lang.Process? = null
 
     /**
@@ -138,6 +179,7 @@ object TorCard {
      */
     fun torrc(controlPort: Int = DEFAULT_CONTROL_PORT, socksPort: Int = DEFAULT_SOCKS_PORT,
               allowLan: Boolean = false, bridge: String = "none", bridgeLines: List<String> = emptyList()): String = buildString {
+        validateBridgeLines(bridgeLines)
         val socksBind = if (allowLan) "0.0.0.0:$socksPort" else "127.0.0.1:$socksPort"
         appendLine("SocksPort $socksBind")
         appendLine("ControlPort 127.0.0.1:$controlPort")

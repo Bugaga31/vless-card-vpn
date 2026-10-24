@@ -35,6 +35,7 @@ class TorRotation(
     private val history = HashMap<String, Entry>()
     private val blacklist = HashMap<String, Long>() // country -> blacklistedAt
     private var lastRotationAt = 0L
+    private var online = true
 
     /** Latency ceiling raised for slow transports (Snowflake is allowed 2x budget). */
     private fun ceilingMs(t: Transport): Long = when (t) {
@@ -48,7 +49,7 @@ class TorRotation(
      * gets blacklisted instead of polluting the history).
      */
     fun record(country: String, latencyMs: Long, transport: Transport = Transport.DIRECT, nowMs: Long = now()): Boolean {
-        if (country.isBlank()) return false
+        if (!country.matches(Regex("[a-z]{2}")) || latencyMs <= 0) return false
         val lim = ceilingMs(transport)
         if (latencyMs > lim) {
             blacklist[country] = nowMs
@@ -107,7 +108,7 @@ class TorRotation(
 
     /** Adaptive rotate decision: cadence floor, absolute threshold floor, hysteresis vs the best alternative. */
     fun shouldRotate(nowMs: Long = now()): Boolean {
-        if (nowMs - lastRotationAt < rotateEveryMs) return false
+        if (!online || nowMs - lastRotationAt < rotateEveryMs) return false
         val cur = lastCountry ?: return candidates(nowMs).isNotEmpty()
         val curEma = history[cur]?.ema ?: return candidates(nowMs).isNotEmpty()
         val best = candidates(nowMs).minByOrNull { history[it]?.ema ?: Double.MAX_VALUE } ?: return false
@@ -127,7 +128,7 @@ class TorRotation(
     }
 
     fun setOnline(value: Boolean) {
-        /* kept for API symmetry with TorRotator; policy is offline-agnostic */
+        online = value
     }
 
     var lastCountry: String? = null

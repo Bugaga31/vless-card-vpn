@@ -288,6 +288,7 @@ class TunnelService : VpnService() {
             foreground(if (settings.quietNotification) "Активно" else "Подключено · $route")
             liveNotification(route)
             watchNetwork()
+            torLoop()
             verifySoon(0)
             // Instant start: DNS and first TLS handshakes fire at once, in parallel — not after the verify.
             scope.launch { kotlinx.coroutines.delay(250); runCatching { warmUp() } }
@@ -319,7 +320,7 @@ class TunnelService : VpnService() {
         val network = Net.underlying(this)
         val caps = cm?.getNetworkCapabilities(network)
         val mtu = com.vlesscardvpn.core.TransportPolicy.mtu(caps?.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) == true,
-            warpChained || usedServers.any { Masks.isWarp(it) }, cm?.getLinkProperties(network)?.mtu ?: 0)
+            warpChained || usedServers.any { Masks.isWarp(it) }, if (Build.VERSION.SDK_INT >= 29) cm?.getLinkProperties(network)?.mtu ?: 0 else 0)
         val b = Builder().setSession(if (settings.randomTun || settings.quietNotification) "Sync" else "VLESS Card").setMtu(mtu)
             .addAddress(v4, 30).addRoute("0.0.0.0", 0)
             // No IPv6 in the tunnel: Android then refuses IPv6 at once and apps (Chrome) fall back to IPv4 instantly.
@@ -416,23 +417,40 @@ class TunnelService : VpnService() {
     private fun torLoop() {
         if (torJob?.isActive == true) return
         val st = Store.state.value.settings
-        if (!st.torRotation && !st.torRouting) return
-        torJob = scope.launch {
+        if (!st.torRotation && !st.torRouting && !st.torAll) return
+        torJob = scope.launch(Dispatchers.IO) {
             // Embedded daemon (no Termux needed); Termux instance wins when its cookie is readable.
-            runCatching {
+            try {
                 com.vlesscardvpn.tor.TorCard.ensureStarted(this@TunnelService, st.torBridge,
                     bridgeLines = st.torBridgeLines.lines().map { it.trim() }.filter { it.startsWith("Bridge ") }.take(12))
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                Log.w("TOR", "Tor startup failed; no direct fallback for Tor routes")
+                return@launch
             }
-            val cookie = runCatching { com.vlesscardvpn.tor.TorCard.readCookieHex(this@TunnelService) }.getOrNull()
-            if (cookie == null) { Log.i("TOR", "no control cookie, rotator idle"); return@launch }
+            // A new daemon creates its cookie asynchronously. Do not permanently abandon rotation
+            // because the first read raced startup. Delay is cancellable and the wait is bounded.
+            val cookie = kotlinx.coroutines.withTimeoutOrNull(30_000L) {
+                var found: String? = null
+                while (found == null) {
+                    found = com.vlesscardvpn.tor.TorCard.readCookieHex(this@TunnelService)
+                    if (found == null) delay(200)
+                }
+                found
+            }
+            if (cookie == null) { Log.i("TOR", "control cookie unavailable; rotator idle"); return@launch }
             if (!st.torRotation) return@launch
             val rotator = com.vlesscardvpn.tor.TorRotator(
                 com.vlesscardvpn.tor.TorControl("127.0.0.1", com.vlesscardvpn.tor.TorCard.DEFAULT_CONTROL_PORT),
-                countries = com.vlesscardvpn.tor.TorCard.preferredCountries(Store.state.value.servers),
+                countries = emptyList(), // Server hostnames do not establish a Tor exit country.
                 cookieHex = cookie,
             )
             try {
-                rotator.connect()
+                val ready = kotlinx.coroutines.withTimeoutOrNull(30_000L) {
+                    while (!rotator.connect()) delay(200)
+                    true
+                } == true
+                if (!ready) { Log.i("TOR", "control connection unavailable; rotator idle"); return@launch }
                 var lastMeasure = 0L
                 while (true) {
                     delay(10_000L)
@@ -791,7 +809,8 @@ class TunnelService : VpnService() {
             curNet = network
             runCatching { setUnderlyingNetworks(network?.let { arrayOf(it) }) }
             netJob?.cancel(); checkJob?.cancel(); healJob?.cancel(); optJob?.cancel(); scoutJob?.cancel(); rescueJob?.cancel()
-            watchJob?.cancel(); coverJob?.cancel(); serviceJob?.cancel(); liveJob?.cancel()
+            watchJob?.cancel(); coverJob?.cancel(); serviceJob?.cancel(); liveJob?.cancel(); torJob?.cancel(); torJob = null
+            com.vlesscardvpn.tor.TorCard.invalidateStartup()
             Actions.cancelForNetworkChange()
             if (!change.online) {
                 val current = Tunnel.status.value
@@ -823,6 +842,9 @@ class TunnelService : VpnService() {
     }
 
     private fun teardown(error: String?, keepTun: Boolean = false) {
+        torJob?.cancel(); torJob = null
+        com.vlesscardvpn.tor.TorCard.invalidateStartup()
+        if (error != null) com.vlesscardvpn.tor.TorCard.stopEmbedded()
         if (!keepTun) runCatching { com.vlesscardvpn.core.Traffic.tick() }
         liveJob?.cancel()
         scoutJob?.cancel(); scoutJob=null
