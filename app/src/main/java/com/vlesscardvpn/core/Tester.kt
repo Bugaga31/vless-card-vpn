@@ -49,7 +49,7 @@ object Tester {
     val BIG_URLS = listOf("https://speed.cloudflare.com/__down?bytes=262144", "https://cachefly.cachefly.net/1mb.test")
     const val YT_URL = "https://www.youtube.com/generate_204"
     const val TG_URL = "https://api.telegram.org/"
-    const val BIG_BYTES = 200_000
+    const val BIG_BYTES = TransferProof.REQUIRED_BYTES
 
     /**
      * TCP ping of all servers at once: non-blocking sockets in one selector (no thread per server — the 96-thread pool
@@ -191,8 +191,8 @@ object Tester {
             val t0 = System.nanoTime()
             try {
                 if (System.nanoTime() >= deadline) return false to 0
-                val n = download(client, url, deadline, onCall)
-                if (n >= BIG_BYTES) return true to (n * 8L * 1_000_000 / ((System.nanoTime() - t0) / 1000).coerceAtLeast(1) / 1000).toInt().coerceAtLeast(1)
+                val sample = download(client, url, deadline, onCall)
+                if (sample.bytes >= BIG_BYTES) return true to minOf(sample.slowestKbps,TransferProof.rate(sample.bytes,System.nanoTime()-t0))
             } catch (e: java.io.InterruptedIOException) { return false to 0 } catch (e: Exception) { /* mirror down: next */ }
         }
         return false to 0
@@ -301,8 +301,9 @@ object Tester {
         return try {
             client.newCall(Request.Builder().url(url).header("User-Agent", UA).build()).execute().use { r ->
                 // a page that starts loading: DPI "16 KB freeze" shows up as a read timeout here
-                r.body?.byteStream()?.let { src -> val buf = ByteArray(16384); var t = 0; while (t < 40_000) { val n = src.read(buf); if (n < 0) break; t += n } }
-                SiteProbe(if (r.code == 403 || r.code == 451) "denied" else "ok", ((System.nanoTime() - t0) / 1_000_000).toInt(), r.code)
+                var received=0
+                r.body?.byteStream()?.let { src -> val buf = ByteArray(16384); while (received < 40_000) { val n = src.read(buf); if (n < 0) break; received += n } }
+                SiteProbe(ProbeResponsePolicy.site(r.code,received), ((System.nanoTime() - t0) / 1_000_000).toInt(), r.code)
             }
         } catch (e: Exception) {
             SiteProbe(when (e) {
@@ -328,16 +329,15 @@ object Tester {
         }
     }
 
-    private fun download(client: OkHttpClient, url: String, deadline: Long = Long.MAX_VALUE, onCall: ((okhttp3.Call) -> Unit)? = null): Int =
+    private fun download(client: OkHttpClient, url: String, deadline: Long = Long.MAX_VALUE, onCall: ((okhttp3.Call) -> Unit)? = null): TransferProof.Sample =
         client.newCall(Request.Builder().url(url).header("User-Agent", UA)
             .header("Accept-Encoding", "identity").header("Cache-Control", "no-cache, no-store").build()).also { call ->
             if (deadline != Long.MAX_VALUE) call.timeout().timeout(TimeUnit.NANOSECONDS.toMillis((deadline-System.nanoTime()).coerceAtLeast(1)).coerceAtLeast(1),TimeUnit.MILLISECONDS)
             onCall?.invoke(call)
         }.execute().use { r ->
             check(ProbeResponsePolicy.download(r.code, r.header("Content-Type"), r.header("Content-Encoding"))) { "Invalid speed-test response" }
-            val src = r.body!!.byteStream(); val buf = ByteArray(16384); var total = 0
-            while (total < BIG_BYTES) { val n = src.read(buf); if (n < 0) break; total += n }
-            total
+            check(TransferProof.rangeValid(r.code,r.header("Content-Range"),BIG_BYTES)) { "Invalid download byte range" }
+            TransferProof.read(r.body!!.byteStream(),deadline)
         }
 
     /** Tests [variants] (server + mask) in parallel through one temporary Xray instance. */

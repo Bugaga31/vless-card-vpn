@@ -21,7 +21,7 @@ class AutoPoolRecoveryR140Test {
         val good=sample(); val bad=good.copy(ytOk=false,serviceNetwork="wifi",serviceCheckedAt=now)
         assertEquals(listOf(good),AutoEligibility.servicePool(listOf(good,bad),{it},"wifi",now))
         assertEquals(listOf(good,bad),AutoEligibility.servicePool(listOf(good,bad),{it},"cell",now))
-        assertEquals(listOf(bad),AutoEligibility.servicePool(listOf(bad),{it},"wifi",now))
+        assertTrue(AutoEligibility.servicePool(listOf(bad),{it},"wifi",now).isEmpty())
     }
     @Test fun fasterUnknownServiceCandidateBeatsSlowProvenButNeverKnownFailure() {
         val slow=sample(1000,10).copy(ytOk=true,tgOk=true,serviceNetwork="wifi",serviceCheckedAt=now)
@@ -47,7 +47,7 @@ class AutoPoolRecoveryR140Test {
         assertTrue(config.has("observatory"));assertFalse(config.has("burstObservatory"))
         val b=config.getJSONObject("routing").getJSONArray("balancers").getJSONObject(0)
         assertEquals("proxy-",b.getJSONArray("selector").getString(0))
-        assertEquals(2,b.getJSONObject("strategy").getJSONObject("settings").getInt("expected"))
+        assertEquals(1,b.getJSONObject("strategy").getJSONObject("settings").getInt("expected"))
         assertEquals(8,b.getJSONObject("strategy").getJSONObject("settings").getJSONArray("costs").length())
     }
     @Test fun staleHeavyVideoPoolCannotOverrideSpeedAwareLiveBalancer() {

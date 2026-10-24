@@ -20,7 +20,7 @@ class ServiceMediaProbeTest {
         private var cancelled = false
         override fun request() = req
         override fun execute(): Response = Response.Builder().request(req).protocol(Protocol.HTTP_1_1).code(code).message("test")
-            .header("Content-Type", mime).body(body.toResponseBody(mime.toMediaType())).build()
+            .header("Content-Type", mime).apply { if(code==206) header("Content-Range","bytes 0-${body.size-1}/${body.size}") }.body(body.toResponseBody(mime.toMediaType())).build()
         override fun enqueue(responseCallback: Callback) { throw UnsupportedOperationException() }
         override fun cancel() { cancelled = true }
         override fun isExecuted() = false
@@ -51,7 +51,7 @@ class ServiceMediaProbeTest {
         var range = ""
         val result = YouTubeMediaProbe.measure(url) { req ->
             range = req.header("Range").orEmpty()
-            FakeCall(req, 206, "video/mp4", ByteArray(YouTubeMediaProbe.SAMPLE_BYTES))
+            FakeCall(req, 206, "video/mp4", ByteArray(YouTubeMediaProbe.SAMPLE_BYTES).apply { "ftyp".toByteArray().copyInto(this,4) })
         }
         assertEquals(true, result.ok); assertTrue(result.kbps > 0)
         assertEquals("bytes=0-131071", range)
@@ -81,8 +81,8 @@ class ServiceMediaProbeTest {
         val got = ByteArray(16); b.get(got); assertArrayEquals(nonce, got)
     }
     private fun response(nonce: ByteArray): ByteArray = ByteBuffer.allocate(84).order(ByteOrder.LITTLE_ENDIAN)
-        .putLong(0).putLong(1).putInt(64).putInt(0x05162463).put(nonce).put(ByteArray(16))
-        .put(8).put(ByteArray(8)).put(ByteArray(3)).putInt(0x1cb5c415).putInt(1).putLong(123).array()
+        .putLong(0).putLong(1).putInt(64).putInt(0x05162463).put(nonce).put(ByteArray(16) { 1 })
+        .put(8).put(ByteArray(8).apply { this[7]=15 }).put(ByteArray(3)).putInt(0x1cb5c415).putInt(1).putLong(123).array()
     @Test fun mtprotoRequiresCorrectNonceAndCompleteStructuredResponse() {
         val nonce = ByteArray(16) { it.toByte() }; val good = response(nonce)
         assertTrue(TelegramProbe.validResponse(good, nonce))
@@ -96,5 +96,8 @@ class ServiceMediaProbeTest {
         assertNull(TelegramProbe.check(0))
         assertNull(TelegramProbe.check(65536))
         assertNull(TelegramProbe.check(1080, 50))
+    }
+    @Test fun fakeVideoMimeWithHtmlBodyCannotPassMediaProbe() {
+        assertEquals(false,YouTubeMediaProbe.measure(url) { FakeCall(it,200,"video/mp4",("<html>"+"x".repeat(200000)).toByteArray()) }.ok)
     }
 }

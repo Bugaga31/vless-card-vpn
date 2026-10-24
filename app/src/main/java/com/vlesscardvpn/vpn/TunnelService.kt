@@ -428,7 +428,7 @@ class TunnelService : VpnService() {
             // Embedded daemon (no Termux needed); Termux instance wins when its cookie is readable.
             try {
                 com.vlesscardvpn.tor.TorCard.ensureStarted(this@TunnelService, st.torBridge,
-                    bridgeLines = st.torBridgeLines.lines().map { it.trim() }.filter { it.startsWith("Bridge ") }.take(12))
+                    bridgeLines = com.vlesscardvpn.tor.TorBridgeCatalog.selected(st.torBridgeLines, st.torBridge))
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
                 Log.w("TOR", "Tor startup failed; no direct fallback for Tor routes")

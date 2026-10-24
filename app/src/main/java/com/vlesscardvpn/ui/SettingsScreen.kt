@@ -228,10 +228,35 @@ fun SettingsScreen() {
                 OutlinedButton(onClick = {
                     runCatching { ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://bridges.torproject.org/options"))) }
                 }, modifier = Modifier.fillMaxWidth()) { Text("Получить мосты (bridges.torproject.org)") }
-                var bridges by remember { mutableStateOf(s.torBridgeLines) }
+                var bridges by remember(s.torBridgeLines) { mutableStateOf(s.torBridgeLines) }
+                val bridgeScope=rememberCoroutineScope()
+                var bridgeLoading by remember { mutableStateOf(false) }
+                var bridgeInfo by remember { mutableStateOf("") }
+                OutlinedButton(enabled=!bridgeLoading, onClick={
+                    val transport=s.torBridge
+                    bridgeLoading=true;bridgeInfo=""
+                    bridgeScope.launch {
+                        try {
+                            val catalog=com.vlesscardvpn.tor.TorBridgeCatalog.fetch()
+                            val imported=catalog.forTransport(transport)
+                            if(Store.settings.value.torBridge!=transport) bridgeInfo="Режим изменён: мосты не заменены."
+                            else if(imported.isEmpty()) bridgeInfo="Нет корректных мостов выбранного транспорта; сохранённые строки не изменены."
+                            else {
+                                bridges=imported.joinToString("\n")
+                                set { it.copy(torBridgeLines=bridges) }
+                                bridgeInfo="Добавлено ${imported.size}; неподдерживаемых/некорректных строк ${catalog.rejected}. Доступность ещё не проверена."
+                            }
+                        } catch(e: Exception) {
+                            if(e is kotlinx.coroutines.CancellationException) throw e
+                            bridgeInfo="Источник недоступен или список некорректен. Сохранённые мосты не изменены."
+                        } finally { bridgeLoading=false }
+                    }
+                },modifier=Modifier.fillMaxWidth()) { Text(if(bridgeLoading) "Загружаю список…" else "Загрузить мосты igareck (выбранный транспорт)") }
+                Hint("Ручная загрузка из публичного TOR_BRIDGES_TOP100.txt. Источник увидит запрос; список не доказывает доступность или скорость мостов. Автообновления и сканирования нет.")
+                if(bridgeInfo.isNotBlank()) Hint(bridgeInfo)
                 androidx.compose.material3.OutlinedTextField(bridges, { v -> bridges = v; set { it.copy(torBridgeLines = v) } },
-                    modifier = Modifier.fillMaxWidth(), label = { Text("Мосты: строки «Bridge …» (до 12)") }, minLines = 2, maxLines = 6)
-                Hint("Скопируйте строки «Bridge obfs4 …» / «Bridge webtunnel …» с bridges.torproject.org сюда — по одной в строке. Применится при следующем подключении.")
+                    modifier = Modifier.fillMaxWidth(), label = { Text("Мосты: «Bridge …» или строки из списка (до 12)") }, minLines = 2, maxLines = 6)
+                Hint("Поддерживаются obfs4 и WebTunnel, с префиксом Bridge или без него. Некорректные строки и другой транспорт не применяются; прямой Tor автоматически не включается. Применится при следующем подключении.")
             }
             Toggle("Весь трафик через Tor", "Направлять поддерживаемый TCP-трафик через Tor. UDP не поддерживается; абсолютная анонимность и цепочка Tor поверх VLESS не гарантируются.", s.torAll) { v -> set { it.copy(torAll = v) } }
         }

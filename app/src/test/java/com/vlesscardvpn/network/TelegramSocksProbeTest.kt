@@ -36,8 +36,8 @@ class TelegramSocksProbeTest {
                     assertEquals(239, req[0].toInt() and 255); assertEquals(10, req[1].toInt())
                     val nonce = req.copyOfRange(26, 42)
                     val response = ByteBuffer.allocate(84).order(ByteOrder.LITTLE_ENDIAN)
-                        .putLong(0).putLong(1).putInt(64).putInt(0x05162463).put(nonce).put(ByteArray(16))
-                        .put(8).put(ByteArray(8)).put(ByteArray(3)).putInt(0x1cb5c415).putInt(1).putLong(1).array()
+                        .putLong(0).putLong(1).putInt(64).putInt(0x05162463).put(nonce).put(ByteArray(16) { 1 })
+                        .put(8).put(ByteArray(8).apply { this[7]=15 }).put(ByteArray(3)).putInt(0x1cb5c415).putInt(1).putLong(1).array()
                     out.write(21); out.write(response); out.flush()
                 } } catch (e: Throwable) { error.set(e) }
             }

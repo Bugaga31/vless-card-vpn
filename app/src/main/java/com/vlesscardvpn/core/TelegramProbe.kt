@@ -30,17 +30,23 @@ object TelegramProbe {
         if (nonce.size != 16 || bytes.size !in 76..4096 || bytes.size % 4 != 0) return false
         val b = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
         if (b.long != 0L) return false
-        b.long // server message id
+        if (b.long and 1L == 0L) return false // server message ids must be odd
         if (b.int != bytes.size - 20 || b.int != 0x05162463) return false
         val got = ByteArray(16); b.get(got)
         if (!java.security.MessageDigest.isEqual(got, nonce)) return false
-        b.position(b.position() + 16) // server nonce
+        val serverNonce=ByteArray(16);b.get(serverNonce)
+        if(serverNonce.all { it==0.toByte() }) return false
         val len = b.get().toInt() and 255
         if (len !in 1..8 || b.remaining() < len + (4 - (len + 1) % 4) % 4 + 8) return false
-        b.position(b.position() + len + (4 - (len + 1) % 4) % 4)
+        val pq=ByteArray(len);b.get(pq)
+        val number=java.math.BigInteger(1,pq)
+        if(number<=java.math.BigInteger.valueOf(4) || !number.testBit(0) || number.isProbablePrime(16)) return false
+        repeat((4-(len+1)%4)%4) { if(b.get()!=0.toByte()) return false }
         if (b.int != 0x1cb5c415) return false // TL vector of RSA key fingerprints
         val count = b.int
-        count in 1..16 && b.remaining() == count * 8
+        if(count !in 1..16 || b.remaining()!=count*8) return false
+        val keys=(0 until count).map { b.long }
+        keys.none { it==0L } && keys.distinct().size==count
     }.getOrDefault(false)
 
     /** null = not enough budget/cancelled; false = neither sampled DC answered valid MTProto. */

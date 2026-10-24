@@ -1346,7 +1346,7 @@ object Actions {
         // Check up to eight real routes; parallelism stays bounded and downloads remain sequential.
         val shortlist = ServerChoice.diverse(ordered, AutoEligibility.TOP)
         val passed = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
-        val fastOk = realTest(shortlist, "Авто: проверяю до восьми маршрутов", big = false, youtube = false,
+        val fastOk = realTest(shortlist, "Авто: проверяю до восьми маршрутов", big = true, youtube = false,
             attempts = 1, parallel = 4, budgetMs = ConnectPolicy.QUICK_BUDGET_MS,onSuccess={ passed.add(it.id) })
         if (Net.key(app) != net || Net.underlying(app)?.toString() != network) return selectionNetworkChanged()
         if (fastOk > 0) {
@@ -1354,7 +1354,7 @@ object Actions {
             deepPending = true; return "Выбран лучший из проверенных маршрутов; не просто первый ответивший"
         }
         attempted.addAll(first.map { it.id });passed.clear()
-        val ok = realTest(ordered, "Авто: первые ${first.size} маршрутов (облако: ${cloud.size})", big = false,
+        val ok = realTest(ordered, "Авто: первые ${first.size} маршрутов (облако: ${cloud.size})", big = true,
             youtube = false, attempts = 1, stopAfter = Int.MAX_VALUE, budgetMs = ConnectPolicy.QUICK_BUDGET_MS,onSuccess={ passed.add(it.id) })
         if (Net.key(app) != net || Net.underlying(app)?.toString() != network) return selectionNetworkChanged()
         if (ok > 0) { chooseCompared(ordered.filter { it.id in passed },onFirst, eligible.filter { it.id !in attempted }); deepPending = true; return "Маршруты сравнены; облачные подсказки ${cloud.size}, полный поиск в фоне" }
@@ -1366,7 +1366,7 @@ object Actions {
         states.flush()
         val candidates = rest.filter { (tcp[it.id] ?: 0) > 0 }.sortedBy { tcp[it.id] }
         passed.clear()
-        val second = realTest(candidates, "Авто: запасные ${candidates.size} маршрутов", big = false, youtube = false,
+        val second = realTest(candidates, "Авто: запасные ${candidates.size} маршрутов", big = true, youtube = false,
             attempts = 1, stopAfter = Int.MAX_VALUE, budgetMs = ConnectPolicy.QUICK_BUDGET_MS,onSuccess={ passed.add(it.id) })
         if (Net.key(app) != net || Net.underlying(app)?.toString() != network) return selectionNetworkChanged()
         if (second > 0) { chooseCompared(candidates.filter { it.id in passed },onFirst, eligible.filter { it.id !in attempted }); deepPending = true }

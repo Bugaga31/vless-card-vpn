@@ -21,10 +21,8 @@ object SpeedBalance {
         if (speeds.any { it > 0 }) strategy(speeds,latencies).toString() else ""
 
     fun strategy(speeds: List<Int>, latencies: List<Int>): JSONObject {
-        val best = speeds.maxOrNull()?.coerceAtLeast(1)?.toLong() ?: 1L
-        val comparable = speeds.count { it > 0 && it.toLong() * 10 >= best * 6 }.coerceIn(1,AutoEligibility.TOP)
         return JSONObject().put("type","leastLoad").put("settings",JSONObject()
-            .put("expected",comparable).put("maxRTT","4s").put("tolerance",.3)
+            .put("expected",1).put("maxRTT","4s").put("tolerance",0.0)
             .put("costs",JSONArray(costs(speeds,latencies).mapIndexed { i,v ->
                 JSONObject().put("regexp",true).put("match","^proxy-$i$").put("value",v)
             })))

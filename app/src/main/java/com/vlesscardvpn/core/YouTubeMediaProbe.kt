@@ -85,8 +85,18 @@ object YouTubeMediaProbe {
                 // Signed URL expiry, consent and rate limiting are not route failures.
                 if (r.code !in listOf(200, 206)) return Result(null)
                 if (!r.header("Content-Type").orEmpty().startsWith("video/", true)) return Result(null)
+                if (!TransferProof.rangeValid(r.code,r.header("Content-Range"),SAMPLE_BYTES)) return Result(false)
+                if (!r.header("Content-Encoding").isNullOrBlank() && !r.header("Content-Encoding").equals("identity",true)) return Result(null)
                 val input = r.body?.byteStream() ?: return Result(null)
-                var total = 0; val buf = ByteArray(16384)
+                val header=ByteArray(12);var headerSize=0
+                while(headerSize<header.size) {
+                    if(Thread.currentThread().isInterrupted) return Result(null)
+                    val n=input.read(header,headerSize,header.size-headerSize)
+                    if(n<=0) return Result(false)
+                    headerSize+=n
+                }
+                if(!TransferProof.videoHeader(header,r.header("Content-Type").orEmpty())) return Result(false)
+                var total = headerSize; val buf = ByteArray(16384)
                 while (total < SAMPLE_BYTES) {
                     if (Thread.currentThread().isInterrupted) return Result(null)
                     val n = input.read(buf, 0, minOf(buf.size, SAMPLE_BYTES - total))

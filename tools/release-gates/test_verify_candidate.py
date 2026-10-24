@@ -9,10 +9,10 @@ class ReleaseGates(unittest.TestCase):
     def totals(self, **kw):
         with tempfile.TemporaryDirectory() as d:
             p = Path(d)/'test.xml'
-            attrs = dict(tests=441, failures=0, errors=0, skipped=0); attrs.update(kw)
+            attrs = dict(tests=468, failures=0, errors=0, skipped=0); attrs.update(kw)
             p.write_text('<testsuite ' + ' '.join(f'{k}="{x}"' for k,x in attrs.items()) + '/>')
             return v.test_totals([p])
-    def test_green_totals(self): self.assertEqual(self.totals()['tests'], 441)
+    def test_green_totals(self): self.assertEqual(self.totals()['tests'], 468)
     def test_missing_reports(self):
         with self.assertRaises(RuntimeError): v.test_totals([])
     def test_missing_tests(self):
