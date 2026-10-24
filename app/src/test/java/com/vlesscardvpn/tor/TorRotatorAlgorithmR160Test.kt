@@ -37,7 +37,8 @@ class TorRotatorAlgorithmR160Test {
     @Test
     fun `no rotation while cadence gate holds`() {
         val control = RecordingControl()
-        val rotator = TorRotator(control, TorRotation(rotateEveryMs = 600_000, now = { 0 }), cookieHex = "01")
+        val rotation = TorRotation(rotateEveryMs = 600_000, now = { 0 })
+        val rotator = TorRotator(control, rotation, cookieHex = "01")
         rotator.connect()
         rotator.recordExit(100, "nl")
         rotation.markRotated(0)
