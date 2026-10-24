@@ -8,7 +8,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.util.concurrent.TimeUnit
 
-/** Explicit opt-in import; external bridge lists are untrusted suggestions, not working-route evidence. */
+/** Opt-in manual or scheduled import; external bridge lists are untrusted suggestions, not working-route evidence. */
 object TorBridgeCatalog {
     const val SOURCE = "https://raw.githack.com/igareck/vpn-configs-for-russia/main/TOR-BRIDGES/TOR_BRIDGES_TOP100.txt"
     const val MAX_BYTES = 262144
@@ -29,6 +29,15 @@ object TorBridgeCatalog {
         val validHost=if(':' in host) endpoint.startsWith('[') && Regex("[A-Fa-f0-9:]+").matches(host) && runCatching { java.net.InetAddress.getByName(host) is java.net.Inet6Address }.getOrDefault(false)
             else ipv4.size==4 && ipv4.all { it.toIntOrNull() in 0..255 }
         if(!validHost) return null
+        if(tokens[0]=="obfs4") {
+            val address=runCatching { if(':' in host) java.net.InetAddress.getByName(host)
+                else java.net.InetAddress.getByAddress(ByteArray(4) { ipv4[it].toInt().toByte() }) }.getOrNull() ?: return null
+            val bytes=address.address
+            val sharedV4=bytes.size==4 && (bytes[0].toInt() and 255)==100 && (bytes[1].toInt() and 255) in 64..127
+            val privateV6=bytes.size==16 && (bytes[0].toInt() and 254)==252
+            if(address.isAnyLocalAddress || address.isLoopbackAddress || address.isLinkLocalAddress ||
+                address.isSiteLocalAddress || address.isMulticastAddress || sharedV4 || privateV6) return null
+        }
         val params=tokens.drop(3)
         if(params.any { '=' !in it } || params.map { it.substringBefore('=') }.distinct().size!=params.size) return null
         if(tokens[0]=="obfs4") {

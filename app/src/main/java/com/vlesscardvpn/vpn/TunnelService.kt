@@ -1,5 +1,6 @@
 package com.vlesscardvpn.vpn
 
+import kotlinx.coroutines.ensureActive
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -415,6 +416,7 @@ class TunnelService : VpnService() {
     }
 
     private var torJob: Job? = null
+    private var torBridgeRefreshJob: Job? = null
     /**
      * Tor exit rotator, absorbed from tor-rotator-vless (docs/tor-rotator-absorption.md).
      * Opt-in via settings.torRotation. Rotates the exit node of a locally started Tor
@@ -427,8 +429,26 @@ class TunnelService : VpnService() {
         torJob = scope.launch(Dispatchers.IO) {
             // Embedded daemon (no Termux needed); Termux instance wins when its cookie is readable.
             try {
-                com.vlesscardvpn.tor.TorCard.ensureStarted(this@TunnelService, st.torBridge,
-                    bridgeLines = com.vlesscardvpn.tor.TorBridgeCatalog.selected(st.torBridgeLines, st.torBridge))
+                // A first opt-in import may wait at most the catalog call timeout; cached bridges start immediately.
+                if (st.torBridge != "none" && com.vlesscardvpn.tor.TorBridgeUpdates.enabled(this@TunnelService) &&
+                    runCatching { com.vlesscardvpn.tor.TorBridgeCatalog.selected(st.torBridgeLines, st.torBridge) }.isFailure) {
+                    com.vlesscardvpn.tor.TorBridgeUpdates.refresh(this@TunnelService)
+                }
+                kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                val active = Store.state.value.settings
+                if (active.torBridge != st.torBridge || (!active.torRotation && !active.torRouting && !active.torAll)) return@launch
+                com.vlesscardvpn.tor.TorCard.ensureStarted(this@TunnelService, active.torBridge,
+                    bridgeLines = com.vlesscardvpn.tor.TorBridgeCatalog.selected(active.torBridgeLines, active.torBridge))
+                if (torBridgeRefreshJob?.isActive != true) {
+                    torBridgeRefreshJob = scope.launch(Dispatchers.IO) {
+                        while (true) {
+                            val current = Store.state.value.settings
+                            if (!current.torRotation && !current.torRouting && !current.torAll) break
+                            com.vlesscardvpn.tor.TorBridgeUpdates.refresh(this@TunnelService)
+                            delay(com.vlesscardvpn.tor.TorBridgeRefreshPolicy.RETRY_MS)
+                        }
+                    }
+                }
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
                 Log.w("TOR", "Tor startup failed; no direct fallback for Tor routes")
@@ -816,6 +836,7 @@ class TunnelService : VpnService() {
             runCatching { setUnderlyingNetworks(network?.let { arrayOf(it) }) }
             netJob?.cancel(); checkJob?.cancel(); healJob?.cancel(); optJob?.cancel(); scoutJob?.cancel(); rescueJob?.cancel()
             watchJob?.cancel(); coverJob?.cancel(); serviceJob?.cancel(); liveJob?.cancel(); torJob?.cancel(); torJob = null
+            torBridgeRefreshJob?.cancel(); torBridgeRefreshJob = null
             com.vlesscardvpn.tor.TorCard.invalidateStartup()
             Actions.cancelForNetworkChange()
             if (!change.online) {
@@ -849,6 +870,7 @@ class TunnelService : VpnService() {
 
     private fun teardown(error: String?, keepTun: Boolean = false) {
         torJob?.cancel(); torJob = null
+        torBridgeRefreshJob?.cancel(); torBridgeRefreshJob = null
         com.vlesscardvpn.tor.TorCard.invalidateStartup()
         if (error != null) com.vlesscardvpn.tor.TorCard.stopEmbedded()
         if (!keepTun) runCatching { com.vlesscardvpn.core.Traffic.tick() }

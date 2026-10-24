@@ -1,5 +1,5 @@
 {
   "ready": true,
-  "scope": "strict transfer and media/MTProto validation, measured-speed leader, explicit manual Tor bridge import",
+  "scope": "strict transfer proofs, fastest measured leader, Tor-only UI, opt-in persistent bridge refresh, corrected isolated WireGuard fixture",
   "physical_phone_tested": false
 }

@@ -16,12 +16,13 @@ mkdir -p /tmp/xray /tmp/srv /tmp/xcfg && unzip -qo /tmp/xray.zip -d /tmp/xray
 X=/tmp/xray/xray
 STAGE=generate-fixtures
 KEYS=$($X x25519); PRIV=$(echo "$KEYS" | sed -n 's/^PrivateKey: //p'); PBK=$(echo "$KEYS" | sed -n 's/^Password (PublicKey): //p')
-openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -keyout /tmp/srv.key -out /tmp/srv.crt -days 2 -subj "/CN=test.local" -addext "subjectAltName=DNS:test.local,IP:127.0.0.1" 2>/dev/null
+openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -keyout /tmp/srv.key -out /tmp/srv.crt -days 2 -subj "/CN=test.local" -addext "subjectAltName=DNS:test.local,IP:127.0.0.1,IP:192.0.2.2" 2>/dev/null
 export MATRIX_CHECK_URL=https://127.0.0.1:18443/generate_204 MATRIX_DOWNLOAD_URL=https://127.0.0.1:18443/bytes MATRIX_CA=/tmp/srv.crt
 python3 tools/e2e/matrix-origin.py >/tmp/matrix-origin.log 2>&1 & ORIGIN=$!
 P=$(openssl x509 -in /tmp/srv.crt -outform der | sha256sum | cut -d' ' -f1)
 U=a00975c5-597e-4c22-a7a7-a84ce5e0691e
 sed -e "s#@PRIV@#$PRIV#g" -e "s#@U@#$U#g" tools/e2e/matrix-server.json > /tmp/srv/server.json
+python3 tools/e2e/matrix_wireguard.py /tmp/srv/server.json
 $X run -c /tmp/srv/server.json > /tmp/srv/server.log 2>&1 &
 STAGE=compile-native
 gcc -D_DEFAULT_SOURCE -std=c99 -O2 native/byedpi/{packets,main,conev,proxy,desync,mpool,extend}.c -o /tmp/byedpi
@@ -130,7 +131,11 @@ STAGE=wireguard-transfer
 python3 - <<'PY' || MFAIL=1
 # WireGuard: one tunnel per key at a time (parallel tunnels with one key make the server roam), so each WG
 # variant gets its own Xray instance here, sequentially, instead of the parallel matrix.
-import json, subprocess, time, os
+import json, subprocess, time, os, sys
+sys.path.insert(0, 'tools/e2e')
+from matrix_wireguard import wireguard_url
+wg_check = wireguard_url(os.environ['MATRIX_CHECK_URL'])
+wg_download = wireguard_url(os.environ['MATRIX_DOWNLOAD_URL'])
 cfg = json.load(open('/tmp/xcfg/local-matrix.json'))
 rows = [l.split() for l in open('/tmp/xcfg/local-matrix.txt')]
 wok = wall = 0
@@ -141,8 +146,8 @@ with open('/tmp/xcfg/wg-result.txt', 'w') as out:
         ob = [o for o in cfg['outbounds'] if o['tag'] == tag][0]
         json.dump({"inbounds": [{"port": 24900, "listen": "127.0.0.1", "protocol": "socks", "settings": {"auth": "noauth"}}], "outbounds": [ob]}, open('/tmp/wg1.json', 'w'))
         p = subprocess.Popen(['/tmp/xray/xray', 'run', '-c', '/tmp/wg1.json'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL); time.sleep(1.5)
-        a = subprocess.run(['curl', '--noproxy', '', '-s', '-o', '/dev/null', '-m', '15', '-w', '%{http_code}', '--socks5-hostname', '127.0.0.1:24900', os.environ['MATRIX_CHECK_URL'], '--cacert', os.environ['MATRIX_CA']], capture_output=True, text=True).stdout
-        b = subprocess.run(['curl', '--noproxy', '', '-s', '-o', '/dev/null', '-m', '25', '-w', '%{size_download}', '--socks5-hostname', '127.0.0.1:24900', os.environ['MATRIX_DOWNLOAD_URL'], '--cacert', os.environ['MATRIX_CA']], capture_output=True, text=True).stdout
+        a = subprocess.run(['curl', '--noproxy', '', '-s', '-o', '/dev/null', '-m', '15', '-w', '%{http_code}', '--socks5-hostname', '127.0.0.1:24900', wg_check, '--cacert', os.environ['MATRIX_CA']], capture_output=True, text=True).stdout
+        b = subprocess.run(['curl', '--noproxy', '', '-s', '-o', '/dev/null', '-m', '25', '-w', '%{size_download}', '--socks5-hostname', '127.0.0.1:24900', wg_download, '--cacert', os.environ['MATRIX_CA']], capture_output=True, text=True).stdout
         p.kill(); p.wait()
         ok = a == '204' and b.isdigit() and int(b) >= 262144
         wall += 1; wok += ok

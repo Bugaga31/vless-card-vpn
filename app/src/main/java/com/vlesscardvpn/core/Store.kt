@@ -222,8 +222,9 @@ object Store {
         runCatching { LocalSecrets.deleteState(context) }
         runCatching { android.util.AtomicFile(File(context.filesDir, "state.json")).delete(); File(context.filesDir, "state.json.tmp").delete() }
         CloudSync.forget(context); Report.stop(); Brain.clear(); runCatching { PhoneBrain.reset(context); DeviceCoach.background(context, false) }
-        listOf("brain", "report", "cloud_speed", "clip").forEach { context.getSharedPreferences(it, 0).edit().clear().commit() }
+        listOf("brain", "report", "cloud_speed", "clip", "tor_bridge_updates").forEach { context.getSharedPreferences(it, 0).edit().clear().commit() }
         runCatching { LocalSecrets.destroy(context) }
+        com.vlesscardvpn.tor.TorBridgeUpdates.consentCleared()
         CloudSpeed.clear(); Report.load = emptyMap()
         storageReady = true; storageError.value = ""
         runCatching { File(context.filesDir, "hev-socks5-tunnel.yaml").delete() }

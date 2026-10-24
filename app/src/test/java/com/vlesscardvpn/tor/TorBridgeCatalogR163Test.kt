@@ -22,4 +22,13 @@ class TorBridgeCatalogR163Test {
         assertTrue(parsed.forTransport("webtunnel").isNotEmpty())
         println("Tor bridge syntax only: obfs4=${parsed.forTransport("obfs4").size}; webtunnel=${parsed.forTransport("webtunnel").size}; rejected=${parsed.rejected}; bootstrap NOT tested")
     }
+    @Test fun automaticCatalogCannotIntroduceLoopbackPrivateOrLinkLocalObfsBridges() {
+        for (host in listOf("127.0.0.1", "10.0.0.1", "172.16.0.1", "192.168.0.1", "169.254.1.1", "100.64.0.1", "0.0.0.0", "224.0.0.1"))
+            assertNull(host, TorBridgeCatalog.normalize(obfs.replace("192.0.2.1",host)))
+    }
+    @Test fun automaticCatalogRejectsPrivateIpv6ButKeepsWebTunnelDummyAddress() {
+        for (host in listOf("[::1]", "[fc00::1]", "[fd00::1]", "[fe80::1]", "[ff02::1]"))
+            assertNull(host, TorBridgeCatalog.normalize(obfs.replace("192.0.2.1",host)))
+        assertNotNull(TorBridgeCatalog.normalize(web))
+    }
 }
