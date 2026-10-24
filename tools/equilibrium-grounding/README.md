@@ -8,7 +8,7 @@ No model, source books, user manuscript, raw answers, secrets or datasets are co
 
 Instead of trusting fluent generated paraphrases, the model selects complete verbatim
 sentences. A deterministic gate verifies JSON shape, source digest, source ID, offsets,
-quote membership, sentence boundaries and completion. It rejects unknown fields (including
+quote membership, sentence boundaries and completion. Whitespace-only line-wrap differences map back to the original source slice; words and negations cannot be rewritten. It rejects unknown fields (including
 actions), invented names/relationships, edits to quotations and many dropped-negation cuts.
 A source instruction is kept as **data**. No quoted command is executed.
 
@@ -18,7 +18,7 @@ semantic review remains required. Sentence-boundary heuristics are conservative 
 (abbreviations, dialogue, multiline sentences). These tests are not an injection-proofness
 or general reasoning certification. Outputs remain JSON data, not executable Markdown/HTML.
 
-Retrieval is lexical with explicitly supplied aliases; it is not multilingual semantic search.
+Retrieval selects at most two paragraph-based passages rather than padding context with unrelated neighbours. It is lexical with bounded prefix matching and explicitly supplied aliases; it is not multilingual semantic search.
 Generation and inference remain local. This tool itself has no browsing, training or execution API.
 A future network reader must separately implement opt-in, address/redirect/size controls and privacy.
 

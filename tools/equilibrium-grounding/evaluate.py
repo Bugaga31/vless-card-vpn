@@ -55,7 +55,7 @@ def main():
         manifest={'model_id':MODEL_ID,'model_revision':MODEL_REVISION,'model_sha256':digest,
                   'llama_cpp_python':importlib.metadata.version('llama-cpp-python'),
                   'weight_training_performed':False,'android_integration':False,
-                  'semantic_success_claimed':False,'results':results}
+                  'semantic_success_claimed':False,'code_sha256':{n:hashlib.sha256((Path(__file__).parent/n).read_bytes()).hexdigest() for n in ['grounding.py','evaluate.py']},'results':results}
         a.output.write_text(json.dumps(manifest,ensure_ascii=False,indent=2)+'\n')
         print(json.dumps({'id':case['id'],'rejected':result['rejected'],'seconds':result['seconds']},ensure_ascii=False),flush=True)
 

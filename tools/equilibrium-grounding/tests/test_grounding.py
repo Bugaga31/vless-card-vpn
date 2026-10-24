@@ -5,7 +5,7 @@ import unittest
 from dataclasses import replace
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from grounding import Source, retrieve, spans, validate, Rejected, make_prompt
+from grounding import Source, retrieve, spans, validate, Rejected, make_prompt, paragraph_spans
 
 class GroundingTests(unittest.TestCase):
     def setUp(self):
@@ -125,5 +125,56 @@ class GroundingTests(unittest.TestCase):
         e=[dict(self.evidence[0])];e[0]['start']=self.source.text.index('открыл');e[0]['text']=self.source.text[e[0]['start']:e[0]['end']]
         self.good['quotes'][0]['text']='открыл дверь.'
         with self.assertRaises(Rejected):self.check(evidence=e)
+
+    def test_paragraph_coverage(self):
+        text='Short.\n\n'+('long text. '*400)+'\n\nFinal.'
+        cover=bytearray(len(text))
+        for a,b in paragraph_spans(text):cover[a:b]=b'\1'*(b-a)
+        self.assertTrue(all(cover))
+    def test_retrieval_does_not_pad_with_unrelated_paragraph(self):
+        s=Source('p','Paragraphs','Нина знает ответ.\n\nПосторонний текст о поездах.')
+        e=retrieve(s,'Нина ответ')
+        self.assertEqual(len(e),1)
+        self.assertNotIn('Посторонний',e[0]['text'])
+    def test_evidence_count_bounded(self):
+        s=Source('p','Paragraphs','\n\n'.join('Нина факт '+str(i)+'.' for i in range(20)))
+        self.assertLessEqual(len(retrieve(s,'Нина')),2)
+
+    def test_line_wrap_canonicalized_to_original_source(self):
+        source=Source('wrapped','Wrapped','Герой не\nоткрыл дверь. Следующий факт.')
+        e=retrieve(source,'Герой дверь')
+        raw=json.dumps({'status':'evidence','quotes':[{'evidence_id':'E1','text':'Герой не открыл дверь.'}]})
+        r=validate(raw,e,source,'stop');q=r['quotes'][0]
+        self.assertEqual('Герой не\nоткрыл дверь.',q['text'])
+        self.assertEqual(source.text[q['start']:q['end']],q['text'])
+    def test_line_wrap_does_not_allow_removal_of_negation(self):
+        source=Source('wrapped','Wrapped','Герой не\nоткрыл дверь.')
+        e=retrieve(source,'Герой дверь')
+        raw=json.dumps({'status':'evidence','quotes':[{'evidence_id':'E1','text':'Герой открыл дверь.'}]})
+        with self.assertRaises(Rejected):validate(raw,e,source,'stop')
+    def test_line_wrap_does_not_allow_new_words(self):
+        source=Source('wrapped','Wrapped','Герой не\nоткрыл дверь.')
+        e=retrieve(source,'Герой дверь')
+        raw=json.dumps({'status':'evidence','quotes':[{'evidence_id':'E1','text':'Герой не открыл старую дверь.'}]})
+        with self.assertRaises(Rejected):validate(raw,e,source,'stop')
+    def test_line_wrap_does_not_allow_mid_sentence_cut(self):
+        source=Source('wrapped','Wrapped','Герой не\nоткрыл дверь.')
+        e=retrieve(source,'Герой дверь')
+        raw=json.dumps({'status':'evidence','quotes':[{'evidence_id':'E1','text':'не открыл дверь.'}]})
+        with self.assertRaises(Rejected):validate(raw,e,source,'stop')
+    def test_extended_form_of_shorter_source_token(self):
+        source=Source('p','Forms','Вход открыт.')
+        self.assertTrue(retrieve(source,'Что известно о входе?'))
+
+    def test_line_wrap_is_not_start_of_sentence_after_negation(self):
+        source=Source('wrapped','Wrapped','Герой не\nоткрыл дверь.')
+        e=retrieve(source,'Герой дверь')
+        raw=json.dumps({'status':'evidence','quotes':[{'evidence_id':'E1','text':'открыл дверь.'}]})
+        with self.assertRaises(Rejected):validate(raw,e,source,'stop')
+    def test_line_wrap_is_not_end_of_sentence_before_qualification(self):
+        source=Source('wrapped','Wrapped','Вход открыт\nтолько для сотрудников.')
+        e=retrieve(source,'Вход')
+        raw=json.dumps({'status':'evidence','quotes':[{'evidence_id':'E1','text':'Вход открыт'}]})
+        with self.assertRaises(Rejected):validate(raw,e,source,'stop')
 
 if __name__=='__main__':unittest.main()
