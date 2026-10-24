@@ -217,8 +217,8 @@ object XrayConfigBuilder {
                   heavy: Set<Int> = emptySet(), serviceRoutes: Map<String, List<String>> = emptyMap(), quietLogs: Boolean = false, downloadSpeeds: List<Int> = emptyList(), downloadLatencies: List<Int> = emptyList()): String {
         // Auto: servers when there are working ones, otherwise the DPI engine alone.
         val settings = if (settings0.mode == Mode.AUTO) settings0.copy(mode = if (servers.isEmpty()) Mode.BYEDPI else Mode.SERVERS) else settings0
-        require(settings.mode == Mode.BYEDPI || servers.isNotEmpty()) { "Не выбран ни один сервер" }
-        require(settings.mode == Mode.SERVERS || byeDpiPort != null) { "ByeDPI не запущен" }
+        require(settings.torAll || settings.mode == Mode.BYEDPI || servers.isNotEmpty()) { "Не выбран ни один сервер" }
+        require(settings.torAll || settings.mode == Mode.SERVERS || byeDpiPort != null) { "ByeDPI не запущен" }
         val c = base()
         if (quietLogs) c.getJSONObject("log").put("loglevel", "error")
         val inSettings = JSONObject().put("udp", true).put("ip", "127.0.0.1")
@@ -232,11 +232,11 @@ object XrayConfigBuilder {
             .put("protocol", "http").put("settings", JSONObject()).put("sniffing", sniff()))
         c.put("inbounds", inbounds)
         val outs = JSONArray()
-        val useServers = settings.mode != Mode.BYEDPI
+        val useServers = !settings.torAll && settings.mode != Mode.BYEDPI
         if (useServers) servers.forEachIndexed { i, (s, m) -> outs.put(outbound(s, "$PROXY_PREFIX$i", resolveMask(m, byeDpiPort, dpiPorts), settings.mux)) }
         outs.put(JSONObject().put("tag", "direct").put("protocol", "freedom").put("settings", JSONObject().put("domainStrategy", "UseIPv4")))
-        // Tor chain: services marked in settings go through the local Tor SOCKS port (Termux). Tor's
-        // own circuits ride the TUN (the app uid is excluded, Termux is not), so Tor ends up wrapped in VLESS for free.
+        // Embedded Tor (or an explicitly configured local Tor) uses its own SOCKS listener.
+        // Standalone Tor needs neither a VLESS outbound nor a ByeDPI process.
         val torOn = com.vlesscardvpn.tor.TorRoutePolicy.active(settings)
         if (torOn) outs.put(JSONObject().put("tag", TOR_TAG).put("protocol", "socks")
             .put("settings", JSONObject().put("servers", arr(JSONObject().put("address", "127.0.0.1").put("port", com.vlesscardvpn.tor.TorCard.DEFAULT_SOCKS_PORT)))))
@@ -264,7 +264,7 @@ object XrayConfigBuilder {
             else -> rule.put("outboundTag", "${PROXY_PREFIX}0")
         }
         val dnsServers = JSONArray()
-        val ruDns = settings.ruDns && settings.ruDirect && useServers
+        val ruDns = settings.ruDns && settings.ruDirect && (useServers || settings.torAll)
         if (ruDns) dnsServers.put(JSONObject().put("address", RU_DNS).put("port", 53)
             .put("domains", JSONArray(RU_DOMAINS)).put("skipFallback", true))
         // a chain, not one server: if Cloudflare DoH is slowed down here, Google, Quad9 and plain DNS through the tunnel answer
@@ -326,7 +326,7 @@ object XrayConfigBuilder {
             rules.put(toMain(JSONObject().put("domain", JSONArray(com.vlesscardvpn.core.Services.domains(listOf("telegram"))))))
             rules.put(toMain(JSONObject().put("ip", JSONArray(com.vlesscardvpn.core.Services.ips(listOf("telegram"))))))
         }
-        if (settings.ruDirect && useServers) {
+        if (settings.ruDirect && (useServers || settings.torAll)) {
             rules.put(JSONObject().put("domain", JSONArray(RU_DOMAINS)).put("outboundTag", "direct"))
             rules.put(JSONObject().put("ip", arr("geoip:ru")).put("outboundTag", "direct"))
         }

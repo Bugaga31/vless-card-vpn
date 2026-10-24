@@ -303,7 +303,7 @@ class TunnelService : VpnService() {
             Log.w(TAG, "connect failed", e)
             Log.i("E2E", "connect failed: ${e.message}")
             // Auto mode doesn't give up on a failed start: 1) without masks, 2) DPI bypass without servers.
-            if (Store.state.value.settings.mode == Mode.AUTO && connectFails < 2) {
+            if (com.vlesscardvpn.tor.TorConnectionPolicy.needsAutoSearch(Store.state.value.settings) && connectFails < 2) {
                 connectFails++
                 if (connectFails == 1) safeMasks = true else autoDpiOnly = true
                 Log.i("E2E", "connect retry #$connectFails safe=$safeMasks dpiOnly=$autoDpiOnly")
