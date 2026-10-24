@@ -7,7 +7,9 @@ on:
     paths: ['scripts/cloud_servers.py', 'scripts/cloud_reports.py', 'scripts/cloud_real.py', 'scripts/cloud_manifest.py', 'scripts/cloud_masks.py', 'scripts/cloud_state.py', 'scripts/test_cloud_continuity.py', 'config/cloud-recipes.json', '.github/workflows/cloud-servers.yml']
 permissions:
   contents: read
-concurrency: { group: cloud-servers, cancel-in-progress: false }
+concurrency:
+  group: ${{ github.ref == 'refs/heads/main' && 'cloud-servers' || format('cloud-validation-{0}', github.ref) }}
+  cancel-in-progress: false
 jobs:
   validate:
     runs-on: ubuntu-latest
