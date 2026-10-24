@@ -49,12 +49,18 @@ class TorRotator(
 
     /**
      * Call periodically (e.g. every 10 s). Returns true when a rotation happened.
+     * Full rotator algorithm: cadence gate → pick the best-measured exit country →
+     * pin it on the ControlPort (SETCONF ExitNodes) → fresh circuits (NEWNYM).
      * Silent no-op when offline, not connected, or rotation is not due.
      */
     fun tick(nowMs: Long = System.currentTimeMillis()): Boolean {
         if (!connected) return false
         if (!rotation.shouldRotate(nowMs)) return false
         return try {
+            rotation.pick(nowMs)?.let { best ->
+                control.setExitCountries(listOf(best))
+                rotation.notePicked(best)
+            }
             control.signalNewNym()
             rotation.markRotated(nowMs)
             true

@@ -75,16 +75,17 @@ object TorCard {
      * come from bridges.torproject.org, as with Termux.
      */
     fun torrcEmbedded(ctx: android.content.Context, controlPort: Int = DEFAULT_CONTROL_PORT,
-                      socksPort: Int = DEFAULT_SOCKS_PORT, bridge: String = "none"): String {
+                      socksPort: Int = DEFAULT_SOCKS_PORT, bridge: String = "none", bridgeLines: List<String> = emptyList()): String {
         val dir = java.io.File(ctx.filesDir, "tor")
         return torrcEmbedded(java.io.File(dir, "data").absolutePath, java.io.File(dir, "cookie").absolutePath,
-            nativeDir(ctx), controlPort, socksPort, bridge)
+            nativeDir(ctx), controlPort, socksPort, bridge, bridgeLines)
     }
 
     /** Pure overload — testable on the JVM without an Android context. */
     fun torrcEmbedded(dataDir: String, cookieFile: String, nativeBinDir: String,
                       controlPort: Int = DEFAULT_CONTROL_PORT,
-                      socksPort: Int = DEFAULT_SOCKS_PORT, bridge: String = "none"): String = buildString {
+                      socksPort: Int = DEFAULT_SOCKS_PORT, bridge: String = "none",
+                      bridgeLines: List<String> = emptyList()): String = buildString {
         appendLine("SocksPort 127.0.0.1:$socksPort")
         appendLine("ControlPort 127.0.0.1:$controlPort")
         appendLine("CookieAuthentication 1")
@@ -95,7 +96,8 @@ object TorCard {
         when (bridge) {
             "obfs4", "webtunnel" -> {
                 appendLine("ClientTransportPlugin obfs4,webtunnel exec $bin/libLyrebird.so")
-                appendLine("# obfs4/webtunnel: мосты выдаёт bridges.torproject.org — вставьте их строками «Bridge …» ниже (настройки Tor-режима → «Получить мосты»)")
+                appendLine("# obfs4/webtunnel: мосты выдаёт bridges.torproject.org — вставьте их в настройках Tor-режима → «Мосты»")
+                bridgeLines.filter { it.startsWith("Bridge ") }.forEach { appendLine(it.trim()) }
                 appendLine("UseBridges 1")
             }
         }
@@ -103,9 +105,10 @@ object TorCard {
 
     /** Starts the embedded daemon; returns the process (caller keeps it alive). */
     fun startEmbedded(ctx: android.content.Context, bridge: String = "none",
-                      controlPort: Int = DEFAULT_CONTROL_PORT, socksPort: Int = DEFAULT_SOCKS_PORT): java.lang.Process {
+                      controlPort: Int = DEFAULT_CONTROL_PORT, socksPort: Int = DEFAULT_SOCKS_PORT,
+                      bridgeLines: List<String> = emptyList()): java.lang.Process {
         val dir = java.io.File(ctx.filesDir, "tor"); dir.mkdirs()
-        java.io.File(dir, "torrc").writeText(torrcEmbedded(ctx, controlPort, socksPort, bridge))
+        java.io.File(dir, "torrc").writeText(torrcEmbedded(ctx, controlPort, socksPort, bridge, bridgeLines))
         val b = java.lang.ProcessBuilder(listOf(java.io.File(nativeDir(ctx), "libTor.so").absolutePath,
             "-f", java.io.File(dir, "torrc").absolutePath))
             .redirectOutput(java.io.File(dir, "tor.log")).redirectErrorStream(true)
@@ -118,9 +121,10 @@ object TorCard {
 
     /** Starts the embedded daemon unless a local Tor already answers on [socksPort]. */
     fun ensureStarted(ctx: android.content.Context, bridge: String = "none",
-                      controlPort: Int = DEFAULT_CONTROL_PORT, socksPort: Int = DEFAULT_SOCKS_PORT): java.lang.Process? {
+                      controlPort: Int = DEFAULT_CONTROL_PORT, socksPort: Int = DEFAULT_SOCKS_PORT,
+                      bridgeLines: List<String> = emptyList()): java.lang.Process? {
         if (!available(ctx) || portUp(socksPort)) return null
-        return runCatching { startEmbedded(ctx, bridge, controlPort, socksPort).also { embedded = it } }.getOrNull()
+        return runCatching { startEmbedded(ctx, bridge, controlPort, socksPort, bridgeLines).also { embedded = it } }.getOrNull()
     }
 
     /** Stops the embedded daemon (Termux tor is managed by Termux itself). */
@@ -133,7 +137,7 @@ object TorCard {
      * DPI that blocks the tor protocol itself (the same reason the app masks VLESS).
      */
     fun torrc(controlPort: Int = DEFAULT_CONTROL_PORT, socksPort: Int = DEFAULT_SOCKS_PORT,
-              allowLan: Boolean = false, bridge: String = "none"): String = buildString {
+              allowLan: Boolean = false, bridge: String = "none", bridgeLines: List<String> = emptyList()): String = buildString {
         val socksBind = if (allowLan) "0.0.0.0:$socksPort" else "127.0.0.1:$socksPort"
         appendLine("SocksPort $socksBind")
         appendLine("ControlPort 127.0.0.1:$controlPort")
@@ -142,12 +146,14 @@ object TorCard {
         when (bridge) {
             "snowflake" -> {
                 appendLine("ClientTransportPlugin snowflake exec /data/data/com.termux/files/usr/bin/snowflake-client -url https://1098762253-765532153-cloudflare-voip.tor-project.org/ -front cdn.sstatic.net -ice stun:stun.l.google.com:19302,stun:stun.voipgate.com:3478,stun:stun.voys.nl:3478 utls-imitate=hellorandomizedalpn")
-                appendLine("Bridge snowflake 192.0.2.3:1 2B280B23E1107BB62ABFC40DDCC8824814F80A72")
+                val custom = bridgeLines.filter { it.startsWith("Bridge ") }.map { it.trim() }
+                if (custom.isEmpty()) appendLine("Bridge snowflake 192.0.2.3:1 2B280B23E1107BB62ABFC40DDCC8824814F80A72")
+                else custom.forEach { appendLine(it) }
                 appendLine("UseBridges 1")
             }
             "obfs4" -> {
                 appendLine("ClientTransportPlugin obfs4 exec /data/data/com.termux/files/usr/bin/obfs4proxy")
-                appendLine("# obfs4: мосты выдаёт bridges.torproject.org — вставьте их строками «Bridge obfs4 …» ниже (настройки Tor-режима → «Получить мосты»)")
+                bridgeLines.filter { it.startsWith("Bridge ") }.forEach { appendLine(it.trim()) }
                 appendLine("UseBridges 1")
             }
         }

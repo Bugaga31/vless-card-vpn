@@ -419,7 +419,10 @@ class TunnelService : VpnService() {
         if (!st.torRotation && !st.torRouting) return
         torJob = scope.launch {
             // Embedded daemon (no Termux needed); Termux instance wins when its cookie is readable.
-            runCatching { com.vlesscardvpn.tor.TorCard.ensureStarted(this@TunnelService, st.torBridge) }
+            runCatching {
+                com.vlesscardvpn.tor.TorCard.ensureStarted(this@TunnelService, st.torBridge,
+                    bridgeLines = st.torBridgeLines.lines().map { it.trim() }.filter { it.startsWith("Bridge ") }.take(12))
+            }
             val cookie = runCatching { com.vlesscardvpn.tor.TorCard.readCookieHex(this@TunnelService) }.getOrNull()
             if (cookie == null) { Log.i("TOR", "no control cookie, rotator idle"); return@launch }
             if (!st.torRotation) return@launch
@@ -430,9 +433,19 @@ class TunnelService : VpnService() {
             )
             try {
                 rotator.connect()
+                var lastMeasure = 0L
                 while (true) {
                     delay(10_000L)
                     if (Tunnel.status.value.state != Tunnel.State.CONNECTED || !Store.state.value.settings.torRotation) break
+                    val nowMs = System.currentTimeMillis()
+                    // tor-rotator algorithm: measure the real exit through the tunnel (Cloudflare trace, loc=)
+                    // and feed the policy — the history learns which countries are actually fast right now.
+                    if (nowMs - lastMeasure >= 30_000L) {
+                        lastMeasure = nowMs
+                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                            com.vlesscardvpn.tor.TorProbes.exitInfo(com.vlesscardvpn.tor.TorCard.DEFAULT_SOCKS_PORT)
+                        }?.let { (ms, cc) -> rotator.recordExit(ms, cc) }
+                    }
                     if (com.vlesscardvpn.core.PhonePower.refresh(this@TunnelService).allowed) rotator.tick()
                 }
             } catch (e: Exception) {

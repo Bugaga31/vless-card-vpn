@@ -386,9 +386,11 @@ object Actions {
             if (Brain.seen >= 50 && l.size > realLimit) Brain.order(Net.key(app), l) { now.state(it) } else l.sortedBy { tcp[it.id] } }
             .let { ServerChoice.diverse(it, realLimit) }
         // one attempt for all (fast), a second one only for those that failed although TCP answers
-        var working = realTest(alive, "Проверка через Xray", big, attempts = 1)
+        // «жёстко и быстро»: 64 одновременных пробы вместо 32 — лучшие серверы находятся вдвое быстрее
+        var working = realTest(alive, "Проверка через Xray", big, attempts = 1, parallel = 64)
         val again = Store.state.value.let { s -> alive.filter { !s.state(it).works } }
-        if (again.isNotEmpty() && again.size < alive.size * 3 / 4 + 4) working += realTest(again, "Повторная проверка", big, attempts = 2)
+        // реванш достаётся только узкому хвосту (TCP отвечает, Xray нет) — не растягиваем проверку
+        if (again.isNotEmpty() && again.size <= 6) working += realTest(again, "Повторная проверка", big, attempts = 2, parallel = 12)
         return "Работают: $working из ${alive.size} доступных по TCP (всего ${list.size})"
     }
 
