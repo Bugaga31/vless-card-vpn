@@ -1,0 +1,10 @@
+{
+  "artifact": "Equalizer-language-pilot-experimental.zip",
+  "size_bytes": 6006325,
+  "sha256": "acdd4a50339f02faa716fbfbe253cbc81831bf0a371bef381401a24a834b58cb",
+  "production_approved": false,
+  "training_examples": 90,
+  "optimizer_steps": 90,
+  "trainable_parameters": 540672,
+  "changed_adapter_tensors": 96
+}

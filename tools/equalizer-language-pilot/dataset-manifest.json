@@ -1,0 +1,10 @@
+{
+  "training_examples": 90,
+  "validation_examples": 8,
+  "validation_caveat": "Former holdout has been inspected after run1; validation only, NOT a blind test",
+  "change": "Balanced useful dialogue examples, explicit VPN identity; all attention layers receive LoRA",
+  "files": {
+    "train.jsonl": "5e389697c59866c0f6a2024fe3d31365c543259c95e20ee98e74f16cdb1a35ec",
+    "holdout.jsonl": "6754c2a9d3ed2dad93f2b234a31465d4d378d05c0415b1852b3776709f75b635"
+  }
+}

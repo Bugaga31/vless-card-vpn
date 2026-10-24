@@ -1,0 +1,38 @@
+{
+  "production_approved": false,
+  "apk_integration_approved": false,
+  "reason": "Token loss decreased but fresh replies still contain technical errors and unsupported advice. No automatic promotion.",
+  "cases": [
+    {
+      "case": "identity",
+      "assessment": "partial",
+      "reason": "Correct Equalizer VPN identity, but vague capability wording."
+    },
+    {
+      "case": "data-proof",
+      "assessment": "fail",
+      "reason": "Incorrect explanation of when TCP connectivity is established; does not cleanly distinguish application body proof."
+    },
+    {
+      "case": "stale",
+      "assessment": "fail",
+      "reason": "Misstates stale evidence rule as a prohibition on connecting to a new Wi-Fi network."
+    },
+    {
+      "case": "youtube",
+      "assessment": "fail",
+      "reason": "Invents a playlist-filtering requirement instead of explaining media transfer proof."
+    },
+    {
+      "case": "bridges",
+      "assessment": "fail",
+      "reason": "Confused bridge validation and cancellation instructions."
+    },
+    {
+      "case": "helpful",
+      "assessment": "fail",
+      "reason": "Suggests a console/restart without grounding or a focused diagnostic question."
+    }
+  ],
+  "method": "Manual reading of six freshly generated answers after reloading adapter; not a statistical or expert benchmark."
+}
