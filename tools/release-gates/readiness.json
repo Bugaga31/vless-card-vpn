@@ -1,5 +1,5 @@
 {
-  "ready": true,
-  "scope": "strict transfer proofs, fastest measured leader, Tor-only UI, opt-in persistent bridge refresh, corrected isolated WireGuard fixture",
+  "ready": false,
+  "scope": "Owner requested additional masking compatibility improvements; publication held until tested final SHA",
   "physical_phone_tested": false
 }
