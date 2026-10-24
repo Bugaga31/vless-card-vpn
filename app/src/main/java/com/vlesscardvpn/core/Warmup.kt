@@ -1,5 +1,9 @@
 package com.vlesscardvpn.core
 
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.withPermit
+import kotlinx.coroutines.withContext
+
 /**
  * Warmup: after the tunnel comes up, quietly open and close the first TLS handshake
  * to the domains the user is about to need (YouTube, Discord media, Telegram).
@@ -37,7 +41,7 @@ object Warmup {
      * Parallel (4 sockets at once): all first screens (YouTube, Discord, Telegram) are warm within
      * one handshake time, not after a long queue. Domains are already ordered most-wanted first.
      */
-    suspend fun warm(port: Int, domains: List<String>): Unit = kotlinx.coroutines.withContext<Unit>(kotlinx.coroutines.Dispatchers.IO) {
+    suspend fun warm(port: Int, domains: List<String>): Unit = withContext(kotlinx.coroutines.Dispatchers.IO) {
         val sem = kotlinx.coroutines.sync.Semaphore(4)
         domains.map { d -> launch { sem.withPermit { warmOne(port, d) } } }.forEach { it.join() }
     }
