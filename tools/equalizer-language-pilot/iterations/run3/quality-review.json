@@ -1,0 +1,8 @@
+{
+  "production_approved": false,
+  "selected_for_app": false,
+  "reason": "Continued training did not resolve factual errors. Generated ungrounded Telegram availability and incorrect advice to run training on a Tor relay. Reject irrespective of lower validation token loss.",
+  "parent_run": "run2",
+  "cumulative_optimizer_steps_in_lineage": 180,
+  "note": "Model text was NOT executed; no Tor node or training server was created."
+}
