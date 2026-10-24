@@ -3,10 +3,15 @@
 #   probe app (other UID) → VPN TUN → hev-socks5-tunnel → SOCKS 127.0.0.1:10808 → Xray-core → server on the host → internet.
 # Server-side Xray access log proves which server carried the traffic. Run inside android-emulator-runner.
 set -uo pipefail
+CASE=setup
 PKG=com.vlesscardvpn; PROBE=com.vlesscardvpn.netprobe
 W=/tmp/e2e; mkdir -p $W; FAILS=0
 XRAY=${XRAY:-/tmp/xray/xray}
-fail() { echo "::error title=e2e::$*"; echo "FAIL: $*"; FAILS=$((FAILS+1)); }
+diagnostic() {
+  adb logcat -d -s E2E:I | python3 tools/e2e/summarize_failure.py --case "$CASE"
+  if [ -n "${R:-}" ]; then printf '%s' "$R" | python3 tools/e2e/summarize_failure.py --case "$CASE" --probe; fi
+}
+fail() { echo "::error title=e2e::$*"; echo "FAIL: $*"; FAILS=$((FAILS+1)); diagnostic; }
 
 # ---- servers on the host (emulator sees the host as 10.0.2.2)
 KEYS=$($XRAY x25519); PRIV=$(echo "$KEYS" | sed -n 's/^PrivateKey: //p'); PBK=$(echo "$KEYS" | sed -n 's/^Password (PublicKey): //p')
@@ -46,6 +51,7 @@ ok = r.get("vpn") and len(res)==4 and res[0]["code"]==204 and res[1]["code"]==20
 print(("PASS " if ok else "BAD ")+json.dumps(r)); sys.exit(0 if ok else 1)' "$1"; }
 
 run_case() { # $1 name, $2 state, $3 seconds to wait for the connect result
+  CASE=$1; R=""
   echo "=== case $1"
   adb shell am start -n $PKG/.MainActivity --ez e2e_disconnect true >/dev/null; sleep 3; : > $W/access.log
   load $2; adb logcat -c
@@ -118,6 +124,7 @@ run_case auto-eight auto-eight.json 180
 P=$(waitlog "pool size=8 " 150) || fail "auto-eight: real Xray pool never reached eight outbounds"
 echo "eight: $P"
 
+CASE=proxy; R=""
 echo "=== case proxy (no VPN: SOCKS5 10808 + HTTP 10809 for other apps)"
 adb shell am start -n $PKG/.MainActivity --ez e2e_disconnect true >/dev/null; sleep 3; : > $W/access.log
 load proxy.json; adb logcat -c
@@ -135,6 +142,7 @@ adb forward --remove-all
 c=$(grep -c "email: u8443" $W/access.log); echo "proxy: server :8443 accepted $c"
 [ "$c" -gt 0 ] || fail "proxy: traffic did not go through the server"
 
+CASE=warp; R=""
 echo "=== case warp (register free WARP accounts, find endpoint + mask, connect)"
 adb shell am start -n $PKG/.MainActivity --ez e2e_disconnect true >/dev/null; sleep 3
 load warp.json; adb logcat -c

@@ -237,7 +237,7 @@ object XrayConfigBuilder {
         outs.put(JSONObject().put("tag", "direct").put("protocol", "freedom").put("settings", JSONObject().put("domainStrategy", "UseIPv4")))
         // Tor chain: services marked in settings go through the local Tor SOCKS port (Termux). Tor's
         // own circuits ride the TUN (the app uid is excluded, Termux is not), so Tor ends up wrapped in VLESS for free.
-        val torOn = useServers && (settings.torAll || settings.torRouting && settings.services.isNotEmpty())
+        val torOn = com.vlesscardvpn.tor.TorRoutePolicy.active(settings)
         if (torOn) outs.put(JSONObject().put("tag", TOR_TAG).put("protocol", "socks")
             .put("settings", JSONObject().put("servers", arr(JSONObject().put("address", "127.0.0.1").put("port", com.vlesscardvpn.tor.TorCard.DEFAULT_SOCKS_PORT)))))
         outs.put(JSONObject().put("tag", "block").put("protocol", "blackhole"))
@@ -296,7 +296,7 @@ object XrayConfigBuilder {
             val included = id !in setOf("youtube", "telegram") || settings.services.isEmpty() || id in settings.services
             if (included && (settings.mode != Mode.HYBRID || hybridDomains(settings).none { it in target.domains })) {
                 fun pinned(rule: JSONObject): JSONObject = when {
-                    torOn && id in settings.services -> rule.put("outboundTag", TOR_TAG)
+                    torOn && (settings.torAll || id in settings.services) -> rule.put("outboundTag", TOR_TAG)
                     pool.size == 1 -> rule.put("outboundTag", "$PROXY_PREFIX${pool.first()}")
                     else -> rule.put("balancerTag", "service-$id")
                 }
@@ -312,7 +312,15 @@ object XrayConfigBuilder {
             rules.put(JSONObject().put("domain", JSONArray(TRACKERS)).put("outboundTag", "block"))
             rules.put(JSONObject().put("network", "tcp,udp").put("port", "853").put("outboundTag", "block"))
         }
-        if (settings.mode == Mode.HYBRID && hybridDomains(settings).isNotEmpty())
+        // Explicit Tor service routing must not depend on a learned VLESS service pool.
+        // Only TCP is supported by Tor; arbitrary UDP is not promoted to a Tor success.
+        if (torOn && settings.torRouting && !settings.torAll) {
+            val domains = com.vlesscardvpn.core.Services.domains(settings.services)
+            val ips = com.vlesscardvpn.core.Services.ips(settings.services)
+            if (domains.isNotEmpty()) rules.put(JSONObject().put("network", "tcp").put("domain", JSONArray(domains)).put("outboundTag", TOR_TAG))
+            if (ips.isNotEmpty()) rules.put(JSONObject().put("network", "tcp").put("ip", JSONArray(ips)).put("outboundTag", TOR_TAG))
+        }
+        if (!settings.torAll && settings.mode == Mode.HYBRID && hybridDomains(settings).isNotEmpty())
             rules.put(JSONObject().put("domain", JSONArray(hybridDomains(settings))).put("outboundTag", BYEDPI_TAG))
         if (useServers && (settings.services.isEmpty() || "telegram" in settings.services)) {
             rules.put(toMain(JSONObject().put("domain", JSONArray(com.vlesscardvpn.core.Services.domains(listOf("telegram"))))))
@@ -322,10 +330,10 @@ object XrayConfigBuilder {
             rules.put(JSONObject().put("domain", JSONArray(RU_DOMAINS)).put("outboundTag", "direct"))
             rules.put(JSONObject().put("ip", arr("geoip:ru")).put("outboundTag", "direct"))
         }
-        val only = com.vlesscardvpn.core.Services.domains(settings.services)
+        val only = if (settings.torAll) emptyList() else com.vlesscardvpn.core.Services.domains(settings.services)
         // video goes to the 1–2 servers that really downloaded fastest (balancer «heavy»), the rest is spread over all
         val speedAware = downloadSpeeds.size == servers.size && downloadSpeeds.any { it > 0 }
-        val heavyOn = !speedAware && many && hopIdx < 0 && servers.size <= 10 && heavy.isNotEmpty() && heavy.size < servers.size && heavy.all { it in servers.indices } &&
+        val heavyOn = !settings.torAll && !speedAware && many && hopIdx < 0 && servers.size <= 10 && heavy.isNotEmpty() && heavy.size < servers.size && heavy.all { it in servers.indices } &&
             (only.isEmpty() || "youtube" in settings.services)
         if (heavyOn) rules.put(JSONObject().put("domain", JSONArray(HEAVY_DOMAINS)).put("balancerTag", "heavy"))
         if (only.isNotEmpty()) {

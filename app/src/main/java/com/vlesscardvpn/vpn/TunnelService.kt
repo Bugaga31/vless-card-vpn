@@ -95,6 +95,7 @@ class TunnelService : VpnService() {
     /** Auto mode gave up on servers for this connection: ByeDPI only (the search goes on in the background). */
     private var autoDpiOnly = false
     /** Servers of the running connection (selected or the best ones taken automatically). */
+    @Volatile private var usedTorRoute: Boolean = false
     @Volatile private var usedServers: List<com.vlesscardvpn.model.Server> = emptyList()
     @Volatile private var appliedAutoWeights = ""
     @Volatile private var warpChained = false
@@ -222,7 +223,7 @@ class TunnelService : VpnService() {
             Tunnel.ytViaDpi = ytDpi
             if (settings.mode != Mode.BYEDPI && selected.isEmpty())
                 error("Нет выбранных серверов. Откройте «Серверы», нажмите «Проверить» и отметьте рабочие.")
-            selected = Actions.pinCertificates(com.vlesscardvpn.core.AutoEligibility.independent(selected))
+            selected = Actions.pinCertificates(com.vlesscardvpn.core.AutoEligibility.launchPool(selected, automatic))
             usedServers = selected
             val rotate = settings.rotateMasks
             val withMasks = selected.map { srv ->
@@ -265,6 +266,7 @@ class TunnelService : VpnService() {
             c.start(config)
             check(c.running) { "Xray не запустился: ${c.lastStatus}" }
             usedServers = used.map { it.first }
+            usedTorRoute = com.vlesscardvpn.tor.TorRoutePolicy.active(settings)
             appliedAutoWeights = com.vlesscardvpn.core.SpeedBalance.fingerprint(downloadSpeeds,downloadLatencies)
             Tunnel.socks = socks
             if (BuildConfig.DEBUG) Log.i("E2E", "pool size=${used.size} ids=${used.map { it.first.id }}")
@@ -278,8 +280,10 @@ class TunnelService : VpnService() {
                     else "${selected.size} серв. + $dpiLabel для YouTube/Discord"
                 else -> if (selected.size == 1) selected[0].name else "${selected.size} серверов · ${settings.balance.title.lowercase()}"
             }
+            if (settings.torAll) route = "Tor · TCP (кроме прямых исключений)"
+            else if (usedTorRoute) route += " · выбранные сервисы через Tor (TCP)"
             if (auto) route = "Авто · $route"
-            if (settings.services.isNotEmpty()) route += " · через VPN только " + com.vlesscardvpn.core.Services.label(settings.services)
+            if (settings.services.isNotEmpty() && !settings.torAll) route += " · через VPN только " + com.vlesscardvpn.core.Services.label(settings.services)
             if (proxy) route = "Прокси SOCKS5 :${socks.port} · HTTP :${settings.httpPort}" + (if (settings.lanShare) " (для всей сети: ${lanIp() ?: "IP телефона"})" else "") + " · $route"
             val since = if (keepTun && prev.since > 0) prev.since else System.currentTimeMillis()
             if (!keepTun) { com.vlesscardvpn.core.Traffic.start(); Tunnel.rx0 = android.net.TrafficStats.getUidRxBytes(android.os.Process.myUid()); Tunnel.tx0 = android.net.TrafficStats.getUidTxBytes(android.os.Process.myUid()) }
@@ -363,6 +367,8 @@ class TunnelService : VpnService() {
             val sampledNet = Net.key(this@TunnelService)
             val sampledHandle = Net.underlying(this@TunnelService)?.toString()
             val sampledServers = usedServers.toList()
+            val sampledTorRoute = usedTorRoute
+            val attributeServers = com.vlesscardvpn.tor.TorRoutePolicy.canAttributeServerEvidence(sampledTorRoute)
             val sampledCore = core
             val checkServices = st.mode == Mode.AUTO || Tunnel.ytViaDpi
             var p = Tester.probeSocks(port, st.testUrl, big = false, youtube = checkServices, attempts = 1, budgetMs = 5000)
@@ -373,7 +379,7 @@ class TunnelService : VpnService() {
             if (cur.state != Tunnel.State.CONNECTED || core !== sampledCore || Net.key(this@TunnelService) != sampledNet ||
                 Net.underlying(this@TunnelService)?.toString() != sampledHandle) return@launch
             // WARP: ask Cloudflare itself whether the traffic comes through WARP (warp=on / plus), so it's clear it works.
-            val warp = if (p.realMs > 0 && (warpChained || usedServers.any { Masks.isWarp(it) }))
+            val warp = if (attributeServers && p.realMs > 0 && (warpChained || usedServers.any { Masks.isWarp(it) }))
                 when (Tester.warpTrace(port).let { t -> if (t == "plus" || t == "on" || t == "off") t else { delay(2000); Tester.warpTrace(port) } }) {
                 "plus" -> " · WARP+: включён ✓"; "on" -> " · WARP: включён ✓"; "off" -> " · WARP: не через Cloudflare ✗"; else -> " · WARP: Cloudflare не ответил"
             } else ""
@@ -382,9 +388,9 @@ class TunnelService : VpnService() {
             val text = if (p.realMs > 0) "HTTPS · ${p.realMs} мс · Видео YouTube: ${if(p.ytOk==true) "✓" else if(p.ytOk==false) "нет ответа" else "не проверен"} · Telegram MTProto: ${if(p.tgOk==true) "✓" else if(p.tgOk==false) "нет ответа" else "не проверен"}$warp"
                 else "Нет ответа через выбранный маршрут (${p.error}). " + if (st.mode == Mode.AUTO && st.autoHeal) "Ищу рабочий вариант сам…" else "Проверьте серверы или включите маскировку."
             Tunnel.status.value = cur.copy(check = text, checkOk = p.works)
-            runCatching { val stv = Store.state.value; com.vlesscardvpn.core.Brain.lived(sampledNet, sampledServers, { stv.state(it) }, p.works); com.vlesscardvpn.core.Brain.save(this@TunnelService) }
+            if (attributeServers) runCatching { val stv = Store.state.value; com.vlesscardvpn.core.Brain.lived(sampledNet, sampledServers, { stv.state(it) }, p.works); com.vlesscardvpn.core.Brain.save(this@TunnelService) }
             Log.i("E2E", "check ok=${p.works} ms=${p.realMs} big=${p.bigOk} yt=${p.ytOk} tg=${p.tgOk} err=${p.error} warp=$warp")
-            if (p.works && st.mode == Mode.AUTO) Actions.rememberNet(sampledNet)
+            if (attributeServers && p.works && st.mode == Mode.AUTO) Actions.rememberNet(sampledNet)
             // «Умный YouTube» broke YouTube here (the bypass stopped working): back to the servers for YouTube
             if (p.realMs > 0 && p.ytOk == false && Tunnel.ytViaDpi) {
                 val net = Net.key(this@TunnelService)

@@ -48,7 +48,7 @@ object XrayCore {
         })
         val running: Boolean get() = runCatching { controller.isRunning }.getOrDefault(false)
         /** Throws with the core's message if the config is rejected. */
-        fun start(config: String) { controller.startLoop(config, 0) }
+        fun start(config: String) { controller.startLoop(RuntimeXrayConfig.prepare(config), 0) }
         fun stop() { runCatching { controller.stopLoop() } }
         /** HTTP(S) GET through the running instance's routing; returns ms or -1. */
         fun delay(url: String): Long = runCatching { controller.measureDelay(url) }.getOrDefault(-1L)

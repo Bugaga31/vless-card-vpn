@@ -25,6 +25,9 @@ object AutoEligibility {
             freshSecret && freshSubnet && (s.sni.isBlank() || snis.add(s.sni))
         }
     }
+    /** Manual selections are explicit; diversity pruning belongs to Auto, not manual masks. */
+    fun launchPool(servers: List<Server>, automatic: Boolean): List<Server> =
+        if (automatic) independent(servers) else servers.distinctBy { it.id }
     private fun String.isIpv4(): Boolean {
         val parts = split('.')
         return parts.size == 4 && parts.all { p -> p.toIntOrNull() in 0..255 }

@@ -1,0 +1,18 @@
+#!/usr/bin/env python3
+"""Publish only allowlisted counters/booleans, never URLs, addresses, payloads or credentials."""
+import argparse, json, re, sys
+p=argparse.ArgumentParser();p.add_argument('--case',required=True,choices=['setup','single','byedpi','multi','tpws','ownmask','xraydpi','services','auto','auto-eight','proxy','warp']);p.add_argument('--probe',action='store_true');a=p.parse_args()
+text=sys.stdin.read()
+if a.probe:
+    try: data=json.loads(text)
+    except (ValueError,TypeError): data={}
+    result={'vpn':data.get('vpn') is True,'results':[]}
+    for r in data.get('results',[])[:4]:
+        err=str(r.get('error','')).split(':',1)[0]
+        result['results'].append({k:r.get(k) if type(r.get(k)) is int else None for k in ('code','bytes','ms')})
+        result['results'][-1]['error_type']=err if re.fullmatch(r'[A-Za-z]{1,60}(Exception|Error)',err) else ('present' if err else 'none')
+else:
+    pools=re.findall(r'pool size=(\d{1,2}) ',text)
+    checks=re.findall(r'check ok=(true|false) ms=(-?\d{1,8}) big=(true|false|null) yt=(true|false|null) tg=(true|false|null)',text)
+    result={'last_pool_sizes':pools[-4:],'last_checks':checks[-2:]}
+print('::notice title=E2E bounded '+a.case+'::'+json.dumps(result,separators=(',',':')))
