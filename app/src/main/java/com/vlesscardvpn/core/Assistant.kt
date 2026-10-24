@@ -32,6 +32,7 @@ object Assistant {
         val servers: Int, val working: Int, val best: List<Triple<String, Int, Int>>,   // name, ms, kbps
         val mode: Mode, val ytDpi: Boolean?, val dpiKnown: Boolean, val selectedMask: Mask?,
         val phone: PhoneInfo? = null,
+        val learning: Brain.Explanation? = null,
     )
 
     private fun has(q: String, vararg stems: String) = stems.any { q.contains(it) }
@@ -97,15 +98,17 @@ object Assistant {
                 val key = when { has(q, "реклам") -> "blockAds"; has(q, "quic") -> "blockQuic"; else -> "turbo" }
                 Msg(false, "Меняю настройку.", listOf(Btn("Применить", "!set $key ${if (off) "off" else "on"}")), auto = true)
             }
+            has(q, "как учишься", "как ты обуч", "нейрон", "сознани", "думать", "мыслить", "почему выбран маршрут", "почему выбрал маршрут") ->
+                Msg(false, learning(f), listOf(Btn("Проверить серверы", "!test")))
             has(q, "телефон", "устройств", "батаре", "памят", "андроид", "android", "смартфон", "заряд", "озу") -> Msg(false, phone(f),
                 (if (f.phone?.batteryOptimized == true) listOf(Btn("Разрешить работу в фоне", "!battery")) else emptyList()) + Btn("Ускорить YouTube", "!yt"))
             has(q, "тор", "tor", "лук", "луковичн", "onion", "анонимн") -> {
                 val off = has(q, "выключи", "отключи", "не надо", "убери")
                 when {
                     off -> Msg(false, "Выключаю Tor-режим для сервисов: выбранные приложения снова пойдут через основной VPN-маршрут.", listOf(Btn("Применить", "!set torRouting off")), auto = true)
-                    has(q, "мост", "маски тор", "obfs", "снежинк", "snowflake", "бридж") -> Msg(false, "Мосты Tor (obfs4/snowflake) прячут сам факт подключения к Tor от оператора — полезно, когда Tor напрямую не соединяется. Транспорт obfs4 и webtunnel уже встроен в приложение (Snowflake — через Termux). Включаются в настройках Tor-режима.", listOf(Btn("Открыть настройки", "!settings")))
-                    has(q, "отдельн", "напрям", "мимо vpn", "свой путь") -> Msg(false, "Отдельный путь Tor: демон Tor исключается из VPN и ходит в интернет напрямую — своё шифрование и мосты, работает даже если серверы недоступны. Хорошо как запасной путь.", listOf(Btn("Включить", "!set torDirect on"), Btn("Мосты Tor", "тор мосты")))
-                    else -> Msg(false, "Tor-режим: выбранные сервисы пойдут через локальный Tor поверх VPN-туннеля (Tor в VLESS). Выход Tor сам ротируется каждые ~10 минут, страны выхода — по вашим привычкам.", listOf(Btn("Включить Tor", "!set torRouting on"), Btn("Мосты Tor", "тор мосты")))
+                    has(q, "мост", "маски тор", "obfs", "снежинк", "snowflake", "бридж") -> Msg(false, "В приложение встроены мосты obfs4 и webtunnel. Они меняют вид соединения, но не гарантируют незаметность или доступность. Snowflake не является встроенным транспортом. Обновление списка мостов — не проверка их работоспособности; после подключения нужна проверка трафика.", listOf(Btn("Открыть настройки", "!settings")))
+                    has(q, "отдельн", "напрям", "мимо vpn", "свой путь") -> Msg(false, "Отдельный путь Tor: демон Tor использует защищённые от VPN сокеты к сети Tor или мостам. Он не требует рабочего VLESS-сервера, но доступность мостов и создание цепочки нужно проверить. Tor переносит TCP, не UDP.", listOf(Btn("Включить", "!set torDirect on"), Btn("Мосты Tor", "тор мосты")))
+                    else -> Msg(false, "Tor-режим направляет TCP выбранных сервисов через локальный Tor; это отдельный путь, не Tor внутри VLESS. В Авто это резерв после явных отказов всех маршрутов проверяемой ограниченной группы. UNKNOWN не означает отказ. Готовая цепочка не подтверждает Telegram или YouTube — нужны отдельные проверки трафика.", listOf(Btn("Включить Tor", "!set torRouting on"), Btn("Мосты Tor", "тор мосты")))
                 }
             }
             has(q, "привет", "здравств", "кто ты", "ты кто") -> Msg(false, HELLO, START)
@@ -224,6 +227,20 @@ object Assistant {
         if ((plainRate(f) ?: 1.0) < 0.4) append("\nВ сети «${f.net}» сильно режут — без маскировки почти ничего не пройдёт.")
     }
 
+    private fun learning(f: Facts): String = buildString {
+        append("Я не обладаю сознанием и не являюсь языковой моделью: ответы помощника основаны на правилах. ")
+        append("Локальная логистическая модель с 14 признаками помогает ранжировать маршруты по прошлым проверкам, задержке и истории передачи данных. ")
+        append("Отдельная небольшая нейросеть оценивает риск нагрева телефона, а не доступность сайтов. ")
+        append("Модель не выставляет PASS: нужны реальные проверки; UNKNOWN не становится PASS, явный отказ сервиса исключает маршрут. ")
+        append("Tor и маски не учатся писать или мыслить. Объяснение ниже относится только к подсказке модели, не ко всему решению Авто.")
+        f.learning?.let { e ->
+            append("\nВес локальных наблюдений: ").append(java.lang.String.format(java.util.Locale.ROOT, "%.1f", e.weightedChecks))
+            if (e.weightedChecks < 10) append(" — мало данных, оценка предварительная")
+            append(". Это не процент надёжности.")
+            e.factors.forEach { factor -> append("\n• ").append(factor.feature).append(if (factor.value > 0) ": повышает оценку" else ": снижает оценку") }
+        }
+    }
+
     private fun servers(f: Facts) = if (f.best.isEmpty()) "Рабочих серверов пока нет — нажмите «Проверить серверы»." else
         "Лучшие сейчас (из ${f.working} рабочих):\n" + f.best.take(5).mapIndexed { i, (n, ms, k) -> "${i + 1}. $n — $ms мс" + if (k > 0) ", ${"%.1f".format(k / 1000.0)} Мбит/с" else "" }.joinToString("\n")
 
@@ -237,7 +254,7 @@ object Assistant {
         return Facts(net, stats, s.state == Tunnel.State.CONNECTED, s.route, s.check, st.servers.size, ok.size,
             ok.take(5).map { Triple(it.name, st.state(it).realMs, st.state(it).kbps) }, st.settings.mode, st.settings.ytDpi[net],
             (st.settings.dpiRemembered[net] ?: st.settings.dpiRemembered[Net.family(net)]) != null, sel?.let { Masks.byId(st.state(it).maskFor(net)) },
-            runCatching { PhoneInfo.collect(app) }.getOrNull())
+            runCatching { PhoneInfo.collect(app) }.getOrNull(), sel?.let { Brain.explain(net, it, st.state(it)) })
     }
 
     /** Everything measured, as text for the language model. */

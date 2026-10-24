@@ -61,6 +61,25 @@ object Brain {
     @Synchronized fun p(net: String, s: Server, st: ServerState): Double = probability(
         if (scoped(net)) contexts[contextKey(net)]?.weights ?: prior() else weights(net), localFeatures(net, s, st))
 
+    data class Contribution(val feature: String, val value: Double)
+    /** Scores explain this model only: not calibrated confidence, service PASS, or a full Auto decision. */
+    data class Explanation(val score: Double, val weightedChecks: Double, val factors: List<Contribution>)
+    private val featureLabels = listOf("Базовое смещение", "Задержка TCP", "Доля успешных проверок",
+        "Объём истории", "Прошлая проверка данных", "Прошлая передача тела", "Reality", "CDN",
+        "Тип транспорта", "Наличие маски", "Порт 443", "Давность проверки", "Время суток: sin", "Время суток: cos")
+
+    /** Read-only: must not allocate a learned context or change counters, weights, or formats. */
+    @Synchronized fun explain(net: String, s: Server, st: ServerState): Explanation {
+        val local = if (scoped(net)) contexts[contextKey(net)] else null
+        val k = if (scoped(net)) local?.weights ?: prior() else w[kind(net)] ?: prior()
+        val x = localFeatures(net, s, st)
+        val n = if (scoped(net)) local?.checks ?: 0.0 else trained[kind(net)] ?: 0.0
+        val factors = (0 until N).map { Contribution(featureLabels[it], k[it] * x[it]) }
+            .filter { it.value.isFinite() && kotlin.math.abs(it.value) > 0.000001 }
+            .sortedByDescending { kotlin.math.abs(it.value) }.take(3)
+        return Explanation(probability(k, x), n, factors)
+    }
+
     fun learningRate(checks: Double): Double = maxOf(0.01, 0.2 / kotlin.math.sqrt(1.0 + checks.coerceAtLeast(0.0) / 50.0))
     @Synchronized fun learn(net: String, s: Server, st: ServerState, works: Boolean, weight: Double = 1.0) {
         if (!weight.isFinite() || weight <= 0) return

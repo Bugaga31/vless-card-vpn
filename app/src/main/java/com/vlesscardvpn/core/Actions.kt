@@ -850,15 +850,22 @@ object Actions {
         val current = Store.state.value
         if (eligible.any { current.state(it).maskFor(net) != st.state(it).maskFor(net) } ||
             current.selected.map { it.id }.toSet() != selected.map { it.id }.toSet()) return false
+        kotlinx.coroutines.currentCoroutineContext().ensureActive()
         val changed = ServiceRoutes.update(net, target.id, results.entries.map { it.key to it.value }, now)
-        // Tor in Auto: a service that no VLESS route can reach falls back to the local Tor
-        // SOCKS (Tor over the tunnel) once, instead of silently staying broken.
-        val st2 = Store.state.value
-        if (st2.settings.torAuto && !changed && st2.settings.services.contains(target.id) &&
-            results.values.none { it > 0 } && !st2.settings.torRouting)
-            Store.update { it.copy(settings = it.settings.copy(torRouting = true)) }
+        // Only conclusive failures of every route in this bounded round may enable the
+        // separate local Tor path. UNKNOWN/partial results cannot trigger it or prove PASS.
+        var torEnabledNow = false
+        Store.update { latest ->
+            val sameRound = Net.key(app) == net && Net.underlying(app)?.toString() == handle &&
+                latest.selected.map { it.id }.toSet() == selected.map { it.id }.toSet() &&
+                eligible.all { latest.state(it).maskFor(net) == st.state(it).maskFor(net) }
+            torEnabledNow = sameRound && TorAutoPolicy.shouldEnable(latest.settings.torAuto,
+                latest.settings.torRouting, target.id in latest.settings.services,
+                eligible.map { it.id }.toSet(), results)
+            if (torEnabledNow) latest.copy(settings = latest.settings.copy(torRouting = true)) else latest
+        }
         AppWatch.note("${target.title}: ${if (ServiceRoutes.native(target)) "протокол/медиаданные" else "HTTPS"} доступны через ${results.values.count { it > 0 }} из ${results.size} проверенных маршрутов; это не проверка аккаунта")
-        return changed && selected.size > 1
+        return TorAutoPolicy.needsReconnect(torEnabledNow, changed, selected.size)
     }
 
     private fun automaticOrder(st: AppState, servers: List<Server>): List<Server> {
