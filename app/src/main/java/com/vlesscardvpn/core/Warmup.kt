@@ -32,24 +32,31 @@ object Warmup {
         return list.distinct().filter { d -> d.split(".").size >= 2 && d.length <= 253 }.take(14)
     }
 
-    /** One-shot TLS warm-up through the SOCKS tunnel: DNS + handshake, then close. ~1–2 KB per domain. */
+    /**
+     * One-shot TLS warm-up through the SOCKS tunnel: DNS + handshake, then close. ~1–2 KB per domain.
+     * Parallel (4 sockets at once): all first screens (YouTube, Discord, Telegram) are warm within
+     * one handshake time, not after a long queue. Domains are already ordered most-wanted first.
+     */
     suspend fun warm(port: Int, domains: List<String>): Unit = kotlinx.coroutines.withContext<Unit>(kotlinx.coroutines.Dispatchers.IO) {
-        for (d in domains) {
+        val sem = kotlinx.coroutines.sync.Semaphore(4)
+        domains.map { d -> launch { sem.withPermit { warmOne(port, d) } } }.forEach { it.join() }
+    }
+
+    private fun kotlinx.coroutines.CoroutineScope.warmOne(port: Int, d: String) {
+        try {
+            val proxy = java.net.Proxy(java.net.Proxy.Type.SOCKS, java.net.InetSocketAddress("127.0.0.1", port))
+            val s = java.net.Socket(proxy)
             try {
-                val proxy = java.net.Proxy(java.net.Proxy.Type.SOCKS, java.net.InetSocketAddress("127.0.0.1", port))
-                val s = java.net.Socket(proxy)
-                try {
-                    s.soTimeout = 4000
-                    s.connect(java.net.InetSocketAddress.createUnresolved(d, 443), 4000)
-                    val f = javax.net.ssl.SSLSocketFactory.getDefault() as javax.net.ssl.SSLSocketFactory
-                    val tls = f.createSocket(s, d, 443, true) as javax.net.ssl.SSLSocket
-                    tls.startHandshake()
-                    tls.close()
-                } finally {
-                    s.close()
-                }
-            } catch (t: Throwable) {
+                s.soTimeout = 4000
+                s.connect(java.net.InetSocketAddress.createUnresolved(d, 443), 4000)
+                val f = javax.net.ssl.SSLSocketFactory.getDefault() as javax.net.ssl.SSLSocketFactory
+                val tls = f.createSocket(s, d, 443, true) as javax.net.ssl.SSLSocket
+                tls.startHandshake()
+                tls.close()
+            } finally {
+                s.close()
             }
+        } catch (t: Throwable) {
         }
     }
 }

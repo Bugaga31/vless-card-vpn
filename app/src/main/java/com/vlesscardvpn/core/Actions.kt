@@ -504,7 +504,9 @@ object Actions {
             val (own, port) = dpiForTests(current.map { it.second })
             progress.value = progress.value.copy(title = "Подбор обхода: этап ${phase + 1}")
             try {
-            Tester.real(current, cfg.testUrl, port, own.ports, youtube = false, batch = 64, parallel = 12, attempts = 1,
+            // «Жёсткий поиск»: 24 probes at once (PowerPolicy caps it on a hot/low-power phone) —
+            // the whole pass takes seconds, not half a minute.
+            Tester.real(current, cfg.testUrl, port, own.ports, youtube = false, batch = 64, parallel = 24, attempts = 1,
                 skip = { i -> System.currentTimeMillis() > deadline || synchronized(best) { (found[group(variants[indices[i]].first)] ?: 0) >= enough } || dead(variants[indices[i]].second) }) { i, p ->
                 if (Net.key(app) != net0 || Net.underlying(app)?.toString() != maskNetwork) return@real
                 val (s, m) = variants[indices[i]]
