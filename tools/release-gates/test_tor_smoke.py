@@ -10,7 +10,9 @@ import os,sys
 s=' '.join(sys.argv[1:]);stage=os.environ.get('FAIL_STAGE','')
 if s.startswith('shell pm path '):print('package:/data/app/private-id/base.apk')
 elif s.startswith('shell dumpsys package '):print('nativeLibraryDir=/data/app/private-id/lib/x86_64')
-elif ' test -x ' in s:
+elif 'test -x' in s:
+ if '/system/bin/sh -c' not in s:
+  print('run-as: exec failed for test: Permission denied',file=sys.stderr);sys.exit(126)
  if stage=='locate':sys.exit(1)
 elif '--version' in s:
  if stage=='version':print('error opening /data/user/0/private/secret at 192.0.2.1');sys.exit(7)

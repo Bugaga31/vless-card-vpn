@@ -7,6 +7,13 @@ W=${TOR_SMOKE_OUTPUT_DIR:-/tmp/e2e}
 mkdir -p "$W"
 export TOR_SMOKE_OUTPUT_DIR="$W"
 STAGE=resolve-native-library
+[[ "$PKG" =~ ^[A-Za-z0-9_.]+$ ]]
+executable() {
+  # Android run-as cannot exec the shell builtin `test` as a standalone program.
+  # PackageManager paths are restricted before constructing a remote shell command.
+  [[ "$1" =~ ^/[A-Za-z0-9_./+=~:-]+$ ]] || return 1
+  adb shell "run-as $PKG /system/bin/sh -c 'test -x \"$1\"'"
+}
 cleanup() {
   adb shell run-as "$PKG" rm -rf files/tor-native-check >/dev/null 2>&1 || true
   adb shell rm -f /data/local/tmp/tor-native-check.conf >/dev/null 2>&1 || true
@@ -40,13 +47,13 @@ LIB=""
 CANDIDATES=$(adb shell dumpsys package "$PKG" | tr -d '\r' | sed -n -e 's/^ *nativeLibraryDir=//p' -e 's/^ *legacyNativeLibraryDir=//p')
 for base in $CANDIDATES "$(dirname "$PACKAGE_APK")/lib"; do
   for dir in "$base" "$base/x86_64"; do
-    if adb shell run-as "$PKG" test -x "$dir/libTor.so" 2>> "$W/tor-native-locate.txt"; then LIB=$dir; break 2; fi
+    if executable "$dir/libTor.so" 2>> "$W/tor-native-locate.txt"; then LIB=$dir; break 2; fi
   done
 done
 test -n "$LIB"
 STAGE=check-native-executables
-adb shell run-as "$PKG" test -x "$LIB/libTor.so"
-adb shell run-as "$PKG" test -x "$LIB/libLyrebird.so"
+executable "$LIB/libTor.so"
+executable "$LIB/libLyrebird.so"
 STAGE=execute-version
 adb shell run-as "$PKG" "$LIB/libTor.so" --version 2>&1 | tee "$W/tor-version.txt"
 adb shell run-as "$PKG" mkdir -p files/tor-native-check/data
