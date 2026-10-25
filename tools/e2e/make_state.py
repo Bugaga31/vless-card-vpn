@@ -44,3 +44,6 @@ write(f"{out}/warp.json", [], [], {}, autoUpdateSubs=False, lastSubRefresh=41024
 # Eight real authenticated outbounds; the foreground may start early but background must fill the pool.
 pool=[dict(ws,name=f"e2e-pool-{i}",address=f"r163-pool-{i}.test",sni=f"r163-pool-{i}.test",secret=f"00000000-0000-0000-0000-{i+2:012d}") for i in range(8)]
 write(f"{out}/auto-eight.json",pool,[],{},mode="AUTO",autoUpdateSubs=False,lastSubRefresh=4102444800000)
+
+# Live chain regression uses the production measurement gates, not mocked service PASS.
+write(f"{out}/auto-chain.json", [reality,dead], [], {}, mode="AUTO", dpiStrategy="TPWS#SPLIT_DISORDER", autoUpdateSubs=False, lastSubRefresh=4102444800000, autoChainSearch=True, torAuto=False)

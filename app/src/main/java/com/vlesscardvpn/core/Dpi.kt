@@ -268,6 +268,20 @@ class DpiSet(private val context: Context) : AutoCloseable {
         return this
     }
 
+    /** Optional chain challenger must not make a working server depend on DPI startup. */
+    suspend fun warmCurrent(s: Settings, network: String, allowLocal: Boolean) {
+        if (currentPort != null) return
+        val cur = DpiStrategies.resolve(s, network)
+        val p = DpiProxy(context)
+        try {
+            val port = p.start(cur, s.byeDpiSni, allowLocal)
+            currentPort = port; current = cur; procs += p
+        } catch (e: Exception) {
+            p.close()
+            if (e is kotlinx.coroutines.CancellationException) throw e
+        }
+    }
+
     private var watch: kotlinx.coroutines.Job? = null
 
     /** Every 2 s: a crashed ByeDPI / zapret process is restarted on its port (logged for the e2e and diagnostics). */

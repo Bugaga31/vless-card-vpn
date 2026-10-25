@@ -23,7 +23,7 @@ import java.net.ServerSocket
 import java.net.Socket
 import java.util.concurrent.TimeUnit
 
-data class Probe(val realMs: Int, val bigOk: Boolean?, val ytOk: Boolean?, val error: String = "", val tgOk: Boolean? = null, val kbps: Int = 0, val ytKbps: Int = 0) {
+data class Probe(val realMs: Int, val bigOk: Boolean?, val ytOk: Boolean?, val error: String = "", val tgOk: Boolean? = null, val kbps: Int = 0, val ytKbps: Int = 0, val bodyBytes: Long = 0, val bodyMs: Long = 0) {
     val works: Boolean get() = realMs > 0 && bigOk != false
 }
 
@@ -165,17 +165,17 @@ object Tester {
             if (best == Long.MAX_VALUE) return Probe(0, null, null, err)
             val deadline = if (budgetDeadline == Long.MAX_VALUE) System.nanoTime() + TimeUnit.SECONDS.toNanos(40) else budgetDeadline
             fun remaining() = TimeUnit.NANOSECONDS.toMillis((deadline - System.nanoTime()).coerceAtLeast(1)).coerceAtLeast(1)
-            val bigF = if (big) pool.submit<Pair<Boolean, Int>> { bigDownload(client,budgetDeadline,onCall) }.also { tasks += it } else null
+            val bigF = if (big) pool.submit<BodyResult> { bigDownload(client,budgetDeadline,onCall) }.also { tasks += it } else null
             val ytF = if (youtube) pool.submit<YouTubeMediaProbe.Result> {
                 YouTubeMediaProbe.check { boundedCall(mediaClient, it) }
             }.also { tasks += it } else null
             val tgF = if (youtube) pool.submit<Boolean?> {
                 TelegramProbe.check(port, minOf(3000, remaining()))
             }.also { tasks += it } else null
-            val bigResult = ProbeTasks.await(bigF, remaining(), false to 0)
+            val bigResult = ProbeTasks.await(bigF, remaining(), BodyResult())
             val ytResult = ProbeTasks.await(ytF, remaining(), YouTubeMediaProbe.Result(null))
             val tgOk = if (tgF != null) ProbeTasks.await(tgF, remaining(), null) else null
-            return Probe(best.toInt().coerceAtLeast(1), if (bigF != null) bigResult.first else null, ytResult.ok, tgOk = tgOk, kbps = bigResult.second, ytKbps = ytResult.kbps)
+            return Probe(best.toInt().coerceAtLeast(1), if (bigF != null) bigResult.ok else null, ytResult.ok, tgOk = tgOk, kbps = bigResult.kbps, ytKbps = ytResult.kbps, bodyBytes = bigResult.bytes, bodyMs = bigResult.ms)
         } finally {
             ProbeTasks.cancel(tasks)
             // Private dispatcher/pool: cancellation cannot cancel another probe or the live VPN's HTTP calls.
@@ -186,16 +186,18 @@ object Tester {
     private val pool = java.util.concurrent.Executors.newFixedThreadPool(12) { r -> Thread(r, "probe").apply { isDaemon = true } }
 
     /** 256 KB through the server: (passed, kbit/s). A freeze (read timeout — the TSPU "16 KB" cut) fails at once, no second mirror. */
-    private fun bigDownload(client: OkHttpClient, deadline: Long = Long.MAX_VALUE, onCall: ((okhttp3.Call) -> Unit)? = null): Pair<Boolean, Int> {
+    private data class BodyResult(val ok: Boolean = false, val kbps: Int = 0, val bytes: Long = 0, val ms: Long = 0)
+
+    private fun bigDownload(client: OkHttpClient, deadline: Long = Long.MAX_VALUE, onCall: ((okhttp3.Call) -> Unit)? = null): BodyResult {
         for (url in BIG_URLS) {
             val t0 = System.nanoTime()
             try {
-                if (System.nanoTime() >= deadline) return false to 0
+                if (System.nanoTime() >= deadline) return BodyResult()
                 val sample = download(client, url, deadline, onCall)
-                if (sample.bytes >= BIG_BYTES) return true to minOf(sample.slowestKbps,TransferProof.rate(sample.bytes,System.nanoTime()-t0))
-            } catch (e: java.io.InterruptedIOException) { return false to 0 } catch (e: Exception) { /* mirror down: next */ }
+                if (sample.bytes >= BIG_BYTES) return BodyResult(true, minOf(sample.slowestKbps,TransferProof.rate(sample.bytes,System.nanoTime()-t0)), sample.bytes.toLong(), ((System.nanoTime()-t0)/1_000_000).coerceAtLeast(1))
+            } catch (e: java.io.InterruptedIOException) { return BodyResult() } catch (e: Exception) { /* mirror down: next */ }
         }
-        return false to 0
+        return BodyResult()
     }
 
     /** Cloudflare trace through the running tunnel: "on" / "plus" when traffic really goes through WARP, "off" otherwise, null = no answer. */
@@ -255,11 +257,14 @@ object Tester {
     }
 
     /** Country (ISO) the internet sees through the tunnel — Cloudflare trace «loc=». null = no answer. */
-    fun exitCountry(port: Int): String? = runCatching {
-        val client = fast.newBuilder().proxy(Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", port))).build()
-        client.newCall(Request.Builder().url("https://www.cloudflare.com/cdn-cgi/trace").header("User-Agent", UA).build()).execute().use { r ->
-            traceLoc(r.body?.string().orEmpty())
-        }
+    fun exitCountry(port: Int, budgetMs: Long = 0, onCall: ((okhttp3.Call) -> Unit)? = null): String? = runCatching {
+        val client = fast.newBuilder().dispatcher(okhttp3.Dispatcher()).connectionPool(okhttp3.ConnectionPool())
+            .proxy(Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", port)))
+            .apply {if(budgetMs>0)callTimeout(budgetMs,TimeUnit.MILLISECONDS)}.build()
+        try {
+            client.newCall(Request.Builder().url("https://www.cloudflare.com/cdn-cgi/trace").header("User-Agent", UA).build())
+                .also {onCall?.invoke(it)}.execute().use { r -> traceLoc(r.body?.string().orEmpty()) }
+        } finally { client.dispatcher.cancelAll();client.connectionPool.evictAll() }
     }.getOrNull()
     fun traceLoc(body: String): String? = body.lineSequence().firstOrNull { it.startsWith("loc=") }?.substringAfter('=')?.trim()?.uppercase()?.takeIf { it.length == 2 }
 
@@ -339,6 +344,9 @@ object Tester {
             check(TransferProof.rangeValid(r.code,r.header("Content-Range"),BIG_BYTES)) { "Invalid download byte range" }
             TransferProof.read(r.body!!.byteStream(),deadline)
         }
+
+    /** Serialize chain downloads with ordinary server/mask tests. Waiting is cancellable. */
+    suspend fun <T> exclusiveProbe(block: suspend () -> T): T = mutex.withLock { block() }
 
     /** Tests [variants] (server + mask) in parallel through one temporary Xray instance. */
     suspend fun real(

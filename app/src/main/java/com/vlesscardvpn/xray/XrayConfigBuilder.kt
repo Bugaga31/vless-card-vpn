@@ -214,11 +214,12 @@ object XrayConfigBuilder {
      */
     fun vpnConfig(servers: List<Pair<Server, Mask?>>, settings0: Settings, byeDpiPort: Int?, socks: SocksAuth = SocksAuth(settings0.socksPort),
                   dpiPorts: Map<String, Int> = emptyMap(), listen: String = "127.0.0.1", httpPort: Int? = null, warpHop: Server? = null,
-                  heavy: Set<Int> = emptySet(), serviceRoutes: Map<String, List<String>> = emptyMap(), quietLogs: Boolean = false, downloadSpeeds: List<Int> = emptyList(), downloadLatencies: List<Int> = emptyList()): String {
+                  heavy: Set<Int> = emptySet(), serviceRoutes: Map<String, List<String>> = emptyMap(), quietLogs: Boolean = false, downloadSpeeds: List<Int> = emptyList(), downloadLatencies: List<Int> = emptyList(), serverViaTor: Set<String> = emptySet()): String {
         // Auto: servers when there are working ones, otherwise the DPI engine alone.
         val settings = if (settings0.mode == Mode.AUTO) settings0.copy(mode = if (servers.isEmpty()) Mode.BYEDPI else Mode.SERVERS) else settings0
         require(settings.torAll || settings.mode == Mode.BYEDPI || servers.isNotEmpty()) { "Не выбран ни один сервер" }
         require(settings.torAll || settings.mode == Mode.SERVERS || byeDpiPort != null) { "ByeDPI не запущен" }
+        require(serverViaTor.isEmpty() || (servers.size == 1 && servers[0].first.id in serverViaTor && servers[0].first.isTcpBased && servers[0].second?.viaByeDpi != true && warpHop == null && !settings.torAll)) { "Invalid Tor-to-server chain" }
         val c = base()
         if (quietLogs) c.getJSONObject("log").put("loglevel", "error")
         val inSettings = JSONObject().put("udp", true).put("ip", "127.0.0.1")
@@ -233,11 +234,20 @@ object XrayConfigBuilder {
         c.put("inbounds", inbounds)
         val outs = JSONArray()
         val useServers = !settings.torAll && settings.mode != Mode.BYEDPI
-        if (useServers) servers.forEachIndexed { i, (s, m) -> outs.put(outbound(s, "$PROXY_PREFIX$i", resolveMask(m, byeDpiPort, dpiPorts), settings.mux)) }
+        if (useServers) servers.forEachIndexed { i, (s, m) ->
+            val out = outbound(s, "$PROXY_PREFIX$i", resolveMask(m, byeDpiPort, dpiPorts), settings.mux)
+            if (s.id in serverViaTor) {
+                val stream = out.optJSONObject("streamSettings") ?: JSONObject().also { out.put("streamSettings",it) }
+                val sock = stream.optJSONObject("sockopt") ?: JSONObject().also { stream.put("sockopt",it) }
+                require(!sock.has("dialerProxy")) { "Cannot overwrite an existing chain" }
+                sock.put("dialerProxy", TOR_TAG)
+            }
+            outs.put(out)
+        }
         outs.put(JSONObject().put("tag", "direct").put("protocol", "freedom").put("settings", JSONObject().put("domainStrategy", "UseIPv4")))
         // Embedded Tor (or an explicitly configured local Tor) uses its own SOCKS listener.
         // Standalone Tor needs neither a VLESS outbound nor a ByeDPI process.
-        val torOn = com.vlesscardvpn.tor.TorRoutePolicy.active(settings)
+        val torOn = com.vlesscardvpn.tor.TorRoutePolicy.active(settings) || serverViaTor.isNotEmpty()
         if (torOn) outs.put(JSONObject().put("tag", TOR_TAG).put("protocol", "socks")
             .put("settings", JSONObject().put("servers", arr(JSONObject().put("address", "127.0.0.1").put("port", com.vlesscardvpn.tor.TorCard.DEFAULT_SOCKS_PORT)))))
         outs.put(JSONObject().put("tag", "block").put("protocol", "blackhole"))
@@ -268,7 +278,7 @@ object XrayConfigBuilder {
         if (ruDns) dnsServers.put(JSONObject().put("address", RU_DNS).put("port", 53)
             .put("domains", JSONArray(RU_DOMAINS)).put("skipFallback", true))
         // a chain, not one server: if Cloudflare DoH is slowed down here, Google, Quad9 and plain DNS through the tunnel answer
-        (listOf(settings.dnsUrl) + DNS_FALLBACKS).distinct().forEach { dnsServers.put(it) }
+        (listOf(settings.dnsUrl) + DNS_FALLBACKS).distinct().filter { serverViaTor.isEmpty() || it.startsWith("https://") }.forEach { dnsServers.put(it) }
         c.put("dns", JSONObject().put("servers", dnsServers).put("queryStrategy", "UseIPv4").put("tag", "dns-module")
             .put("hosts", JSONObject(DNS_HOSTS as Map<*, *>))
             // «Ускорение»: an expired answer is served at once and refreshed in the background (no wait on every open)
@@ -288,6 +298,7 @@ object XrayConfigBuilder {
         // «Сайт не открывается?» — the user's own choice wins over everything below (RU direct, services, hybrid)
         if (settings.alwaysDirect.isNotEmpty()) rules.put(JSONObject().put("domain", JSONArray(settings.alwaysDirect.map { "domain:$it" })).put("outboundTag", "direct"))
         if (settings.alwaysVpn.isNotEmpty()) rules.put(toMain(JSONObject().put("domain", JSONArray(settings.alwaysVpn.map { "domain:$it" }))))
+        if (serverViaTor.isNotEmpty()) rules.put(JSONObject().put("network", "udp").put("outboundTag", "block"))
         // AI services (Gemini, ChatGPT, Claude…) refuse Russian addresses: always through the servers, never direct or via the DPI bypass
         val servicePools = if (useServers && warpHop == null) com.vlesscardvpn.core.ServiceRoutes.indices(servers.map { it.first.id }, serviceRoutes) else emptyMap()
         servicePools.forEach { (id, pool) ->

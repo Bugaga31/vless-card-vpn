@@ -201,12 +201,12 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
                 }
                 Text(if (cfg.torAll) "Встроенный Tor без VLESS-сервера. TCP идёт через Tor, кроме сохранённых прямых исключений. Произвольный UDP не поддерживается; на мобильной сети могут понадобиться мосты."
                 else when (mode) {
-                    Mode.AUTO -> "Сам обновит подписки, проверит серверы, подберёт маскировку и обход DPI. Если маскировку распознают — сменит её сам"
+                    Mode.AUTO -> "Подберёт сервер и маскировку, затем в фоне сравнит совместимые цепочки по передаче данных и скорости. Tor участвует только если разрешён в настройках"
                     Mode.SERVERS -> "Весь трафик через выбранные серверы (запросы распределяются между ними)"
                     Mode.BYEDPI -> "Без сервера: обход DPI встроенными ByeDPI/zapret (YouTube, Discord и т.п.). Не помогает от блокировки по IP"
                     Mode.HYBRID -> "YouTube/Discord — через обход DPI, остальное (и Telegram) — через серверы"
                 }, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 6.dp))
-                if (cfg.torAll) TextButton(onClick = { torDialog = true }) { Text("Настроить Tor: мосты и ротация") }
+                if (cfg.torAll || mode == Mode.AUTO) TextButton(onClick = { torDialog = true }) { Text(if(cfg.torAll) "Настроить Tor: мосты и ротация" else "Настроить цепочки Auto и Tor") }
                 Spacer(Modifier.height(10.dp))
                 val st = cfg
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {

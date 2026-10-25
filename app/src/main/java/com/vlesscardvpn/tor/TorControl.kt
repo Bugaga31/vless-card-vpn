@@ -12,7 +12,8 @@ import java.net.Socket
  * SIGNAL NEWNYM, SETCONF ExitNodes, GETINFO status/circuit-established.
  * Speaks the raw line protocol — no dependencies beyond a TCP socket.
  */
-open class TorControl(private val host: String = "127.0.0.1", private val port: Int = DEFAULT_CONTROL_PORT) {
+open class TorControl(private val host: String = "127.0.0.1", private val port: Int = DEFAULT_CONTROL_PORT, private val timeoutMs: Int = 5000) {
+    init { require(timeoutMs in 100..5000) }
     private var socket: Socket? = null
     private var reader: BufferedReader? = null
     private var out: java.io.OutputStream? = null
@@ -22,8 +23,8 @@ open class TorControl(private val host: String = "127.0.0.1", private val port: 
         close()
         val s = Socket()
         try {
-            s.connect(InetSocketAddress(host, port), 5000)
-            s.soTimeout = 5000
+            s.connect(InetSocketAddress(host, port), timeoutMs)
+            s.soTimeout = timeoutMs
             socket = s
             reader = BufferedReader(InputStreamReader(s.getInputStream(), Charsets.US_ASCII))
             out = s.getOutputStream()

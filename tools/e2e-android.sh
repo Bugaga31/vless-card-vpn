@@ -124,6 +124,19 @@ run_case auto-eight auto-eight.json 180
 P=$(waitlog "pool size=8 " 150) || fail "auto-eight: real Xray pool never reached eight outbounds"
 echo "eight: $P"
 
+# Production runner -> measured winner -> actual live VPN config, using native DPI.
+# Tor is intentionally not faked here; Tor socket chaining has a separate closed host fixture.
+: > $W/access.log
+run_case auto-chain auto-chain.json 180
+adb logcat -c
+adb shell am start -n $PKG/.MainActivity --ez e2e_chain true >/dev/null
+CH=$(waitlog "auto-chain-e2e applied=|auto-chain-e2e FAIL" 90) || fail "auto-chain: no completion"
+echo "chain: $CH"
+echo "$CH" | grep -q "applied=DPI_SERVER" || fail "auto-chain: measured DPI-server chain not applied"
+R=$(probe auto-chain); okprobe "$R" || fail "auto-chain: other UID cannot transfer through selected live chain"
+c=$(grep -c "email: u8443" $W/access.log)
+[ "$c" -gt 0 ] || fail "auto-chain: authenticated server saw no traffic"
+
 CASE=proxy; R=""
 echo "=== case proxy (no VPN: SOCKS5 10808 + HTTP 10809 for other apps)"
 adb shell am start -n $PKG/.MainActivity --ez e2e_disconnect true >/dev/null; sleep 3; : > $W/access.log

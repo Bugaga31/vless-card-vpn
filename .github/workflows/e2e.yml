@@ -48,9 +48,12 @@ jobs:
       - name: Xray-core for the host-side servers
         run: |
           curl -fsSL -o /tmp/xray.zip https://github.com/XTLS/Xray-core/releases/download/v26.9.30/Xray-linux-64.zip
+          echo "f851110beaff16e78d643f0ccfd9524b4a44dfd59bae3e34bb52bba378f7690e  /tmp/xray.zip" | sha256sum -c -
           mkdir -p /tmp/xray && unzip -qo /tmp/xray.zip -d /tmp/xray && /tmp/xray/xray version | head -1
       - name: Standalone Tor startup without ByeDPI (loopback fixture)
         run: python3 tools/e2e/tor-standalone-smoke.py --xray /tmp/xray/xray --config /tmp/xcfg/vpn-tor-standalone.json
+      - name: Isolated Auto chain TLS body and required-hop failure gates
+        run: python3 tools/auto-chain-lab/smoke.py --xray /tmp/xray/xray --configs /tmp/chain-probe-configs
       - name: Enable KVM
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules

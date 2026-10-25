@@ -78,7 +78,15 @@ fun TorSettingsCard(settings: Settings, set: ((Settings) -> Settings) -> Unit) {
                 }
             }
             TorOption("Tor для сервисов", "Направлять выбранные сервисы через локальный Tor.", settings.torRouting) { v -> set { it.copy(torRouting = v) } }
-            TorOption("Tor в Авто", "Разрешить Tor как резервный путь. UNKNOWN не считается подтверждением.", settings.torAuto) { v -> set { it.copy(torAuto = v) } }
+            TorOption("Tor в Авто", "Прогревать Tor и сравнивать Tor / Tor → сервер с обычными маршрутами. Холодный Tor не задерживает подключение; UDP через Tor недоступен.", settings.torAuto) { v -> set { it.copy(torAuto = v) } }
+            TorOption("Автоподбор сетевых цепочек", "В режиме Авто сравнивать сервер, ByeDPI → сервер и, если разрешён Tor в Авто, готовые Tor-маршруты. Переключение — после проверки передачи, без полного перебора каталога.", settings.autoChainSearch) {v -> set {it.copy(autoChainSearch=v)}}
+            Text("Приоритет подбора",fontWeight=FontWeight.Medium)
+            Row(horizontalArrangement=Arrangement.spacedBy(6.dp)) {
+                listOf("balanced" to "Баланс","download" to "Скорость","interactive" to "Отклик").forEach {(id,title) ->
+                    FilterChip(selected=settings.autoChainPurpose==id,onClick={set {it.copy(autoChainPurpose=id)}},label={Text(title)})
+                }
+            }
+            Text("Работает в VPN-режиме Авто без отдельной сервисной маршрутизации и WARP-цепочки. Измеряется лучший из ограниченного набора, не каждый сервер интернета.",style=MaterialTheme.typography.bodySmall)
             TorOption("Ротация цепочек", "Запрашивать новую цепочку для новых соединений. Активные загрузки не обрываются; новый IP не гарантируется.", settings.torRotation) { v -> set { it.copy(torRotation = v) } }
             var seconds by remember(settings.torRotationSeconds) { mutableStateOf(settings.torRotationSeconds.toString()) }
             var latency by remember(settings.torMaxLatencyMs) { mutableStateOf(settings.torMaxLatencyMs.toString()) }

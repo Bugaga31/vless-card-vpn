@@ -1,5 +1,5 @@
 {
-  "ready": true,
-  "scope": "v1.2.54 standalone Tor startup hotfix: no ByeDPI dependency, no unused VLESS outbounds, preserve explicit direct exceptions, no Auto DPI fallback; language-model research excluded",
+  "ready": false,
+  "scope": "v1.2.55 live Auto chain integration in progress; publication blocked until final checks",
   "physical_phone_tested": false
 }
