@@ -11,6 +11,9 @@ if a.probe:
         err=str(r.get('error','')).split(':',1)[0]
         result['results'].append({k:r.get(k) if type(r.get(k)) is int else None for k in ('code','bytes','ms')})
         result['results'][-1]['error_type']=err if re.fullmatch(r'[A-Za-z]{1,60}(Exception|Error)',err) else ('present' if err else 'none')
+        for field in ('request_index','run_id','started_wall_ms','started_elapsed_ms','ended_wall_ms','ended_elapsed_ms'):
+            value=r.get(field)
+            result['results'][-1][field]=value if type(value) is int and 0<=value<=10**15 else None
         safe_types={'SSLHandshakeException','SSLProtocolException','SSLPeerUnverifiedException','SSLException','CertificateException','CertificateExpiredException','CertificateNotYetValidException','CertPathValidatorException','CertificateParsingException','UnknownHostException','ConnectException','SocketException','SocketTimeoutException','EOFException','IOException','ProtocolException','MalformedURLException','InterruptedException','SecurityException','IllegalStateException','IllegalArgumentException','Exception','Other'}
         safe_reasons={'certificate_validation','peer_unverified','timeout','dns','connect','eof','tls_protocol','connection_reset','connection_closed','https_downgrade','redirect_policy','tls_handshake','unclassified'}
         safe_phases={'url','connect_headers','redirect','body'}
@@ -48,7 +51,9 @@ else:
             'causes':[c if c in safe_types else 'Other' for c in causes.split(',')[:5]]})
     service_events=re.findall(r'service command=(start|stop|pause|sticky|chain) state=(IDLE|CONNECTING|CONNECTED|ERROR)\b',text)[-6:]
     teardown_events=re.findall(r'teardown state=(IDLE|CONNECTING|CONNECTED|ERROR) keepTun=(true|false) reason=(restart|stop|error)\b',text)[-6:]
-    result={'failures':failures,'service_events':service_events,'teardown_events':teardown_events,
+    core_events=re.findall(r'core instance=([0-9]{1,10}) role=(vpn|test|test1|speed|auto-chain|other) event=(start_begin|start_return|start_throw|stop_begin|stop_return|stop_throw) wall_ms=([0-9]{1,15}) elapsed_ms=([0-9]{1,15})(?=\s|$)',text)[-24:]
+    probe_events=re.findall(r'probe run=([0-9]{1,10}) request=([0-9]{1,2}) event=(begin|complete|error) phase=(url|connect_headers|redirect|body|other) wall_ms=([0-9]{1,15}) elapsed_ms=([0-9]{1,15})(?=\s|$)',text)[-12:]
+    result={'core_events':core_events,'probe_events':probe_events,'failures':failures,'service_events':service_events,'teardown_events':teardown_events,
             'optimize_skips':re.findall(r'optimize skipped=(power|foreground_busy|disabled)\b',text)[-3:],
             'auto_ready_blocked':re.findall(r'auto ready_blocked=(network_changed|cancelled)\b',text)[-3:],
             'start_callers':re.findall(r'start request caller=((?:MainActivity|Actions|Assistant|BootReceiver|VpnWidget|ToggleTileService)\.kt:[0-9]{1,6}|unknown)(?=\s|$)',text)[-4:],

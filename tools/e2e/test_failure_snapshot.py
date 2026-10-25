@@ -58,3 +58,17 @@ class FailureSnapshotTest(unittest.TestCase):
         self.assertEqual('unknown',d['results'][0]['failure_phase'])
         out=subprocess.check_output([sys.executable,str(Path(__file__).with_name('summarize_failure.py')),'--case','multi'],input=b'\xff\x80\n')
         self.assertIn(b'::notice',out)
+
+    def test_request_times_are_numeric_only(self):
+        text,d=self.summarize({'results':[{'request_index':0,'run_id':1,'started_wall_ms':1234,'started_elapsed_ms':20,'ended_wall_ms':'SECRET','ended_elapsed_ms':True}]})
+        r=d['results'][0]
+        self.assertEqual(1234,r['started_wall_ms']);self.assertEqual(20,r['started_elapsed_ms'])
+        self.assertIsNone(r['ended_wall_ms']);self.assertIsNone(r['ended_elapsed_ms']);self.assertNotIn('SECRET',text)
+    def test_safe_lifecycle_timeline_is_bounded(self):
+        text=('core instance=7 role=test event=stop_begin wall_ms=100 elapsed_ms=20\n'*30 +
+            'probe run=2 request=0 event=error phase=connect_headers wall_ms=105 elapsed_ms=25\n' +
+            'core instance=8 role=SECRET event=PRIVATE wall_ms=100 elapsed_ms=20\n')
+        out=subprocess.check_output([sys.executable,str(Path(__file__).with_name('summarize_failure.py')),'--case','multi'],input=text,text=True)
+        d=json.loads(out.split('::',2)[-1])
+        self.assertEqual(24,len(d['core_events']));self.assertEqual(1,len(d['probe_events']))
+        self.assertNotIn('SECRET',out);self.assertNotIn('PRIVATE',out)

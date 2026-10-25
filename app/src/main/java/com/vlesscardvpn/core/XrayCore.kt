@@ -38,8 +38,15 @@ object XrayCore {
 
     fun version(): String = if (!initialized) "Xray 26.9.30 · запуск по необходимости" else runCatching { Libv2ray.checkVersionX() }.getOrDefault("?")
 
+    private val diagnosticIds = java.util.concurrent.atomic.AtomicLong()
+
     /** A separate core instance. The VPN uses one, the tester another one at the same time. */
     class Instance(private val name: String) {
+        private val diagnosticId = if (com.vlesscardvpn.BuildConfig.DEBUG) diagnosticIds.incrementAndGet() else 0L
+        private fun trace(event: String) {
+            if (com.vlesscardvpn.BuildConfig.DEBUG) Log.i("E2E", ConnectDiagnostics.coreEvent(name, diagnosticId, event,
+                System.currentTimeMillis(), android.os.SystemClock.elapsedRealtime()))
+        }
         @Volatile var lastStatus: String = ""
         private val controller: CoreController = Libv2ray.newCoreController(object : CoreCallbackHandler {
             override fun startup(): Long = 0
@@ -48,8 +55,17 @@ object XrayCore {
         })
         val running: Boolean get() = runCatching { controller.isRunning }.getOrDefault(false)
         /** Throws with the core's message if the config is rejected. */
-        fun start(config: String) { controller.startLoop(RuntimeXrayConfig.prepare(config), 0) }
-        fun stop() { runCatching { controller.stopLoop() } }
+        fun start(config: String) {
+            trace("start_begin")
+            var returned = false
+            try { controller.startLoop(RuntimeXrayConfig.prepare(config), 0); returned = true }
+            finally { trace(if (returned) "start_return" else "start_throw") }
+        }
+        fun stop() {
+            trace("stop_begin")
+            val result = runCatching { controller.stopLoop() }
+            trace(if (result.isSuccess) "stop_return" else "stop_throw")
+        }
         /** HTTP(S) GET through the running instance's routing; returns ms or -1. */
         fun delay(url: String): Long = runCatching { controller.measureDelay(url) }.getOrDefault(-1L)
     }

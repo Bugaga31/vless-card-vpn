@@ -14,6 +14,13 @@ object ConnectDiagnostics {
             it.lineNumber in 1..100000
     }?.let { "${it.fileName}:${it.lineNumber}" } ?: "unknown"
 
+    /** Fixed lifecycle labels only: no instance names derived from server IDs or core messages. */
+    fun coreEvent(name: String, id: Long, event: String, wall: Long, elapsed: Long): String {
+        val role = name.takeIf { it in setOf("vpn", "test", "test1", "speed", "auto-chain") } ?: "other"
+        val action = event.takeIf { it in setOf("start_begin", "start_return", "start_throw", "stop_begin", "stop_return", "stop_throw") } ?: "other"
+        return "core instance=${id.coerceAtLeast(0)} role=$role event=$action wall_ms=${wall.coerceAtLeast(0)} elapsed_ms=${elapsed.coerceAtLeast(0)}"
+    }
+
     fun describe(scope: String, phase: String, error: Throwable): String {
         val chain = mutableListOf<Throwable>()
         var current: Throwable? = error

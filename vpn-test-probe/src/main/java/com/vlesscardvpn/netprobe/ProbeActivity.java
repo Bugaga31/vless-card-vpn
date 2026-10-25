@@ -17,6 +17,8 @@ import org.json.JSONObject;
 
 /** Test-only app with its own UID: its traffic must go through the VPN. Fetches the given URLs and writes result.json. */
 public final class ProbeActivity extends Activity {
+    private static final java.util.concurrent.atomic.AtomicLong RUNS = new java.util.concurrent.atomic.AtomicLong();
+
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
         final String urls = getIntent().getStringExtra("urls");
@@ -26,6 +28,7 @@ public final class ProbeActivity extends Activity {
 
     private void probe(String urls, String tag) {
         JSONObject result = new JSONObject();
+        long run = RUNS.incrementAndGet();
         try {
             result.put("tag", tag);
             ConnectivityManager cm = (ConnectivityManager) getSystemService(CONNECTIVITY_SERVICE);
@@ -40,10 +43,15 @@ public final class ProbeActivity extends Activity {
             result.put("vpn", vpn);
             try { result.put("dns", InetAddress.getByName("example.com").getHostAddress()); } catch (Exception e) { result.put("dns", "FAIL " + ProbeFailure.type(e)); }
             JSONArray out = new JSONArray();
+            int index = 0;
             for (String u : urls.split(",")) {
                 if (u.isEmpty()) continue;
                 JSONObject r = new JSONObject(); r.put("url", u);
+                int request = index++;
                 long t0 = SystemClock.elapsedRealtime();
+                r.put("request_index", request); r.put("run_id", run);
+                r.put("started_wall_ms", System.currentTimeMillis()); r.put("started_elapsed_ms", t0);
+                android.util.Log.i("E2E", ProbeTimeline.event(run, request, "begin", "url", System.currentTimeMillis(), t0));
                 String phase = "url";
                 long received = 0;
                 try {
@@ -80,7 +88,11 @@ public final class ProbeActivity extends Activity {
                     r.put("causes", new JSONArray(java.util.Arrays.asList(ProbeFailure.causes(e))));
                     r.put("body_bytes_before_error", received);
                 }
-                r.put("ms", SystemClock.elapsedRealtime() - t0);
+                long ended = SystemClock.elapsedRealtime();
+                r.put("ended_wall_ms", System.currentTimeMillis()); r.put("ended_elapsed_ms", ended);
+                android.util.Log.i("E2E", ProbeTimeline.event(run, request, r.optInt("code", -1) < 0 ? "error" : "complete", phase,
+                    r.getLong("ended_wall_ms"), ended));
+                r.put("ms", ended - t0);
                 out.put(r);
             }
             result.put("results", out);

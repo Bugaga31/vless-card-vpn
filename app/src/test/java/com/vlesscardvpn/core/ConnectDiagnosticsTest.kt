@@ -40,4 +40,10 @@ class ConnectDiagnosticsTest {
         assertEquals("Actions.kt:789",ConnectDiagnostics.startCaller(stack))
         assertEquals("unknown",ConnectDiagnostics.startCaller(arrayOf(StackTraceElement("com.vlesscardvpn.SECRET","SECRET","private.kt",4))))
     }
+    @Test fun coreLifecycleIsCorrelatableWithoutServerIdentity() {
+        assertEquals("core instance=7 role=vpn event=start_begin wall_ms=100 elapsed_ms=20",
+            ConnectDiagnostics.coreEvent("vpn",7,"start_begin",100,20))
+        val safe = ConnectDiagnostics.coreEvent("dpi-SECRET",-1,"PRIVATE",-2,-3)
+        assertEquals("core instance=0 role=other event=other wall_ms=0 elapsed_ms=0",safe)
+    }
 }
