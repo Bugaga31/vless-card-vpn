@@ -27,6 +27,7 @@ data class Settings(
     /** Domains that go through ByeDPI in hybrid mode (geosite tags or domains). */
     val hybridDomains: List<String> = listOf("geosite:youtube", "geosite:discord", "geosite:twitter", "geosite:meta"),
     val testUrl: String = "https://www.gstatic.com/generate_204",
+    val dnsAuto: Boolean = true,
     val dnsUrl: String = "https://1.1.1.1/dns-query",
     val subscriptions: List<String> = DEFAULT_SUBSCRIPTIONS,
     /** DPI strategy id: [DPI_AUTO] (found for this network), "custom" (byeDpiArgs) or a built-in id. */
@@ -167,7 +168,7 @@ data class Settings(
     val httpPort: Int get() = if (socksPort < 65535) socksPort + 1 else socksPort - 1
     fun toJson(): JSONObject = JSONObject().put("mode", mode.name).put("balance", balance.name).put("socksPort", socksPort)
         .put("ruDirect", ruDirect).put("blockAds", blockAds).put("blockTrackers", blockTrackers).put("byeDpiArgs", byeDpiArgs).put("byeDpiSni", byeDpiSni)
-        .put("hybridDomains", JSONArray(hybridDomains)).put("testUrl", testUrl).put("dnsUrl", dnsUrl)
+        .put("hybridDomains", JSONArray(hybridDomains)).put("testUrl", testUrl).put("dnsUrl", dnsUrl).put("dnsAuto", dnsAuto)
         .put("subscriptions", JSONArray(subscriptions))
         .put("dpiStrategy", dpiStrategy).put("dpiRemembered", JSONObject(dpiRemembered as Map<*, *>))
         .put("stealthSocks", stealthSocks).put("blockStun", blockStun).put("blockQuic", blockQuic).put("mux", mux).put("rotateMasks", rotateMasks)
@@ -230,6 +231,7 @@ data class Settings(
                 ruDirect = o.optBoolean("ruDirect", d.ruDirect), blockAds = o.optBoolean("blockAds", d.blockAds), blockTrackers = o.optBoolean("blockTrackers", d.blockTrackers),
                 byeDpiArgs = o.optString("byeDpiArgs", d.byeDpiArgs), byeDpiSni = o.optString("byeDpiSni", d.byeDpiSni),
                 hybridDomains = list("hybridDomains", d.hybridDomains), testUrl = o.optString("testUrl", d.testUrl),
+                dnsAuto = o.optBoolean("dnsAuto", o.optString("dnsUrl", d.dnsUrl) == d.dnsUrl),
                 dnsUrl = o.optString("dnsUrl", d.dnsUrl), subscriptions = list("subscriptions", d.subscriptions),
                 dpiStrategy = o.optString("dpiStrategy", d.dpiStrategy),
                 dpiRemembered = o.optJSONObject("dpiRemembered")?.let { m -> m.keys().asSequence().associateWith { m.getString(it) } } ?: emptyMap(),

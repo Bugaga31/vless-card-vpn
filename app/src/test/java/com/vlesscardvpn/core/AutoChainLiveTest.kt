@@ -71,7 +71,7 @@ class AutoChainLiveTest {
     }
     @Test fun `live Tor server chain DNS uses server route and encrypted upstreams`() {
         val c=config();val dns=c.getJSONObject("dns").getJSONArray("servers")
-        for(i in 0 until dns.length())assertTrue(dns.getString(i).startsWith("https://"))
+        for(i in 0 until dns.length())assertTrue(dns.getJSONObject(i).getString("address").startsWith("https://"))
         assertEquals("proxy-0",rules(c).first {it.optJSONArray("inboundTag")?.toString()?.contains("dns-module")==true}.getString("outboundTag"))
     }
     @Test fun `live Tor server chain blocks UDP before main route`() {assertTrue(rules(config()).any {it.optString("network")=="udp" && it.optString("outboundTag")=="block"})}

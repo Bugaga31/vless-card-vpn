@@ -209,42 +209,46 @@ object Tester {
     }.getOrNull()
 
     /** DNS query (A record) in wire format, id = [id]. */
-    fun dnsQuery(host: String, id: Int = 0x5a5a): ByteArray {
-        val out = java.io.ByteArrayOutputStream()
-        out.write(byteArrayOf((id shr 8).toByte(), id.toByte(), 1, 0, 0, 1, 0, 0, 0, 0, 0, 0))
-        host.trimEnd('.').split('.').forEach { l -> val b = l.toByteArray(); out.write(b.size); out.write(b) }
-        out.write(byteArrayOf(0, 0, 1, 0, 1)); return out.toByteArray()
-    }
+    fun dnsQuery(host: String, id: Int = 0x5a5a): ByteArray = DnsWire.query(host, id)
 
     /**
      * The phone's DNS path as apps use it: SOCKS5 UDP ASSOCIATE → 1.1.1.1:53 → Xray's DNS. HTTP checks go via socks5h
      * (Xray resolves on the server side), so a dead DNS path used to look healthy while apps could not open anything.
      */
-    fun dnsViaSocks(port: Int, user: String = "", pass: String = "", host: String = "www.google.com"): Boolean = runCatching {
+    fun dnsViaSocks(port: Int, user: String = "", pass: String = "", host: String = "www.google.com", budgetMs: Int = 5000, onCancel: ((() -> Unit) -> Unit)? = null): Boolean = runCatching {
+        val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(budgetMs.coerceIn(1, 5000).toLong())
+        fun remaining(): Int {
+            val left = TimeUnit.NANOSECONDS.toMillis(deadline - System.nanoTime())
+            if (left <= 0) throw java.net.SocketTimeoutException("DNS deadline")
+            return left.toInt().coerceAtLeast(1)
+        }
         java.net.Socket().use { s ->
-            s.connect(InetSocketAddress("127.0.0.1", port), 2000); s.soTimeout = 5000
+            onCancel?.invoke { s.close() }
+            s.connect(InetSocketAddress("127.0.0.1", port), minOf(2000, remaining())); s.soTimeout = remaining()
             val o = s.getOutputStream(); val i = java.io.DataInputStream(s.getInputStream())
             o.write(if (user.isNotEmpty()) byteArrayOf(5, 1, 2) else byteArrayOf(5, 1, 0)); o.flush()
-            val m = ByteArray(2); i.readFully(m)
+            val m = ByteArray(2); i.readFully(m); check(m[0].toInt() == 5 && m[1].toInt() == if (user.isNotEmpty()) 2 else 0)
             if (m[1].toInt() == 2) {
-                val u = user.toByteArray(); val p = pass.toByteArray()
+                val u = user.toByteArray(); val p = pass.toByteArray(); check(u.size in 1..255 && p.size <= 255)
                 o.write(byteArrayOf(1, u.size.toByte()) + u + byteArrayOf(p.size.toByte()) + p); o.flush()
-                val r = ByteArray(2); i.readFully(r); check(r[1].toInt() == 0)
+                val r = ByteArray(2); i.readFully(r); check(r[0].toInt() == 1 && r[1].toInt() == 0)
             } else check(m[1].toInt() == 0)
             o.write(byteArrayOf(5, 3, 0, 1, 0, 0, 0, 0, 0, 0)); o.flush()
-            val h = ByteArray(4); i.readFully(h); check(h[1].toInt() == 0)
+            s.soTimeout = remaining()
+            val h = ByteArray(4); i.readFully(h); check(h[0].toInt() == 5 && h[1].toInt() == 0 && h[2].toInt() == 0)
             val addr = when (h[3].toInt()) { 1 -> ByteArray(4); 4 -> ByteArray(16); else -> error("atyp") }.also { i.readFully(it) }
-            val rport = i.readUnsignedShort()
+            val rport = i.readUnsignedShort(); check(rport > 0)
             val relay = InetAddress.getByAddress(addr).let { if (it.isAnyLocalAddress) InetAddress.getByName("127.0.0.1") else it }
             java.net.DatagramSocket().use { u ->
-                u.soTimeout = 5000
+                onCancel?.invoke { u.close(); s.close() }
+                u.connect(relay, rport)
+                u.soTimeout = remaining()
                 val q = dnsQuery(host, (System.nanoTime() and 0xffff).toInt())
                 val pkt = byteArrayOf(0, 0, 0, 1, 1, 1, 1, 1, 0, 53) + q
                 u.send(java.net.DatagramPacket(pkt, pkt.size, relay, rport))
                 val buf = ByteArray(1500); val dp = java.net.DatagramPacket(buf, buf.size); u.receive(dp)
-                val off = when (buf[3].toInt()) { 1 -> 10; 4 -> 22; else -> 7 + (buf[4].toInt() and 255) }
-                val an = ((buf[off + 6].toInt() and 255) shl 8) or (buf[off + 7].toInt() and 255)
-                dp.length > off + 12 && buf[off] == q[0] && buf[off + 1] == q[1] && an > 0
+                val response = DnsWire.payload(buf, dp.length)
+                response != null && DnsWire.hasAnswer(response, q)
             }
         }
     }.getOrDefault(false)

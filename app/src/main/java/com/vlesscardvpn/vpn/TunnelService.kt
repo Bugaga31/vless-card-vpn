@@ -441,7 +441,8 @@ class TunnelService : VpnService() {
         checkJob = scope.launch {
             delay(delayMs)
             val st = Store.state.value.settings
-            val port = Tunnel.socks?.port ?: return@launch
+            val auth = Tunnel.socks ?: return@launch
+            val port = auth.port
             val sampledNet = Net.key(this@TunnelService)
             val sampledHandle = Net.underlying(this@TunnelService)?.toString()
             val sampledServers = usedServers.toList()
@@ -454,6 +455,12 @@ class TunnelService : VpnService() {
             // right after connecting the first packets may still be on their way (WireGuard/WARP handshake, a slow
             // mobile network): one calm second try before calling the route bad and starting a heal or a reconnect
             if (!p.works) { delay(3000); if (Tunnel.socks?.port == port) p = Tester.probeSocks(port, st.testUrl, big = false, youtube = checkServices, attempts = 1, budgetMs = 5000) }
+            // A SOCKS HTTPS success uses remote name resolution and does not prove
+            // Android apps' UDP DNS path. Never show a healthy VPN on that evidence alone.
+            val dnsOk = if (p.works && !st.proxyOnly) com.vlesscardvpn.core.CancellableProbe.run { bind ->
+                Tester.dnsViaSocks(port, auth.user, auth.pass, budgetMs = 3000, onCancel = bind)
+            } else st.proxyOnly
+            if (p.works && !dnsOk) p = p.copy(realMs = 0, error = "DNS через туннель не отвечает")
             val chainExitRejected = if(usedChain?.chain?.layout?.tor == true) {
                 val country=com.vlesscardvpn.core.CancellableProbe.run {bind -> Tester.exitCountry(port,1000,onCall={call->bind {call.cancel()}})}
                 country == null || country == "RU"
@@ -472,7 +479,7 @@ class TunnelService : VpnService() {
                 else "Нет ответа через выбранный маршрут (${p.error}). " + if (st.mode == Mode.AUTO && st.autoHeal) "Ищу рабочий вариант сам…" else "Проверьте серверы или включите маскировку."
             Tunnel.status.value = cur.copy(check = text, checkOk = p.works && !chainExitRejected)
             if (attributeServers) runCatching { val stv = Store.state.value; com.vlesscardvpn.core.Brain.lived(sampledNet, sampledServers, { stv.state(it) }, p.works); com.vlesscardvpn.core.Brain.save(this@TunnelService) }
-            Log.i("E2E", "check ok=${p.works} ms=${p.realMs} big=${p.bigOk} yt=${p.ytOk} tg=${p.tgOk} err=${p.error} warp=$warp")
+            Log.i("E2E", "check ok=${p.works} ms=${p.realMs} big=${p.bigOk} yt=${p.ytOk} tg=${p.tgOk} err=${p.error} warp=$warp dns=$dnsOk")
             if (attributeServers && p.works && st.mode == Mode.AUTO) Actions.rememberNet(sampledNet)
             // «Умный YouTube» broke YouTube here (the bypass stopped working): back to the servers for YouTube
             if (p.realMs > 0 && p.ytOk == false && Tunnel.ytViaDpi) {
