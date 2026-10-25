@@ -12,6 +12,6 @@ object TorConnectionPolicy {
     fun rotation(s: Settings, now: () -> Long): TorRotation = TorRotation(
         rotateEveryMs = s.torRotationSeconds.coerceIn(30, 86400) * 1000L,
         periodic = true, fastOnly = s.torFastOnly,
-        ceilingMs = if (s.torFastOnly) s.torMaxLatencyMs.coerceIn(250, 15000).toLong() else 7000L,
+        ceilingMs = if (s.torFastOnly) s.torMaxLatencyMs.coerceAtLeast(1).toLong() else 7000L,
         now = now)
 }

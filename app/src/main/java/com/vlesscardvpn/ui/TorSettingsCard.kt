@@ -91,15 +91,15 @@ fun TorSettingsCard(settings: Settings, set: ((Settings) -> Settings) -> Unit) {
             var seconds by remember(settings.torRotationSeconds) { mutableStateOf(settings.torRotationSeconds.toString()) }
             var latency by remember(settings.torMaxLatencyMs) { mutableStateOf(settings.torMaxLatencyMs.toString()) }
             val validSeconds = seconds.toIntOrNull()?.takeIf { it in 30..86400 }
-            val validLatency = latency.toIntOrNull()?.takeIf { it in 250..15000 }
+            val validLatency = latency.toIntOrNull()?.takeIf { it > 0 }
             OutlinedTextField(value = seconds, onValueChange = { if (it.length <= 5) seconds = it }, singleLine = true,
                 label = { Text("Запрашивать новую цепочку каждые N секунд") },
                 supportingText = { Text("30–86400 секунд. В режиме энергосбережения ротация может откладываться.") },
                 isError = validSeconds == null, modifier = Modifier.fillMaxWidth(),
                 keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number))
             TorOption("Предпочитать быстрые выходы", "Выбирать лучшую страну по свежим HTTPS-замерам Cloudflare, без исследования более медленных стран. Это задержка, не скорость скачивания и не гарантия каждого узла.", settings.torFastOnly) { v -> set { it.copy(torFastOnly = v) } }
-            OutlinedTextField(value = latency, onValueChange = { if (it.length <= 5) latency = it }, singleLine = true,
-                label = { Text("Порог задержки HTTPS, мс") }, supportingText = { Text("250–15000 мс. Медленные измерения временно исключаются; если быстрых пока нет, продолжается обычное создание цепочек.") },
+            OutlinedTextField(value = latency, onValueChange = { if (it.length <= 10) latency = it }, singleLine = true,
+                label = { Text("Порог задержки HTTPS, мс") }, supportingText = { Text("Любое целое от 1 до 2147483647 мс, например 100. Это фильтр, а не обещание скорости: слишком низкий порог может исключить все замеры. Для Snowflake допускается двойной порог. Если быстрых пока нет, продолжается обычное создание цепочек.") },
                 isError = validLatency == null, modifier = Modifier.fillMaxWidth(),
                 keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number))
             OutlinedButton(onClick = { if (validSeconds != null && validLatency != null) set { it.copy(torRotationSeconds = validSeconds, torMaxLatencyMs = validLatency) } },

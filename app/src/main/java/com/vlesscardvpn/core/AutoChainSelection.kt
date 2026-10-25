@@ -49,7 +49,8 @@ object AutoChainSelection {
                             val torReady: Boolean = false, val requiresUdp: Boolean = false)
     data class Sample(val chainId: String, val generation: Long, val sampledAtMs: Long,
                       val data: Verdict, val telegram: Verdict, val youtube: Verdict,
-                      val verifiedBody: Boolean, val bodyBytes: Long, val transferMs: Long, val latencyMs: Long, val exitCountry: String? = null)
+                      val verifiedBody: Boolean, val bodyBytes: Long, val transferMs: Long, val latencyMs: Long, val exitCountry: String? = null,
+                      val youtubeKbps: Int = 0)
     interface Session : AutoCloseable {
         /** Must be bounded and non-blocking; the cooperative timeout cannot preempt
          * arbitrary blocking native code. Resource teardown belongs to the adapter. */
@@ -81,14 +82,20 @@ object AutoChainSelection {
         s.data == Verdict.PASS && s.telegram != Verdict.FAIL && s.youtube != Verdict.FAIL &&
         ( !chain.layout.tor || (s.exitCountry?.matches(Regex("[A-Z]{2}")) == true && s.exitCountry != "RU")) &&
         s.verifiedBody && s.bodyBytes in MIN_BODY_BYTES..4_194_304L &&
-        s.transferMs in 1..TOTAL_MS && s.latencyMs in 0..TOTAL_MS
+        s.transferMs in 1..TOTAL_MS && s.latencyMs in 0..TOTAL_MS && s.youtubeKbps >= 0
 
     private fun confirmed(s: Sample) = s.telegram == Verdict.PASS && s.youtube == Verdict.PASS
-    private fun kbps(s: Sample) = s.bodyBytes * 8 / s.transferMs // decimal kbit/s
+    /** Conservative measured bottleneck, not a guaranteed streaming bitrate. A missing
+     * media measurement is not invented from the generic HTTPS transfer. */
+    fun transferKbps(s: Sample): Long {
+        val data = s.bodyBytes * 8 / s.transferMs.coerceAtLeast(1)
+        return if (s.youtube == Verdict.PASS && s.youtubeKbps > 0)
+            minOf(data, s.youtubeKbps.toLong()) else data
+    }
     private fun score(s: Sample, purpose: Purpose): Long = when (purpose) {
-        Purpose.DOWNLOAD -> kbps(s)
+        Purpose.DOWNLOAD -> transferKbps(s)
         Purpose.INTERACTIVE -> -s.latencyMs
-        Purpose.BALANCED -> kbps(s) * 1000 / (s.latencyMs + 1000)
+        Purpose.BALANCED -> transferKbps(s) * 1000 / (s.latencyMs + 1000)
     }
 
     /** Sequential transfer trials avoid self-created bandwidth competition. One absolute

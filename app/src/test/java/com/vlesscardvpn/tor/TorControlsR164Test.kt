@@ -32,12 +32,43 @@ class TorControlsR164Test {
     @Test fun `import clamps intervals and thresholds`() {
         val lo = Settings.fromJson(JSONObject().put("torRotationSeconds",-1).put("torMaxLatencyMs",0))
         val hi = Settings.fromJson(JSONObject().put("torRotationSeconds",Int.MAX_VALUE).put("torMaxLatencyMs",Int.MAX_VALUE))
-        assertEquals(30,lo.torRotationSeconds); assertEquals(250,lo.torMaxLatencyMs)
-        assertEquals(86400,hi.torRotationSeconds); assertEquals(15000,hi.torMaxLatencyMs)
+        assertEquals(30,lo.torRotationSeconds); assertEquals(1,lo.torMaxLatencyMs)
+        assertEquals(86400,hi.torRotationSeconds); assertEquals(Int.MAX_VALUE,hi.torMaxLatencyMs)
     }
     @Test fun `export also clamps direct invalid copies`() {
-        val j=Settings(torRotationSeconds=0,torMaxLatencyMs=1).toJson()
-        assertEquals(30,j.getInt("torRotationSeconds")); assertEquals(250,j.getInt("torMaxLatencyMs"))
+        val j=Settings(torRotationSeconds=0,torMaxLatencyMs=0).toJson()
+        assertEquals(30,j.getInt("torRotationSeconds")); assertEquals(1,j.getInt("torMaxLatencyMs"))
+    }
+    @Test fun `positive custom latency survives save and import without hidden clamp`() {
+        listOf(1, 99, 100, 249, 250, 15000, 15001, 60000, Int.MAX_VALUE).forEach { value ->
+            val round = Settings.fromJson(Settings(torMaxLatencyMs=value).toJson())
+            assertEquals(value, round.torMaxLatencyMs)
+        }
+    }
+    @Test fun `one hundred ms is the actual direct Tor measurement ceiling`() {
+        val r=TorConnectionPolicy.rotation(Settings(torMaxLatencyMs=100)){0L}
+        assertTrue(r.record("nl",100)); assertFalse(r.record("de",101))
+        assertTrue(r.isBlacklisted("de")); assertEquals("nl",r.pick())
+    }
+    @Test fun `custom large latency is not silently reduced to old maximum`() {
+        val r=TorConnectionPolicy.rotation(Settings(torMaxLatencyMs=60000)){0L}
+        assertTrue(r.record("nl",16000)); assertFalse(r.record("de",60001))
+    }
+    @Test fun `small threshold with no accepted measurements never fabricates a winner`() {
+        val r=TorConnectionPolicy.rotation(Settings(torMaxLatencyMs=100)){0L}
+        assertFalse(r.record("nl",101)); assertNull(r.pick())
+    }
+    @Test fun `Snowflake keeps documented double budget without integer overflow`() {
+        val r=TorConnectionPolicy.rotation(Settings(torMaxLatencyMs=100)){0L}
+        assertTrue(r.record("nl",200,TorRotation.Transport.SNOWFLAKE))
+        assertFalse(r.record("de",201,TorRotation.Transport.SNOWFLAKE))
+        val large=TorConnectionPolicy.rotation(Settings(torMaxLatencyMs=Int.MAX_VALUE)){0L}
+        assertTrue(large.record("nl",Int.MAX_VALUE.toLong()*2,TorRotation.Transport.SNOWFLAKE))
+    }
+    @Test fun `invalid negative threshold is normalized on both persistence and runtime`() {
+        assertEquals(1,Settings.fromJson(Settings(torMaxLatencyMs=-1).toJson()).torMaxLatencyMs)
+        val r=TorConnectionPolicy.rotation(Settings(torMaxLatencyMs=-1)){0L}
+        assertTrue(r.record("nl",1)); assertFalse(r.record("de",2))
     }
     @Test fun `home Tor does not erase mode masks bridges or user exceptions`() {
         val original=Settings(mode=Mode.AUTO,torBridge="obfs4",torBridgeLines="user value",myMasks=listOf("user mask"),alwaysDirect=listOf("example.test"))

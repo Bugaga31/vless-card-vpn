@@ -12,6 +12,17 @@ import com.vlesscardvpn.core.AutoChainSelection.Purpose
 
 class AutoChainLiveTest {
     private val a=AutoChainSelection.Sample("a",1,1000,Verdict.PASS,Verdict.PASS,Verdict.PASS,true,262144,1000,100)
+    @Test fun `fast generic download with slower video does not trigger switch`() {
+        val current=a.copy(youtubeKbps=1000)
+        val candidate=a.copy(chainId="b",transferMs=100,youtubeKbps=128)
+        assertFalse(AutoChainSwitchPolicy.shouldSwitch(current,candidate,Purpose.DOWNLOAD))
+        assertFalse(AutoChainSwitchPolicy.shouldSwitch(current,candidate,Purpose.BALANCED))
+    }
+    @Test fun `material video bottleneck improvement permits switch`() {
+        val current=a.copy(youtubeKbps=128)
+        val candidate=a.copy(chainId="b",youtubeKbps=1000)
+        assertTrue(AutoChainSwitchPolicy.shouldSwitch(current,candidate,Purpose.DOWNLOAD))
+    }
     @Test fun `large speed improvement switches`() {assertTrue(AutoChainSwitchPolicy.shouldSwitch(a,a.copy(chainId="b",transferMs=500),Purpose.DOWNLOAD))}
     @Test fun `tiny noise does not cause flapping`() {assertFalse(AutoChainSwitchPolicy.shouldSwitch(a,a.copy(chainId="b",transferMs=950),Purpose.DOWNLOAD))}
     @Test fun `confirmed route beats faster unknown`() {assertFalse(AutoChainSwitchPolicy.shouldSwitch(a,a.copy(chainId="b",transferMs=100,telegram=Verdict.UNKNOWN),Purpose.DOWNLOAD))}

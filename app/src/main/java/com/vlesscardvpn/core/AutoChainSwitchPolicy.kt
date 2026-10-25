@@ -17,8 +17,7 @@ object AutoChainSwitchPolicy {
         if (confirmed(current) != confirmed(winner)) return confirmed(winner)
         if (purpose == AutoChainSelection.Purpose.INTERACTIVE)
             return winner.latencyMs * 100 <= current.latencyMs * 80 && current.latencyMs - winner.latencyMs >= 50
-        fun rate(s: AutoChainSelection.Sample) = s.bodyBytes * 8 / s.transferMs.coerceAtLeast(1)
-        val old = rate(current); val fresh = rate(winner)
+        val old = AutoChainSelection.transferKbps(current); val fresh = AutoChainSelection.transferKbps(winner)
         if (purpose == AutoChainSelection.Purpose.BALANCED && winner.latencyMs > current.latencyMs + 100) return false
         return fresh >= old * 120 / 100 && fresh - old >= 256
     }

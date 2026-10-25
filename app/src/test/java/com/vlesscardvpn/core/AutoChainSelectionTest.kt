@@ -74,6 +74,31 @@ class AutoChainSelectionTest {
         val r=A.select(listOf(a,b),caps,Purpose.DOWNLOAD,{1000},{1}) { session(sample(it,transfer=if(it==a)200 else 50)) }
         assertEquals(b,r.selected);assertEquals(State.CONFIRMED,r.state);assertEquals(0,r.fallbackCount)
     }
+    @Test fun `slow measured video cannot hide behind fast generic download`() = runBlocking {
+        val a=chain("a"); val b=chain("b")
+        for (purpose in listOf(Purpose.DOWNLOAD,Purpose.BALANCED)) {
+            val result=A.select(listOf(a,b),caps,purpose,{1000},{1}) {
+                session(sample(it,transfer=if(it==a)10 else 100).copy(youtubeKbps=if(it==a)128 else 2000))
+            }
+            assertEquals(b,result.selected); assertEquals(State.CONFIRMED,result.state)
+        }
+    }
+    @Test fun `media measurement cannot inflate actual generic transfer rate`() {
+        val s=sample(chain(),transfer=100).copy(youtubeKbps=Int.MAX_VALUE)
+        assertEquals(2621L,A.transferKbps(s))
+    }
+    @Test fun `unknown media speed is not treated as measured video evidence`() {
+        val s=sample(chain(),yt=Verdict.UNKNOWN,transfer=100).copy(youtubeKbps=1)
+        assertEquals(2621L,A.transferKbps(s))
+        assertEquals(Verdict.UNKNOWN,s.youtube)
+    }
+    @Test fun `missing media metric preserves legacy rate without manufacturing PASS`() {
+        val s=sample(chain(),yt=Verdict.UNKNOWN,transfer=100)
+        assertEquals(2621L,A.transferKbps(s)); assertEquals(0,s.youtubeKbps)
+    }
+    @Test fun `negative media metric is ineligible`() {
+        val c=chain(); assertFalse(A.eligible(sample(c).copy(youtubeKbps=-1),c,1,1000))
+    }
     @Test fun `interactive purpose favors latency over bandwidth`() = runBlocking {
         val a=chain("a");val b=chain("b")
         val r=A.select(listOf(a,b),caps,Purpose.INTERACTIVE,{1000},{1}) { session(sample(it,latency=if(it==a)20 else 400,transfer=if(it==a)200 else 20)) }

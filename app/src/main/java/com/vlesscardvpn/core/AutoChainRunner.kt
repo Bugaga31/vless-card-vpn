@@ -84,7 +84,7 @@ object AutoChainRunner {
                                 }
                                 fun status(v:Boolean?)=when(v){true->Verdict.PASS;false->Verdict.FAIL;null->Verdict.UNKNOWN}
                                 val sampled=Sample(chain.id,epoch,elapsed(),if(p.works && p.bigOk==true)Verdict.PASS else Verdict.FAIL,
-                                    status(p.tgOk),status(p.ytOk),p.bigOk==true,p.bodyBytes,p.bodyMs,p.realMs.toLong(),country)
+                                    status(p.tgOk),status(p.ytOk),p.bigOk==true,p.bodyBytes,p.bodyMs,p.realMs.toLong(),country,youtubeKbps=p.ytKbps)
                                 samples[chain.id]=sampled
                                 return sampled
                             }
