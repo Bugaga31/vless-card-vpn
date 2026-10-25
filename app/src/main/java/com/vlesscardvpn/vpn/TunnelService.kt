@@ -249,6 +249,16 @@ class TunnelService : VpnService() {
                 settings = settings.copy(mode = if (selected.isEmpty() || autoDpiOnly) Mode.BYEDPI else Mode.SERVERS)
                 if (settings.mode == Mode.BYEDPI) selected = emptyList()
             }
+            // Xray round-robin treats an outbound with no observation yet as alive.
+            // Exclude only explicit negative TCP hints before exposing a manual pool;
+            // keep timeouts/unknown, and never turn this hint into working/PASS evidence.
+            // Auto already uses measured eligibility; do not extend its search budget.
+            if (!automatic && settings.mode != Mode.BYEDPI && !settings.torAll && selected.size > 1) {
+                val handle = Net.underlying(this)?.toString()
+                val hints = Tester.fastFilter(selected.take(16), budgetMs = 600)
+                check(Net.key(this) == network && Net.underlying(this)?.toString() == handle) { "Network changed during pool startup" }
+                selected = com.vlesscardvpn.core.ManualPoolFilter.retain(selected, { it.id }, hints)
+            }
             val measuredChain = chainChoice?.takeIf { measured ->
                 com.vlesscardvpn.core.AutoChainRunner.fresh(measured, st.settings, network, chainEpoch.get(), android.os.SystemClock.elapsedRealtime()) &&
                 com.vlesscardvpn.core.AutoChainLivePolicy.enabled(st.settings) &&

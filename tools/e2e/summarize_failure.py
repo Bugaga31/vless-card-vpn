@@ -14,7 +14,17 @@ if a.probe:
 else:
     pools=re.findall(r'pool size=(\d{1,2}) ',text)
     checks=re.findall(r'check ok=(true|false) ms=(-?\d{1,8}) big=(true|false|null) yt=(true|false|null) tg=(true|false|null)',text)
-    result={'last_pool_sizes':pools[-4:],'last_checks':checks[-2:],
+    # Terminal Auto messages are classified, never printed: they may contain route names.
+    actions=re.findall(r'action\[(Авто-настройка)\]: ([^\r\n]{0,2000})',text)
+    def terminal(message):
+        if message == 'Остановлено': return 'cancelled'
+        if message.startswith('Сеть изменилась:'): return 'network_changed'
+        if message.startswith('Сравнение прервано:'): return 'comparison_interrupted'
+        if message.startswith('Авто: рабочих серверов нет'): return 'no_verified_server'
+        if message.startswith(('Первый HTTPS-маршрут найден', 'Запасной маршрут найден', 'VPN подключается;', 'Авто: выбрано')): return 'connection_requested'
+        return 'other'
+    result={'auto_terminal_states':[terminal(message) for _,message in actions[-3:]],
+            'last_pool_sizes' :pools[-4:],'last_checks':checks[-2:],
             'connect_failed_count':text.count('connect failed:'),
             'fatal_exception_count':text.count('FATAL EXCEPTION'),
             'background_failure_count':text.count('background job failed'),
