@@ -18,12 +18,7 @@ for scale in 1.0 1.3; do
     adb shell uiautomator dump /sdcard/vcard-ui.xml >/dev/null 2>&1 || continue
     adb shell cat /sdcard/vcard-ui.xml > /tmp/vcard-ui.xml
     adb exec-out screencap -p > "$dst"
-    if python3 tools/release-gates/check_screenshot.py "$dst" && python3 - "$PKG" <<'PY'
-import sys, xml.etree.ElementTree as E
-r=E.parse('/tmp/vcard-ui.xml').getroot()
-nodes=[n for n in r.iter('node') if n.get('package')==sys.argv[1] and (n.get('text') or n.get('content-desc'))]
-raise SystemExit(0 if len(nodes)>=4 else 1)
-PY
+    if python3 tools/release-gates/check_screenshot.py "$dst" && python3 tools/release-gates/check_home_hierarchy.py /tmp/vcard-ui.xml "$PKG"
     then found=1; break; fi
   done
   if [ "$found" != 1 ]; then
