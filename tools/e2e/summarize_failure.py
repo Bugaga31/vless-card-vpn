@@ -23,7 +23,25 @@ else:
         if message.startswith('Авто: рабочих серверов нет'): return 'no_verified_server'
         if message.startswith(('Первый HTTPS-маршрут найден', 'Запасной маршрут найден', 'VPN подключается;', 'Авто: выбрано')): return 'connection_requested'
         return 'other'
-    result={'auto_terminal_states':[terminal(message) for _,message in actions[-3:]],
+    # Producer and parser both allowlist values. No exception message/route is copied.
+    safe_types={'IllegalStateException','IllegalArgumentException','IOException','FileNotFoundException','BindException','SocketException','SocketTimeoutException','UnknownHostException','CancellationException','TimeoutCancellationException','SecurityException','NullPointerException','OutOfMemoryError','RuntimeException','Exception','Other'}
+    safe_phases={'init','selection','dpi','config','core','tun','notification','action','chain_check'}
+    safe_codes={'bind','address_in_use','file_limit','permission','dpi_missing','chain_unconfirmed','chain_not_applied','core_not_running','unclassified'}
+    safe_files={'TunnelService.kt','Actions.kt','XrayCore.kt','DpiSet.kt','DpiProxy.kt','Tester.kt','RuntimeChainE2E.kt','AutoChainRunner.kt','XrayConfigBuilder.kt','Store.kt'}
+    failures=[]
+    for scope,phase,kind,code,origin,causes in re.findall(r'failure scope=(\S+) phase=(\S+) type=(\S+) code=(\S+) origin=(\S+) causes=(\S+)',text)[-3:]:
+        file,_,line=origin.partition(':')
+        failures.append({'scope':scope if scope in {'connect','action','chain'} else 'unknown',
+            'phase':phase if phase in safe_phases else 'unknown','type':kind if kind in safe_types else 'Other',
+            'code':code if code in safe_codes else 'unclassified',
+            'origin':origin if file in safe_files and line.isdecimal() and 1<=int(line)<=100000 else 'unknown',
+            'causes':[c if c in safe_types else 'Other' for c in causes.split(',')[:5]]})
+    service_events=re.findall(r'service command=(start|stop|pause|sticky|chain) state=(IDLE|CONNECTING|CONNECTED|ERROR)\b',text)[-6:]
+    teardown_events=re.findall(r'teardown state=(IDLE|CONNECTING|CONNECTED|ERROR) keepTun=(true|false) reason=(restart|stop|error)\b',text)[-6:]
+    result={'failures':failures,'service_events':service_events,'teardown_events':teardown_events,
+            'optimize_skips':re.findall(r'optimize skipped=(power|foreground_busy|disabled)\b',text)[-3:],
+            'auto_ready_blocked':re.findall(r'auto ready_blocked=(network_changed|cancelled)\b',text)[-3:],
+            'auto_terminal_states':[terminal(message) for _,message in actions[-3:]],
             'last_pool_sizes' :pools[-4:],'last_checks':checks[-2:],
             'connect_failed_count':text.count('connect failed:'),
             'fatal_exception_count':text.count('FATAL EXCEPTION'),

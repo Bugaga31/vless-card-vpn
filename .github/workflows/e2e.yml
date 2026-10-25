@@ -74,6 +74,7 @@ jobs:
         with:
           name: e2e-api-${{ matrix.api }}
           path: |
+            /tmp/e2e/failure-*.txt
             /tmp/e2e/logcat.txt
             /tmp/e2e/server.log
             /tmp/e2e/access.log

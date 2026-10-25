@@ -117,6 +117,10 @@ class TunnelService : VpnService() {
     private var safeMasks = false
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (BuildConfig.DEBUG) {
+            val command = when { intent?.getBooleanExtra("e2e_chain_check",false)==true -> "chain"; intent?.action==ACTION_STOP -> "stop"; intent?.action==ACTION_PAUSE -> "pause"; intent?.action==ACTION_START -> "start"; else -> "sticky" }
+            Log.i("E2E", "service command=$command state=${Tunnel.status.value.state}")
+        }
         cancelChainSearch()
         if(BuildConfig.DEBUG && intent?.getBooleanExtra("e2e_chain_check",false)==true) {
             scope.launch {
@@ -138,7 +142,7 @@ class TunnelService : VpnService() {
                     check(usedChain?.chain?.layout==com.vlesscardvpn.core.AutoChainSelection.Layout.DPI_SERVER){"Measured chain was not applied"}
                     Log.i("E2E","auto-chain-e2e applied=DPI_SERVER body=${measured.sample.bodyBytes} data=${measured.sample.data}")
                 }catch(e:kotlinx.coroutines.CancellationException){throw e}
-                 catch(e:Exception){Log.i("E2E","auto-chain-e2e FAIL ${e.javaClass.simpleName}")}
+                 catch(e:Exception){Log.i("E2E","auto-chain-e2e FAIL ${e.javaClass.simpleName}"); Log.i("E2E", com.vlesscardvpn.core.ConnectDiagnostics.describe("chain","chain_check",e))}
             }}
             return START_STICKY
         }
@@ -224,8 +228,10 @@ class TunnelService : VpnService() {
         val prev = Tunnel.status.value
         Tunnel.status.value = if (keepTun && prev.state == Tunnel.State.CONNECTED) prev.copy(check = "Переподключаюсь без разрыва VPN…", checkOk = null)
             else Tunnel.Status(Tunnel.State.CONNECTING, "Подключение…")
+        var connectPhase = "init"
         try {
             kotlinx.coroutines.withContext(Dispatchers.IO) { XrayCore.init(this@TunnelService) }
+            connectPhase = "selection"
             val st = Store.state.value
             watchNetwork()
             val network = Net.key(this)
@@ -300,6 +306,7 @@ class TunnelService : VpnService() {
             }
             val needCurrent = !settings.torAll && (settings.mode != Mode.SERVERS || withMasks.any { it.second?.dpi == Masks.CURRENT_DPI })
             val fixed = if (settings.mode == Mode.BYEDPI) emptySet() else Masks.strategies(withMasks.map { it.second }) - Masks.CURRENT_DPI
+            connectPhase = "dpi"
             val set = DpiSet(this); dpi = set
             set.start(settings, network, needCurrent, fixed, allowLocal = BuildConfig.DEBUG)
             set.watch(scope)
@@ -322,6 +329,7 @@ class TunnelService : VpnService() {
             val downloadSpeeds = if (automatic && !com.vlesscardvpn.core.GameSession.active()) used.map {
                 com.vlesscardvpn.core.ServerChoice.measuredSpeed(st.state(it.first),network,System.currentTimeMillis()) } else emptyList()
             val downloadLatencies = used.map { st.state(it.first).realMs }
+            connectPhase = "config"
             val config = XrayConfigBuilder.vpnConfig(used, settings, bdPort, socks, set.ports,
                 listen = if (proxy && settings.lanShare) "0.0.0.0" else "127.0.0.1", httpPort = if (proxy) settings.httpPort else null, warpHop = warpHop,
                 heavy = XrayConfigBuilder.heavyOf(used.map { if (automatic) com.vlesscardvpn.core.ServerChoice.measuredSpeed(st.state(it.first),network,System.currentTimeMillis()) else st.state(it.first).kbps },
@@ -333,6 +341,7 @@ class TunnelService : VpnService() {
                     used.map {it.first.id}.toSet() else emptySet())
             val c = XrayCore.Instance("vpn"); core = c
             Tunnel.wireguardKeys = (used.map { it.first } + listOfNotNull(warpHop)).filter { it.protocol == "wireguard" }.map { it.secret }.toSet()
+            connectPhase = "core"
             c.start(config)
             check(c.running) { "Xray не запустился: ${c.lastStatus}" }
             usedServers = used.map { it.first }; usedVariants=used
@@ -342,6 +351,7 @@ class TunnelService : VpnService() {
             Tunnel.socks = socks
             if (BuildConfig.DEBUG) Log.i("E2E", "pool size=${used.size} ids=${used.map { it.first.id }}")
             Log.i("E2E", "socks port=${socks.port} auth=${socks.auth} dpi=${dpiLabel.ifEmpty { "-" }} fixed=${set.ports.keys} mode=${settings.mode} services=${settings.services} proxy=$proxy")
+            connectPhase = "tun"
             if (!proxy && !keepTun) startTun(settings, socks)
 
             val auto = com.vlesscardvpn.tor.TorConnectionPolicy.needsAutoSearch(st.settings)
@@ -367,6 +377,7 @@ class TunnelService : VpnService() {
             Tunnel.status.value = Tunnel.Status(Tunnel.State.CONNECTED, "Подключено", route, "Проверяю интернет…", null, since)
             watchScreen()
             foreground(if (settings.quietNotification) "Активно" else "Подключено · $route")
+            connectPhase = "notification"
             liveNotification(route)
             watchNetwork()
             torLoop()
@@ -377,6 +388,7 @@ class TunnelService : VpnService() {
         } catch (e: Throwable) {
             if (e is kotlinx.coroutines.CancellationException) throw e
             chainChoice = null; usedChain = null
+            if (BuildConfig.DEBUG) Log.i("E2E", com.vlesscardvpn.core.ConnectDiagnostics.describe("connect",connectPhase,e))
             Log.w(TAG, "connect failed", e)
             Log.i("E2E", "connect failed: ${e.message}")
             // Auto mode doesn't give up on a failed start: 1) without masks, 2) DPI bypass without servers.
@@ -1094,6 +1106,7 @@ class TunnelService : VpnService() {
     }
 
     private fun teardown(error: String?, keepTun: Boolean = false) {
+        if (BuildConfig.DEBUG) Log.i("E2E", "teardown state=${Tunnel.status.value.state} keepTun=$keepTun reason=${if(error == null) "restart" else if(error.isEmpty()) "stop" else "error"}")
         chainJob?.cancel();chainJob=null;usedChain=null
         if(error != null || !keepTun) { chainReserves.clear();chainChoice=null;chainEpoch.incrementAndGet() }
         torJob?.cancel(); torJob = null

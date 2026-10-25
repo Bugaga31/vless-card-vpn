@@ -9,6 +9,7 @@ W=/tmp/e2e; mkdir -p $W; FAILS=0
 XRAY=${XRAY:-/tmp/xray/xray}
 python3 -m unittest discover -s tools/e2e -p 'test_*.py' || exit 1
 diagnostic() {
+  { # Preserve only the bounded/redacted summary at the failure, before the next case clears logcat.
   adb logcat -d -s E2E:I VLESS:W AndroidRuntime:E | python3 tools/e2e/summarize_failure.py --case "$CASE"
   # Host log output is never printed: only fixed-fixture event counts.
   python3 - "$W/access.log" "$CASE" <<'PYCOUNTS'
@@ -19,6 +20,7 @@ counts={str(p):len(re.findall(r'email: u'+str(p)+r'\b',s)) for p in (8443,8444,8
 print('::notice title=E2E fixture server counts::'+json.dumps({'case':sys.argv[2],'accepted':counts},separators=(',',':')))
 PYCOUNTS
   if [ -n "${R:-}" ]; then printf '%s' "$R" | python3 tools/e2e/summarize_failure.py --case "$CASE" --probe; fi
+  } | tee "$W/failure-${CASE}-${FAILS}.txt"
 }
 fail() { echo "::error title=e2e::$*"; echo "FAIL: $*"; FAILS=$((FAILS+1)); diagnostic; }
 

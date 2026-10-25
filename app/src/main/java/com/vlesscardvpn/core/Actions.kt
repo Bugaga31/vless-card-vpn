@@ -77,7 +77,10 @@ object Actions {
         if (job?.isActive == true) return
         progress.value = Progress(title, running = true)
         job = scope.launch {
-            val msg = Store.busy { runCatching { withContext(Dispatchers.IO) { XrayCore.init(app) }; block() }.getOrElse { if (it is kotlinx.coroutines.CancellationException) "Остановлено" else Errors.human(it).replaceFirstChar { c -> c.uppercase() } } }
+            val msg = Store.busy { runCatching { withContext(Dispatchers.IO) { XrayCore.init(app) }; block() }.getOrElse {
+                if (com.vlesscardvpn.BuildConfig.DEBUG) android.util.Log.i("E2E", ConnectDiagnostics.describe("action","action",it))
+                if (it is kotlinx.coroutines.CancellationException) "Остановлено" else Errors.human(it).replaceFirstChar { c -> c.uppercase() }
+            } }
             android.util.Log.i("E2E", "action[$title]: $msg")
             progress.value = progress.value.copy(running = false, message = msg)
         }
@@ -874,9 +877,15 @@ object Actions {
     suspend fun optimize(): Boolean {
         lastOptimizeSwitched = false
         val lightPlan = PhonePower.refresh(app)
-        if (!lightPlan.allowLight) return false
+        if (!lightPlan.allowLight) {
+            if (com.vlesscardvpn.BuildConfig.DEBUG) android.util.Log.i("E2E", "optimize skipped=power")
+            return false
+        }
         var st = Store.state.value
-        if ((!st.settings.autoOptimize && st.settings.mode != Mode.AUTO) || job?.isActive == true) return false
+        if ((!st.settings.autoOptimize && st.settings.mode != Mode.AUTO) || job?.isActive == true) {
+            if (com.vlesscardvpn.BuildConfig.DEBUG) android.util.Log.i("E2E", "optimize skipped=${if(job?.isActive == true) "foreground_busy" else "disabled"}")
+            return false
+        }
         val originalNet = Net.key(app)
         val originalSelection = st.selected.map { AutoRoutePolicy.configuration(it,st.state(it),originalNet) }.toSet()
         if (st.settings.mode == com.vlesscardvpn.model.Mode.BYEDPI) return false
@@ -1048,8 +1057,11 @@ object Actions {
         val ready = {
             if (autoGeneration.get() == ticket) {
                 if (initialNetwork == (Net.key(app) to Net.underlying(app)?.toString())) onReady()
-                else { selectionNetworkChanged(); Unit }
-            }
+                else {
+                    if (com.vlesscardvpn.BuildConfig.DEBUG) android.util.Log.i("E2E", "auto ready_blocked=network_changed")
+                    selectionNetworkChanged(); Unit
+                }
+            } else if (com.vlesscardvpn.BuildConfig.DEBUG) android.util.Log.i("E2E", "auto ready_blocked=cancelled")
         }
         runCatching { Report.prime(app); CloudSpeed.loadCached(app) }
         refreshPublicCloud()
