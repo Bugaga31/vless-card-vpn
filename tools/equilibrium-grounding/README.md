@@ -18,7 +18,7 @@ semantic review remains required. Sentence-boundary heuristics are conservative 
 (abbreviations, dialogue, multiline sentences). These tests are not an injection-proofness
 or general reasoning certification. Outputs remain JSON data, not executable Markdown/HTML.
 
-Retrieval selects at most two paragraph-based passages rather than padding context with unrelated neighbours. It is lexical with bounded prefix matching and explicitly supplied aliases; it is not multilingual semantic search.
+Retrieval selects at most two paragraph-based passages rather than padding context with unrelated neighbours. With operator-supplied `required_topics`, it prioritizes missing lexical topics before redundant passages. It is lexical with bounded prefix matching and explicitly supplied aliases; it is not multilingual semantic search.
 Generation and inference remain local. This tool itself has no browsing, training or execution API.
 A future network reader must separately implement opt-in, address/redirect/size controls and privacy.
 
@@ -46,7 +46,7 @@ python tools/equilibrium-grounding/evaluate.py --model /local/model.gguf \
 ```
 
 Each local case has `id`, `source_id`, `title`, `source_path`, `question`, and optional
-`aliases`. Local paths are operator-selected; this CLI is not a remotely exposed file API.
+`aliases`, and optional `required_topics` (for example `{"telegram":["Telegram","Телеграм"],"youtube":["YouTube","Ютуб"]}`). Topic names/aliases are operator configuration, not model-generated facts. Local paths are operator-selected; this CLI is not a remotely exposed file API.
 Keep manuscripts and evaluation outputs outside public repository paths.
 
 ## Release gates still missing
@@ -58,3 +58,25 @@ Keep manuscripts and evaluation outputs outside public repository paths.
 - Release CI, signatures and emulator checks for the final integrated SHA.
 
 Until these exist: **not release ready**. Existing APK behavior is unchanged.
+
+## v12: avoid silently dropping a requested service
+
+- Explicit lexical topic coverage diversifies retrieval within the existing two-passage limit.
+- A quotation response missing a required topic is rejected, not displayed as complete.
+- Missing retrieval coverage (including after context trimming) skips generation and returns
+  `insufficient`; it does not expand context without limit or fabricate a verdict.
+- Every case records `generation_performed` and retrieval coverage. The no-evidence path uses
+  the same provenance/action/training flags as the normal validator.
+- Invalid evidence shapes, unhashable IDs and attempts to mark source instructions trusted
+  fail with `Rejected` rather than an incidental exception or a permissive interpretation.
+- Short lexical tokens require equality: Russian `тор` must not match `торговля`.
+
+**Topic presence is not entailment.** Mentioning Telegram and YouTube does not prove either
+service works, that an answer includes all qualifications, or that conflicting evidence was
+resolved correctly. This is an optional, bounded omission guard, not a semantic verifier.
+Required topics must be configured explicitly; arbitrary multi-part questions are not
+reliably decomposed automatically. Three separate topics may not fit two passages: abstain.
+
+71 standard-library tests pass (47 retained, 24 new). Four evaluator tests use an explicit
+fake model, not real inference. No new model calls, weight training, internet access,
+Android integration or release were performed in this iteration. See `RESULTS-v12.md`.

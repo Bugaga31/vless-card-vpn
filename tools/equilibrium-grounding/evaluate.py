@@ -9,7 +9,7 @@ import importlib.metadata
 import json
 from pathlib import Path
 import time
-from grounding import Source, retrieve, make_prompt, validate, Rejected
+from grounding import Source, retrieve, make_prompt, validate, Rejected, coverage_report
 
 MODEL_SHA256='3605803b982cb64aead44f6c1b2ae36e3acdb41d8e46c8a94c6533bc4c67e597'
 MODEL_ID='unsloth/Qwen3-4B-Instruct-2507-GGUF'
@@ -32,22 +32,27 @@ def main():
     results=[]
     for case in cases:
         source=Source(case['source_id'],case['title'],Path(case['source_path']).read_text())
-        evidence=retrieve(source,case['question'],case.get('aliases',[]))
-        messages=make_prompt(case['question'],evidence)
+        topics=case.get('required_topics')
+        evidence=retrieve(source,case['question'],case.get('aliases',[]),topics)
+        messages=make_prompt(case['question'],evidence,topics)
         # Conservative context bound; never silently truncate source text mid-quote.
         while evidence and len(model.tokenize(json.dumps(messages,ensure_ascii=False).encode()))>3000:
-            evidence.pop(); messages=make_prompt(case['question'],evidence)
+            evidence.pop(); messages=make_prompt(case['question'],evidence,topics)
         started=time.monotonic()
         result={'id':case['id'],'question':case['question'],'source_sha256':source.digest,
                 'evidence':evidence,'manual_semantic_review':'pending'}
-        if not evidence:
-            result.update(raw=None,gate={'status':'insufficient','actions_executed':False},rejected=False)
+        retrieval_coverage=coverage_report([e['text'] for e in evidence],topics)
+        result['retrieval_topic_coverage']=retrieval_coverage
+        if not evidence or retrieval_coverage['missing']:
+            result.update(raw=None,gate=validate('{"status":"insufficient","quotes":[]}',evidence,source,'stop',topics),
+                          rejected=False,generation_performed=False,
+                          abstention_reason='missing retrieval topics' if retrieval_coverage['missing'] else 'no evidence')
         else:
             response=model.create_chat_completion(messages=messages,temperature=0,max_tokens=512,seed=11001)
             choice=response['choices'][0];raw=choice['message']['content']
-            result.update(raw=raw,finish_reason=choice['finish_reason'],usage=response.get('usage'))
+            result.update(generation_performed=True,raw=raw,finish_reason=choice['finish_reason'],usage=response.get('usage'))
             try:
-                result.update(gate=validate(raw,evidence,source,choice['finish_reason']),rejected=False)
+                result.update(gate=validate(raw,evidence,source,choice['finish_reason'],topics),rejected=False)
             except Rejected as exc:
                 result.update(gate=None,rejected=True,rejection=str(exc))
         result['seconds']=round(time.monotonic()-started,2)
