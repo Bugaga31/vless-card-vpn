@@ -1,5 +1,5 @@
 {
   "ready": true,
-  "scope": "v1.2.55 live bounded Auto chain selection: SERVER, DPI_SERVER, warm opt-in TOR and TOR_SERVER; preflight API29/33 passed; final release gates mandatory",
+  "scope": "v1.2.55 live Auto chains plus bounded 10-minute exact Tor-chain cooldown; final JVM, E2E, signed APK and install/UI gates mandatory",
   "physical_phone_tested": false
 }

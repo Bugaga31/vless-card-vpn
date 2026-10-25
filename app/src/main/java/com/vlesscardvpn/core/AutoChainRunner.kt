@@ -19,6 +19,10 @@ import java.security.MessageDigest
 
 /** Actual isolated Xray + real HTTPS body/MTProto/media probes. No Store server evidence writes. */
 object AutoChainRunner {
+    private val cooldown=AutoChainCooldown()
+    fun reject(choice:Choice,network:String,now:Long,definiteFailure:Boolean) =
+        cooldown.record(choice.chain,digest(network),now,success=false,definiteFailure=definiteFailure)
+
     data class Choice(val chain: Chain, val server: Server?, val mask: Mask?, val dpiStrategy: String = "")
     data class Measured(val choice: Choice, val sample: Sample, val network: String, val epoch: Long,
                         val settingsKey: String)
@@ -35,7 +39,7 @@ object AutoChainRunner {
             serverExitAllowed=server?.let(AutoEligibility::allowed) ?: true),server,native,dpiStrategy)
     }
     fun fresh(m: Measured, s: Settings, network: String, epoch: Long, now: Long): Boolean =
-        s.autoChainSearch && m.network == network && m.epoch == epoch && m.settingsKey == settingsKey(s) &&
+        s.autoChainSearch && cooldown.allowed(m.choice.chain,digest(network),now) && m.network == network && m.epoch == epoch && m.settingsKey == settingsKey(s) &&
         (!m.choice.chain.layout.tor || s.torAuto) && AutoChainSelection.eligible(m.sample,m.choice.chain,epoch,now)
 
     suspend fun compare(candidates: List<Choice>, s: Settings, network: String, epoch: Long,
@@ -43,11 +47,16 @@ object AutoChainRunner {
                         currentDpi: Int?, dpiPorts: Map<String,Int>, torReady: Boolean): Measured? =
         withTimeoutOrNull(AutoChainSelection.TOTAL_MS) {
             Tester.exclusiveProbe {
-                val pool=candidates.distinctBy { it.chain.id }.take(AutoChainSelection.MAX_CANDIDATES)
+                val networkKey=digest(network)
+                val pool=candidates.distinctBy { it.chain.id }.filter {cooldown.allowed(it.chain,networkKey,elapsed())}.take(AutoChainSelection.MAX_CANDIDATES)
                 val index=pool.associateBy { it.chain.id }; val samples=HashMap<String,Sample>()
                 val result=AutoChainSelection.select(pool.map {it.chain},
                     AutoChainSelection.Capabilities(ChainProbeConfig.implemented, s.torAuto, torReady),
-                    AutoChainSwitchPolicy.purpose(s.autoChainPurpose),elapsed,generation) { chain ->
+                    AutoChainSwitchPolicy.purpose(s.autoChainPurpose),elapsed,generation,onTrial={chain,sample,at ->
+                        cooldown.record(chain,networkKey,at,
+                            success=sample!=null && AutoChainSelection.eligible(sample,chain,epoch,at),
+                            definiteFailure=sample?.let {it.data==Verdict.FAIL || it.telegram==Verdict.FAIL || it.youtube==Verdict.FAIL}==true)
+                    }) { chain ->
                     val option=index.getValue(chain.id)
                     val port=ServerSocket(0,1,InetAddress.getByName("127.0.0.1")).use { it.localPort }
                     val core=XrayCore.Instance("auto-chain")

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Check the real published 1.2.50 -> exact signed candidate. No user device involved.
 set -euo pipefail
+trap 'rc=$?; if [ "$rc" -ne 0 ]; then echo "::error title=Release install phase::published-upgrade failed; exit=$rc"; fi' EXIT
 CODE=${VERSION##*-}
 [[ "$CODE" =~ ^[0-9]+$ ]]
 BASE=release/baseline-1.2.50.apk

@@ -99,6 +99,7 @@ object AutoChainSelection {
      */
     suspend fun select(chains: List<Chain>, capabilities: Capabilities, purpose: Purpose,
                        elapsed: () -> Long, generation: () -> Long,
+                       onTrial: ((Chain, Sample?, Long) -> Unit)? = null,
                        open: suspend (Chain) -> Session): Outcome {
         currentCoroutineContext().ensureActive()
         val epoch = generation()
@@ -139,6 +140,8 @@ object AutoChainSelection {
             }
             val finished = elapsed()
             check(finished >= now) { "Monotonic clock moved backwards" }
+            if (finished <= deadline && (sample == null || (sample.chainId == chain.id && sample.generation == epoch && sample.sampledAtMs >= now)))
+                onTrial?.invoke(chain,sample,finished)
             if (sample != null && sample.sampledAtMs >= now && finished <= deadline && eligible(sample, chain, epoch, finished)) results.add(chain to sample)
             else diagnostics.add(if (sample == null) "timeout-or-error" else "ineligible-or-late")
         }

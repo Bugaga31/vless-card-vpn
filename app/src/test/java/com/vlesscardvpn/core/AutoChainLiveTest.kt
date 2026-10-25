@@ -99,4 +99,14 @@ class AutoChainLiveTest {
         assertNotEquals(one.chain.id,differentMask.chain.id)
     }
 
+    @Test fun `quarantined Tor winner cannot be applied from fresh cached evidence`() {
+        val s=Settings(mode=Mode.AUTO,torAuto=true,torBridgeLines="cooldown-unit-unique-profile")
+        val c=AutoChainRunner.choice(null,null,AutoChainSelection.Layout.TOR,s)
+        val proof=AutoChainSelection.Sample(c.chain.id,1,1000,Verdict.PASS,Verdict.PASS,Verdict.PASS,true,262144,500,100,"DE")
+        val m=AutoChainRunner.Measured(c,proof,"cooldown-unit-net",1,AutoChainRunner.settingsKey(s))
+        assertTrue(AutoChainRunner.fresh(m,s,"cooldown-unit-net",1,1000))
+        AutoChainRunner.reject(c,"cooldown-unit-net",1000,true)
+        assertFalse(AutoChainRunner.fresh(m,s,"cooldown-unit-net",1,1001))
+        assertFalse(AutoChainRunner.fresh(m,s,"cooldown-unit-net",1,601000)) // Expiry is not a fresh proof.
+    }
 }

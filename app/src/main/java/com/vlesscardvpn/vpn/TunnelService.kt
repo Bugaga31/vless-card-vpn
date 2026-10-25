@@ -470,6 +470,8 @@ class TunnelService : VpnService() {
                 return@launch
             }
             if((!p.works || chainExitRejected || p.tgOk==false || p.ytOk==false) && usedChain != null) {
+                usedChain?.let {com.vlesscardvpn.core.AutoChainRunner.reject(it,sampledNet,android.os.SystemClock.elapsedRealtime(),
+                    definiteFailure=!p.works || p.tgOk==false || p.ytOk==false)}
                 chainChoice=null; usedChain=null; chainScanAfter=android.os.SystemClock.elapsedRealtime()+120_000
                 scope.launch { lock.withLock { connect(soft=true) } }
                 return@launch

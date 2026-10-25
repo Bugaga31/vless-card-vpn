@@ -26,5 +26,24 @@ raise SystemExit(0 if len(nodes)>=4 else 1)
 PY
     then found=1; break; fi
   done
-  test "$found" = 1 || { echo 'Home UI was not visibly ready; release capture failed'; exit 1; }
+  if [ "$found" != 1 ]; then
+    python3 - "$dst" "$PKG" <<'PYDIAG'
+import json,sys,xml.etree.ElementTree as E
+from pathlib import Path
+sys.path.insert(0,'tools/release-gates')
+from check_screenshot import check_png
+r={'app_nodes':0,'app_label_nodes':0,'system_dialog':False,'png_nonblank':False}
+try:
+    nodes=list(E.parse('/tmp/vcard-ui.xml').getroot().iter('node'))
+    r['app_nodes']=sum(n.get('package')==sys.argv[2] for n in nodes)
+    r['app_label_nodes']=sum(n.get('package')==sys.argv[2] and bool(n.get('text') or n.get('content-desc')) for n in nodes)
+    r['system_dialog']=any('permissioncontroller' in n.get('package','') for n in nodes)
+except (OSError,E.ParseError):pass
+try:check_png(Path(sys.argv[1]).read_bytes());r['png_nonblank']=True
+except Exception:pass
+print('::notice title=Release UI bounded diagnostic::'+json.dumps(r,separators=(',',':')))
+PYDIAG
+    echo '::error title=Release home UI::Home hierarchy or nonblank screencap not ready after bounded wait'
+    exit 1
+  fi
 done

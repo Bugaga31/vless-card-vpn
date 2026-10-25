@@ -24,8 +24,10 @@ CP="$DEPS/stdlib.jar:$DEPS/coroutines.jar:$DEPS/junit.jar:$DEPS/json.jar:$DEPS/a
 "${JAVA_HOME:+$JAVA_HOME/bin/}java" -cp "$DEPS/*" org.jetbrains.kotlin.cli.jvm.K2JVMCompiler \
   -no-stdlib -no-reflect -jvm-target 17 -classpath "$CP" -d "$OUT" \
   "$ROOT/app/src/main/java/com/vlesscardvpn/core/AutoChainSelection.kt" \
+  "$ROOT/app/src/main/java/com/vlesscardvpn/core/AutoChainCooldown.kt" \
   "$ROOT/app/src/main/java/com/vlesscardvpn/xray/ChainProbeConfig.kt" \
   "$ROOT/app/src/test/java/com/vlesscardvpn/core/AutoChainSelectionTest.kt" \
+  "$ROOT/app/src/test/java/com/vlesscardvpn/core/AutoChainCooldownTest.kt" \
   "$ROOT/app/src/test/java/com/vlesscardvpn/core/ChainProbeConfigTest.kt"
 "${JAVA_HOME:+$JAVA_HOME/bin/}java" -cp "$OUT:$DEPS/*" org.junit.runner.JUnitCore \
-  com.vlesscardvpn.core.AutoChainSelectionTest com.vlesscardvpn.core.ChainProbeConfigTest
+  com.vlesscardvpn.core.AutoChainSelectionTest com.vlesscardvpn.core.AutoChainCooldownTest com.vlesscardvpn.core.ChainProbeConfigTest
