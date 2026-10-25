@@ -23,6 +23,12 @@ class AutoChainLiveTest {
         val candidate=a.copy(chainId="b",youtubeKbps=1000)
         assertTrue(AutoChainSwitchPolicy.shouldSwitch(current,candidate,Purpose.DOWNLOAD))
     }
+    @Test fun `unknown current trial cannot disrupt a working live route`() {
+        assertFalse(AutoChainSwitchPolicy.shouldSwitch(null,a,Purpose.DOWNLOAD,currentExpected=true))
+    }
+    @Test fun `without an existing route a verified winner can start`() {
+        assertTrue(AutoChainSwitchPolicy.shouldSwitch(null,a,Purpose.DOWNLOAD,currentExpected=false))
+    }
     @Test fun `large speed improvement switches`() {assertTrue(AutoChainSwitchPolicy.shouldSwitch(a,a.copy(chainId="b",transferMs=500),Purpose.DOWNLOAD))}
     @Test fun `tiny noise does not cause flapping`() {assertFalse(AutoChainSwitchPolicy.shouldSwitch(a,a.copy(chainId="b",transferMs=950),Purpose.DOWNLOAD))}
     @Test fun `confirmed route beats faster unknown`() {assertFalse(AutoChainSwitchPolicy.shouldSwitch(a,a.copy(chainId="b",transferMs=100,telegram=Verdict.UNKNOWN),Purpose.DOWNLOAD))}

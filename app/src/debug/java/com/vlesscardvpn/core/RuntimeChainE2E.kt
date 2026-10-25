@@ -15,6 +15,8 @@ object RuntimeChainE2E {
         val dpi=AutoChainRunner.choice(good,null,Layout.DPI_SERVER,settings,
             set.current.toString()+"|"+settings.byeDpiSni,com.vlesscardvpn.xray.Masks.CURRENT_DPI)
         return AutoChainRunner.compare(listOf(baseline,dpi),settings,network,epoch,generation,android.os.SystemClock::elapsedRealtime,
-            baseline.chain.id,set.currentPort,set.ports.toMap(),false)
+            // The dead fixture is a challenger baseline, not the working live incumbent.
+            // Both real trials and the required DPI_SERVER/body proof remain unchanged.
+            null,set.currentPort,set.ports.toMap(),false)
     }
 }

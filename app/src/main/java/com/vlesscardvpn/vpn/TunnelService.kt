@@ -102,9 +102,10 @@ class TunnelService : VpnService() {
     private val chainEpoch = java.util.concurrent.atomic.AtomicLong()
     private var chainChoice: com.vlesscardvpn.core.AutoChainRunner.Measured? = null
     @Volatile private var usedChain: com.vlesscardvpn.core.AutoChainRunner.Choice? = null
+    private val chainReserves = com.vlesscardvpn.core.AutoChainReserves()
     private var chainScanAfter = 0L
     @Volatile private var usedVariants: List<Pair<com.vlesscardvpn.model.Server,com.vlesscardvpn.xray.Mask?>> = emptyList()
-    private fun cancelChainSearch() { chainEpoch.incrementAndGet(); chainJob?.cancel(); chainJob=null; chainChoice=null }
+    private fun cancelChainSearch() { chainReserves.clear(); chainEpoch.incrementAndGet(); chainJob?.cancel(); chainJob=null; chainChoice=null }
     @Volatile private var usedServers: List<com.vlesscardvpn.model.Server> = emptyList()
     @Volatile private var appliedAutoWeights = ""
     @Volatile private var warpChained = false
@@ -483,7 +484,8 @@ class TunnelService : VpnService() {
             if((!p.works || chainExitRejected || p.tgOk==false || p.ytOk==false) && usedChain != null) {
                 usedChain?.let {com.vlesscardvpn.core.AutoChainRunner.reject(it,sampledNet,android.os.SystemClock.elapsedRealtime(),
                     definiteFailure=!p.works || p.tgOk==false || p.ytOk==false)}
-                chainChoice=null; usedChain=null; chainScanAfter=android.os.SystemClock.elapsedRealtime()+120_000
+                chainChoice=chainReserves.take(st,sampledNet,chainEpoch.get(),android.os.SystemClock.elapsedRealtime(),usedChain?.chain?.id)
+                usedChain=null; chainScanAfter=if(chainChoice == null) android.os.SystemClock.elapsedRealtime()+120_000 else 0L
                 scope.launch { lock.withLock { connect(soft=true) } }
                 return@launch
             }
@@ -569,7 +571,9 @@ class TunnelService : VpnService() {
                     }
                     if(generation()!=epoch)return@withLock
                     val winner=com.vlesscardvpn.core.AutoChainRunner.compare(pool,settings,net,epoch,::generation,android.os.SystemClock::elapsedRealtime,
-                        current?.chain?.id,set.currentPort,set.ports.toMap(),torReady)
+                        current?.chain?.id,set.currentPort,set.ports.toMap(),torReady,onMeasured={ measured ->
+                            if(generation()==epoch) chainReserves.record(measured,settings,net,epoch,android.os.SystemClock.elapsedRealtime(),current?.chain?.id)
+                        },onRejected={ rejected -> if(generation()==epoch) chainReserves.discard(rejected.chain.id) })
                     kotlinx.coroutines.currentCoroutineContext().ensureActive()
                     if(winner!=null && generation()==epoch && Tunnel.status.value.state==Tunnel.State.CONNECTED) {
                         chainChoice=winner;changed=true
@@ -676,7 +680,7 @@ class TunnelService : VpnService() {
                         }?.let { (ms, cc) -> rotator.recordExit(ms, cc) }
                     }
                     kotlinx.coroutines.currentCoroutineContext().ensureActive()
-                    if(rotator.tick(android.os.SystemClock.elapsedRealtime())) { chainEpoch.incrementAndGet();chainChoice=null }
+                    if(rotator.tick(android.os.SystemClock.elapsedRealtime())) { chainReserves.clear();chainEpoch.incrementAndGet();chainChoice=null }
                 }
             } catch (e: Exception) {
                 Log.i("TOR", "rotator stopped: ${e.message}")
@@ -925,6 +929,16 @@ class TunnelService : VpnService() {
             return
         }
         val auto = st.settings.mode == Mode.AUTO
+        if (com.vlesscardvpn.core.AutoChainLivePolicy.enabled(st.settings)) {
+            val backup=chainReserves.take(st.settings,Net.key(this),chainEpoch.get(),android.os.SystemClock.elapsedRealtime(),usedChain?.chain?.id)
+            if(backup != null) {
+                healJob=scope.launch {
+                    healStatus("Проверяю свежую запасную цепочку…")
+                    lock.withLock { chainChoice=backup;connect(soft=true) }
+                }
+                return
+            }
+        }
         if (st.settings.mode == Mode.BYEDPI || autoDpiOnly) {
             // DPI bypass without a server stopped working: the next strategy remembered for this network, else a new search
             if (st.settings.dpiStrategy != Settings.DPI_AUTO || dpiHeals >= 6) {
@@ -1033,6 +1047,8 @@ class TunnelService : VpnService() {
             val profile = network?.let { Net.key(this@TunnelService, it) }
             val snapshot = network?.let { NetworkHandoff.Snapshot(it.toString(), profile!!) }
             val change = handoff.update(snapshot) ?: return@launch
+            // Carry endpoints only as unverified candidate hints, never their old-network samples.
+            val previousCandidates=(usedServers+chainReserves.candidateServers()).distinctBy {it.id}.take(8)
             cancelChainSearch()
             curNet = network
             runCatching { setUnderlyingNetworks(network?.let { arrayOf(it) }) }
@@ -1057,7 +1073,7 @@ class TunnelService : VpnService() {
                 healStatus("Новая сеть — подстраиваю сервер, маскировку и локальный профиль…")
                 if (com.vlesscardvpn.tor.TorConnectionPolicy.needsAutoSearch(Store.state.value.settings)) {
                     Actions.recallNet(profile!!)
-                    runCatching { Actions.quickRecheck() }.onFailure { if (it is kotlinx.coroutines.CancellationException) throw it }
+                    runCatching { Actions.quickRecheck(previousCandidates) }.onFailure { if (it is kotlinx.coroutines.CancellationException) throw it }
                 }
                 if (!handoff.valid(change.revision)) return@reconnect
                 lock.withLock {
@@ -1072,7 +1088,7 @@ class TunnelService : VpnService() {
 
     private fun teardown(error: String?, keepTun: Boolean = false) {
         chainJob?.cancel();chainJob=null;usedChain=null
-        if(error != null || !keepTun) { chainChoice=null;chainEpoch.incrementAndGet() }
+        if(error != null || !keepTun) { chainReserves.clear();chainChoice=null;chainEpoch.incrementAndGet() }
         torJob?.cancel(); torJob = null
         torBridgeRefreshJob?.cancel(); torBridgeRefreshJob = null
         com.vlesscardvpn.tor.TorCard.invalidateStartup()

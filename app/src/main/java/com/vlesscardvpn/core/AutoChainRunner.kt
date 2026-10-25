@@ -44,7 +44,9 @@ object AutoChainRunner {
 
     suspend fun compare(candidates: List<Choice>, s: Settings, network: String, epoch: Long,
                         generation: () -> Long, elapsed: () -> Long, currentId: String?,
-                        currentDpi: Int?, dpiPorts: Map<String,Int>, torReady: Boolean): Measured? =
+                        currentDpi: Int?, dpiPorts: Map<String,Int>, torReady: Boolean,
+                        onMeasured: ((Measured) -> Unit)? = null,
+                        onRejected: ((Choice) -> Unit)? = null): Measured? =
         withTimeoutOrNull(AutoChainSelection.TOTAL_MS) {
             Tester.exclusiveProbe {
                 val networkKey=digest(network)
@@ -56,6 +58,11 @@ object AutoChainRunner {
                         cooldown.record(chain,networkKey,at,
                             success=sample!=null && AutoChainSelection.eligible(sample,chain,epoch,at),
                             definiteFailure=sample?.let {it.data==Verdict.FAIL || it.telegram==Verdict.FAIL || it.youtube==Verdict.FAIL}==true)
+                        if (generation() == epoch) {
+                            if (sample != null && AutoChainSelection.eligible(sample,chain,epoch,at))
+                                onMeasured?.invoke(Measured(index.getValue(chain.id),sample,network,epoch,settingsKey(s)))
+                            else onRejected?.invoke(index.getValue(chain.id))
+                        }
                     }) { chain ->
                     val option=index.getValue(chain.id)
                     val port=ServerSocket(0,1,InetAddress.getByName("127.0.0.1")).use { it.localPort }
@@ -98,7 +105,7 @@ object AutoChainRunner {
                 val current=currentId?.let(samples::get)?.takeIf { idSample ->
                     index[idSample.chainId]?.let { AutoChainSelection.eligible(idSample,it.chain,epoch,elapsed()) } == true
                 }
-                if(!AutoChainSwitchPolicy.shouldSwitch(current,sample,AutoChainSwitchPolicy.purpose(s.autoChainPurpose))) return@exclusiveProbe null
+                if(!AutoChainSwitchPolicy.shouldSwitch(current,sample,AutoChainSwitchPolicy.purpose(s.autoChainPurpose),currentExpected=currentId!=null)) return@exclusiveProbe null
                 Measured(winner,sample,network,epoch,settingsKey(s))
             }
         }

@@ -1178,9 +1178,17 @@ object Actions {
      * Network changed (Auto): compare up to eight remembered/cloud/diverse routes outside the tunnel,
      * then sequentially sample downloads on up to three finalists. Results are guarded by physical network identity.
      */
-    suspend fun quickRecheck(): Boolean {
+    suspend fun quickRecheck(previousCandidates: List<Server> = emptyList()): Boolean {
+        val result = kotlinx.coroutines.withTimeoutOrNull(AutoHandoffPolicy.TOTAL_MS) {
+            quickRecheckWithinDeadline(previousCandidates)
+        }
+        if (result != true) deepPending = true
+        return result == true
+    }
+
+    private suspend fun quickRecheckWithinDeadline(previousCandidates: List<Server>): Boolean {
         val net = Net.key(app); val handle = Net.underlying(app)?.toString()
-        Store.update { state -> state.copy(states = state.states.mapValues { (_, value) -> value.forAutomaticNetwork(net) }) }
+        Store.update { state -> state.copy(states = state.states.mapValues { (_, value) -> AutoHandoffPolicy.resetRuntime(value,net) }) }
         fun valid() = Net.key(app) == net && Net.underlying(app)?.toString() == handle
         val st = Store.state.value
         val local = st.settings.netServers[net].orEmpty().toSet()
@@ -1188,7 +1196,8 @@ object Actions {
         val ranked = preferred(st, st.servers).sortedWith(compareByDescending<Server> {
             Brain.p(net, it, st.state(it))
         }.thenByDescending { CloudSpeed.prior(it) ?: .5 })
-        val candidates = ServerChoice.diverse(remembered + st.selected + CloudSpeed.pick(ranked, emptyList(), n = 2) + ranked, 8)
+        val candidates = AutoHandoffPolicy.candidates(preferred(st,previousCandidates),st.servers,
+            remembered + st.selected + CloudSpeed.pick(ranked, emptyList(), n = 2) + ranked)
         if (candidates.isEmpty()) return false
         val passed = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
         val prev = progress.value
