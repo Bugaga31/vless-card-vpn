@@ -228,7 +228,8 @@ class TunnelService : VpnService() {
             val st = Store.state.value
             watchNetwork()
             val network = Net.key(this)
-            var settings = com.vlesscardvpn.tor.TorConnectionPolicy.runtime(st.settings)
+            var settings = com.vlesscardvpn.tor.TorConnectionPolicy.runtime(
+                com.vlesscardvpn.tor.TorNetworkRecommendations.apply(st.settings, Net.family(network)))
             val automatic = settings.mode == Mode.AUTO
             var selected = if (settings.torAll) emptyList() else st.selected.filter(com.vlesscardvpn.core.AutoEligibility::allowed)
             if (settings.mode != Mode.BYEDPI && selected.isEmpty()) {
@@ -600,7 +601,7 @@ class TunnelService : VpnService() {
      */
     private fun torLoop() {
         if (torJob?.isActive == true) return
-        val st = Store.state.value.settings
+        val st = com.vlesscardvpn.tor.TorNetworkRecommendations.apply(Store.state.value.settings, Net.family(Net.key(this)))
         if (!st.torRotation && !st.torRouting && !st.torAll && !(st.mode==Mode.AUTO && st.autoChainSearch && st.torAuto)) return
         torJob = scope.launch(Dispatchers.IO) {
             // Embedded daemon (no Termux needed); Termux instance wins when its cookie is readable.
