@@ -1,5 +1,5 @@
 {
   "ready": true,
-  "scope": "strict transfer proofs, measured speed leader, Tor UI and opt-in bridge refresh, bounded lightweight masks and strict compatibility; isolated WG fixture fixed",
+  "scope": "v1.2.54 standalone Tor startup hotfix: no ByeDPI dependency, no unused VLESS outbounds, preserve explicit direct exceptions, no Auto DPI fallback; language-model research excluded",
   "physical_phone_tested": false
 }
