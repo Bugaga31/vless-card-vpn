@@ -27,6 +27,7 @@ data class Settings(
     /** Domains that go through ByeDPI in hybrid mode (geosite tags or domains). */
     val hybridDomains: List<String> = listOf("geosite:youtube", "geosite:discord", "geosite:twitter", "geosite:meta"),
     val testUrl: String = "https://www.gstatic.com/generate_204",
+    val dnsAuto: Boolean = true,
     val dnsUrl: String = "https://1.1.1.1/dns-query",
     val subscriptions: List<String> = DEFAULT_SUBSCRIPTIONS,
     /** DPI strategy id: [DPI_AUTO] (found for this network), "custom" (byeDpiArgs) or a built-in id. */
@@ -106,6 +107,8 @@ data class Settings(
     /** Prefer fresh, low-latency measured countries; does not certify every relay or throughput. */
     val torFastOnly: Boolean = true,
     val torMaxLatencyMs: Int = 2500,
+    /** Opt-in runtime Wi-Fi/cellular presets; never overwrites manual settings or bridges. */
+    val torNetworkRecommendations: Boolean = false,
     /** Services picked in settings ride the local Tor SOCKS (Tor over the tunnel), not the main proxy route. */
     val torRouting: Boolean = false,
     /** Auto mode may switch a broken service to Tor by itself (once measured routes are all dead). */
@@ -165,7 +168,7 @@ data class Settings(
     val httpPort: Int get() = if (socksPort < 65535) socksPort + 1 else socksPort - 1
     fun toJson(): JSONObject = JSONObject().put("mode", mode.name).put("balance", balance.name).put("socksPort", socksPort)
         .put("ruDirect", ruDirect).put("blockAds", blockAds).put("blockTrackers", blockTrackers).put("byeDpiArgs", byeDpiArgs).put("byeDpiSni", byeDpiSni)
-        .put("hybridDomains", JSONArray(hybridDomains)).put("testUrl", testUrl).put("dnsUrl", dnsUrl)
+        .put("hybridDomains", JSONArray(hybridDomains)).put("testUrl", testUrl).put("dnsUrl", dnsUrl).put("dnsAuto", dnsAuto)
         .put("subscriptions", JSONArray(subscriptions))
         .put("dpiStrategy", dpiStrategy).put("dpiRemembered", JSONObject(dpiRemembered as Map<*, *>))
         .put("stealthSocks", stealthSocks).put("blockStun", blockStun).put("blockQuic", blockQuic).put("mux", mux).put("rotateMasks", rotateMasks)
@@ -178,7 +181,7 @@ data class Settings(
         .put("warpKeyOff", JSONArray(warpKeyOff)).put("warpKeyStatus", JSONObject(warpKeyStatus as Map<*, *>)).put("myMasks", JSONArray(myMasks))
         .put("maskEvolution", maskEvolution).put("autoMasks", JSONArray(autoMasks)).put("dpiEvoPool", JSONArray(dpiEvoPool)).put("theme", theme)
         .put("dpiRanking", JSONObject().apply { dpiRanking.forEach { (k, v) -> put(k, JSONArray(v)) } })
-        .put("ruAppsDirect", ruAppsDirect).put("randomTun", randomTun).put("coverTraffic", coverTraffic).put("torRotation", torRotation).put("torRotationSeconds", torRotationSeconds.coerceIn(30, 86400)).put("torFastOnly", torFastOnly).put("torMaxLatencyMs", torMaxLatencyMs.coerceAtLeast(1)).put("autoChainSearch", autoChainSearch).put("autoChainPurpose", autoChainPurpose).put("torAll", torAll).put("torRouting", torRouting).put("torAuto", torAuto).put("torBridge", torBridge).put("torBridgeLines", torBridgeLines).put("torDirect", torDirect).put("rev", rev).put("turbo", turbo).put("autoStart", autoStart)
+        .put("ruAppsDirect", ruAppsDirect).put("randomTun", randomTun).put("coverTraffic", coverTraffic).put("torRotation", torRotation).put("torRotationSeconds", torRotationSeconds.coerceIn(30, 86400)).put("torFastOnly", torFastOnly).put("torMaxLatencyMs", torMaxLatencyMs.coerceAtLeast(1)).put("torNetworkRecommendations", torNetworkRecommendations).put("autoChainSearch", autoChainSearch).put("autoChainPurpose", autoChainPurpose).put("torAll", torAll).put("torRouting", torRouting).put("torAuto", torAuto).put("torBridge", torBridge).put("torBridgeLines", torBridgeLines).put("torDirect", torDirect).put("rev", rev).put("turbo", turbo).put("autoStart", autoStart)
         .put("alwaysVpn", JSONArray(alwaysVpn)).put("alwaysDirect", JSONArray(alwaysDirect))
         .put("traffic", JSONObject().apply { traffic.forEach { (k, v) -> put(k, v) } }).put("monthLimitGb", monthLimitGb)
         .put("country", country).put("favorites", JSONArray(favorites)).put("smartYoutube", smartYoutube).put("appAware", appAware).put("autopilot", autopilot).put("oceanBackground", oceanBackground).put("oceanMotion", oceanMotion).put("welcomeSound", welcomeSound).put("phoneLearning", phoneLearning).put("powerProfile", powerProfile).put("batteryThreshold", batteryThreshold).put("quietScreen", quietScreen).put("chargeOnly", chargeOnly).put("wifiMaintenance", wifiMaintenance).put("protectActiveTraffic", protectActiveTraffic).put("autoCool", autoCool).put("gpsSpoof", gpsSpoof)
@@ -228,6 +231,7 @@ data class Settings(
                 ruDirect = o.optBoolean("ruDirect", d.ruDirect), blockAds = o.optBoolean("blockAds", d.blockAds), blockTrackers = o.optBoolean("blockTrackers", d.blockTrackers),
                 byeDpiArgs = o.optString("byeDpiArgs", d.byeDpiArgs), byeDpiSni = o.optString("byeDpiSni", d.byeDpiSni),
                 hybridDomains = list("hybridDomains", d.hybridDomains), testUrl = o.optString("testUrl", d.testUrl),
+                dnsAuto = o.optBoolean("dnsAuto", o.optString("dnsUrl", d.dnsUrl) == d.dnsUrl),
                 dnsUrl = o.optString("dnsUrl", d.dnsUrl), subscriptions = list("subscriptions", d.subscriptions),
                 dpiStrategy = o.optString("dpiStrategy", d.dpiStrategy),
                 dpiRemembered = o.optJSONObject("dpiRemembered")?.let { m -> m.keys().asSequence().associateWith { m.getString(it) } } ?: emptyMap(),
@@ -245,7 +249,7 @@ data class Settings(
                 myMasks = list("myMasks", emptyList()),
                 maskEvolution = o.optBoolean("maskEvolution", true), autoMasks = list("autoMasks", emptyList()), dpiEvoPool = list("dpiEvoPool", emptyList()), theme = o.optString("theme", "dark"),
                 dpiRanking = o.optJSONObject("dpiRanking")?.let { m -> m.keys().asSequence().associateWith { k -> m.optJSONArray(k)?.let { a -> (0 until a.length()).map { a.getString(it) } }.orEmpty() } } ?: emptyMap(),
-                ruAppsDirect = o.optBoolean("ruAppsDirect", true), randomTun = o.optBoolean("randomTun", true), coverTraffic = o.optBoolean("coverTraffic", true), torRotation = o.optBoolean("torRotation", false), torRotationSeconds = o.optInt("torRotationSeconds", 600).coerceIn(30, 86400), torFastOnly = o.optBoolean("torFastOnly", true), torMaxLatencyMs = o.optInt("torMaxLatencyMs", 2500).coerceAtLeast(1), autoChainSearch = o.optBoolean("autoChainSearch", true), autoChainPurpose = o.optString("autoChainPurpose", "balanced").takeIf { it in setOf("balanced", "download", "interactive") } ?: "balanced", torAll = o.optBoolean("torAll", false), torRouting = o.optBoolean("torRouting", false), torAuto = o.optBoolean("torAuto", false), torBridge = o.optString("torBridge", "none"), torBridgeLines = o.optString("torBridgeLines", ""), torDirect = o.optBoolean("torDirect", false), rev = o.optInt("rev", 0), turbo = o.optBoolean("turbo", true), autoStart = o.optBoolean("autoStart", false),
+                ruAppsDirect = o.optBoolean("ruAppsDirect", true), randomTun = o.optBoolean("randomTun", true), coverTraffic = o.optBoolean("coverTraffic", true), torRotation = o.optBoolean("torRotation", false), torRotationSeconds = o.optInt("torRotationSeconds", 600).coerceIn(30, 86400), torFastOnly = o.optBoolean("torFastOnly", true), torMaxLatencyMs = o.optInt("torMaxLatencyMs", 2500).coerceAtLeast(1), torNetworkRecommendations = o.optBoolean("torNetworkRecommendations", false), autoChainSearch = o.optBoolean("autoChainSearch", true), autoChainPurpose = o.optString("autoChainPurpose", "balanced").takeIf { it in setOf("balanced", "download", "interactive") } ?: "balanced", torAll = o.optBoolean("torAll", false), torRouting = o.optBoolean("torRouting", false), torAuto = o.optBoolean("torAuto", false), torBridge = o.optString("torBridge", "none"), torBridgeLines = o.optString("torBridgeLines", ""), torDirect = o.optBoolean("torDirect", false), rev = o.optInt("rev", 0), turbo = o.optBoolean("turbo", true), autoStart = o.optBoolean("autoStart", false),
                 alwaysVpn = list("alwaysVpn", emptyList()), alwaysDirect = list("alwaysDirect", emptyList()),
                 traffic = o.optJSONObject("traffic")?.let { m -> m.keys().asSequence().associateWith { m.optLong(it) } } ?: emptyMap(),
                 monthLimitGb = o.optInt("monthLimitGb", 0), country = o.optString("country", ""), favorites = list("favorites", emptyList()),

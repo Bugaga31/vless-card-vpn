@@ -77,7 +77,10 @@ object Actions {
         if (job?.isActive == true) return
         progress.value = Progress(title, running = true)
         job = scope.launch {
-            val msg = Store.busy { runCatching { withContext(Dispatchers.IO) { XrayCore.init(app) }; block() }.getOrElse { if (it is kotlinx.coroutines.CancellationException) "Остановлено" else Errors.human(it).replaceFirstChar { c -> c.uppercase() } } }
+            val msg = Store.busy { runCatching { withContext(Dispatchers.IO) { XrayCore.init(app) }; block() }.getOrElse {
+                if (com.vlesscardvpn.BuildConfig.DEBUG) android.util.Log.i("E2E", ConnectDiagnostics.describe("action","action",it))
+                if (it is kotlinx.coroutines.CancellationException) "Остановлено" else Errors.human(it).replaceFirstChar { c -> c.uppercase() }
+            } }
             android.util.Log.i("E2E", "action[$title]: $msg")
             progress.value = progress.value.copy(running = false, message = msg)
         }
@@ -751,7 +754,7 @@ object Actions {
      * «Ускорь YouTube» (Помощник): Smart YouTube + phone speed-up on, the network's YouTube decision measured again,
      * heavy masks replaced by light ones, real download speed of the best 5, the fastest selected; reconnects if on.
      */
-    fun boostYoutube() = launch("Ускоряю YouTube") {
+    fun boostYoutube(maintenanceReconnect: (() -> Unit)? = null) = launch("Ускоряю YouTube") {
         val net = Net.key(app)
         Store.update { it.copy(settings = it.settings.copy(smartYoutube = true, turbo = true, blockQuic = true, ytDpi = it.settings.ytDpi - net)) }
         progress.value = progress.value.copy(title = "Ускоряю YouTube: облегчаю маски")
@@ -770,21 +773,21 @@ object Actions {
         selectBest(10, close = true, among = top.filter { s2.state(it).works })
         val viaDpi = runCatching { decideYoutube() }.getOrDefault(false)
         val connected = Tunnel.socks != null
-        if (connected) withContext(Dispatchers.Main) { com.vlesscardvpn.vpn.TunnelService.start(app) }
+        if (connected) withContext(Dispatchers.Main) { maintenanceReconnect?.invoke() ?: com.vlesscardvpn.vpn.TunnelService.start(app) }
         val best = Store.state.value.let { s -> s.selected.maxOfOrNull { s.state(it).kbps } ?: 0 }
         "YouTube: " + (if (best > 0) "лучший сервер качает ${"%.1f".format(best / 1000.0)} Мбит/с" else "скорость не измерилась") +
             (if (viaDpi) ", а напрямую через обход DPI ещё быстрее — YouTube пойдёт им" else "") +
-            ". Включены «Умный YouTube» и ускорение телефона" + if (connected) ", переподключаюсь." else ". Подключитесь — всё применится."
+            ". Включены «Умный YouTube» и ускорение телефона" + if (connected) (if (maintenanceReconnect != null) ", применю в паузе трафика." else ", переподключаюсь.") else ". Подключитесь — всё применится."
     }
 
     /** «Облегчи маску» (Помощник). */
-    fun lighten() = launch("Облегчаю маски") {
+    fun lighten(maintenanceReconnect: (() -> Unit)? = null) = launch("Облегчаю маски") {
         val before = Store.state.value.let { s -> s.selected.count { Masks.byId(s.state(it).maskFor(Net.key(app)))?.let { m -> Masks.cost(m) >= 2 } == true } }
         if (before == 0) return@launch "Тяжёлых масок у выбранных серверов нет — уже самые быстрые."
         lightenMasks(true)
         val after = Store.state.value.let { s -> s.selected.count { Masks.byId(s.state(it).maskFor(Net.key(app)))?.let { m -> Masks.cost(m) >= 2 } == true } }
-        if (after < before && Tunnel.socks != null) withContext(Dispatchers.Main) { com.vlesscardvpn.vpn.TunnelService.start(app) }
-        "Облегчено масок: ${before - after} из $before" + if (after < before && Tunnel.socks != null) " — переподключаюсь." else if (after == before) " (лёгкие маски здесь не прошли — тяжёлые оставлены, иначе не будет работать)." else "."
+        if (after < before && Tunnel.socks != null) withContext(Dispatchers.Main) { maintenanceReconnect?.invoke() ?: com.vlesscardvpn.vpn.TunnelService.start(app) }
+        "Облегчено масок: ${before - after} из $before" + if (after < before && Tunnel.socks != null) (if (maintenanceReconnect != null) " — применю в паузе трафика." else " — переподключаюсь.") else if (after == before) " (лёгкие маски здесь не прошли — тяжёлые оставлены, иначе не будет работать)." else "."
     }
 
     private var catalogAt = -300000L
@@ -874,9 +877,15 @@ object Actions {
     suspend fun optimize(): Boolean {
         lastOptimizeSwitched = false
         val lightPlan = PhonePower.refresh(app)
-        if (!lightPlan.allowLight) return false
+        if (!lightPlan.allowLight) {
+            if (com.vlesscardvpn.BuildConfig.DEBUG) android.util.Log.i("E2E", "optimize skipped=power")
+            return false
+        }
         var st = Store.state.value
-        if ((!st.settings.autoOptimize && st.settings.mode != Mode.AUTO) || job?.isActive == true) return false
+        if ((!st.settings.autoOptimize && st.settings.mode != Mode.AUTO) || job?.isActive == true) {
+            if (com.vlesscardvpn.BuildConfig.DEBUG) android.util.Log.i("E2E", "optimize skipped=${if(job?.isActive == true) "foreground_busy" else "disabled"}")
+            return false
+        }
         val originalNet = Net.key(app)
         val originalSelection = st.selected.map { AutoRoutePolicy.configuration(it,st.state(it),originalNet) }.toSet()
         if (st.settings.mode == com.vlesscardvpn.model.Mode.BYEDPI) return false
@@ -1048,8 +1057,11 @@ object Actions {
         val ready = {
             if (autoGeneration.get() == ticket) {
                 if (initialNetwork == (Net.key(app) to Net.underlying(app)?.toString())) onReady()
-                else { selectionNetworkChanged(); Unit }
-            }
+                else {
+                    if (com.vlesscardvpn.BuildConfig.DEBUG) android.util.Log.i("E2E", "auto ready_blocked=network_changed")
+                    selectionNetworkChanged(); Unit
+                }
+            } else if (com.vlesscardvpn.BuildConfig.DEBUG) android.util.Log.i("E2E", "auto ready_blocked=cancelled")
         }
         runCatching { Report.prime(app); CloudSpeed.loadCached(app) }
         refreshPublicCloud()
@@ -1178,9 +1190,17 @@ object Actions {
      * Network changed (Auto): compare up to eight remembered/cloud/diverse routes outside the tunnel,
      * then sequentially sample downloads on up to three finalists. Results are guarded by physical network identity.
      */
-    suspend fun quickRecheck(): Boolean {
+    suspend fun quickRecheck(previousCandidates: List<Server> = emptyList()): Boolean {
+        val result = kotlinx.coroutines.withTimeoutOrNull(AutoHandoffPolicy.TOTAL_MS) {
+            quickRecheckWithinDeadline(previousCandidates)
+        }
+        if (result != true) deepPending = true
+        return result == true
+    }
+
+    private suspend fun quickRecheckWithinDeadline(previousCandidates: List<Server>): Boolean {
         val net = Net.key(app); val handle = Net.underlying(app)?.toString()
-        Store.update { state -> state.copy(states = state.states.mapValues { (_, value) -> value.forAutomaticNetwork(net) }) }
+        Store.update { state -> state.copy(states = state.states.mapValues { (_, value) -> AutoHandoffPolicy.resetRuntime(value,net) }) }
         fun valid() = Net.key(app) == net && Net.underlying(app)?.toString() == handle
         val st = Store.state.value
         val local = st.settings.netServers[net].orEmpty().toSet()
@@ -1188,7 +1208,8 @@ object Actions {
         val ranked = preferred(st, st.servers).sortedWith(compareByDescending<Server> {
             Brain.p(net, it, st.state(it))
         }.thenByDescending { CloudSpeed.prior(it) ?: .5 })
-        val candidates = ServerChoice.diverse(remembered + st.selected + CloudSpeed.pick(ranked, emptyList(), n = 2) + ranked, 8)
+        val candidates = AutoHandoffPolicy.candidates(preferred(st,previousCandidates),st.servers,
+            remembered + st.selected + CloudSpeed.pick(ranked, emptyList(), n = 2) + ranked)
         if (candidates.isEmpty()) return false
         val passed = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
         val prev = progress.value

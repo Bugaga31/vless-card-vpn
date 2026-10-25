@@ -1,0 +1,49 @@
+package com.vlesscardvpn.core
+
+import org.junit.Assert.*
+import org.junit.Test
+
+class ConnectDiagnosticsTest {
+    @Test fun keepsSafeErrorTypeAndSourceLocation() {
+        val e = IllegalStateException("token=SECRET https://private.example/ 203.0.113.7")
+        e.stackTrace = arrayOf(StackTraceElement("com.vlesscardvpn.vpn.TunnelService", "connect", "TunnelService.kt", 123))
+        val text = ConnectDiagnostics.describe("connect","tun",e)
+        assertTrue(text.contains("type=IllegalStateException")); assertTrue(text.contains("origin=TunnelService.kt:123"))
+        listOf("SECRET","private.example","203.0.113.7","token=").forEach { assertFalse(text.contains(it)) }
+    }
+    @Test fun classifiesFileLimitWithoutPrintingTheMessage() {
+        val text = ConnectDiagnostics.describe("connect","core",RuntimeException("private", java.io.IOException("Too many open files /private/key")))
+        assertTrue(text.contains("code=file_limit")); assertTrue(text.contains("causes=RuntimeException,IOException"));assertFalse(text.contains("private"))
+    }
+    @Test fun unknownScopeAndPhaseCannotLeakUserInput() {
+        val text = ConnectDiagnostics.describe("SECRET", "https://private.example", Exception("private"))
+        assertTrue(text.contains("scope=connect phase=init")); assertFalse(text.contains("SECRET"));assertFalse(text.contains("private"))
+    }
+    @Test fun unknownStackFileAndClassAreNotPrinted() {
+        val e = IllegalArgumentException("private")
+        e.stackTrace = arrayOf(StackTraceElement("com.vlesscardvpn.SECRET", "SECRET", "SECRET.kt", 5))
+        assertTrue(ConnectDiagnostics.describe("action","action",e).contains("origin=unknown"))
+    }
+    @Test fun causeDepthIsBounded() {
+        var e: Throwable = Exception("private")
+        repeat(20) { e = RuntimeException("private",e) }
+        assertEquals(5, ConnectDiagnostics.describe("connect","core",e).substringAfter("causes=").split(',').size)
+    }
+    @Test fun fixedChainErrorsAreDistinguished() {
+        assertTrue(ConnectDiagnostics.describe("chain","chain_check",IllegalStateException("No running DPI set")).contains("code=dpi_missing"))
+        assertTrue(ConnectDiagnostics.describe("chain","chain_check",IllegalStateException("No verified DPI-server winner")).contains("code=chain_unconfirmed"))
+        assertTrue(ConnectDiagnostics.describe("chain","chain_check",IllegalStateException("Measured chain was not applied")).contains("code=chain_not_applied"))
+    }
+    @Test fun startCallerSkipsServiceAndHidesUnknownFrames() {
+        val stack = arrayOf(StackTraceElement("com.vlesscardvpn.vpn.TunnelService", "start", "TunnelService.kt", 73),
+            StackTraceElement("com.vlesscardvpn.core.Actions", "SECRET", "Actions.kt", 789))
+        assertEquals("Actions.kt:789",ConnectDiagnostics.startCaller(stack))
+        assertEquals("unknown",ConnectDiagnostics.startCaller(arrayOf(StackTraceElement("com.vlesscardvpn.SECRET","SECRET","private.kt",4))))
+    }
+    @Test fun coreLifecycleIsCorrelatableWithoutServerIdentity() {
+        assertEquals("core instance=7 role=vpn event=start_begin wall_ms=100 elapsed_ms=20",
+            ConnectDiagnostics.coreEvent("vpn",7,"start_begin",100,20))
+        val safe = ConnectDiagnostics.coreEvent("dpi-SECRET",-1,"PRIVATE",-2,-3)
+        assertEquals("core instance=0 role=other event=other wall_ms=0 elapsed_ms=0",safe)
+    }
+}

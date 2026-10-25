@@ -1,5 +1,5 @@
 {
-  "ready": false,
-  "scope": "Publication held at owner request: pending separate Wi-Fi/cellular Tor recommendations and switching, compatibility-tested masking improvements, and audited neural-assistant scope. Previous E2E failures remain unresolved; no trained weights claimed.",
+  "ready": true,
+  "scope": "Owner authorized publication of 1.2.56 after green E2E run 40232105688 for 9089fee0481c0022a777a95d3bd1ad28c5d3d91d. Release workflow must re-run quality, signed APK certificate/version/security gates and emulator upgrades on the final release SHA. No trained neural weights or physical-device verification claimed.",
   "physical_phone_tested": false
 }

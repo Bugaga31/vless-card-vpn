@@ -36,3 +36,29 @@ class BoundedDiagnosticsTest(unittest.TestCase):
     def test_auto_terminal_history_is_bounded(self):
         _,d=self.summarize('action[Авто-настройка]: Остановлено\n'*20)
         self.assertEqual(['cancelled']*3,d['auto_terminal_states'])
+
+    def test_safe_connect_failure_reason_and_source_survive(self):
+        _,d=self.summarize('failure scope=connect phase=core type=IOException code=file_limit origin=TunnelService.kt:350 causes=RuntimeException,IOException\n')
+        self.assertEqual('file_limit',d['failures'][0]['code'])
+        self.assertEqual('TunnelService.kt:350',d['failures'][0]['origin'])
+        self.assertEqual(['RuntimeException','IOException'],d['failures'][0]['causes'])
+    def test_forged_failure_fields_cannot_leak_secrets(self):
+        s,d=self.summarize('failure scope=SECRET phase=PRIVATE type=TOKEN code=PASSWORD origin=secret.kt:23 causes=SECRET,TOKEN\n')
+        for secret in ['SECRET','PRIVATE','TOKEN','PASSWORD','secret.kt']:self.assertNotIn(secret,s)
+        self.assertEqual('unknown',d['failures'][0]['origin'])
+    def test_failure_history_and_causes_remain_bounded(self):
+        line='failure scope=connect phase=tun type=IOException code=unclassified origin=unknown causes='+','.join(['IOException']*50)+'\n'
+        _,d=self.summarize(line*20)
+        self.assertEqual(3,len(d['failures']));self.assertTrue(all(len(x['causes'])==5 for x in d['failures']))
+    def test_service_transitions_and_early_exit_are_not_success(self):
+        _,d=self.summarize('service command=start state=IDLE\nteardown state=CONNECTED keepTun=false reason=error\noptimize skipped=foreground_busy\nauto ready_blocked=network_changed\n')
+        self.assertEqual([['start','IDLE']],d['service_events'])
+        self.assertEqual([['CONNECTED','false','error']],d['teardown_events'])
+        self.assertEqual(['foreground_busy'],d['optimize_skips']);self.assertEqual(['network_changed'],d['auto_ready_blocked'])
+        self.assertEqual([],d['last_checks'])
+    def test_failure_summary_is_saved_before_logcat_is_cleared(self):
+        root=Path(__file__).resolve().parents[1]
+        script=(root/'e2e-android.sh').read_text()
+        self.assertIn('tee "$W/failure-${CASE}-${FAILS}.txt"',script)
+        workflow=(root.parent/'.github/workflows/e2e.yml').read_text()
+        self.assertIn('/tmp/e2e/failure-*.txt',workflow)

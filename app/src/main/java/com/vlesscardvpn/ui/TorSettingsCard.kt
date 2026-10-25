@@ -87,6 +87,8 @@ fun TorSettingsCard(settings: Settings, set: ((Settings) -> Settings) -> Unit) {
                 }
             }
             Text("Работает в VPN-режиме Авто без отдельной сервисной маршрутизации и WARP-цепочки. Измеряется лучший из ограниченного набора, не каждый сервер интернета.",style=MaterialTheme.typography.bodySmall)
+            TorOption("Рекомендуемые профили Wi-Fi / мобильная сеть", "При подключении и смене сети: Wi-Fi — порог HTTPS 2500 мс, интервал ротации 600 с; мобильная — 5000 мс и 900 с. Это начальные настройки, не измеренная скорость. Мосты, разрешение Tor и прямые исключения не меняются. Ротация используется только если включена отдельно.", settings.torNetworkRecommendations) { v -> set { it.copy(torNetworkRecommendations = v) } }
+            if (settings.torNetworkRecommendations) Text("Ручные интервал и порог ниже сохранены, но временно заменяются профилем Wi-Fi/мобильной сети. Выключите рекомендации, чтобы применять свои значения. На других типах сети используются ручные настройки.", style = MaterialTheme.typography.bodySmall)
             TorOption("Ротация цепочек", "Запрашивать новую цепочку для новых соединений. Активные загрузки не обрываются; новый IP не гарантируется.", settings.torRotation) { v -> set { it.copy(torRotation = v) } }
             var seconds by remember(settings.torRotationSeconds) { mutableStateOf(settings.torRotationSeconds.toString()) }
             var latency by remember(settings.torMaxLatencyMs) { mutableStateOf(settings.torMaxLatencyMs.toString()) }

@@ -74,6 +74,61 @@ class AutoChainSelectionTest {
         val r=A.select(listOf(a,b),caps,Purpose.DOWNLOAD,{1000},{1}) { session(sample(it,transfer=if(it==a)200 else 50)) }
         assertEquals(b,r.selected);assertEquals(State.CONFIRMED,r.state);assertEquals(0,r.fallbackCount)
     }
+    @Test fun `within five percent prefer fewer adapters for throughput and balanced`() = runBlocking {
+        val simple=chain("simple");val layered=chain("layered",Layout.DPI_SERVER)
+        for(purpose in listOf(Purpose.DOWNLOAD,Purpose.BALANCED)) {
+            val result=A.select(listOf(layered,simple),caps,purpose,{1000},{1}) {
+                session(sample(it,transfer=if(it==simple)104 else 100))
+            }
+            assertEquals(simple,result.selected)
+        }
+    }
+    @Test fun `materially faster layered route can still win`() = runBlocking {
+        val simple=chain("simple");val layered=chain("layered",Layout.DPI_SERVER)
+        val result=A.select(listOf(simple,layered),caps,Purpose.DOWNLOAD,{1000},{1}) {
+            session(sample(it,transfer=if(it==simple)200 else 100))
+        }
+        assertEquals(layered,result.selected)
+    }
+    @Test fun `simple fallback never beats a confirmed layered route`() = runBlocking {
+        val simple=chain("simple");val layered=chain("layered",Layout.DPI_SERVER)
+        val result=A.select(listOf(simple,layered),caps,Purpose.DOWNLOAD,{1000},{1}) {
+            session(sample(it,tg=if(it==simple)Verdict.UNKNOWN else Verdict.PASS))
+        }
+        assertEquals(layered,result.selected);assertEquals(State.CONFIRMED,result.state)
+    }
+    @Test fun `simple explicit service failure is never preferred`() = runBlocking {
+        val simple=chain("simple");val layered=chain("layered",Layout.DPI_SERVER)
+        val result=A.select(listOf(simple,layered),caps,Purpose.DOWNLOAD,{1000},{1}) {
+            session(sample(it,yt=if(it==simple)Verdict.FAIL else Verdict.PASS))
+        }
+        assertEquals(layered,result.selected)
+    }
+    @Test fun `interactive comparable latency also prefers fewer adapters`() = runBlocking {
+        val simple=chain("simple");val layered=chain("layered",Layout.DPI_SERVER)
+        val result=A.select(listOf(layered,simple),caps,Purpose.INTERACTIVE,{1000},{1}) {
+            session(sample(it,latency=if(it==simple)104 else 100))
+        }
+        assertEquals(simple,result.selected)
+    }
+    @Test fun `interactive significant latency advantage still wins`() = runBlocking {
+        val simple=chain("simple");val layered=chain("layered",Layout.DPI_SERVER)
+        val result=A.select(listOf(simple,layered),caps,Purpose.INTERACTIVE,{1000},{1}) {
+            session(sample(it,latency=if(it==simple)200 else 100))
+        }
+        assertEquals(layered,result.selected)
+    }
+    @Test fun `complexity is adapter count not a claim about encryption strength`() {
+        assertEquals(1,A.stages(chain()));assertEquals(2,A.stages(chain(layout=Layout.DPI_SERVER)))
+        assertEquals(3,A.stages(chain(layout=Layout.DPI_TOR_SERVER)))
+    }
+    @Test fun `zero latency cannot be replaced with a slower simple route`() = runBlocking {
+        val simple=chain("simple");val layered=chain("layered",Layout.DPI_SERVER)
+        val result=A.select(listOf(simple,layered),caps,Purpose.INTERACTIVE,{1000},{1}) {
+            session(sample(it,latency=if(it==simple)1 else 0))
+        }
+        assertEquals(layered,result.selected)
+    }
     @Test fun `slow measured video cannot hide behind fast generic download`() = runBlocking {
         val a=chain("a"); val b=chain("b")
         for (purpose in listOf(Purpose.DOWNLOAD,Purpose.BALANCED)) {

@@ -332,8 +332,9 @@ fun SettingsScreen() {
 
         }
         Group("DNS через туннель") {
+        Toggle("Автовыбор DNS", "Первый успешный ответ от трёх шифрованных DNS через туннель. RU-DNS для прямых сайтов настраивается отдельно.", s.dnsAuto) { v -> set { it.copy(dnsAuto = v) } }
         Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            Settings.DNS_PRESETS.forEach { (n, u) -> FilterChip(selected = s.dnsUrl == u, onClick = { set { it.copy(dnsUrl = u) } }, label = { Text(n) }) }
+            Settings.DNS_PRESETS.forEach { (n, u) -> FilterChip(selected = !s.dnsAuto && s.dnsUrl == u, onClick = { set { it.copy(dnsUrl = u, dnsAuto = false) } }, label = { Text(n) }) }
         }
 
         }

@@ -98,6 +98,26 @@ object AutoChainSelection {
         Purpose.BALANCED -> transferKbps(s) * 1000 / (s.latencyMs + 1000)
     }
 
+    /** Counts adapters, not security strength. Eligibility and service proof run first.
+     * Prefer fewer adapters only within 5% of the best measured score in the same
+     * confirmation class. This cannot bypass explicit Tor mode or rewrite TLS/keys.
+     */
+    fun stages(chain: Chain): Int = listOf(chain.layout.server, chain.layout.tor, chain.layout.dpi).count { it }
+
+    private fun bestMeasured(fresh: List<Pair<Chain, Sample>>, purpose: Purpose): Pair<Chain, Sample>? {
+        if (fresh.isEmpty()) return null
+        val hasConfirmed = fresh.any { confirmed(it.second) }
+        val sameProof = fresh.filter { confirmed(it.second) == hasConfirmed }
+        val top = sameProof.maxOf { score(it.second, purpose) }
+        val comparable = sameProof.filter {
+            if (purpose == Purpose.INTERACTIVE) it.second.latencyMs * 100 <= (-top) * 105
+            else score(it.second, purpose) * 100 >= top * 95
+        }
+        return comparable.sortedWith(compareBy<Pair<Chain, Sample>> { stages(it.first) }
+            .thenByDescending { score(it.second, purpose) }.thenBy { it.second.latencyMs }
+            .thenBy { it.first.id }).firstOrNull()
+    }
+
     /** Sequential transfer trials avoid self-created bandwidth competition. One absolute
      * monotonic budget includes startup, probe and close. Cold Tor is excluded; never
      * restart its bootstrap eight times on the connect button. Parent cancellation
@@ -158,9 +178,7 @@ object AutoChainSelection {
         check(now >= began) { "Monotonic clock moved backwards" }
         val fresh = results.filter { (c, s) -> eligible(s, c, epoch, now) }
         // Service PASS beats data-only fallback regardless of measured bandwidth.
-        val best = fresh.sortedWith(compareByDescending<Pair<Chain, Sample>> { confirmed(it.second) }
-            .thenByDescending { score(it.second, purpose) }.thenBy { it.second.latencyMs }
-            .thenBy { it.first.id }).firstOrNull()
+        val best = bestMeasured(fresh, purpose)
             ?: return Outcome(State.NO_ROUTE, null, null, attempted, 0, diagnostics.toList())
         val fallback = !confirmed(best.second)
         return Outcome(if (fallback) State.FALLBACK else State.CONFIRMED,

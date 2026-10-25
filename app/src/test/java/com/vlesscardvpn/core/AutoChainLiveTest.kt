@@ -23,6 +23,12 @@ class AutoChainLiveTest {
         val candidate=a.copy(chainId="b",youtubeKbps=1000)
         assertTrue(AutoChainSwitchPolicy.shouldSwitch(current,candidate,Purpose.DOWNLOAD))
     }
+    @Test fun `unknown current trial cannot disrupt a working live route`() {
+        assertFalse(AutoChainSwitchPolicy.shouldSwitch(null,a,Purpose.DOWNLOAD,currentExpected=true))
+    }
+    @Test fun `without an existing route a verified winner can start`() {
+        assertTrue(AutoChainSwitchPolicy.shouldSwitch(null,a,Purpose.DOWNLOAD,currentExpected=false))
+    }
     @Test fun `large speed improvement switches`() {assertTrue(AutoChainSwitchPolicy.shouldSwitch(a,a.copy(chainId="b",transferMs=500),Purpose.DOWNLOAD))}
     @Test fun `tiny noise does not cause flapping`() {assertFalse(AutoChainSwitchPolicy.shouldSwitch(a,a.copy(chainId="b",transferMs=950),Purpose.DOWNLOAD))}
     @Test fun `confirmed route beats faster unknown`() {assertFalse(AutoChainSwitchPolicy.shouldSwitch(a,a.copy(chainId="b",transferMs=100,telegram=Verdict.UNKNOWN),Purpose.DOWNLOAD))}
@@ -65,7 +71,7 @@ class AutoChainLiveTest {
     }
     @Test fun `live Tor server chain DNS uses server route and encrypted upstreams`() {
         val c=config();val dns=c.getJSONObject("dns").getJSONArray("servers")
-        for(i in 0 until dns.length())assertTrue(dns.getString(i).startsWith("https://"))
+        for(i in 0 until dns.length())assertTrue(dns.getJSONObject(i).getString("address").startsWith("https://"))
         assertEquals("proxy-0",rules(c).first {it.optJSONArray("inboundTag")?.toString()?.contains("dns-module")==true}.getString("outboundTag"))
     }
     @Test fun `live Tor server chain blocks UDP before main route`() {assertTrue(rules(config()).any {it.optString("network")=="udp" && it.optString("outboundTag")=="block"})}

@@ -44,12 +44,14 @@ jobs:
       - name: Build (all ABIs, debug) + JVM tests
         run: |
           chmod +x gradlew
-          ./gradlew --no-daemon --max-workers=2 :app:testDebugUnitTest :app:assembleDebug :vpn-test-probe:assembleDebug
+          ./gradlew --no-daemon --max-workers=2 :app:testDebugUnitTest :app:assembleDebug :vpn-test-probe:testDebugUnitTest :vpn-test-probe:assembleDebug
       - name: Xray-core for the host-side servers
         run: |
           curl -fsSL -o /tmp/xray.zip https://github.com/XTLS/Xray-core/releases/download/v26.9.30/Xray-linux-64.zip
           echo "f851110beaff16e78d643f0ccfd9524b4a44dfd59bae3e34bb52bba378f7690e  /tmp/xray.zip" | sha256sum -c -
           mkdir -p /tmp/xray && unzip -qo /tmp/xray.zip -d /tmp/xray && /tmp/xray/xray version | head -1
+      - name: Automatic DNS failover (closed loopback fixtures)
+        run: python3 tools/e2e/dns-failover-smoke.py --xray /tmp/xray/xray --config /tmp/dns-auto-config.json
       - name: Standalone Tor startup without ByeDPI (loopback fixture)
         run: python3 tools/e2e/tor-standalone-smoke.py --xray /tmp/xray/xray --config /tmp/xcfg/vpn-tor-standalone.json
       - name: Isolated Auto chain TLS body and required-hop failure gates
@@ -72,6 +74,7 @@ jobs:
         with:
           name: e2e-api-${{ matrix.api }}
           path: |
+            /tmp/e2e/failure-*.txt
             /tmp/e2e/logcat.txt
             /tmp/e2e/server.log
             /tmp/e2e/access.log

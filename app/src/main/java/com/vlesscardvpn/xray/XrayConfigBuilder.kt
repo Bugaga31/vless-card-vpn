@@ -277,10 +277,17 @@ object XrayConfigBuilder {
         val ruDns = settings.ruDns && settings.ruDirect && (useServers || settings.torAll)
         if (ruDns) dnsServers.put(JSONObject().put("address", RU_DNS).put("port", 53)
             .put("domains", JSONArray(RU_DOMAINS)).put("skipFallback", true))
-        // a chain, not one server: if Cloudflare DoH is slowed down here, Google, Quad9 and plain DNS through the tunnel answer
-        (listOf(settings.dnsUrl) + DNS_FALLBACKS).distinct().filter { serverViaTor.isEmpty() || it.startsWith("https://") }.forEach { dnsServers.put(it) }
+        // Xray 26.9.30 supports parallel queries within an identical policy group.
+        // All automatic upstreams deliberately have the same policy/tag: race real DNS
+        // answers rather than waiting for one slow resolver to exhaust Android's timeout.
+        val upstreams = if (settings.dnsAuto) com.vlesscardvpn.core.DnsPolicy.ENCRYPTED else (listOf(settings.dnsUrl) + DNS_FALLBACKS).distinct()
+        upstreams.filter { !torOn || it.startsWith("https://") }.forEach {
+            dnsServers.put(if (settings.dnsAuto) JSONObject().put("address", it)
+                .put("timeoutMs", com.vlesscardvpn.core.DnsPolicy.TIMEOUT_MS) else it)
+        }
         c.put("dns", JSONObject().put("servers", dnsServers).put("queryStrategy", "UseIPv4").put("tag", "dns-module")
             .put("hosts", JSONObject(DNS_HOSTS as Map<*, *>))
+            .put("enableParallelQuery", settings.dnsAuto)
             // «Ускорение»: an expired answer is served at once and refreshed in the background (no wait on every open)
             .apply { if (settings.turbo) put("serveStale", true) })
 

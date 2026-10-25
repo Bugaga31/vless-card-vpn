@@ -9,9 +9,12 @@ W=/tmp/e2e; mkdir -p $W; FAILS=0
 XRAY=${XRAY:-/tmp/xray/xray}
 python3 -m unittest discover -s tools/e2e -p 'test_*.py' || exit 1
 diagnostic() {
-  adb logcat -d -s E2E:I VLESS:W AndroidRuntime:E | python3 tools/e2e/summarize_failure.py --case "$CASE"
+  # Capture before a later scenario clears logcat/access.log. Never print the raw snapshots.
+  adb logcat -d -s E2E:I VLESS:W AndroidRuntime:E | python3 tools/e2e/snapshot_failure.py --directory "$W" --case "$CASE" --failure "$FAILS"
+  { # Preserve only the bounded/redacted summary at the failure, before the next case clears logcat.
+  python3 tools/e2e/summarize_failure.py --case "$CASE" < "$W/failure-${CASE}-${FAILS}-logcat.txt"
   # Host log output is never printed: only fixed-fixture event counts.
-  python3 - "$W/access.log" "$CASE" <<'PYCOUNTS'
+  python3 - "$W/failure-${CASE}-${FAILS}-access.txt" "$CASE" <<'PYCOUNTS'
 import json,pathlib,re,sys
 try:s=pathlib.Path(sys.argv[1]).read_text(errors='replace')[-2000000:]
 except OSError:s=''
@@ -19,6 +22,7 @@ counts={str(p):len(re.findall(r'email: u'+str(p)+r'\b',s)) for p in (8443,8444,8
 print('::notice title=E2E fixture server counts::'+json.dumps({'case':sys.argv[2],'accepted':counts},separators=(',',':')))
 PYCOUNTS
   if [ -n "${R:-}" ]; then printf '%s' "$R" | python3 tools/e2e/summarize_failure.py --case "$CASE" --probe; fi
+  } | tee "$W/failure-${CASE}-${FAILS}.txt"
 }
 fail() { echo "::error title=e2e::$*"; echo "FAIL: $*"; FAILS=$((FAILS+1)); diagnostic; }
 
@@ -26,7 +30,7 @@ fail() { echo "::error title=e2e::$*"; echo "FAIL: $*"; FAILS=$((FAILS+1)); diag
 KEYS=$($XRAY x25519); PRIV=$(echo "$KEYS" | sed -n 's/^PrivateKey: //p'); PBK=$(echo "$KEYS" | sed -n 's/^Password (PublicKey): //p')
 openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -keyout $W/k.pem -out $W/c.pem -days 2 -subj "/CN=test.local" 2>/dev/null
 U=a00975c5-597e-4c22-a7a7-a84ce5e0691e
-sed -e "s#@PRIV@#$PRIV#g" -e "s#@U@#$U#g" -e "s#@W@#$W#g" tools/e2e/server.json > $W/server.json
+sed -e 's/"loglevel":"warning"/"loglevel":"info"/' -e "s#@PRIV@#$PRIV#g" -e "s#@U@#$U#g" -e "s#@W@#$W#g" tools/e2e/server.json > $W/server.json
 $XRAY run -c $W/server.json > $W/server.log 2>&1 & SRV=$!
 trap 'kill $SRV 2>/dev/null' EXIT
 sleep 2
@@ -45,7 +49,7 @@ load() { # $1 = state file
   adb shell am force-stop "$PKG" || return 1
   adb push "$W/$1" /data/local/tmp/state.json >/dev/null || return 1
   adb shell "run-as $PKG sh -c 'mkdir -p files && cp /data/local/tmp/state.json files/state.json'" || return 1
-  adb shell am start -W -n "$PKG/.MainActivity" --ez e2e_reload true >/dev/null || return 1
+  adb shell am start -W -n "$PKG/.MainActivity" --ez e2e_reload true --ez e2e_connect "${2:-false}" >/dev/null || return 1
   sleep 1
 }
 waitlog() { # $1 = regex, $2 = seconds
@@ -67,12 +71,28 @@ run_case() { # $1 name, $2 state, $3 seconds to wait for the connect result
   CASE=$1; R=""
   echo "=== case $1"
   adb shell am start -n $PKG/.MainActivity --ez e2e_disconnect true >/dev/null; sleep 3; : > $W/access.log
+  if [ "$1" = single ]; then
+    adb shell settings put system accelerometer_rotation 0
+    adb shell settings put system user_rotation 0
+    sleep 1
+  fi
   adb logcat -c
-  load "$2" || { fail "$1: fixture state load failed"; return; }
-  adb shell am start -n $PKG/.MainActivity --ez e2e_connect true >/dev/null
+  # Start onCreate with both commands: configuration recreation must not replay either.
+  load "$2" true || { fail "$1: fixture state load failed"; return; }
   C=$(waitlog "check ok=|connect failed" ${3:-60}) || { fail "$1: no connect result"; return; }
   echo "app: $C"
   echo "$C" | grep -q "check ok=true" || fail "$1: in-app check through 127.0.0.1:10808 failed"
+  if [ "$1" = single ]; then
+    # The initial Intent contains connect+reload. Rotation recreates this Activity;
+    # replaying it would tear down the live TUN and restart Xray.
+    adb shell settings put system accelerometer_rotation 0
+    adb shell settings put system user_rotation 1
+    waitlog "fixture activity restored" 20 >/dev/null || fail "single: rotation did not recreate Activity"
+    adb shell settings put system user_rotation 0
+    sleep 2
+    LC=$(adb logcat -d -s E2E:I)
+    printf '%s' "$LC" | python3 tools/e2e/verify_activity_recreation.py || fail "single: recreation replayed a command or restarted VPN"
+  fi
   R=$(probe $1); okprobe "$R" || fail "$1: probe app traffic through VPN failed"
   S=$(adb logcat -d -s E2E:I | grep "socks port=" | tail -1); echo "app: $S"
   echo "$S" | grep -q "auth=true" || fail "$1: local SOCKS is not password-protected (stealth)"
@@ -91,6 +111,9 @@ c=$(grep -c "email: u" $W/access.log); echo "byedpi: server lines $c (must be 0;
 
 : > $W/access.log
 run_case multi multi.json
+# Optional mask improvements must not send another hard START during the multi transfer.
+STARTS=$(adb logcat -d -s E2E:I | grep -c 'service command=start state=')
+[ "$STARTS" -eq 1 ] || fail "multi: optional background work hard-restarted VPN"
 # Background speed-up: the selected e2e-dead server must be noticed and dropped (no buttons).
 adb shell am start -n $PKG/.MainActivity --ez e2e_optimize true >/dev/null
 O=$(waitlog "optimize result=" 150) || fail "optimize: no result"

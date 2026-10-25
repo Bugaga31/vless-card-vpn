@@ -8,10 +8,11 @@ object AutoChainSwitchPolicy {
         else -> AutoChainSelection.Purpose.BALANCED
     }
     fun shouldSwitch(current: AutoChainSelection.Sample?, winner: AutoChainSelection.Sample,
-                     purpose: AutoChainSelection.Purpose): Boolean {
+                     purpose: AutoChainSelection.Purpose, currentExpected: Boolean = false): Boolean {
         if (winner.data != AutoChainSelection.Verdict.PASS || !winner.verifiedBody ||
             winner.telegram == AutoChainSelection.Verdict.FAIL || winner.youtube == AutoChainSelection.Verdict.FAIL) return false
-        if (current == null) return true
+        // A missing trial is UNKNOWN, not proof that a working live route failed.
+        if (current == null) return !currentExpected
         if (current.chainId == winner.chainId) return false
         fun confirmed(s: AutoChainSelection.Sample) = s.telegram == AutoChainSelection.Verdict.PASS && s.youtube == AutoChainSelection.Verdict.PASS
         if (confirmed(current) != confirmed(winner)) return confirmed(winner)
