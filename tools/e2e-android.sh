@@ -136,6 +136,9 @@ echo "$CH" | grep -q "applied=DPI_SERVER" || fail "auto-chain: measured DPI-serv
 R=$(probe auto-chain); okprobe "$R" || fail "auto-chain: other UID cannot transfer through selected live chain"
 c=$(grep -c "email: u8443" $W/access.log)
 [ "$c" -gt 0 ] || fail "auto-chain: authenticated server saw no traffic"
+if echo "$CH" | grep -q "applied=DPI_SERVER" && okprobe "$R" >/dev/null && [ "$c" -gt 0 ]; then
+  echo "::notice title=Auto chain verified::Production selector applied DPI_SERVER; other-UID HTTPS transfer PASS; authenticated server reached"
+fi
 
 CASE=proxy; R=""
 echo "=== case proxy (no VPN: SOCKS5 10808 + HTTP 10809 for other apps)"
@@ -175,6 +178,12 @@ if echo "$WR" | grep -q "WARP готов"; then
     echo "::notice title=E2E HTTP rate limit::Google returned 429; one 15-second backoff before the unchanged full probe"
     sleep 15
     R=$(probe warp-rate-limit-retry)
+  elif printf '%s' "$R" | python3 tools/e2e/transient_dns_retry.py; then
+    # Preserve the original failure. No cached success merging or relaxed assertions.
+    printf '%s' "$R" | python3 tools/e2e/summarize_failure.py --case warp --probe
+    echo "::notice title=E2E DNS diagnostic::First origin UnknownHostException with three passing probes; one full fresh probe after 15 seconds; root cause not established"
+    sleep 15
+    R=$(probe warp-dns-retry)
   fi
   okprobe "$R" || fail "warp: probe app traffic through WARP failed"
 else fail "warp: no working WARP endpoint"; fi

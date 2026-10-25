@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Publish only allowlisted counters/booleans, never URLs, addresses, payloads or credentials."""
 import argparse, json, re, sys
-p=argparse.ArgumentParser();p.add_argument('--case',required=True,choices=['setup','single','byedpi','multi','tpws','ownmask','xraydpi','services','auto','auto-eight','proxy','warp']);p.add_argument('--probe',action='store_true');a=p.parse_args()
+p=argparse.ArgumentParser();p.add_argument('--case',required=True,choices=['setup','single','byedpi','multi','tpws','ownmask','xraydpi','services','auto','auto-eight','auto-chain','proxy','warp']);p.add_argument('--probe',action='store_true');a=p.parse_args()
 text=sys.stdin.read()
 if a.probe:
     try: data=json.loads(text)

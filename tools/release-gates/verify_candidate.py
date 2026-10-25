@@ -73,7 +73,7 @@ def main():
                 require(not any(x in n.lower() for x in ('debug-ca', 'test-ca', 'fixture')), 'Fixture or test CA in release APK')
                 if re.fullmatch(r'classes\d*\.dex', n):
                     data = z.read(n)
-                    require(not any(x in data for x in (b'e2e_connect', b'e2e_reload', b'e2e_test', b'r163-pool-', b'fixture-only')), 'Debug E2E hook in release')
+                    require(not any(x in data for x in (b'e2e_connect', b'e2e_reload', b'e2e_test', b'e2e_chain', b'r163-pool-', b'fixture-only')), 'Debug E2E hook in release')
             if name == 'VLESS-Card-Beta.apk':
                 for lib in ('libTor.so', 'libLyrebird.so', 'libgojni.so', 'libhev-socks5-tunnel.so'):
                     require(f'lib/x86_64/{lib}' in z.namelist(), 'Missing emulator native library: ' + lib)
