@@ -7,6 +7,7 @@ CASE=setup
 PKG=com.vlesscardvpn; PROBE=com.vlesscardvpn.netprobe
 W=/tmp/e2e; mkdir -p $W; FAILS=0
 XRAY=${XRAY:-/tmp/xray/xray}
+python3 -m unittest discover -s tools/e2e -p 'test_*.py' || exit 1
 diagnostic() {
   adb logcat -d -s E2E:I | python3 tools/e2e/summarize_failure.py --case "$CASE"
   if [ -n "${R:-}" ]; then printf '%s' "$R" | python3 tools/e2e/summarize_failure.py --case "$CASE" --probe; fi
@@ -31,9 +32,13 @@ adb shell appops set $PKG ACTIVATE_VPN allow
 adb shell am start -W -n $PKG/.MainActivity >/dev/null; sleep 3
 
 load() { # $1 = state file
-  adb push $W/$1 /data/local/tmp/state.json >/dev/null
-  adb shell "run-as $PKG sh -c 'mkdir -p files && cp /data/local/tmp/state.json files/state.json'"
-  adb shell am start -n $PKG/.MainActivity --ez e2e_reload true >/dev/null; sleep 1
+  # Isolate cases: a delayed save/background coroutine from the previous process
+  # must not overwrite the new state between copying it and Store.reload().
+  adb shell am force-stop "$PKG" || return 1
+  adb push "$W/$1" /data/local/tmp/state.json >/dev/null || return 1
+  adb shell "run-as $PKG sh -c 'mkdir -p files && cp /data/local/tmp/state.json files/state.json'" || return 1
+  adb shell am start -W -n "$PKG/.MainActivity" --ez e2e_reload true >/dev/null || return 1
+  sleep 1
 }
 waitlog() { # $1 = regex, $2 = seconds
   for i in $(seq 1 $2); do L=$(adb logcat -d -s E2E:I | grep -E "$1" | tail -1); [ -n "$L" ] && { echo "$L"; return 0; }; sleep 1; done; return 1
@@ -54,7 +59,7 @@ run_case() { # $1 name, $2 state, $3 seconds to wait for the connect result
   CASE=$1; R=""
   echo "=== case $1"
   adb shell am start -n $PKG/.MainActivity --ez e2e_disconnect true >/dev/null; sleep 3; : > $W/access.log
-  load $2; adb logcat -c
+  load "$2" || { fail "$1: fixture state load failed"; return; }; adb logcat -c
   adb shell am start -n $PKG/.MainActivity --ez e2e_connect true >/dev/null
   C=$(waitlog "check ok=|connect failed" ${3:-60}) || { fail "$1: no connect result"; return; }
   echo "app: $C"
@@ -143,7 +148,7 @@ fi
 CASE=proxy; R=""
 echo "=== case proxy (no VPN: SOCKS5 10808 + HTTP 10809 for other apps)"
 adb shell am start -n $PKG/.MainActivity --ez e2e_disconnect true >/dev/null; sleep 3; : > $W/access.log
-load proxy.json; adb logcat -c
+load proxy.json || { fail "proxy: fixture state load failed"; exit 1; }; adb logcat -c
 adb shell am start -n $PKG/.MainActivity --ez e2e_connect true >/dev/null
 C=$(waitlog "check ok=|connect failed" 60) || fail "proxy: no connect result"
 echo "app: $C"; echo "$C" | grep -q "check ok=true" || fail "proxy: in-app check failed"

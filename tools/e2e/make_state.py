@@ -17,7 +17,10 @@ dead = {"name": "e2e-dead", "protocol": "vless", "address": H, "port": 8999, "se
         "sni": "www.microsoft.com", "pbk": PBK, "sid": "ab"}
 
 def write(path, servers, selected, masks, mode="SERVERS", balance="LEAST_PING", **extra):
-    settings = {"mode": mode, "balance": balance, "ruDirect": False, "byeDpiArgs": "-o1 -At,r,s -d1", "byeDpiSni": "ya.ru"}
+    # Every case is a closed, explicit server catalogue. Production subscription jobs
+    # must not race a fixture import or replace selected synthetic endpoints.
+    settings = {"mode": mode, "balance": balance, "ruDirect": False, "byeDpiArgs": "-o1 -At,r,s -d1", "byeDpiSni": "ya.ru",
+                "autoUpdateSubs": False, "lastSubRefresh": 4102444800000}
     settings.update(extra)
     st = {"servers": servers, "states": {}, "settings": settings,
           "e2e_select": [s["name"] for s in servers if s["name"] in selected], "e2e_masks": masks}
