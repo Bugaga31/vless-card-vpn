@@ -1,5 +1,5 @@
 {
-  "ready": false,
-  "scope": "v1.2.55 live Auto chain integration in progress; publication blocked until final checks",
+  "ready": true,
+  "scope": "v1.2.55 live bounded Auto chain selection: SERVER, DPI_SERVER, warm opt-in TOR and TOR_SERVER; preflight API29/33 passed; final release gates mandatory",
   "physical_phone_tested": false
 }
