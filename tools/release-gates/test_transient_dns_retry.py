@@ -25,3 +25,14 @@ class DnsRetry(unittest.TestCase):
         d=self.data();d['results'][0]=dict(code=204,bytes=0);self.assertFalse(v.eligible(d))
     def test_malformed_result_rejected(self):
         for d in [None,{},dict(vpn=True,results=[None]*4),dict(vpn=True,results=[])]:self.assertFalse(v.eligible(d))
+
+    def test_redacted_exception_type_has_same_existing_retry_contract(self):
+        d=self.data();d['results'][0]['error']='UnknownHostException'
+        self.assertTrue(v.eligible(d))
+        for value in ('UnknownHostExceptionFake','UnknownHostException Fake','UnknownHostException\nSECRET',None,{},True):
+            d['results'][0]['error']=value;self.assertFalse(v.eligible(d))
+    def test_redacted_type_does_not_relax_other_three_probes(self):
+        d=self.data();d['results'][0]['error']='UnknownHostException'
+        for index in (1,2,3):
+            bad=copy.deepcopy(d);bad['results'][index]['code']=-1;self.assertFalse(v.eligible(bad))
+        d['results'][1]['bytes']=1048575;self.assertFalse(v.eligible(d))

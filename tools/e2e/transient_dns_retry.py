@@ -13,8 +13,12 @@ def eligible(data):
     rows = data.get('results')
     if not isinstance(rows, list) or len(rows) != 4 or not all(isinstance(r, dict) for r in rows):
         return False
+    # ProbeFailure now emits an allowlisted type without a potentially private message.
+    # Both spellings denote the same exception; do not match lookalike class names.
+    error = rows[0].get('error')
+    dns_error = isinstance(error, str) and (error == 'UnknownHostException' or error.startswith('UnknownHostException:'))
     return (tuple(r.get('code') for r in rows) == (-1, 200, 200, 204)
-            and str(rows[0].get('error', '')).startswith('UnknownHostException:')
+            and dns_error
             and type(rows[1].get('bytes')) is int and rows[1]['bytes'] >= 1048576
             and not any(r.get('error') for r in rows[1:]))
 
