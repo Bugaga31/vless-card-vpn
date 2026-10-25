@@ -9,10 +9,12 @@ W=/tmp/e2e; mkdir -p $W; FAILS=0
 XRAY=${XRAY:-/tmp/xray/xray}
 python3 -m unittest discover -s tools/e2e -p 'test_*.py' || exit 1
 diagnostic() {
+  # Capture before a later scenario clears logcat/access.log. Never print the raw snapshots.
+  adb logcat -d -s E2E:I VLESS:W AndroidRuntime:E | python3 tools/e2e/snapshot_failure.py --directory "$W" --case "$CASE" --failure "$FAILS"
   { # Preserve only the bounded/redacted summary at the failure, before the next case clears logcat.
-  adb logcat -d -s E2E:I VLESS:W AndroidRuntime:E | python3 tools/e2e/summarize_failure.py --case "$CASE"
+  python3 tools/e2e/summarize_failure.py --case "$CASE" < "$W/failure-${CASE}-${FAILS}-logcat.txt"
   # Host log output is never printed: only fixed-fixture event counts.
-  python3 - "$W/access.log" "$CASE" <<'PYCOUNTS'
+  python3 - "$W/failure-${CASE}-${FAILS}-access.txt" "$CASE" <<'PYCOUNTS'
 import json,pathlib,re,sys
 try:s=pathlib.Path(sys.argv[1]).read_text(errors='replace')[-2000000:]
 except OSError:s=''
@@ -28,7 +30,7 @@ fail() { echo "::error title=e2e::$*"; echo "FAIL: $*"; FAILS=$((FAILS+1)); diag
 KEYS=$($XRAY x25519); PRIV=$(echo "$KEYS" | sed -n 's/^PrivateKey: //p'); PBK=$(echo "$KEYS" | sed -n 's/^Password (PublicKey): //p')
 openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -keyout $W/k.pem -out $W/c.pem -days 2 -subj "/CN=test.local" 2>/dev/null
 U=a00975c5-597e-4c22-a7a7-a84ce5e0691e
-sed -e "s#@PRIV@#$PRIV#g" -e "s#@U@#$U#g" -e "s#@W@#$W#g" tools/e2e/server.json > $W/server.json
+sed -e 's/"loglevel":"warning"/"loglevel":"info"/' -e "s#@PRIV@#$PRIV#g" -e "s#@U@#$U#g" -e "s#@W@#$W#g" tools/e2e/server.json > $W/server.json
 $XRAY run -c $W/server.json > $W/server.log 2>&1 & SRV=$!
 trap 'kill $SRV 2>/dev/null' EXIT
 sleep 2

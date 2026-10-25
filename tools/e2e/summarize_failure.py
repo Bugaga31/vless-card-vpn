@@ -2,7 +2,7 @@
 """Publish only allowlisted counters/booleans, never URLs, addresses, payloads or credentials."""
 import argparse, json, re, sys
 p=argparse.ArgumentParser();p.add_argument('--case',required=True,choices=['setup','single','byedpi','multi','tpws','ownmask','xraydpi','services','auto','auto-eight','auto-chain','proxy','warp']);p.add_argument('--probe',action='store_true');a=p.parse_args()
-text=sys.stdin.read(2_000_000)
+text=sys.stdin.buffer.read(2_000_000).decode('utf-8',errors='replace')
 if a.probe:
     try: data=json.loads(text)
     except (ValueError,TypeError): data={}
@@ -11,6 +11,16 @@ if a.probe:
         err=str(r.get('error','')).split(':',1)[0]
         result['results'].append({k:r.get(k) if type(r.get(k)) is int else None for k in ('code','bytes','ms')})
         result['results'][-1]['error_type']=err if re.fullmatch(r'[A-Za-z]{1,60}(Exception|Error)',err) else ('present' if err else 'none')
+        safe_types={'SSLHandshakeException','SSLProtocolException','SSLPeerUnverifiedException','SSLException','CertificateException','CertificateExpiredException','CertificateNotYetValidException','CertPathValidatorException','CertificateParsingException','UnknownHostException','ConnectException','SocketException','SocketTimeoutException','EOFException','IOException','ProtocolException','MalformedURLException','InterruptedException','SecurityException','IllegalStateException','IllegalArgumentException','Exception','Other'}
+        safe_reasons={'certificate_validation','peer_unverified','timeout','dns','connect','eof','tls_protocol','connection_reset','connection_closed','https_downgrade','redirect_policy','tls_handshake','unclassified'}
+        safe_phases={'url','connect_headers','redirect','body'}
+        causes=r.get('causes',[])
+        if not isinstance(causes,list): causes=[]
+        result['results'][-1].update({
+            'failure_phase':r.get('failure_phase') if isinstance(r.get('failure_phase'),str) and r.get('failure_phase') in safe_phases else 'unknown',
+            'failure_reason':r.get('failure_reason') if isinstance(r.get('failure_reason'),str) and r.get('failure_reason') in safe_reasons else 'unclassified',
+            'causes':[c if isinstance(c,str) and c in safe_types else 'Other' for c in causes[:5]],
+            'body_bytes_before_error':r.get('body_bytes_before_error') if type(r.get('body_bytes_before_error')) is int and 0<=r['body_bytes_before_error']<=2*1024*1024+16384 else None})
 else:
     pools=re.findall(r'pool size=(\d{1,2}) ',text)
     checks=re.findall(r'check ok=(true|false) ms=(-?\d{1,8}) big=(true|false|null) yt=(true|false|null) tg=(true|false|null)',text)
