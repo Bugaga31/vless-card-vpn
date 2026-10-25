@@ -47,7 +47,7 @@ load() { # $1 = state file
   adb shell am force-stop "$PKG" || return 1
   adb push "$W/$1" /data/local/tmp/state.json >/dev/null || return 1
   adb shell "run-as $PKG sh -c 'mkdir -p files && cp /data/local/tmp/state.json files/state.json'" || return 1
-  adb shell am start -W -n "$PKG/.MainActivity" --ez e2e_reload true >/dev/null || return 1
+  adb shell am start -W -n "$PKG/.MainActivity" --ez e2e_reload true --ez e2e_connect "${2:-false}" >/dev/null || return 1
   sleep 1
 }
 waitlog() { # $1 = regex, $2 = seconds
@@ -69,12 +69,28 @@ run_case() { # $1 name, $2 state, $3 seconds to wait for the connect result
   CASE=$1; R=""
   echo "=== case $1"
   adb shell am start -n $PKG/.MainActivity --ez e2e_disconnect true >/dev/null; sleep 3; : > $W/access.log
+  if [ "$1" = single ]; then
+    adb shell settings put system accelerometer_rotation 0
+    adb shell settings put system user_rotation 0
+    sleep 1
+  fi
   adb logcat -c
-  load "$2" || { fail "$1: fixture state load failed"; return; }
-  adb shell am start -n $PKG/.MainActivity --ez e2e_connect true >/dev/null
+  # Start onCreate with both commands: configuration recreation must not replay either.
+  load "$2" true || { fail "$1: fixture state load failed"; return; }
   C=$(waitlog "check ok=|connect failed" ${3:-60}) || { fail "$1: no connect result"; return; }
   echo "app: $C"
   echo "$C" | grep -q "check ok=true" || fail "$1: in-app check through 127.0.0.1:10808 failed"
+  if [ "$1" = single ]; then
+    # The initial Intent contains connect+reload. Rotation recreates this Activity;
+    # replaying it would tear down the live TUN and restart Xray.
+    adb shell settings put system accelerometer_rotation 0
+    adb shell settings put system user_rotation 1
+    waitlog "fixture activity restored" 20 >/dev/null || fail "single: rotation did not recreate Activity"
+    adb shell settings put system user_rotation 0
+    sleep 2
+    LC=$(adb logcat -d -s E2E:I)
+    printf '%s' "$LC" | python3 tools/e2e/verify_activity_recreation.py || fail "single: recreation replayed a command or restarted VPN"
+  fi
   R=$(probe $1); okprobe "$R" || fail "$1: probe app traffic through VPN failed"
   S=$(adb logcat -d -s E2E:I | grep "socks port=" | tail -1); echo "app: $S"
   echo "$S" | grep -q "auth=true" || fail "$1: local SOCKS is not password-protected (stealth)"

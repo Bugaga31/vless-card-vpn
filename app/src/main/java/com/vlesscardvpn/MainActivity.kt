@@ -51,7 +51,7 @@ class MainActivity : ComponentActivity() {
             }
         }
         setContent { AppUi(onConnect = { connect() }, onDisconnect = { com.vlesscardvpn.core.Actions.cancelPrepare(); TunnelService.stop(this) }) }
-        e2e(intent)
+        e2e(intent, restored = savedInstanceState != null)
         importFrom(intent)
     }
 
@@ -83,22 +83,26 @@ class MainActivity : ComponentActivity() {
     }
 
     /** Debug builds only: hooks for the emulator end-to-end check (tools/e2e-android.sh). */
-    private fun e2e(i: android.content.Intent?) {
+    private fun e2e(i: android.content.Intent?, restored: Boolean = false) {
         if (!BuildConfig.DEBUG || i == null) return
-        if (i.getBooleanExtra("e2e_chain", false)) startService(android.content.Intent(this,TunnelService::class.java).putExtra("e2e_chain_check",true))
-        if (i.getBooleanExtra("e2e_reload", false)) {
+        // Consume before any side effect (including permission prompts/recreation).
+        val commands = com.vlesscardvpn.core.E2ECommands.consume(restored,
+            { key -> i.getBooleanExtra(key, false) }, { key -> i.removeExtra(key); Unit })
+        if (restored) android.util.Log.i("E2E", "fixture activity restored")
+        if ("e2e_chain" in commands) startService(android.content.Intent(this,TunnelService::class.java).putExtra("e2e_chain_check",true))
+        if ("e2e_reload" in commands) {
             com.vlesscardvpn.core.Store.reload(this)
             val st = com.vlesscardvpn.core.Store.state.value
             android.util.Log.i("E2E", "fixture state mode=${st.settings.mode} servers=${st.servers.size} selected=${st.selected.size}")
         }
-        if (i.getBooleanExtra("e2e_connect", false)) {
+        if ("e2e_connect" in commands) {
             android.util.Log.i("E2E", "fixture connect permission=${VpnService.prepare(this) != null}")
             connect()
         }
-        if (i.getBooleanExtra("e2e_disconnect", false)) TunnelService.stop(this)
-        if (i.getBooleanExtra("e2e_test", false)) com.vlesscardvpn.core.Actions.testAll()
-        if (i.getBooleanExtra("e2e_dpi", false)) com.vlesscardvpn.core.Actions.findDpi()
-        if (i.getBooleanExtra("e2e_optimize", false)) kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+        if ("e2e_disconnect" in commands) TunnelService.stop(this)
+        if ("e2e_test" in commands) com.vlesscardvpn.core.Actions.testAll()
+        if ("e2e_dpi" in commands) com.vlesscardvpn.core.Actions.findDpi()
+        if ("e2e_optimize" in commands) kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
             // Test action waits for the previous bounded foreground action, rather than
             // treating optimize()'s busy early return as a failed route repair.
             val idle = kotlinx.coroutines.withTimeoutOrNull(60_000) {
@@ -112,7 +116,7 @@ class MainActivity : ComponentActivity() {
             val good = selected.count { it.name in setOf("e2e-reality", "e2e-ws-tls", "e2e-xhttp") }
             android.util.Log.i("E2E", "optimize result=$result dead_selected=$dead good_selected=$good")
         }
-        if (i.getBooleanExtra("e2e_warp", false)) com.vlesscardvpn.core.Actions.setupWarp()
-        if (i.getBooleanExtra("e2e_masks", false)) com.vlesscardvpn.core.Actions.findMasks(com.vlesscardvpn.core.Store.state.value.servers)
+        if ("e2e_warp" in commands) com.vlesscardvpn.core.Actions.setupWarp()
+        if ("e2e_masks" in commands) com.vlesscardvpn.core.Actions.findMasks(com.vlesscardvpn.core.Store.state.value.servers)
     }
 }
