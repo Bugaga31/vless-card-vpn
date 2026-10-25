@@ -95,7 +95,10 @@ run_case multi multi.json
 adb shell am start -n $PKG/.MainActivity --ez e2e_optimize true >/dev/null
 O=$(waitlog "optimize result=" 150) || fail "optimize: no result"
 echo "optimize: $O"; adb logcat -d -s E2E:I | grep "optimize sel=" | tail -1
-echo "$O" | grep -q "result=true" || fail "optimize: did not switch away from the dead server"
+# The return value is a delta, not the final selection: background optimization may
+# have already removed the dead route. Require completed optimization AND actual state.
+echo "$O" | python3 tools/e2e/verify_optimize_selection.py || fail "optimize: dead server remains selected, no working fixture selected, or optimizer failed"
+R=$(probe multi-after-optimize); okprobe "$R" || fail "optimize: other UID cannot transfer through the resulting VPN"
 for p in 8443 8444 8447; do
   c=$(grep -c "email: u$p" $W/access.log); echo "multi: server :$p accepted $c"
   [ "$c" -gt 0 ] || fail "multi: round-robin never used server :$p"

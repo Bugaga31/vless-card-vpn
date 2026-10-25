@@ -99,7 +99,18 @@ class MainActivity : ComponentActivity() {
         if (i.getBooleanExtra("e2e_test", false)) com.vlesscardvpn.core.Actions.testAll()
         if (i.getBooleanExtra("e2e_dpi", false)) com.vlesscardvpn.core.Actions.findDpi()
         if (i.getBooleanExtra("e2e_optimize", false)) kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
-            android.util.Log.i("E2E", "optimize result=${runCatching { com.vlesscardvpn.core.Actions.optimize() }.getOrElse { "error " + it.message }}")
+            // Test action waits for the previous bounded foreground action, rather than
+            // treating optimize()'s busy early return as a failed route repair.
+            val idle = kotlinx.coroutines.withTimeoutOrNull(60_000) {
+                while (com.vlesscardvpn.core.Actions.running.value) kotlinx.coroutines.delay(100)
+                true
+            } == true
+            val result = if (idle) runCatching { com.vlesscardvpn.core.Actions.optimize() }
+                .getOrElse { "error " + it.javaClass.simpleName } else "error BusyTimeout"
+            val selected = com.vlesscardvpn.core.Store.state.value.selected
+            val dead = selected.any { it.name == "e2e-dead" }
+            val good = selected.count { it.name in setOf("e2e-reality", "e2e-ws-tls", "e2e-xhttp") }
+            android.util.Log.i("E2E", "optimize result=$result dead_selected=$dead good_selected=$good")
         }
         if (i.getBooleanExtra("e2e_warp", false)) com.vlesscardvpn.core.Actions.setupWarp()
         if (i.getBooleanExtra("e2e_masks", false)) com.vlesscardvpn.core.Actions.findMasks(com.vlesscardvpn.core.Store.state.value.servers)

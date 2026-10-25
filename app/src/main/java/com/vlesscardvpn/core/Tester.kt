@@ -59,7 +59,7 @@ object Tester {
         val names = servers.map { it.address }.distinct()
         val limit = PowerPolicy.cap(parallel, PhonePower.state.value.tcpParallel)
         val sem = Semaphore(minOf(32, limit))
-        val ips = names.map { h -> async(Bg.io) { sem.withPermit { h to runCatching { InetAddress.getByName(h) }.getOrNull() } } }.awaitAll().toMap()
+        val ips = names.map { h -> async(Bg.io) { sem.withPermit { h to runCatching { InetAddress.getByName(RuntimeProbeAddress.host(h)) }.getOrNull() } } }.awaitAll().toMap()
         servers.filter { !it.isTcpBased }.forEach { onEach(it, if (ips[it.address] != null) 1 else 0) }
         val tcpList = servers.filter { it.isTcpBased }
         tcpList.filter { ips[it.address] == null }.forEach { onEach(it, 0) }
@@ -75,7 +75,7 @@ object Tester {
                 kotlinx.coroutines.withTimeoutOrNull(budgetMs) {
                     CancellableProbe.run { bind ->
                         val socket = Socket(); bind { socket.close() }; val t = System.nanoTime()
-                        socket.use { it.connect(InetSocketAddress(InetAddress.getByName(server.address), server.port), budgetMs.toInt()) }
+                        socket.use { it.connect(InetSocketAddress(InetAddress.getByName(RuntimeProbeAddress.host(server.address)), server.port), budgetMs.toInt()) }
                         ((System.nanoTime() - t) / 1_000_000).toInt().coerceAtLeast(1)
                     }
                 } ?: -1

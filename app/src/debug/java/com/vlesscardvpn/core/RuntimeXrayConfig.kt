@@ -12,8 +12,7 @@ object RuntimeXrayConfig {
             for (j in 0 until servers.length()) {
                 val server = servers.getJSONObject(j)
                 // Exact synthetic aliases only; no generic DNS overrides, CA changes or bypass of authentication.
-                if (Regex("^r163-pool-[0-7]\\.test$").matches(server.optString("address")))
-                    server.put("address", "10.0.2.2")
+                server.put("address", RuntimeProbeAddress.host(server.optString("address")))
             }
         }
         return root.toString()
