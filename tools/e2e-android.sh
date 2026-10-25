@@ -109,6 +109,9 @@ c=$(grep -c "email: u" $W/access.log); echo "byedpi: server lines $c (must be 0;
 
 : > $W/access.log
 run_case multi multi.json
+# Optional mask improvements must not send another hard START during the multi transfer.
+STARTS=$(adb logcat -d -s E2E:I | grep -c 'service command=start state=')
+[ "$STARTS" -eq 1 ] || fail "multi: optional background work hard-restarted VPN"
 # Background speed-up: the selected e2e-dead server must be noticed and dropped (no buttons).
 adb shell am start -n $PKG/.MainActivity --ez e2e_optimize true >/dev/null
 O=$(waitlog "optimize result=" 150) || fail "optimize: no result"

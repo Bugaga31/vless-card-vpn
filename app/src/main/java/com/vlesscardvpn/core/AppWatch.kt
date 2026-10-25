@@ -195,7 +195,7 @@ object AppWatch {
         if (reason != powerReason) { powerReason = reason; say("Нагрузка VPN: ${plan.reason}. Самовосстановление остаётся включено") }
     }
 
-    private suspend fun autopilot(reconnect: () -> Unit) {
+    private suspend fun autopilot(reconnect: () -> Unit, maintenanceReconnect: () -> Unit) {
         val elapsed = android.os.SystemClock.elapsedRealtime()
         if (elapsed - pilotAt < 60000) return
         pilotAt = elapsed
@@ -229,7 +229,7 @@ object AppWatch {
                 if (Diagnose.freeze(p) == Diagnose.Freeze.FROZEN && now - lastSpeedup > 30 * 60_000L) {
                     lastSpeedup = now
                     say("Автопилот: в этой сети загрузка через сервер замирает после ~16 КБ («заморозка» ТСПУ) — ищу сервер и маску, где этого нет")
-                    withContext(Dispatchers.Main) { Actions.boostYoutube() }
+                    withContext(Dispatchers.Main) { Actions.boostYoutube(maintenanceReconnect) }
                 }
             }
         }
@@ -260,7 +260,7 @@ object AppWatch {
             }
         }
         when (pilot(fails, Store.summary.value.heavyMask, Actions.progress.value.running || (Thermal.cooling || ecoOn) && fails < 2, now - lastFix, now - lastLight, now - lastEvolve, slow, now - lastSpeedup)) {
-            "speedup" -> { lastSpeedup = now; say(if (lastMbps > 0) "Автопилот: скорость всего %.1f Мбит/с — ищу серверы и маски быстрее".format(lastMbps) else "Автопилот: сайты открываются медленно (ответ ${slowMs / 1000.0} с) — ищу серверы и маски быстрее"); withContext(Dispatchers.Main) { Actions.boostYoutube() } }
+            "speedup" -> { lastSpeedup = now; say(if (lastMbps > 0) "Автопилот: скорость всего %.1f Мбит/с — ищу серверы и маски быстрее".format(lastMbps) else "Автопилот: сайты открываются медленно (ответ ${slowMs / 1000.0} с) — ищу серверы и маски быстрее"); withContext(Dispatchers.Main) { Actions.boostYoutube(maintenanceReconnect) } }
             "evolve" -> {
                 lastEvolve = now; evoN++
                 val st0 = Store.state.value
@@ -280,7 +280,7 @@ object AppWatch {
                 }
             }
             "fix" -> { lastFix = now; fails = 0; say("Автопилот: интернет через VPN пропал — чиню сам (серверы, маски, обход DPI)"); withContext(Dispatchers.Main) { Actions.fixAll { reconnect() } } }
-            "lighten" -> { lastLight = now; say("Автопилот: маска тяжёлая, видео может тормозить — ищу лёгкую"); withContext(Dispatchers.Main) { Actions.lighten() } }
+            "lighten" -> { lastLight = now; say("Автопилот: маска тяжёлая, видео может тормозить — ищу лёгкую"); withContext(Dispatchers.Main) { Actions.lighten(maintenanceReconnect) } }
         }
     }
 
@@ -313,7 +313,7 @@ object AppWatch {
     private fun countries(): List<String> = Store.state.value.selected.map { Countries.of(it.name) }
 
     /** Runs while the VPN is on. reconnect() re-applies the servers without dropping the tunnel. */
-    fun start(ctx: Context, reconnect: () -> Unit) {
+    fun start(ctx: Context, reconnect: () -> Unit, maintenanceReconnect: () -> Unit) {
         if (job?.isActive == true) return
         val app = ctx.applicationContext; appCtx = app
         job = CoroutineScope(SupervisorJob() + Dispatchers.Default).launch {
@@ -325,23 +325,23 @@ object AppWatch {
                     if (st.gpsSpoof && interactive(app)) GpsMock.follow(app, gpsCountry(st.country, countries())) else GpsMock.stop(app)
                     val pkg = if (st.appAware && interactive(app) && hasAccess(app)) foreground(app) else null
                     val opened = pkg != null && pkg != last
-                    if (opened) { last = pkg!!; PROFILES[pkg]?.let { if (!it.youtube || plan.allowed) handle(app, it, reconnect) } }
+                    if (opened) { last = pkg!!; PROFILES[pkg]?.let { if (!it.youtube || plan.allowed) handle(app, it, reconnect, maintenanceReconnect) } }
                     // usage events only show an app when it opens: until another one opens, the last one is still on screen
                     if (st.autopilot && last.isNotEmpty() && interactive(app)) GUARDS[last]?.let { runCatching { guard(last, it, opened, reconnect) } }
-                    if (st.autopilot) autopilot(reconnect)
+                    if (st.autopilot) autopilot(reconnect, maintenanceReconnect)
                     delay(plan.loopMs)
                 }
             } finally { GpsMock.stop(app); status.value = "" }
         }
     }
 
-    private suspend fun handle(app: Context, need: Need, reconnect: () -> Unit) {
+    private suspend fun handle(app: Context, need: Need, reconnect: () -> Unit, maintenanceReconnect: () -> Unit) {
         if (need.youtube) {
             val net = Net.key(app); val t = ytDone[net] ?: 0
             if (Store.state.value.settings.smartYoutube && System.currentTimeMillis() - t > 6 * 3600_000L && !Actions.progress.value.running) {
                 ytDone[net] = System.currentTimeMillis()
                 say("Открыт ${need.title}: ускоряю видео для этой сети")
-                withContext(Dispatchers.Main) { Actions.boostYoutube() }
+                withContext(Dispatchers.Main) { Actions.boostYoutube(maintenanceReconnect) }
             }
             return
         }

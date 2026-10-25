@@ -754,7 +754,7 @@ object Actions {
      * «Ускорь YouTube» (Помощник): Smart YouTube + phone speed-up on, the network's YouTube decision measured again,
      * heavy masks replaced by light ones, real download speed of the best 5, the fastest selected; reconnects if on.
      */
-    fun boostYoutube() = launch("Ускоряю YouTube") {
+    fun boostYoutube(maintenanceReconnect: (() -> Unit)? = null) = launch("Ускоряю YouTube") {
         val net = Net.key(app)
         Store.update { it.copy(settings = it.settings.copy(smartYoutube = true, turbo = true, blockQuic = true, ytDpi = it.settings.ytDpi - net)) }
         progress.value = progress.value.copy(title = "Ускоряю YouTube: облегчаю маски")
@@ -773,21 +773,21 @@ object Actions {
         selectBest(10, close = true, among = top.filter { s2.state(it).works })
         val viaDpi = runCatching { decideYoutube() }.getOrDefault(false)
         val connected = Tunnel.socks != null
-        if (connected) withContext(Dispatchers.Main) { com.vlesscardvpn.vpn.TunnelService.start(app) }
+        if (connected) withContext(Dispatchers.Main) { maintenanceReconnect?.invoke() ?: com.vlesscardvpn.vpn.TunnelService.start(app) }
         val best = Store.state.value.let { s -> s.selected.maxOfOrNull { s.state(it).kbps } ?: 0 }
         "YouTube: " + (if (best > 0) "лучший сервер качает ${"%.1f".format(best / 1000.0)} Мбит/с" else "скорость не измерилась") +
             (if (viaDpi) ", а напрямую через обход DPI ещё быстрее — YouTube пойдёт им" else "") +
-            ". Включены «Умный YouTube» и ускорение телефона" + if (connected) ", переподключаюсь." else ". Подключитесь — всё применится."
+            ". Включены «Умный YouTube» и ускорение телефона" + if (connected) (if (maintenanceReconnect != null) ", применю в паузе трафика." else ", переподключаюсь.") else ". Подключитесь — всё применится."
     }
 
     /** «Облегчи маску» (Помощник). */
-    fun lighten() = launch("Облегчаю маски") {
+    fun lighten(maintenanceReconnect: (() -> Unit)? = null) = launch("Облегчаю маски") {
         val before = Store.state.value.let { s -> s.selected.count { Masks.byId(s.state(it).maskFor(Net.key(app)))?.let { m -> Masks.cost(m) >= 2 } == true } }
         if (before == 0) return@launch "Тяжёлых масок у выбранных серверов нет — уже самые быстрые."
         lightenMasks(true)
         val after = Store.state.value.let { s -> s.selected.count { Masks.byId(s.state(it).maskFor(Net.key(app)))?.let { m -> Masks.cost(m) >= 2 } == true } }
-        if (after < before && Tunnel.socks != null) withContext(Dispatchers.Main) { com.vlesscardvpn.vpn.TunnelService.start(app) }
-        "Облегчено масок: ${before - after} из $before" + if (after < before && Tunnel.socks != null) " — переподключаюсь." else if (after == before) " (лёгкие маски здесь не прошли — тяжёлые оставлены, иначе не будет работать)." else "."
+        if (after < before && Tunnel.socks != null) withContext(Dispatchers.Main) { maintenanceReconnect?.invoke() ?: com.vlesscardvpn.vpn.TunnelService.start(app) }
+        "Облегчено масок: ${before - after} из $before" + if (after < before && Tunnel.socks != null) (if (maintenanceReconnect != null) " — применю в паузе трафика." else " — переподключаюсь.") else if (after == before) " (лёгкие маски здесь не прошли — тяжёлые оставлены, иначе не будет работать)." else "."
     }
 
     private var catalogAt = -300000L

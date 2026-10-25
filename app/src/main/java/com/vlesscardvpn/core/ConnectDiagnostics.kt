@@ -7,6 +7,13 @@ object ConnectDiagnostics {
     private val types = setOf("IllegalStateException", "IllegalArgumentException", "IOException", "FileNotFoundException", "BindException", "SocketException", "SocketTimeoutException", "UnknownHostException", "CancellationException", "TimeoutCancellationException", "SecurityException", "NullPointerException", "OutOfMemoryError", "RuntimeException", "Exception")
     private val files = setOf("TunnelService.kt", "Actions.kt", "XrayCore.kt", "DpiSet.kt", "DpiProxy.kt", "Tester.kt", "RuntimeChainE2E.kt", "AutoChainRunner.kt", "XrayConfigBuilder.kt", "Store.kt")
 
+    /** Only source locations from known application files; never class names/messages/paths. */
+    fun startCaller(stack: Array<StackTraceElement>): String = stack.firstOrNull {
+        it.className.startsWith("com.vlesscardvpn.") && it.fileName in
+            setOf("MainActivity.kt", "Actions.kt", "Assistant.kt", "BootReceiver.kt", "VpnWidget.kt", "ToggleTileService.kt") &&
+            it.lineNumber in 1..100000
+    }?.let { "${it.fileName}:${it.lineNumber}" } ?: "unknown"
+
     fun describe(scope: String, phase: String, error: Throwable): String {
         val chain = mutableListOf<Throwable>()
         var current: Throwable? = error

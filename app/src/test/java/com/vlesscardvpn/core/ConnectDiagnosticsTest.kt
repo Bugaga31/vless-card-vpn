@@ -34,4 +34,10 @@ class ConnectDiagnosticsTest {
         assertTrue(ConnectDiagnostics.describe("chain","chain_check",IllegalStateException("No verified DPI-server winner")).contains("code=chain_unconfirmed"))
         assertTrue(ConnectDiagnostics.describe("chain","chain_check",IllegalStateException("Measured chain was not applied")).contains("code=chain_not_applied"))
     }
+    @Test fun startCallerSkipsServiceAndHidesUnknownFrames() {
+        val stack = arrayOf(StackTraceElement("com.vlesscardvpn.vpn.TunnelService", "start", "TunnelService.kt", 73),
+            StackTraceElement("com.vlesscardvpn.core.Actions", "SECRET", "Actions.kt", 789))
+        assertEquals("Actions.kt:789",ConnectDiagnostics.startCaller(stack))
+        assertEquals("unknown",ConnectDiagnostics.startCaller(arrayOf(StackTraceElement("com.vlesscardvpn.SECRET","SECRET","private.kt",4))))
+    }
 }

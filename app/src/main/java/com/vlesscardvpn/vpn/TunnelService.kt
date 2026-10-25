@@ -70,6 +70,7 @@ class TunnelService : VpnService() {
         const val IPV6 = "fd66:6c65:7373::1"
 
         fun start(context: Context) {
+            if (BuildConfig.DEBUG) Log.i("E2E", "start request caller=${com.vlesscardvpn.core.ConnectDiagnostics.startCaller(Throwable().stackTrace)}")
             val i = Intent(context, TunnelService::class.java).setAction(ACTION_START)
             if (Build.VERSION.SDK_INT >= 26) context.startForegroundService(i) else context.startService(i)
         }
@@ -113,6 +114,8 @@ class TunnelService : VpnService() {
     private var dpiHeals = 0
     /** Connect attempts that failed to start (Auto mode retries with safer settings). */
     private var connectFails = 0
+    private var maintenanceJob: Job? = null
+    private var connectedElapsed = 0L
     /** Retry after a failed start: links' own settings, no masks. */
     private var safeMasks = false
 
@@ -374,6 +377,7 @@ class TunnelService : VpnService() {
             if (proxy) route = "Прокси SOCKS5 :${socks.port} · HTTP :${settings.httpPort}" + (if (settings.lanShare) " (для всей сети: ${lanIp() ?: "IP телефона"})" else "") + " · $route"
             val since = if (keepTun && prev.since > 0) prev.since else System.currentTimeMillis()
             if (!keepTun) { com.vlesscardvpn.core.Traffic.start(); Tunnel.rx0 = android.net.TrafficStats.getUidRxBytes(android.os.Process.myUid()); Tunnel.tx0 = android.net.TrafficStats.getUidTxBytes(android.os.Process.myUid()) }
+            connectedElapsed = android.os.SystemClock.elapsedRealtime()
             Tunnel.status.value = Tunnel.Status(Tunnel.State.CONNECTED, "Подключено", route, "Проверяю интернет…", null, since)
             watchScreen()
             foreground(if (settings.quietNotification) "Активно" else "Подключено · $route")
@@ -520,7 +524,7 @@ class TunnelService : VpnService() {
                 if (sinceNet < 90_000L && !netHardDone) { netHardDone = true; hardRestart("новая сеть, а интернет не пошёл", force = true); return@launch }
                 if (System.currentTimeMillis() - lastHard > 5 * 60_000L) { hardRestart("после переподключения интернет не пошёл"); return@launch }
             }
-            if (p.works) { healStep = 0; dpiHeals = 0; connectFails = 0; scheduleOptimize(if (com.vlesscardvpn.core.Actions.deepPending || usedServers.size < com.vlesscardvpn.core.AutoEligibility.TOP) 5_000 else 60_000); com.vlesscardvpn.core.AppWatch.start(this@TunnelService) { scope.launch { lock.withLock { connect(soft = true) } } }; watchdog(); standbyScout(); coverTraffic(); torLoop(); serviceRoutes(); autoChainScout(); if (serverless()) rescueLater() } else heal()
+            if (p.works) { healStep = 0; dpiHeals = 0; connectFails = 0; scheduleOptimize(if (com.vlesscardvpn.core.Actions.deepPending || usedServers.size < com.vlesscardvpn.core.AutoEligibility.TOP) 5_000 else 60_000); com.vlesscardvpn.core.AppWatch.start(this@TunnelService, reconnect = { scope.launch { lock.withLock { connect(soft = true) } } }, maintenanceReconnect = { scheduleMaintenanceReconnect() }); watchdog(); standbyScout(); coverTraffic(); torLoop(); serviceRoutes(); autoChainScout(); if (serverless()) rescueLater() } else heal()
         }
     }
 
@@ -758,6 +762,49 @@ class TunnelService : VpnService() {
         scope.launch(Dispatchers.IO) {
             if (!com.vlesscardvpn.core.PhonePower.refresh(this@TunnelService).allowed) return@launch
             WARM.take(com.vlesscardvpn.core.PhonePower.state.value.realParallel).forEach { h -> launch { runCatching { Tester.dnsViaSocks(auth.port, auth.user, auth.pass, h) } } }
+        }
+    }
+
+    /** A lighter mask/faster route is optional: never hard-restart a healthy VPN for it.
+     * Emergency repair keeps its separate immediate reconnect callback. */
+    private fun scheduleMaintenanceReconnect() {
+        if (maintenanceJob?.isActive == true) return
+        val observed = core ?: return
+        val net = Net.key(this)
+        val handle = Net.underlying(this)?.toString()
+        fun current() = core === observed && observed.running && Tunnel.status.value.state == Tunnel.State.CONNECTED &&
+            Tunnel.status.value.checkOk == true && Net.key(this) == net && Net.underlying(this)?.toString() == handle
+        if (!current()) return
+        if (BuildConfig.DEBUG) Log.i("E2E", "maintenance queued")
+        maintenanceJob = scope.launch {
+            try {
+                while (current()) {
+                    val remaining = com.vlesscardvpn.core.MaintenanceReconnectPolicy.remaining(
+                        android.os.SystemClock.elapsedRealtime(), connectedElapsed)
+                    if (remaining > 0) { delay(remaining); continue }
+                    val protect = Store.state.value.settings.protectActiveTraffic
+                    val uid = android.os.Process.myUid()
+                    val rx = android.net.TrafficStats.getUidRxBytes(uid)
+                    val tx = android.net.TrafficStats.getUidTxBytes(uid)
+                    // Conservative: even a slow transfer (or unavailable counters) defers an optional switch.
+                    delay(5000)
+                    val idle = com.vlesscardvpn.core.MaintenanceReconnectPolicy.idle(rx, tx,
+                        android.net.TrafficStats.getUidRxBytes(uid), android.net.TrafficStats.getUidTxBytes(uid))
+                    if (!com.vlesscardvpn.core.MaintenanceReconnectPolicy.mayApply(current(), true, protect, idle)) {
+                        if (!current()) return@launch
+                        continue
+                    }
+                    lock.withLock {
+                        if (current()) {
+                            if (BuildConfig.DEBUG) Log.i("E2E", "maintenance applying=soft")
+                            // teardown must not cancel the coroutine performing this reconnect.
+                            maintenanceJob = null
+                            connect(soft = true)
+                        }
+                    }
+                    return@launch
+                }
+            } finally { if (maintenanceJob === coroutineContext[Job]) maintenanceJob = null }
         }
     }
 
@@ -1106,6 +1153,7 @@ class TunnelService : VpnService() {
     }
 
     private fun teardown(error: String?, keepTun: Boolean = false) {
+        maintenanceJob?.cancel(); maintenanceJob = null
         if (BuildConfig.DEBUG) Log.i("E2E", "teardown state=${Tunnel.status.value.state} keepTun=$keepTun reason=${if(error == null) "restart" else if(error.isEmpty()) "stop" else "error"}")
         chainJob?.cancel();chainJob=null;usedChain=null
         if(error != null || !keepTun) { chainReserves.clear();chainChoice=null;chainEpoch.incrementAndGet() }

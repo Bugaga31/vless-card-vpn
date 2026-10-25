@@ -41,6 +41,8 @@ else:
     result={'failures':failures,'service_events':service_events,'teardown_events':teardown_events,
             'optimize_skips':re.findall(r'optimize skipped=(power|foreground_busy|disabled)\b',text)[-3:],
             'auto_ready_blocked':re.findall(r'auto ready_blocked=(network_changed|cancelled)\b',text)[-3:],
+            'start_callers':re.findall(r'start request caller=((?:MainActivity|Actions|Assistant|BootReceiver|VpnWidget|ToggleTileService)\.kt:[0-9]{1,6}|unknown)(?=\s|$)',text)[-4:],
+            'maintenance_events':re.findall(r'maintenance (queued|applying=soft)\b',text)[-4:],
             'auto_terminal_states':[terminal(message) for _,message in actions[-3:]],
             'last_pool_sizes' :pools[-4:],'last_checks':checks[-2:],
             'connect_failed_count':text.count('connect failed:'),
