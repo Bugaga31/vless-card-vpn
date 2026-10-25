@@ -4,8 +4,9 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class E2ECommandsTest {
+    private val keys = listOf("chain", "reload", "connect", "disconnect", "test", "dpi", "optimize", "warp", "masks").map { "e2e_$it" }
     private fun consume(extras: MutableMap<String, Boolean>, restored: Boolean = false) =
-        E2ECommands.consume(restored, { extras[it] == true }, { extras.remove(it); Unit })
+        E2ECommands.consume(keys, restored, { extras[it] == true }, { extras.remove(it); Unit })
 
     @Test fun initialConnectAndReloadAreConsumedTogetherBeforeDispatch() {
         val extras = mutableMapOf("e2e_reload" to true, "e2e_connect" to true)

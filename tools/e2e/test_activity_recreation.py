@@ -21,3 +21,11 @@ class ActivityRecreationTest(unittest.TestCase):
         self.assertIn('e2e(intent, restored = savedInstanceState != null)',text)
         self.assertLess(text.index('if (!BuildConfig.DEBUG || i == null) return'),text.index('E2ECommands.consume'))
         self.assertNotIn('if (i.getBooleanExtra("e2e_',text)
+
+    def test_command_literals_are_not_retained_by_kept_shared_helper(self):
+        root=Path(__file__).resolve().parents[2]
+        helper=(root/'app/src/main/java/com/vlesscardvpn/core/E2ECommands.kt').read_text()
+        self.assertNotIn('"e2e_',helper)
+        activity=(root/'app/src/main/java/com/vlesscardvpn/MainActivity.kt').read_text()
+        self.assertLess(activity.index('if (!BuildConfig.DEBUG || i == null) return'),activity.index('listOf("e2e_chain"'))
+        self.assertIn('fun consume(keys: List<String>, restored: Boolean',helper)

@@ -86,7 +86,8 @@ class MainActivity : ComponentActivity() {
     private fun e2e(i: android.content.Intent?, restored: Boolean = false) {
         if (!BuildConfig.DEBUG || i == null) return
         // Consume before any side effect (including permission prompts/recreation).
-        val commands = com.vlesscardvpn.core.E2ECommands.consume(restored,
+        val commands = com.vlesscardvpn.core.E2ECommands.consume(
+            listOf("e2e_chain", "e2e_reload", "e2e_connect", "e2e_disconnect", "e2e_test", "e2e_dpi", "e2e_optimize", "e2e_warp", "e2e_masks"), restored,
             { key -> i.getBooleanExtra(key, false) }, { key -> i.removeExtra(key); Unit })
         if (restored) android.util.Log.i("E2E", "fixture activity restored")
         if ("e2e_chain" in commands) startService(android.content.Intent(this,TunnelService::class.java).putExtra("e2e_chain_check",true))
