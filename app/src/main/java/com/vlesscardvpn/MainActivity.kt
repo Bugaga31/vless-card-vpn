@@ -86,8 +86,15 @@ class MainActivity : ComponentActivity() {
     private fun e2e(i: android.content.Intent?) {
         if (!BuildConfig.DEBUG || i == null) return
         if (i.getBooleanExtra("e2e_chain", false)) startService(android.content.Intent(this,TunnelService::class.java).putExtra("e2e_chain_check",true))
-        if (i.getBooleanExtra("e2e_reload", false)) com.vlesscardvpn.core.Store.reload(this)
-        if (i.getBooleanExtra("e2e_connect", false)) connect()
+        if (i.getBooleanExtra("e2e_reload", false)) {
+            com.vlesscardvpn.core.Store.reload(this)
+            val st = com.vlesscardvpn.core.Store.state.value
+            android.util.Log.i("E2E", "fixture state mode=${st.settings.mode} servers=${st.servers.size} selected=${st.selected.size}")
+        }
+        if (i.getBooleanExtra("e2e_connect", false)) {
+            android.util.Log.i("E2E", "fixture connect permission=${VpnService.prepare(this) != null}")
+            connect()
+        }
         if (i.getBooleanExtra("e2e_disconnect", false)) TunnelService.stop(this)
         if (i.getBooleanExtra("e2e_test", false)) com.vlesscardvpn.core.Actions.testAll()
         if (i.getBooleanExtra("e2e_dpi", false)) com.vlesscardvpn.core.Actions.findDpi()

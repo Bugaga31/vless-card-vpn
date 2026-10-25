@@ -9,7 +9,15 @@ W=/tmp/e2e; mkdir -p $W; FAILS=0
 XRAY=${XRAY:-/tmp/xray/xray}
 python3 -m unittest discover -s tools/e2e -p 'test_*.py' || exit 1
 diagnostic() {
-  adb logcat -d -s E2E:I | python3 tools/e2e/summarize_failure.py --case "$CASE"
+  adb logcat -d -s E2E:I VLESS:W AndroidRuntime:E | python3 tools/e2e/summarize_failure.py --case "$CASE"
+  # Host log output is never printed: only fixed-fixture event counts.
+  python3 - "$W/access.log" "$CASE" <<'PYCOUNTS'
+import json,pathlib,re,sys
+try:s=pathlib.Path(sys.argv[1]).read_text(errors='replace')[-2000000:]
+except OSError:s=''
+counts={str(p):len(re.findall(r'email: u'+str(p)+r'\b',s)) for p in (8443,8444,8447)}
+print('::notice title=E2E fixture server counts::'+json.dumps({'case':sys.argv[2],'accepted':counts},separators=(',',':')))
+PYCOUNTS
   if [ -n "${R:-}" ]; then printf '%s' "$R" | python3 tools/e2e/summarize_failure.py --case "$CASE" --probe; fi
 }
 fail() { echo "::error title=e2e::$*"; echo "FAIL: $*"; FAILS=$((FAILS+1)); diagnostic; }
@@ -59,7 +67,8 @@ run_case() { # $1 name, $2 state, $3 seconds to wait for the connect result
   CASE=$1; R=""
   echo "=== case $1"
   adb shell am start -n $PKG/.MainActivity --ez e2e_disconnect true >/dev/null; sleep 3; : > $W/access.log
-  load "$2" || { fail "$1: fixture state load failed"; return; }; adb logcat -c
+  adb logcat -c
+  load "$2" || { fail "$1: fixture state load failed"; return; }
   adb shell am start -n $PKG/.MainActivity --ez e2e_connect true >/dev/null
   C=$(waitlog "check ok=|connect failed" ${3:-60}) || { fail "$1: no connect result"; return; }
   echo "app: $C"
