@@ -195,17 +195,18 @@ object AppWatch {
         if (reason != powerReason) { powerReason = reason; say("Нагрузка VPN: ${plan.reason}. Самовосстановление остаётся включено") }
     }
 
-    private suspend fun autopilot(reconnect: () -> Unit, maintenanceReconnect: () -> Unit) {
+    private suspend fun autopilot(reconnect: () -> Unit, maintenanceReconnect: () -> Unit, connectedAt: () -> Long) {
         val elapsed = android.os.SystemClock.elapsedRealtime()
         if (elapsed - pilotAt < 60000) return
         pilotAt = elapsed
         val plan = appCtx?.let { PhonePower.refresh(it) } ?: return
         powerNote(plan)
-        if (plan.allowed) appCtx?.let { Updater.check(ctx = it); CloudSync.auto(it) } // hourly APK checks / 3 h private sync while VPN monitoring runs
+        val optionalAllowed = MaintenanceReconnectPolicy.mayProbe(elapsed, connectedAt(), plan.allowed)
+        if (optionalAllowed) appCtx?.let { Updater.check(ctx = it); CloudSync.auto(it) } // hourly APK checks / 3 h private sync while VPN monitoring runs
         // battery saver on or < 20 %: only what keeps the internet working (fix, switching) — no evolution, revival,
         // freeze/latency/speed checks; they come back when the phone charges
-        val eco = !plan.allowed
-        if (plan.allowLight) appCtx?.let { Report.auto(it) } // shared cloud: pull what all phones learned, send this one's report
+        val eco = !optionalAllowed
+        if (MaintenanceReconnectPolicy.mayProbe(elapsed, connectedAt(), plan.allowLight)) appCtx?.let { Report.auto(it) } // shared cloud: pull what all phones learned, send this one's report
         ecoOn = eco
         val s = Tunnel.status.value
         fails = if (s.checkOk == false) fails + 1 else 0
@@ -313,7 +314,7 @@ object AppWatch {
     private fun countries(): List<String> = Store.state.value.selected.map { Countries.of(it.name) }
 
     /** Runs while the VPN is on. reconnect() re-applies the servers without dropping the tunnel. */
-    fun start(ctx: Context, reconnect: () -> Unit, maintenanceReconnect: () -> Unit) {
+    fun start(ctx: Context, reconnect: () -> Unit, maintenanceReconnect: () -> Unit, connectedAt: () -> Long) {
         if (job?.isActive == true) return
         val app = ctx.applicationContext; appCtx = app
         job = CoroutineScope(SupervisorJob() + Dispatchers.Default).launch {
@@ -328,7 +329,7 @@ object AppWatch {
                     if (opened) { last = pkg!!; PROFILES[pkg]?.let { if (!it.youtube || plan.allowed) handle(app, it, reconnect, maintenanceReconnect) } }
                     // usage events only show an app when it opens: until another one opens, the last one is still on screen
                     if (st.autopilot && last.isNotEmpty() && interactive(app)) GUARDS[last]?.let { runCatching { guard(last, it, opened, reconnect) } }
-                    if (st.autopilot) autopilot(reconnect, maintenanceReconnect)
+                    if (st.autopilot) autopilot(reconnect, maintenanceReconnect, connectedAt)
                     delay(plan.loopMs)
                 }
             } finally { GpsMock.stop(app); status.value = "" }

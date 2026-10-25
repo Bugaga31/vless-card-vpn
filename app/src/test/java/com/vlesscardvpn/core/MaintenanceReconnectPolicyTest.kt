@@ -34,4 +34,24 @@ class MaintenanceReconnectPolicyTest {
         assertTrue(MaintenanceReconnectPolicy.mayApply(true,true,false,false))
         assertFalse(MaintenanceReconnectPolicy.mayApply(true,false,false,false))
     }
+    @Test fun optionalProbeCannotCompeteWithInitialTlsHandshake() {
+        assertFalse(MaintenanceReconnectPolicy.mayProbe(100,100,true))
+        assertFalse(MaintenanceReconnectPolicy.mayProbe(30_099,100,true))
+        assertTrue(MaintenanceReconnectPolicy.mayProbe(30_100,100,true))
+    }
+    @Test fun newConnectionRestartsProtectionWithoutResettingAutoBudget() {
+        assertTrue(MaintenanceReconnectPolicy.mayProbe(60_000,100,true))
+        assertFalse(MaintenanceReconnectPolicy.mayProbe(60_000,60_000,true))
+        assertFalse(MaintenanceReconnectPolicy.mayProbe(99,100,true))
+    }
+    @Test fun startupExpiryCannotOverridePowerOrTrafficProtection() {
+        assertFalse(MaintenanceReconnectPolicy.mayProbe(60_000,100,false))
+    }
+    @Test fun optionalDeferralDoesNotSuppressEmergencyRepair() {
+        val busy = !MaintenanceReconnectPolicy.mayProbe(100,100,true)
+        assertNull(AppWatch.pilot(0,true,busy,600_000,7_200_000))
+        // Production bypasses optional/power busy only for two actual failed checks.
+        val failures = 2
+        assertEquals("fix", AppWatch.pilot(failures,true,busy && failures < 2,600_000,7_200_000))
+    }
 }

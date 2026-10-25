@@ -27,3 +27,21 @@ class MaintenanceWiringTest(unittest.TestCase):
         text='start request caller=Actions.kt:789\n'*10+'start request caller=SECRET.kt:42\n'
         out=subprocess.check_output([sys.executable,str(Path(__file__).with_name('summarize_failure.py')),'--case','multi'],input=text,text=True)
         d=json.loads(out.split('::',2)[-1]);self.assertEqual(['Actions.kt:789']*4,d['start_callers']);self.assertNotIn('SECRET',out)
+
+    def test_optional_load_waits_for_current_connection_not_only_reconnect(self):
+        s=(ROOT/'app/src/main/java/com/vlesscardvpn/vpn/TunnelService.kt').read_text()
+        body=s[s.index('private fun scheduleOptimize('):s.index('private suspend fun userActive()')]
+        self.assertLess(body.index('if (startupRemaining > 0)'),body.index('Actions.optimize()'))
+        self.assertIn('connectedAt = { connectedElapsed }',s)
+        a=(ROOT/'app/src/main/java/com/vlesscardvpn/core/AppWatch.kt').read_text()
+        self.assertIn('val optionalAllowed = MaintenanceReconnectPolicy.mayProbe(elapsed, connectedAt(), plan.allowed)',a)
+        self.assertIn('val eco = !optionalAllowed',a)
+        self.assertIn('(Thermal.cooling || ecoOn) && fails < 2',a)
+        self.assertIn('Actions.fixAll { reconnect() }',a)
+    def test_repair_and_fast_auto_do_not_use_optional_startup_delay(self):
+        s=(ROOT/'app/src/main/java/com/vlesscardvpn/vpn/TunnelService.kt').read_text()
+        # Startup guard belongs to background optimizer, never the connect or heal path.
+        connect=s[s.index('private suspend fun connect('):s.index('private fun scheduleMaintenanceReconnect()')]
+        self.assertNotIn('startupRemaining',connect)
+        self.assertNotIn('MaintenanceReconnectPolicy.mayProbe',connect)
+        self.assertIn('else heal()',connect)

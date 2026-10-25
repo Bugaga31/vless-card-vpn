@@ -524,7 +524,7 @@ class TunnelService : VpnService() {
                 if (sinceNet < 90_000L && !netHardDone) { netHardDone = true; hardRestart("новая сеть, а интернет не пошёл", force = true); return@launch }
                 if (System.currentTimeMillis() - lastHard > 5 * 60_000L) { hardRestart("после переподключения интернет не пошёл"); return@launch }
             }
-            if (p.works) { healStep = 0; dpiHeals = 0; connectFails = 0; scheduleOptimize(if (com.vlesscardvpn.core.Actions.deepPending || usedServers.size < com.vlesscardvpn.core.AutoEligibility.TOP) 5_000 else 60_000); com.vlesscardvpn.core.AppWatch.start(this@TunnelService, reconnect = { scope.launch { lock.withLock { connect(soft = true) } } }, maintenanceReconnect = { scheduleMaintenanceReconnect() }); watchdog(); standbyScout(); coverTraffic(); torLoop(); serviceRoutes(); autoChainScout(); if (serverless()) rescueLater() } else heal()
+            if (p.works) { healStep = 0; dpiHeals = 0; connectFails = 0; scheduleOptimize(if (com.vlesscardvpn.core.Actions.deepPending || usedServers.size < com.vlesscardvpn.core.AutoEligibility.TOP) 5_000 else 60_000); com.vlesscardvpn.core.AppWatch.start(this@TunnelService, reconnect = { scope.launch { lock.withLock { connect(soft = true) } } }, maintenanceReconnect = { scheduleMaintenanceReconnect() }, connectedAt = { connectedElapsed }); watchdog(); standbyScout(); coverTraffic(); torLoop(); serviceRoutes(); autoChainScout(); if (serverless()) rescueLater() } else heal()
         }
     }
 
@@ -816,6 +816,10 @@ class TunnelService : VpnService() {
             var calm = 0
             while (Tunnel.status.value.state == Tunnel.State.CONNECTED) {
                 while (asleep() && Tunnel.status.value.state == Tunnel.State.CONNECTED) delay(60_000) // no re-tests while the phone sleeps
+                // Starting test cores/downloads is itself load, even when their resulting reconnect is deferred.
+                val startupRemaining = com.vlesscardvpn.core.MaintenanceReconnectPolicy.remaining(
+                    android.os.SystemClock.elapsedRealtime(), connectedElapsed)
+                if (startupRemaining > 0) { delay(startupRemaining); continue }
                 if (!com.vlesscardvpn.core.PhonePower.refresh(this@TunnelService).allowLight) { delay(60_000); continue }
                 if (Store.state.value.settings.protectActiveTraffic && userActive() &&
                     !(Store.state.value.settings.mode == Mode.AUTO && usedServers.size < com.vlesscardvpn.core.AutoEligibility.TOP)) { delay(60_000); continue } // hot phone: no background re-tests
