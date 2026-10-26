@@ -5,27 +5,24 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** Charging + screen off is the best window for heavy background work (1.2.45 optimizer). */
 class PowerPolicyChargeWorkR157Test {
-
     @Test
-    fun `charging and screen off allows full parallel work`() {
+    fun `charging does not override quiet screen`() {
         val plan = PowerPolicy.evaluate(PowerPolicy.Input(0, charging = true, screen = false), PowerPolicy.Options())
-        assertTrue(plan.allowed)
-        assertTrue(plan.reason.contains("Зарядка"))
-        assertEquals(64, plan.tcpParallel)
-        assertEquals(6, plan.realParallel)
-        assertTrue(plan.allowLight)
-        assertFalse(plan.deferTraffic)
-        assertEquals(3000, plan.loopMs)
+        assertFalse(plan.allowed)
+        assertFalse(plan.allowLight)
+        assertTrue(plan.reason.contains("Экран"))
+        assertEquals(16, plan.tcpParallel)
+        assertEquals(2, plan.realParallel)
     }
 
     @Test
-    fun `fast profile on the charger gets the fast numbers`() {
+    fun `fast profile cannot override quiet screen`() {
         val plan = PowerPolicy.evaluate(PowerPolicy.Input(0, charging = true, screen = false), PowerPolicy.Options(profile = "fast"))
-        assertTrue(plan.allowed)
-        assertEquals(128, plan.tcpParallel)
-        assertEquals(12, plan.realParallel)
+        assertFalse(plan.allowed)
+        assertFalse(plan.allowLight)
+        assertEquals(16, plan.tcpParallel)
+        assertEquals(2, plan.realParallel)
     }
 
     @Test
@@ -36,8 +33,8 @@ class PowerPolicyChargeWorkR157Test {
 
     @Test
     fun `metered network still gates the charging window`() {
-        assertFalse(PowerPolicy.evaluate(PowerPolicy.Input(0, charging = true, screen = false, metered = true), PowerPolicy.Options()).allowed)
-        assertTrue(PowerPolicy.evaluate(PowerPolicy.Input(0, charging = true, screen = false, metered = true), PowerPolicy.Options(wifiOnly = false)).allowed)
+        assertFalse(PowerPolicy.evaluate(PowerPolicy.Input(0, charging = true, metered = true), PowerPolicy.Options()).allowed)
+        assertTrue(PowerPolicy.evaluate(PowerPolicy.Input(0, charging = true, metered = true), PowerPolicy.Options(wifiOnly = false)).allowed)
     }
 
     @Test
