@@ -1,0 +1,6 @@
+{
+  "ready": true,
+  "scope": "Experimental local chat, constrained neural Auto ordering and app-only energy policy implemented. Publication still requires this workflow JVM/lint/build/signature/package/security gates. Full Android E2E and physical-phone testing explicitly not performed; no all-phone LLM or quality/energy guarantee. Stable Latest unchanged.",
+  "android_e2e_required_for_this_preview": false,
+  "physical_phone_tested": false
+}

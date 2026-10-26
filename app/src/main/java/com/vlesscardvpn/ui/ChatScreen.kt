@@ -87,6 +87,7 @@ fun ChatScreen() {
                     Tile("Лучший", if (sum.bestMs > 0) "${sum.bestMs} мс" + (if (sum.bestKbps > 0) " · " + Actions.mbps(sum.bestKbps) else "") else "—",
                         MaterialTheme.colorScheme.onSurface, Modifier.weight(1f))
                 }
+                LocalAiPanel()
                 Text(com.vlesscardvpn.core.NeuralRouting.report(com.vlesscardvpn.core.Net.key(ctx)), fontSize = 14.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Text("Ранжирует маршруты и маски. Поиск — по вашему запросу.", fontSize = 14.sp,

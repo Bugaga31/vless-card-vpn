@@ -19,7 +19,7 @@ object Assistant {
     /** [auto]: an order («ускорь YouTube») — the first button runs right away. */
     data class Msg(val mine: Boolean, val text: String, val buttons: List<Btn> = emptyList(), val auto: Boolean = false)
 
-    const val HELLO = "Привет! Я Equilibrium — локальный помощник сети. Я не языковая модель.  Спросите, что режут в вашей сети, какая маска лучше, почему медленно, " +
+    const val HELLO = "Привет! Я Equilibrium — помощник сети. В панели можно отдельно скачать и включить разговорную модель. Без неё отвечаю по правилам и измерениям.  Спросите, что режут в вашей сети, какая маска лучше, почему медленно, " +
         "что с телефоном — или скажите, что сделать: «ускорь YouTube», «смени маску», «облегчи маску», «включи авто», «включи турбо»."
     val START = listOf(Btn("Что режут в моей сети?", "что режут в моей сети"), Btn("Лучшие маски", "какие маски лучше"),
         Btn("Почему медленно?", "почему медленно"), Btn("Что ты умеешь?", "помощь"))
@@ -273,7 +273,27 @@ object Assistant {
         val t = text.trim(); if (t.isEmpty()) return
         if (t.startsWith("!")) { run(app, t); return }
         post(Msg(true, t))
-        val a = answer(t, facts(app))
+        com.vlesscardvpn.ai.LocalAi.init(app)
+        val direct = answer(t, facts(app))
+        // Explicit commands, stop/disconnect and browser searches bypass slow generation.
+        if (com.vlesscardvpn.ai.LocalAi.state.value.enabled && !direct.auto &&
+            direct.buttons.none { it.cmd.startsWith("!site ") || it.cmd.startsWith("!web ") }) {
+            val f = facts(app)
+            val evidence = "connected=${f.connected};data=${Tunnel.status.value.checkOk};servers=${f.servers};working=${f.working}"
+            val ticket = com.vlesscardvpn.ai.LocalAutoControl.ticket()
+            com.vlesscardvpn.ai.LocalAi.ask(app, t, evidence) { reply ->
+                if (reply == null) post(Msg(false, "Локальная модель недоступна или не уложилась в лимит. Ответ по правилам: " + direct.text, direct.buttons))
+                else {
+                    val auto = com.vlesscardvpn.ai.LocalAutoControl.enabled &&
+                        com.vlesscardvpn.ai.LocalAutoControl.current(ticket) && reply.command in listOf("!auto", "!test", "!masks") && !Actions.progress.value.running
+                    post(Msg(false, "Локальная модель · не сетевой тест\n" + reply.text,
+                        if (auto) emptyList() else reply.command?.let { listOf(Btn("Подтвердить предложение", it)) } ?: emptyList()))
+                    if (auto) { post(Msg(false, "Нейроконтроллер запускает разрешённое действие: ${reply.command}. Итог определят реальные проверки.")); run(app, reply.command!!, quiet = true) }
+                }
+            }
+            return
+        }
+        val a = direct
         post(a)
         if (a.auto) { run(app, a.buttons.first().cmd, quiet = true); return }
         // a site in the question: check right away (one tap less)
@@ -282,6 +302,9 @@ object Assistant {
 
     /** Commands of the buttons; results come back as messages. */
     fun run(app: android.content.Context, cmd: String, quiet: Boolean = false) {
+        if (cmd in listOf("!disconnect", "!connect")) {
+            com.vlesscardvpn.ai.LocalAi.cancel(); com.vlesscardvpn.ai.LocalAutoControl.invalidate()
+        }
         when {
             cmd.startsWith("!web ") -> {
                 val url = AssistantWebSearch.url(cmd.removePrefix("!web "))
@@ -326,7 +349,7 @@ object Assistant {
                 if (rolled > 0) { reconnect(app); post(Msg(false, "Кости брошены: случайная маска на " + rolled + " сервер(а/ов)." + if (Tunnel.socks != null) " Переподключаюсь." else " Нажмите «Подключить».")) }
                 else post(Msg(false, "Нечего бросать — нет подходящих масок.", listOf(Btn("Подобрать маскировку", "!masks"))))
             }
-            cmd == "!auto" -> { Store.update { it.copy(settings = it.settings.copy(mode = Mode.AUTO)) }; reconnect(app); post(Msg(false, "Режим «Авто» включён" + if (Tunnel.socks != null) " — переподключаюсь." else ". Нажмите «Подключить».")) }
+            cmd == "!auto" -> { com.vlesscardvpn.ai.LocalAi.preparePolicy(app); Store.update { it.copy(settings = it.settings.copy(mode = Mode.AUTO)) }; reconnect(app); post(Msg(false, "Режим «Авто» включён" + if (Tunnel.socks != null) " — переподключаюсь." else ". Нажмите «Подключить».")) }
             cmd == "!connect" -> {
                 if (Store.state.value.settings.proxyOnly || android.net.VpnService.prepare(app) == null) { com.vlesscardvpn.vpn.TunnelService.start(app); post(Msg(false, "Подключаюсь…")) }
                 else post(Msg(false, "Нажмите «Подключить» на главной один раз — Android спросит разрешение на VPN, дальше смогу сам."))

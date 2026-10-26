@@ -91,7 +91,7 @@ object Brain {
         runCatching { learn(net, one, state(one), works, weight = 0.2) }
     }
     fun order(net: String, list: List<Server>, state: (Server) -> ServerState): List<Server> =
-        list.sortedWith(compareByDescending<Server> { (p(net, it, state(it)) * 10).toInt() }.thenBy { state(it).score }
+        list.sortedWith(compareByDescending<Server> { (p(net, it, state(it)) * 10).toInt() }.thenBy { com.vlesscardvpn.ai.LocalAutoControl.tieScore(net, state(it)) }.thenBy { state(it).score }
             .thenBy { state(it).tcpMs.let { t -> if (t > 0) t else Int.MAX_VALUE } })
 
     /** Reject malformed / non-finite / out-of-range values instead of poisoning all future predictions. */

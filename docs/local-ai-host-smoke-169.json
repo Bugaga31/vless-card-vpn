@@ -1,0 +1,21 @@
+{
+  "platform": "Linux x86_64 host JVM/JNI, not Android",
+  "llama_cpp_sha": "9b8446b91434e0c0cdc293baf0b29c099eaaa0c7",
+  "model_sha256": "74a4da8c9fdbcd15bd1f6d01d621410d31c6fc00986f5eb687824e7b93d7a9db",
+  "chat_smoke": {
+    "passed": true,
+    "seconds": 14.5,
+    "bytes": 42,
+    "observation": "Generated Russian text; called itself a Telegram assistant rather than VPN assistant, demonstrating limited accuracy."
+  },
+  "grammar_plan_smoke": {
+    "passed": true,
+    "seconds": 13.0,
+    "bytes": 35,
+    "output": "PLAN=balanced\nPOWER=eco\nACTION=none"
+  },
+  "android_inference_tested": false,
+  "huihui_inference_tested": false,
+  "physical_phone_tested": false,
+  "limitations": "Single-run functional smoke only, not a speed/quality/energy benchmark. Timings are not phone-performance claims. App UI and Android IPC still require device testing."
+}

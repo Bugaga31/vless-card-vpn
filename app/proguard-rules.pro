@@ -24,3 +24,6 @@
 # Readable stack traces in crash reports.
 -keepattributes SourceFile,LineNumberTable
 -renamesourcefileattribute SourceFile
+
+# Names are part of the pinned JNI entry point.
+-keep class com.vlesscardvpn.ai.LocalAiNative { *; }

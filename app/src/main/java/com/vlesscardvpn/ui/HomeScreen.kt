@@ -46,6 +46,12 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
     val availableOffers by com.vlesscardvpn.core.Offers.items.collectAsState()
     val working = busy
     val mode = cfg.mode
+    val ai by com.vlesscardvpn.ai.LocalAi.state.collectAsState()
+    val energy by com.vlesscardvpn.core.PhonePower.state.collectAsState()
+    var aiDialog by remember { mutableStateOf(false) }
+    if (aiDialog) AlertDialog(onDismissRequest = { aiDialog = false }, title = { Text("Интеллект и энергия") },
+        text = { Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) { LocalAiPanel() } },
+        confirmButton = { TextButton(onClick = { aiDialog = false }) { Text("Готово") } })
     var torDialog by remember { mutableStateOf(false) }
     if (torDialog) AlertDialog(onDismissRequest = { torDialog = false },
         title = { Text("Настройки Tor") },
@@ -118,7 +124,7 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
         fun reconnect() { if (status.state == Tunnel.State.CONNECTED) onConnect() }
         val on = status.state == Tunnel.State.CONNECTED
         val busy = status.state == Tunnel.State.CONNECTING
-        val color = when { on && status.checkOk == false -> Warn; on -> Good; busy -> Accent; else -> MaterialTheme.colorScheme.primary }
+        val color = when { on && status.checkOk == true -> Good; on -> Warn; busy -> Accent; else -> MaterialTheme.colorScheme.primary }
         PowerButton(on, busy, color) { if (on || busy) onDisconnect() else onConnect() }
         if (status.message.isNotEmpty()) Text(status.message, color = if (status.state == Tunnel.State.ERROR) Bad else MaterialTheme.colorScheme.onBackground,
             textAlign = TextAlign.Center, fontWeight = FontWeight.Medium)
@@ -127,13 +133,23 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
         Card(Modifier.fillMaxWidth().padding(top = 16.dp), shape = RoundedCornerShape(20.dp),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(if (busy) "Ищем вашу волну" else if (on) "Маршрут подключён" else "Готовы к подключению", fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
+                Text(if (busy) "Проверяем маршрут" else if (on && status.checkOk == true) "Передача данных подтверждена" else if (on) "Туннель включён · данные не подтверждены" else "Готовы к подключению", fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
                 if (busy) LiveProgress(stop = false) { it.running }
                 Text(if (busy) "Сравниваем маршруты и проверяем связь. Кнопка выше отменяет подключение; проценты показываются только для известного числа проверок."
                     else "Авто учитывает память этой сети и облачные подсказки. Решает проверка на вашем устройстве.",
                     fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = .35f))
-                Text(cloudStatus, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
+                Text(cloudStatus, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 14.sp)
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(if (com.vlesscardvpn.ai.LocalAutoControl.enabled) "Auto · нейроконтроль" else "Auto · обычный поиск",
+                            fontWeight = FontWeight.Medium, fontSize = 14.sp)
+                        Text(if (ai.busy) "Модель работает отдельно от VPN" else if (ai.enabled) "Локальный чат включён" else "Модель не обязательна для подключения",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 14.sp)
+                    }
+                    TextButton(onClick = { aiDialog = true }) { Text("Настроить AI") }
+                }
+                Text("Энергия · " + energy.reason, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 14.sp)
             }
         }
         val pausedUntil by Tunnel.pausedUntil.collectAsState()

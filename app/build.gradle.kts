@@ -118,6 +118,7 @@ android {
     sourceSets["main"].jniLibs.srcDir(layout.buildDirectory.dir("generated/byedpi"))
     sourceSets["main"].jniLibs.srcDir(layout.buildDirectory.dir("generated/hev"))
     sourceSets["main"].jniLibs.srcDir(layout.buildDirectory.dir("generated/tor"))
+    sourceSets["main"].jniLibs.srcDir(layout.buildDirectory.dir("generated/local-ai"))
 }
 
 
@@ -190,3 +191,14 @@ tasks.withType<org.gradle.api.tasks.testing.Test>().configureEach {
         })
     }
 }
+
+// Local chat is isolated from VPN; unsupported 32-bit phones keep deterministic Auto.
+val buildLocalAi by tasks.registering(Exec::class) {
+    inputs.dir(rootProject.file("native/local-ai"))
+    inputs.file(rootProject.file("native/build-local-ai.py"))
+    inputs.property("armOnly", armOnly)
+    outputs.dir(layout.buildDirectory.dir("generated/local-ai"))
+    commandLine("python3", rootProject.file("native/build-local-ai.py").absolutePath, sdkDir(),
+        layout.buildDirectory.dir("generated/local-ai").get().asFile.absolutePath, if (armOnly) "arm" else "all")
+}
+tasks.named("preBuild").configure { dependsOn(buildLocalAi) }

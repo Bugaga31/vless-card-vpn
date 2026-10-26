@@ -62,7 +62,7 @@ object Actions {
         progress.value = progress.value.copy(running = false, message = "Сеть изменилась — старые проверки отменены")
     }
 
-    fun cancel() { job?.cancel(); progress.value = progress.value.copy(running = false, message = "Остановлено") }
+    fun cancel() { com.vlesscardvpn.ai.LocalAi.cancel(); com.vlesscardvpn.ai.LocalAutoControl.invalidate(); job?.cancel(); progress.value = progress.value.copy(running = false, message = "Остановлено") }
 
     /** One in-flight public refresh; never block the connect button on mirror timeouts. */
     fun refreshPublicCloud() {
@@ -1347,6 +1347,7 @@ object Actions {
 
     /** Cached cloud/network candidates first; no whole-catalog TCP scan or video downloads before first connect. */
     suspend fun quickTest(list: List<Server>, onFirst: ((Server) -> Unit)? = null, attempted: MutableSet<String> = mutableSetOf()): String {
+        if (::app.isInitialized) com.vlesscardvpn.ai.LocalAi.preparePolicy(app)
         CloudSpeed.loadCached(app)
         val st = Store.state.value
         val untried = list.filter { it.id !in attempted }
