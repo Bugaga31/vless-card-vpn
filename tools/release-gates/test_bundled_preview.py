@@ -19,6 +19,8 @@ class BundledPreviewTest(unittest.TestCase):
         self.assertIn('installBundle(app)',download)
         self.assertIn('app.assets.open("models/qwen05.gguf")',s)
         self.assertIn('previous.join()',s)
+        self.assertIn('withTimeoutOrNull(1500) { died.await() }',s)
+        self.assertIn('service.linkToDeath(death, 0)',s)
     def test_experimental_workflow_is_not_a_stable_release(self):
         s=(ROOT/'.github/workflows/bundled-chat-preview.yml').read_text()
         self.assertIn("branches: ['fix/equilibrium-bundled-model-170']",s)

@@ -245,6 +245,9 @@ object LocalAi {
     }
     private suspend fun infer(ctx: Context, id: String, prompt: String, planner: Boolean): String {
         var bound = false
+        var remote: IBinder? = null
+        val died = CompletableDeferred<Unit>()
+        val death = IBinder.DeathRecipient { died.complete(Unit) }
         lateinit var connection: ServiceConnection
         try {
             return suspendCancellableCoroutine { c ->
@@ -257,6 +260,8 @@ object LocalAi {
                 connection = object : ServiceConnection {
                     override fun onServiceConnected(name: ComponentName, service: IBinder) {
                         if (!c.isActive) return
+                        remote = service
+                        runCatching { service.linkToDeath(death, 0) }
                         runCatching { Messenger(service).send(Message.obtain(null, 1).apply {
                             replyTo = receiver; data = Bundle().apply { putString("model", id); putString("prompt", prompt); putBoolean("planner", planner) }
                         }) }.onFailure { if (c.isActive) c.resumeWithException(it) }
@@ -268,6 +273,13 @@ object LocalAi {
                 bound = ctx.bindService(Intent(ctx, LocalAiService::class.java), connection, Context.BIND_AUTO_CREATE)
                 if (!bound && c.isActive) c.resumeWithException(IllegalStateException("bind_failed"))
             }
-        } finally { if (bound) runCatching { ctx.unbindService(connection) } }
+        } finally {
+            withContext(NonCancellable) {
+                remote?.let { binder -> runCatching { Messenger(binder).send(Message.obtain(null, 3)) } }
+                if (bound) runCatching { ctx.unbindService(connection) }
+                if (remote != null) withTimeoutOrNull(1500) { died.await() }
+                remote?.let { runCatching { it.unlinkToDeath(death, 0) } }
+            }
+        }
     }
 }

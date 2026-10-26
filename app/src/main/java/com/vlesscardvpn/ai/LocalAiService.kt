@@ -17,6 +17,8 @@ class LocalAiService : Service() {
     private var busy = false
     private val main = Handler(Looper.getMainLooper())
     private val messenger = Messenger(Handler(Looper.getMainLooper()) { msg ->
+        // A retiring request must terminate before the next client binds to this private process.
+        if (msg.what == 3) { android.os.Process.killProcess(android.os.Process.myPid()); return@Handler true }
         if (msg.what != 1 || busy) return@Handler true
         val reply = msg.replyTo ?: return@Handler true
         val model = LocalAiPolicy.models.firstOrNull { it.id == msg.data.getString("model") } ?: return@Handler true
