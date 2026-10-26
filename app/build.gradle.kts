@@ -10,6 +10,7 @@ plugins {
 // Build 111 = «1.2.0», 112 = 1.2.1, …; 101-110 = 1.1.0-1.1.9; up to 100 — 1.0.<n>. The workflow names the tag the same way.
 fun versionOf(n: Int) = if (n > 110) "1.2.${n - 111}" else if (n > 100) "1.1.${n - 101}" else "1.0.$n"
 val releaseNumber = providers.environmentVariable("GITHUB_RUN_NUMBER").orNull?.toIntOrNull() ?: 59
+val bundledAi = providers.gradleProperty("bundledAi").orNull == "true"
 val betaPreview = providers.gradleProperty("betaPreview").orNull == "true"
 // Release universal APK must run native x86 on CI, not translate Go/ARM system-register instructions.
 // Dedicated arm64 split stays small. Legacy ARM-only builds remain available explicitly.
@@ -82,6 +83,7 @@ android {
         versionName = versionOf(releaseNumber)
         // No shared privileged credential in distributable APKs. Reports need a future server-side intake.
         buildConfigField("String", "REPORT_KEY", "\"\"")
+        buildConfigField("boolean", "BUNDLED_AI", bundledAi.toString())
         // AGP forbids ndk.abiFilters together with ABI splits, so the split block carries the same list.
         if (!splitAbi) ndk { abiFilters.addAll(targetAbis) }
     }
@@ -119,6 +121,8 @@ android {
     sourceSets["main"].jniLibs.srcDir(layout.buildDirectory.dir("generated/hev"))
     sourceSets["main"].jniLibs.srcDir(layout.buildDirectory.dir("generated/tor"))
     sourceSets["main"].jniLibs.srcDir(layout.buildDirectory.dir("generated/local-ai"))
+    if (bundledAi) sourceSets["main"].assets.srcDir(layout.buildDirectory.dir("generated/bundled-ai"))
+    androidResources { noCompress += "gguf" }
 }
 
 
@@ -202,3 +206,11 @@ val buildLocalAi by tasks.registering(Exec::class) {
         layout.buildDirectory.dir("generated/local-ai").get().asFile.absolutePath, if (armOnly) "arm" else "all")
 }
 tasks.named("preBuild").configure { dependsOn(buildLocalAi) }
+
+val fetchBundledAi by tasks.registering(Exec::class) {
+    inputs.file(rootProject.file("native/fetch-chat-model.py"))
+    outputs.file(layout.buildDirectory.file("generated/bundled-ai/models/qwen05.gguf"))
+    commandLine("python3", rootProject.file("native/fetch-chat-model.py").absolutePath,
+        layout.buildDirectory.dir("generated/bundled-ai").get().asFile.absolutePath)
+}
+if (bundledAi) tasks.named("preBuild").configure { dependsOn(fetchBundledAi) }

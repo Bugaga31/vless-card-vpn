@@ -1,0 +1,6 @@
+{
+  "ready": true,
+  "scope": "Owner-authorized experimental hotfix with compact GGUF included in APK. Targeted AI unit tests, compile, package, embedded model hash and persistent signing-certificate checks only. Full JVM/lint/E2E/emulator matrix intentionally not run. Stable Latest unchanged.",
+  "physical_phone_tested": false,
+  "android_inference_tested": false
+}

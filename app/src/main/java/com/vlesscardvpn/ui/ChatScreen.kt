@@ -46,6 +46,7 @@ private val Glow = Brush.linearGradient(listOf(Color(0xFF6A5CFF), Accent, Color(
 fun ChatScreen() {
     val ctx = LocalContext.current
     val msgs by Assistant.messages.collectAsState()
+    val aiChat by com.vlesscardvpn.ai.LocalAi.state.collectAsState()
     val cfg by Store.settings.collectAsState()
     val sum by Store.summary.collectAsState()
     val status by Tunnel.status.collectAsState()
@@ -54,7 +55,7 @@ fun ChatScreen() {
     var input by remember { mutableStateOf("") }
     var panel by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(true) }
     val list = rememberLazyListState()
-    LaunchedEffect(msgs.size) { if (msgs.isNotEmpty()) list.animateScrollToItem(msgs.size - 1) }
+    LaunchedEffect(msgs.size, aiChat.busy) { if (msgs.isNotEmpty()) list.animateScrollToItem(msgs.size - 1 + if (aiChat.busy) 1 else 0) }
     fun send(t: String = input) { if (t === input) input = ""; Assistant.send(ctx, t) }
     val on = status.state == Tunnel.State.CONNECTED
 
@@ -133,6 +134,15 @@ fun ChatScreen() {
                             }
                         }
                     }
+                }
+            }
+            if (aiChat.busy) item {
+                Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Bubble).padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(aiChat.message, fontSize = 14.sp, color = Color.White)
+                    if (aiChat.progress >= 0) Text("Подготовка ${aiChat.progress}% · можно оставить вопрос в чате", fontSize = 14.sp, color = Color.White)
+                    LinearProgressIndicator(Modifier.fillMaxWidth())
+                    TextButton(onClick = { com.vlesscardvpn.ai.LocalAi.cancel() }) { Text("Остановить модель") }
                 }
             }
             if (prog.running) item {

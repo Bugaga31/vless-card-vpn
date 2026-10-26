@@ -41,7 +41,7 @@ fun LocalAiPanel() {
         if (state.busy) {
             if (state.progress >= 0) {
                 LinearProgressIndicator(progress = { state.progress / 100f }, modifier = Modifier.fillMaxWidth())
-                Text("Загрузка ${state.progress}%", style = MaterialTheme.typography.bodyMedium)
+                Text("Подготовка ${state.progress}%", style = MaterialTheme.typography.bodyMedium)
             } else LinearProgressIndicator(Modifier.fillMaxWidth())
             OutlinedButton(onClick = { LocalAi.cancel() }, modifier = Modifier.heightIn(min = 48.dp)) { Text("Остановить модель") }
         }
@@ -52,14 +52,14 @@ fun LocalAiPanel() {
                 Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     LocalAiPolicy.models.forEach { m ->
                         FilterChip(state.model == m.id, { LocalAi.select(ctx, m.id) }, enabled = !state.busy,
-                            label = { Text(if (m == LocalAiPolicy.compact) "0.5B · 491 МБ" else "27B · 10,9 ГБ") }, modifier = Modifier.heightIn(min = 48.dp))
+                            label = { Text(if (m == LocalAiPolicy.compact) if (com.vlesscardvpn.BuildConfig.BUNDLED_AI) "0.5B · в APK" else "0.5B · 491 МБ" else "27B · 10,9 ГБ") }, modifier = Modifier.heightIn(min = 48.dp))
                     }
                 }
                 Text(if (model == LocalAiPolicy.compact) "Для 64-битных устройств: от 3 ГиБ ОЗУ, свободно от 1200 МиБ. Качество ответов ограничено."
                     else "Эксперимент: от 20 ГиБ ОЗУ, свободно от 13 ГиБ. Работа Huihui на телефоне пока не подтверждена.",
                     style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 if (!state.busy) {
-                    if (!state.downloaded) Button(onClick = { confirm = true }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("Скачать выбранную модель") }
+                    if (!state.downloaded) Button(onClick = { if (model == LocalAiPolicy.compact && com.vlesscardvpn.BuildConfig.BUNDLED_AI) LocalAi.download(ctx) else confirm = true }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text(if (model == LocalAiPolicy.compact && com.vlesscardvpn.BuildConfig.BUNDLED_AI) "Подготовить из APK · без интернета" else "Скачать выбранную модель") }
                     else Row(verticalAlignment = Alignment.CenterVertically) {
                         Text("Разговорный чат", Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
                         Switch(state.enabled, { LocalAi.enable(ctx, it) })

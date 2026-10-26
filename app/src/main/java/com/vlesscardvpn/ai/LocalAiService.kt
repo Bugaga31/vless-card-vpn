@@ -45,7 +45,9 @@ class LocalAiService : Service() {
             main.post {
                 main.removeCallbacks(watchdog); main.removeCallbacks(energyWatch)
                 runCatching { reply.send(Message.obtain(null, 2).apply { data = Bundle().apply {
-                    if (result.isSuccess) putString("text", result.getOrThrow().take(4096)) else putString("error", "inference_failed")
+                    if (result.isSuccess) putString("text", result.getOrThrow().take(4096)) else putString("error", result.exceptionOrNull()?.message?.takeIf {
+                        it in setOf("model_load", "context_init", "context_limit", "generation_timeout", "prefill_timeout", "tokenize", "decode", "empty_output", "planner_grammar")
+                    } ?: "inference_failed")
                 } }) }
             }
         }
