@@ -26,8 +26,7 @@ object PowerPolicy {
         var hot = trigger || prev.hot
         var since = if (!trigger && prev.hot && cool) prev.coolSince.takeIf { it >= 0 } ?: i.now else -1
         if (hot && since >= 0 && i.now - since >= 120000) { hot = false; since = -1 }
-        // On the charger with the screen off is the best heavy-work window: cool, idle, and free.
-        val chargeWork = i.charging && !hot && !i.lowMemory && !i.gaming && !i.recentLag && !i.saver && !low && i.now >= pauseUntil && !i.dataSaver && !(o.wifiOnly && i.metered) && !(o.protectTraffic && i.activeTraffic)
+        val chargeWork = i.charging && i.screen && !hot && !i.lowMemory && !i.gaming && !i.recentLag && !i.saver && !low && i.now >= pauseUntil && !i.dataSaver && !(o.wifiOnly && i.metered) && !(o.protectTraffic && i.activeTraffic)
         val reason = when {
             hot -> "Тепловая защита: ждём устойчивого остывания"
             i.lowMemory -> "Нехватка памяти: откладываем необязательную работу"
@@ -37,7 +36,6 @@ object PowerPolicy {
             i.now < pauseUntil -> "Пауза улучшений: ${(pauseUntil - i.now + 59999) / 60000} мин"
             i.dataSaver -> "Системная экономия трафика"
             o.wifiOnly && i.metered -> "Ожидание сети без тарификации"
-            chargeWork && !i.screen -> "Зарядка и выключенный экран: работаем на максимум"
             !i.screen && o.quietScreen -> "Экран выключен: тихий режим"
             o.chargeOnly && !i.charging -> "Улучшения только на зарядке"
             o.protectTraffic && i.activeTraffic -> "Активный трафик: не мешаем загрузке"
@@ -46,7 +44,7 @@ object PowerPolicy {
         }
         val pressure = hot || i.lowMemory || i.gaming || i.recentLag || i.saver || low || o.profile == "eco" || (!i.screen && !chargeWork) || i.dataSaver || (o.protectTraffic && i.activeTraffic)
         val tcp = if (hot || i.lowMemory || i.gaming) 2 else if (pressure) 16 else if (o.profile == "fast") 128 else 64
-        return Plan(Memory(low, hot, since), reason == "Готов к фоновым улучшениям" || (chargeWork && !i.screen), reason,
+        return Plan(Memory(low, hot, since), reason == "Готов к фоновым улучшениям", reason,
             tcp, if (pressure) 2 else if (o.profile == "fast") 12 else 6,
             if (!i.screen && !chargeWork) 15000 else if (pressure) 5000 else 3000,
             if (pressure) 45000 else 20000,
