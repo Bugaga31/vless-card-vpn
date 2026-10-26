@@ -55,6 +55,21 @@ load() { # $1 = state file
 waitlog() { # $1 = regex, $2 = seconds
   for i in $(seq 1 $2); do L=$(adb logcat -d -s E2E:I | grep -E "$1" | tail -1); [ -n "$L" ] && { echo "$L"; return 0; }; sleep 1; done; return 1
 }
+logcount() {
+  local lines
+  lines=$(adb logcat -d -s E2E:I | grep -E "$1" || true)
+  printf '%s\n' "$lines" | grep -c . || true
+}
+waitlog_after() {
+  local pattern="$1" baseline="$2" seconds="$3" lines count
+  for i in $(seq 1 "$seconds"); do
+    lines=$(adb logcat -d -s E2E:I | grep -E "$pattern" || true)
+    count=$(printf '%s\n' "$lines" | grep -c . || true)
+    if [ "$count" -gt "$baseline" ]; then printf '%s\n' "$lines" | tail -1; return 0; fi
+    sleep 1
+  done
+  return 1
+}
 ui_coords() {
   adb shell uiautomator dump /sdcard/e2e-window.xml >/dev/null 2>&1 || return 1
   adb shell cat /sdcard/e2e-window.xml > "$W/window.xml" || return 1
@@ -287,8 +302,11 @@ CASE=manual-check; R=""
 load mass-check.json || fail "manual-check: fixture state load failed"
 adb logcat -c
 tap_ui "Серверы" || fail "manual-check: could not open the server screen"
+pattern='action\[Проверка серверов\]'
+baseline=$(logcount "$pattern")
 tap_ui "Проверить все серверы" || fail "manual-check: check-all button not accessible"
 T=$(waitlog "action\[Проверка серверов\]" 120) || fail "manual-check: no result"
+T=$(waitlog_after "$pattern" "$baseline" 120) || fail "manual-check: no new result"
 echo "manual-check: $T"
 echo "$T" | grep -q "Работают: 1 из 1 доступных по TCP (всего 128)" || fail "manual-check: expected one working of one reachable in a 128-server list"
 adb logcat -d -s E2E:I | grep -q "action\\[Подбор маскировки\\]" && fail "manual-check: check-all unexpectedly started mask search"
