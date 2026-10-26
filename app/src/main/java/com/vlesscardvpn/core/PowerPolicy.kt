@@ -20,6 +20,7 @@ object PowerPolicy {
             else i.battery <= threshold + if (prev.low) 5 else 0
         val critical = i.thermal >= 3 || i.temp >= 45
         val trigger = critical || i.thermal >= 2 || o.autoCool && (i.thermal >= 2 || i.temp >= if (i.charging) 39.0 else 41.0)
+        // Unknown sensors do not count as evidence that the phone cooled down.
         val known = i.temp > 0 || i.thermal >= 0
         val cool = known && (i.temp <= 0 || i.temp < 38) && i.thermal < 2
         var hot = trigger || prev.hot
