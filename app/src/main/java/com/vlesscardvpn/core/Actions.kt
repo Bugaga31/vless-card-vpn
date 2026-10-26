@@ -1355,11 +1355,17 @@ object Actions {
         val gaming = GameSession.active()
         val speedRank = eligible.sortedWith(ServerChoice.downloadOrder({ st.state(it) },net,time))
             .mapIndexed { index,server -> server.id to index }.toMap()
-        val learned = eligible.sortedWith(compareByDescending<Server> {
-            if (gaming) -ServerChoice.latencyScore(st.state(it).evidenceFor(net), st.state(it).realMs)
-            else if (ServerChoice.measuredSpeed(st.state(it),net,time) > 0) 2.0 - (speedRank[it.id] ?: eligible.size).toDouble() / (eligible.size + 1)
-            else ServerChoice.blended(CloudSpeed.prior(it), st.state(it).evidenceFor(net), time) }
-            .thenByDescending { Brain.p(net, it, st.state(it)) }).mapIndexed { i, server -> server.id to i }.toMap()
+        val learnedScores = eligible.associate { server ->
+            val state = st.state(server)
+            val score = if (gaming) -ServerChoice.latencyScore(state.evidenceFor(net), state.realMs)
+                else if (ServerChoice.measuredSpeed(state, net, time) > 0) 2.0 - (speedRank[server.id] ?: eligible.size).toDouble() / (eligible.size + 1)
+                else ServerChoice.blended(CloudSpeed.prior(server), state.evidenceFor(net), time)
+            server.id to (score to Brain.p(net, server, state))
+        }
+        val learned = eligible.sortedWith(
+            compareByDescending<Server> { learnedScores[it.id]?.first ?: 0.0 }
+                .thenByDescending { learnedScores[it.id]?.second ?: 0.0 }
+        ).mapIndexed { i, server -> server.id to i }.toMap()
         val first = ConnectPolicy.candidates(eligible, cloud, remembered, cooling = { server ->
             val e = st.state(server).evidenceFor(net)
             probeMemory.cooling(net, server.id, st.state(server).maskFor(net), time) ||
