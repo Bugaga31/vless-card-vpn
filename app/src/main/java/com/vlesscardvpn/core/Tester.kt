@@ -59,7 +59,11 @@ object Tester {
         val names = servers.map { it.address }.distinct()
         val limit = PowerPolicy.cap(parallel, PhonePower.state.value.tcpParallel)
         val sem = Semaphore(minOf(32, limit))
-        val ips = names.map { h -> async(Bg.io) { sem.withPermit { h to runCatching { InetAddress.getByName(RuntimeProbeAddress.host(h)) }.getOrNull() } } }.awaitAll().toMap()
+        val ips = linkedMapOf<String, InetAddress?>()
+        for (chunk in names.chunked(64)) {
+            chunk.map { h -> async(Bg.io) { sem.withPermit { h to runCatching { InetAddress.getByName(RuntimeProbeAddress.host(h)) }.getOrNull() } } }
+                .awaitAll().forEach { (host, address) -> ips[host] = address }
+        }
         servers.filter { !it.isTcpBased }.forEach { onEach(it, if (ips[it.address] != null) 1 else 0) }
         val tcpList = servers.filter { it.isTcpBased }
         tcpList.filter { ips[it.address] == null }.forEach { onEach(it, 0) }
