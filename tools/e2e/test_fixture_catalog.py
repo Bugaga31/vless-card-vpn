@@ -32,4 +32,12 @@ class FixtureCatalogTest(unittest.TestCase):
             s=self.generate(Path(tmp))['auto-chain.json']['settings']
             self.assertEqual('AUTO',s['mode']);self.assertTrue(s['autoChainSearch']);self.assertFalse(s['torAuto'])
 
+    def test_large_manual_check_fixture_is_deterministic(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            mass=self.generate(Path(tmp))['mass-check.json']
+            self.assertEqual(128,len(mass['servers']))
+            self.assertEqual(8443,mass['servers'][0]['port'])
+            self.assertEqual(list(range(18001,18128)),[s['port'] for s in mass['servers'][1:]])
+            self.assertEqual([],mass['e2e_select'])
+
 if __name__=='__main__':unittest.main()

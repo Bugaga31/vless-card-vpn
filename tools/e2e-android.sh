@@ -55,6 +55,36 @@ load() { # $1 = state file
 waitlog() { # $1 = regex, $2 = seconds
   for i in $(seq 1 $2); do L=$(adb logcat -d -s E2E:I | grep -E "$1" | tail -1); [ -n "$L" ] && { echo "$L"; return 0; }; sleep 1; done; return 1
 }
+ui_coords() {
+  adb shell uiautomator dump /sdcard/e2e-window.xml >/dev/null 2>&1 || return 1
+  adb shell cat /sdcard/e2e-window.xml > "$W/window.xml" || return 1
+  python3 - "$W/window.xml" "$1" <<'PYUI'
+import re,sys,xml.etree.ElementTree as ET
+root=ET.parse(sys.argv[1]).getroot()
+for node in root.iter('node'):
+    attrs=node.attrib
+    if sys.argv[2] not in (attrs.get('text','')+' '+attrs.get('content-desc','')):
+        continue
+    match=re.fullmatch(r'\[(\d+),(\d+)\]\[(\d+),(\d+)\]',attrs.get('bounds',''))
+    if match:
+        x1,y1,x2,y2=map(int,match.groups())
+        print((x1+x2)//2,(y1+y2)//2)
+        break
+PYUI
+}
+tap_ui() {
+  local coords x y
+  for _ in $(seq 1 30); do
+    coords=$(ui_coords "$1")
+    if [ -n "$coords" ]; then
+      read -r x y <<<"$coords"
+      adb shell input tap "$x" "$y"
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
+}
 probe() { # $1 = tag ; prints result json
   adb shell "run-as $PROBE rm -f files/result.json" 2>/dev/null
   adb shell am start -n $PROBE/.ProbeActivity --es tag "$1" --es urls "https://www.gstatic.com/generate_204,https://speed.cloudflare.com/__down?bytes=1048576,https://www.google.com/,https://www.youtube.com/generate_204" >/dev/null
@@ -251,6 +281,25 @@ T=$(waitlog "action\[Проверка серверов\]" 120) || fail "tester: 
 echo "tester: $T"
 echo "$T" | grep -q "Работают: 3 из 3" || fail "tester: expected 3 working of 3 reachable"
 
+adb logcat -c
+echo "=== manual all-server check on a 128-entry catalogue"
+CASE=manual-check; R=""
+load mass-check.json || fail "manual-check: fixture state load failed"
+adb logcat -c
+tap_ui "Серверы" || fail "manual-check: could not open the server screen"
+tap_ui "Проверить все серверы" || fail "manual-check: check-all button not accessible"
+T=$(waitlog "action\[Проверка серверов\]" 120) || fail "manual-check: no result"
+echo "manual-check: $T"
+echo "$T" | grep -q "Работают: 1 из 1 доступных по TCP (всего 128)" || fail "manual-check: expected one working of one reachable in a 128-server list"
+adb logcat -d -s E2E:I | grep -q "action\\[Подбор маскировки\\]" && fail "manual-check: check-all unexpectedly started mask search"
+adb shell pidof "$PKG" >/dev/null || fail "manual-check: app exited during server scan"
+adb logcat -d | grep -q "FATAL EXCEPTION" && fail "manual-check: app crashed during server scan"
+adb exec-out screencap -p > "$W/server-check.png"
+tap_ui "Телефон" || fail "manual-check: could not open the device screen"
+sleep 2
+adb exec-out screencap -p > "$W/device-screen.png"
+
+load test.json || fail "masks: fixture state load failed"
 adb logcat -c
 adb shell am start -n $PKG/.MainActivity --ez e2e_masks true >/dev/null
 M=$(waitlog "action\[Подбор маскировки\]" 240) || fail "masks: no result"

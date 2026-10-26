@@ -24,7 +24,8 @@ def write(path, servers, selected, masks, mode="SERVERS", balance="LEAST_PING", 
     settings.update(extra)
     st = {"servers": servers, "states": {}, "settings": settings,
           "e2e_select": [s["name"] for s in servers if s["name"] in selected], "e2e_masks": masks}
-    json.dump(st, open(path, "w"))
+    with open(path, "w") as f:
+        json.dump(st, f)
 
 out = sys.argv[1]
 write(f"{out}/single.json", [reality], ["e2e-reality"], {})
@@ -50,3 +51,4 @@ write(f"{out}/auto-eight.json",pool,[],{},mode="AUTO",autoUpdateSubs=False,lastS
 
 # Live chain regression uses the production measurement gates, not mocked service PASS.
 write(f"{out}/auto-chain.json", [reality,dead], [], {}, mode="AUTO", dpiStrategy="TPWS#SPLIT_DISORDER", autoUpdateSubs=False, lastSubRefresh=4102444800000, autoChainSearch=True, torAuto=False)
+write(f"{out}/mass-check.json", [dict(reality, name=f"e2e-check-{i}", port=8443 if i == 0 else 18000 + i) for i in range(128)], [], {})

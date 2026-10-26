@@ -362,23 +362,29 @@ object Actions {
         return set to (running ?: set.currentPort)
     }
 
-    /** TCP ping of all servers, then real test of the [realLimit] fastest. */
+    /** TCP ping of every server, then a bounded real test of the fastest reachable servers. */
     fun testAll(onlySelected: Boolean = false, realLimit: Int = 150) = launch("Проверка серверов") {
-        val st0 = Store.state.value
-        val r = doTestAll(if (onlySelected) st0.selected else st0.servers, realLimit)
-        // Few work: masks for the reachable ones right away (no separate button to find)
-        val st1 = Store.state.value
-        val cand = st1.servers.filter { st1.state(it).tcpMs > 0 && !st1.state(it).works }.sortedBy { st1.state(it).tcpMs }.take(8)
-        if (!onlySelected && st1.servers.count { st1.state(it).works } < 5 && cand.isNotEmpty()) r + ". " + doFindMasks(cand, 24, budgetMs = 120_000) else r
+        val snapshot = Store.state.value
+        val targets = if (onlySelected) snapshot.selected else snapshot.servers
+        if (targets.isEmpty()) return@launch if (onlySelected) "Сначала выберите серверы для проверки" else "Нет серверов — добавьте ссылку или обновите подписки"
+        val limits = ManualServerCheckPolicy.limits(PhonePower.refresh(app))
+        doTestAll(targets, realLimit, tcpParallel = limits.tcpParallel, realParallel = limits.realParallel, realBatch = limits.batch)
     }
 
-    private suspend fun doTestAll(list: List<Server>, realLimit: Int, big: Boolean = true): String {
+    private suspend fun doTestAll(
+        list: List<Server>,
+        realLimit: Int,
+        big: Boolean = true,
+        tcpParallel: Int = 192,
+        realParallel: Int = 64,
+        realBatch: Int = 64,
+    ): String {
         if (list.isEmpty()) return "Нет серверов — добавьте ссылку или обновите подписки"
         progress.value = progress.value.copy(title = "TCP-пинг")
         val done = AtomicInteger()
         val tcp = java.util.concurrent.ConcurrentHashMap<String, Int>()
         val batch = StateBatch()
-        Tester.tcp(list, parallel = 192, timeoutMs = 2000) { s, ms ->
+        Tester.tcp(list, parallel = tcpParallel, timeoutMs = 2000) { s, ms ->
             tcp[s.id] = ms
             batch.put(s.id) { it.copy(tcpMs = ms, realMs = if (ms == 0) 0 else it.realMs, checkedAt = System.currentTimeMillis()) }
             step(done.incrementAndGet(), list.size)
@@ -389,16 +395,15 @@ object Actions {
             if (Brain.seen >= 50 && l.size > realLimit) Brain.order(Net.key(app), l) { now.state(it) } else l.sortedBy { tcp[it.id] } }
             .let { ServerChoice.diverse(it, realLimit) }
         // one attempt for all (fast), a second one only for those that failed although TCP answers
-        // «жёстко и быстро»: 64 одновременных пробы вместо 32 — лучшие серверы находятся вдвое быстрее
-        var working = realTest(alive, "Проверка через Xray", big, attempts = 1, parallel = 64)
+        var working = realTest(alive, "Проверка через Xray", big, attempts = 1, parallel = realParallel, batch = realBatch)
         val again = Store.state.value.let { s -> alive.filter { !s.state(it).works } }
-        // реванш достаётся только узкому хвосту (TCP отвечает, Xray нет) — не растягиваем проверку
-        if (again.isNotEmpty() && again.size <= 6) working += realTest(again, "Повторная проверка", big, attempts = 2, parallel = 12)
+        if (again.isNotEmpty() && again.size <= 6) working += realTest(again, "Повторная проверка", big, attempts = 2, parallel = realParallel, batch = realBatch)
         return "Работают: $working из ${alive.size} доступных по TCP (всего ${list.size})"
     }
 
     private suspend fun realTest(servers: List<Server>, title: String, big: Boolean = true, attempts: Int = 2, parallel: Int = 32, youtube: Boolean = true,
-                                 stopAfter: Int = Int.MAX_VALUE, budgetMs: Long = 0, onFirst: ((Server) -> Unit)? = null, onSuccess: ((Server) -> Unit)? = null): Int {
+                                 stopAfter: Int = Int.MAX_VALUE, budgetMs: Long = 0, onFirst: ((Server) -> Unit)? = null, onSuccess: ((Server) -> Unit)? = null,
+                                 batch: Int = 64): Int {
         if (servers.isEmpty()) return 0
         progress.value = progress.value.copy(title = title, done = 0, total = servers.size)
         val net = Net.key(app)
@@ -411,7 +416,7 @@ object Actions {
         val done = AtomicInteger(); val ok = AtomicInteger()
         val states = StateBatch(200)
         try {
-            Tester.real(variants, st.settings.testUrl, port, own.ports, batch = if (onFirst != null) ConnectPolicy.FIRST else 64, parallel = parallel, big = big, youtube = youtube, attempts = attempts, stopAfter = stopAfter, budgetMs = budgetMs) { i, p ->
+            Tester.real(variants, st.settings.testUrl, port, own.ports, batch = if (onFirst != null) ConnectPolicy.FIRST else batch, parallel = parallel, big = big, youtube = youtube, attempts = attempts, stopAfter = stopAfter, budgetMs = budgetMs) { i, p ->
                 if (p == Tester.SKIPPED) return@real
                 // Do not train the old profile with a result completed after Wi-Fi/cellular handoff.
                 if (Net.key(app) != net || Net.underlying(app)?.toString() != underlying) return@real

@@ -1,5 +1,5 @@
 {
   "ready": true,
-  "scope": "Owner authorized final VPN stability release 1.2.60, separated from Equilibrium AI. Based on stable 0916f1b2996350c926c2e49ba034c826b16d4621. Fresh negative current-chain evidence and recovery hysteresis fix only; existing full quality, JVM/lint, signed APK certificate/security and emulator upgrade gates must pass on final SHA. No physical-phone or operator-network verification claimed.",
+  "scope": "Owner authorized VLESS Card 1.2.61 release from 1.2.60. Includes server-list search and responsive controls, device-aware limits for manual checks, chunked DNS work, removal of hidden mask search from the check-all action, deletion only of fresh confirmed TCP failures after confirmation; unchecked and UDP servers remain untouched, resource-screen redesign, and quiet screen-off background policy. Requires the full existing JVM, lint, signing, security, emulator install/upgrade and E2E gates to pass on final SHA. Google AI Overview availability is not claimed fixed; physical phone and operator networks are not tested.",
   "physical_phone_tested": false
 }
