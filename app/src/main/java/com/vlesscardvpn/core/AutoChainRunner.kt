@@ -102,9 +102,8 @@ object AutoChainRunner {
                 currentCoroutineContext().ensureActive()
                 val winner=result.selected?.let { index[it.id] } ?: return@exclusiveProbe null
                 val sample=result.sample ?: return@exclusiveProbe null
-                val current=currentId?.let(samples::get)?.takeIf { idSample ->
-                    index[idSample.chainId]?.let { AutoChainSelection.eligible(idSample,it.chain,epoch,elapsed()) } == true
-                }
+                val current=AutoChainSwitchPolicy.currentEvidence(
+                    currentId?.let(samples::get),currentId,epoch,elapsed())
                 if(!AutoChainSwitchPolicy.shouldSwitch(current,sample,AutoChainSwitchPolicy.purpose(s.autoChainPurpose),currentExpected=currentId!=null)) return@exclusiveProbe null
                 Measured(winner,sample,network,epoch,settingsKey(s))
             }

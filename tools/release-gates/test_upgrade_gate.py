@@ -29,10 +29,10 @@ elif args and args[0]=='install':print('Success')
             env=dict(os.environ,PATH=str(bin)+os.pathsep+os.environ['PATH'],VERSION='release-build-167',MODE=mode,EVENTS=str(events))
             result=subprocess.run(['bash',str(SCRIPT)],cwd=root,env=env,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True)
             return result.returncode,events.read_text() if events.exists() else '',result.stdout
-    def test_both_published_versions_are_required(self):
+    def test_all_published_baselines_are_required(self):
         rc,events,out=self.run_gate();self.assertEqual(0,rc,out)
-        self.assertEqual(2,events.count('adb install -r'))
-        for version in ('1.2.50','1.2.55'):
+        self.assertEqual(3,events.count('adb install -r'))
+        for version in ('1.2.50','1.2.55','1.2.56'):
             self.assertIn('baseline-'+version+'.apk',events)
             self.assertIn('Published '+version+' -> signed versionCode 167 upgrade: PASS',out)
         self.assertIn('b4a319c1753ae28761cba62e1ea3df40167116c6a946b160643a35dc1afdb7c1',events)

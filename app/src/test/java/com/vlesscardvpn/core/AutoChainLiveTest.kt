@@ -12,6 +12,36 @@ import com.vlesscardvpn.core.AutoChainSelection.Purpose
 
 class AutoChainLiveTest {
     private val a=AutoChainSelection.Sample("a",1,1000,Verdict.PASS,Verdict.PASS,Verdict.PASS,true,262144,1000,100)
+    @Test fun `fresh failed current evidence is preserved for recovery`() {
+        val failed=a.copy(data=Verdict.FAIL)
+        assertEquals(failed,AutoChainSwitchPolicy.currentEvidence(failed,"a",1,1000))
+    }
+    @Test fun `current evidence cannot cross network generation`() {
+        assertNull(AutoChainSwitchPolicy.currentEvidence(a,"a",2,1000))
+    }
+    @Test fun `stale future or mismatched current evidence is not failure proof`() {
+        assertNull(AutoChainSwitchPolicy.currentEvidence(a,"a",1,61001))
+        assertNull(AutoChainSwitchPolicy.currentEvidence(a,"a",1,999))
+        assertNull(AutoChainSwitchPolicy.currentEvidence(a,"other",1,1000))
+    }
+    @Test fun `failed data route can recover to slower confirmed route`() {
+        val candidate=a.copy(chainId="b",transferMs=3000,latencyMs=1000)
+        Purpose.values().forEach { assertTrue(AutoChainSwitchPolicy.shouldSwitch(a.copy(data=Verdict.FAIL),candidate,it,true)) }
+    }
+    @Test fun `explicit service failure does not require speed gain for recovery`() {
+        val candidate=a.copy(chainId="b",transferMs=3000)
+        assertTrue(AutoChainSwitchPolicy.shouldSwitch(a.copy(telegram=Verdict.FAIL),candidate,Purpose.DOWNLOAD,true))
+        assertTrue(AutoChainSwitchPolicy.shouldSwitch(a.copy(youtube=Verdict.FAIL),candidate,Purpose.DOWNLOAD,true))
+    }
+    @Test fun `failed current never permits failed or unverified replacement`() {
+        val failed=a.copy(data=Verdict.FAIL)
+        assertFalse(AutoChainSwitchPolicy.shouldSwitch(failed,a.copy(chainId="b",telegram=Verdict.FAIL),Purpose.DOWNLOAD,true))
+        assertFalse(AutoChainSwitchPolicy.shouldSwitch(failed,a.copy(chainId="b",verifiedBody=false),Purpose.DOWNLOAD,true))
+    }
+    @Test fun `inconclusive service result alone retains speed hysteresis`() {
+        val current=a.copy(telegram=Verdict.UNKNOWN,youtube=Verdict.UNKNOWN)
+        assertFalse(AutoChainSwitchPolicy.shouldSwitch(current,current.copy(chainId="b",transferMs=1050),Purpose.DOWNLOAD,true))
+    }
     @Test fun `fast generic download with slower video does not trigger switch`() {
         val current=a.copy(youtubeKbps=1000)
         val candidate=a.copy(chainId="b",transferMs=100,youtubeKbps=128)

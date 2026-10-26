@@ -7,6 +7,13 @@ object AutoChainSwitchPolicy {
         "interactive" -> AutoChainSelection.Purpose.INTERACTIVE
         else -> AutoChainSelection.Purpose.BALANCED
     }
+    /** Preserve fresh negative evidence as well as PASS. Missing/late evidence stays UNKNOWN. */
+    fun currentEvidence(sample: AutoChainSelection.Sample?, chainId: String?, epoch: Long,
+                        now: Long): AutoChainSelection.Sample? = sample?.takeIf {
+        chainId != null && it.chainId == chainId && it.generation == epoch &&
+            it.sampledAtMs >= 0 && now >= it.sampledAtMs &&
+            now - it.sampledAtMs <= AutoChainSelection.FRESH_MS
+    }
     fun shouldSwitch(current: AutoChainSelection.Sample?, winner: AutoChainSelection.Sample,
                      purpose: AutoChainSelection.Purpose, currentExpected: Boolean = false): Boolean {
         if (winner.data != AutoChainSelection.Verdict.PASS || !winner.verifiedBody ||
@@ -14,6 +21,11 @@ object AutoChainSwitchPolicy {
         // A missing trial is UNKNOWN, not proof that a working live route failed.
         if (current == null) return !currentExpected
         if (current.chainId == winner.chainId) return false
+        // Recovery is not speed optimization: a definite failed trial must not be
+        // protected by the 20% speed hysteresis. UNKNOWN alone is not a failure.
+        if (current.data == AutoChainSelection.Verdict.FAIL ||
+            current.telegram == AutoChainSelection.Verdict.FAIL ||
+            current.youtube == AutoChainSelection.Verdict.FAIL) return true
         fun confirmed(s: AutoChainSelection.Sample) = s.telegram == AutoChainSelection.Verdict.PASS && s.youtube == AutoChainSelection.Verdict.PASS
         if (confirmed(current) != confirmed(winner)) return confirmed(winner)
         if (purpose == AutoChainSelection.Purpose.INTERACTIVE)

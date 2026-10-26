@@ -7,7 +7,8 @@ CODE=${VERSION##*-}
 # Keep the original upgrade gate and additionally test the immediately preceding release.
 for spec in \
   '1.2.50 d5a5285872a70f2ebc4a4c9ad6274e3084b0c0dead85f2699f48124d119a05a8' \
-  '1.2.55 b4a319c1753ae28761cba62e1ea3df40167116c6a946b160643a35dc1afdb7c1'; do
+  '1.2.55 b4a319c1753ae28761cba62e1ea3df40167116c6a946b160643a35dc1afdb7c1' \
+  '1.2.56 ac84d095cdb97e73fee8c0849e0667b55d671f5420d0ba151acec30b87a26137'; do
   read -r version digest <<< "$spec"
   BASE="release/baseline-$version.apk"
   curl --fail --location --silent --show-error --max-time 180 --output "$BASE" \
