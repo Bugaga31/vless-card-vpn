@@ -19,7 +19,7 @@ object Assistant {
     /** [auto]: an order («ускорь YouTube») — the first button runs right away. */
     data class Msg(val mine: Boolean, val text: String, val buttons: List<Btn> = emptyList(), val auto: Boolean = false)
 
-    const val HELLO = "Привет! Я помощник VLESS Card. Спросите, что режут в вашей сети, какая маска лучше, почему медленно, " +
+    const val HELLO = "Привет! Я Equilibrium — локальный помощник сети. Я не языковая модель.  Спросите, что режут в вашей сети, какая маска лучше, почему медленно, " +
         "что с телефоном — или скажите, что сделать: «ускорь YouTube», «смени маску», «облегчи маску», «включи авто», «включи турбо»."
     val START = listOf(Btn("Что режут в моей сети?", "что режут в моей сети"), Btn("Лучшие маски", "какие маски лучше"),
         Btn("Почему медленно?", "почему медленно"), Btn("Что ты умеешь?", "помощь"))
@@ -42,6 +42,16 @@ object Assistant {
         val host = Regex("([a-z0-9-]+\\.)+[a-z]{2,}").find(q)?.value
         return when {
             q.isEmpty() -> Msg(false, "Напишите вопрос 🙂", START)
+            AssistantWebSearch.query(question) != null -> {
+                val query = AssistantWebSearch.query(question)!!
+                Msg(false, "Поиск в браузере: «$query». По нажатию браузеру и поисковику будет передан только этот запрос. Результаты не управляют VPN.",
+                    listOf(Btn("Открыть поиск", "!web $query")))
+            }
+            q.startsWith("найди в интернете") || q.startsWith("поиск в интернете") ->
+                Msg(false, "Напишите: «найди в интернете как работает Tor». Не отправляйте ключи, пароли и конфигурации.")
+            has(q, "нейроуправление", "нейронку", "нейросеть") -> Msg(false,
+                "Экспериментальная сеть 12→8→1 обучается локально на полных проверках передачи данных, Telegram и YouTube. До 40 примеров (минимум 8 успехов и 8 отказов) обычный Auto не меняется. Затем влияние ограничено порядком существующих маршрутов и совместимых масок. UNKNOWN не считается отказом или успехом. Это не разговорная модель.",
+                listOf(Btn("Включить эксперимент", "!neural on"), Btn("Выключить", "!neural off"), Btn("Удалить опыт", "!neural reset")))
             host != null && has(q, "сайт", "открыва", "провер", "работает", "не грузит", "не заход", "билет", "http") || host != null && q == host ->
                 Msg(false, "Проверяю $host тремя путями: напрямую, через VPN и через обход DPI…", listOf(Btn("Проверить $host", "!site $host")))
             has(q, "сайт", "билет", "страниц") && has(q, "не открыва", "не заход", "не грузит", "медленно гру", "долго гру") ->
@@ -273,6 +283,22 @@ object Assistant {
     /** Commands of the buttons; results come back as messages. */
     fun run(app: android.content.Context, cmd: String, quiet: Boolean = false) {
         when {
+            cmd.startsWith("!web ") -> {
+                val url = AssistantWebSearch.url(cmd.removePrefix("!web "))
+                if (url == null) { post(Msg(false, "Запрос отклонён: слишком длинный или содержит конфигурацию/секрет.")); return }
+                val opened = runCatching { app.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url)).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }.isSuccess
+                post(Msg(false, if (opened) "Открыт поиск в браузере. Настройки VPN не менялись." else "Не удалось открыть браузер."))
+            }
+            cmd in listOf("!neural on", "!neural off", "!neural reset") -> {
+                NeuralRouting.load(app)
+                NeuralRouting.controlChanged()
+                when (cmd) {
+                    "!neural on" -> Store.update { it.copy(settings = it.settings.copy(neuralRouting = true)) }
+                    "!neural off" -> Store.update { it.copy(settings = it.settings.copy(neuralRouting = false)) }
+                    else -> NeuralRouting.reset(app)
+                }
+                post(Msg(false, NeuralRouting.report(Net.key(app))))
+            }
             cmd.startsWith("!site ") -> {
                 val host = cmd.removePrefix("!site ")
                 if (!quiet) post(Msg(true, "Проверь $host"))

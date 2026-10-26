@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">VLESS Card VPN</string>
+    <string name="app_name">Equilibrium VPN</string>
     <string name="server_list">Servers</string>
     <string name="free_configs">Free Configs</string>
     <string name="connect">Connect</string>

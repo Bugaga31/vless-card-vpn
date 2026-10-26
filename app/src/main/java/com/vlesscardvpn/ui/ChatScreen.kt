@@ -4,6 +4,7 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -65,7 +66,7 @@ fun ChatScreen() {
             }
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
-                Text("Помощник", fontSize = 19.sp, fontWeight = FontWeight.SemiBold)
+                Text("Equilibrium · Preview", fontSize = 19.sp, fontWeight = FontWeight.SemiBold)
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Box(Modifier.size(8.dp).clip(CircleShape).background(if (cfg.autopilot && on) Good else MaterialTheme.colorScheme.onSurfaceVariant))
                     Spacer(Modifier.width(6.dp))
@@ -76,18 +77,23 @@ fun ChatScreen() {
             TextButton(onClick = { panel = !panel }) { Text(if (panel) "Скрыть" else "Панель") }
         }
         AnimatedVisibility(panel) {
-            Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp).clip(RoundedCornerShape(18.dp)).background(MaterialTheme.colorScheme.surface)
+            Column(Modifier.fillMaxWidth().heightIn(max = 300.dp).verticalScroll(rememberScrollState()).padding(horizontal = 12.dp).clip(RoundedCornerShape(18.dp)).background(MaterialTheme.colorScheme.surface)
                 .border(1.dp, Brush.linearGradient(listOf(Color(0x556A5CFF), Color(0x332EC2B5))), RoundedCornerShape(18.dp)).padding(12.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Tile("Связь", if (on) (if (status.checkOk == false) "Нет интернета" else "Подключено") else "Выключено",
-                        if (on) (if (status.checkOk == false) Warn else Good) else MaterialTheme.colorScheme.onSurfaceVariant, Modifier.weight(1f))
+                    Tile("Связь", if (on) when (status.checkOk) { true -> "Данные проверены"; false -> "Нет интернета"; null -> "Проверяем данные" } else "Выключено",
+                        if (on && status.checkOk == true) Good else if (on) Warn else MaterialTheme.colorScheme.onSurfaceVariant, Modifier.weight(1f))
                     Tile("Маска", sum.mask.ifEmpty { "подберу сам" }, MaterialTheme.colorScheme.onSurface, Modifier.weight(1f))
                     Tile("Лучший", if (sum.bestMs > 0) "${sum.bestMs} мс" + (if (sum.bestKbps > 0) " · " + Actions.mbps(sum.bestKbps) else "") else "—",
                         MaterialTheme.colorScheme.onSurface, Modifier.weight(1f))
                 }
+                Text(com.vlesscardvpn.core.NeuralRouting.report(com.vlesscardvpn.core.Net.key(ctx)), fontSize = 14.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("Ранжирует маршруты и маски. Поиск — по вашему запросу.", fontSize = 14.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     fun set(f: (com.vlesscardvpn.model.Settings) -> com.vlesscardvpn.model.Settings) = Store.update { it.copy(settings = f(it.settings)) }
+                    FilterChip(cfg.neuralRouting, { Assistant.run(ctx, if (cfg.neuralRouting) "!neural off" else "!neural on") }, label = { Text("Нейроуправление · эксперимент") })
                     FilterChip(cfg.autopilot, { set { it.copy(autopilot = !it.autopilot) } }, label = { Text("🧭 Автопилот") })
                     FilterChip(cfg.appAware, { set { it.copy(appAware = !it.appAware) }; if (!cfg.appAware && !AppWatch.hasAccess(ctx)) AppWatch.openAccess(ctx) }, label = { Text("📱 Под приложение") })
                     FilterChip(cfg.gpsSpoof, { set { it.copy(gpsSpoof = !it.gpsSpoof) }; if (cfg.gpsSpoof) GpsMock.stop(ctx) }, label = { Text("📍 GPS") })

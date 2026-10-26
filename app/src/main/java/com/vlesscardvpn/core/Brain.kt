@@ -58,8 +58,10 @@ object Brain {
         var z = 0.0; for (i in 0 until N) z += k[i] * x[i]
         return 1 / (1 + kotlin.math.exp(-z.coerceIn(-30.0, 30.0)))
     }
-    @Synchronized fun p(net: String, s: Server, st: ServerState): Double = probability(
-        if (scoped(net)) contexts[contextKey(net)]?.weights ?: prior() else weights(net), localFeatures(net, s, st))
+    @Synchronized fun p(net: String, s: Server, st: ServerState): Double {
+        val baseline = probability(if (scoped(net)) contexts[contextKey(net)]?.weights ?: prior() else weights(net), localFeatures(net, s, st))
+        return (baseline + NeuralRouting.adjustment(net, s, st, com.vlesscardvpn.xray.Masks.byId(st.maskFor(net)))).coerceIn(0.0, 1.0)
+    }
 
     fun learningRate(checks: Double): Double = maxOf(0.01, 0.2 / kotlin.math.sqrt(1.0 + checks.coerceAtLeast(0.0) / 50.0))
     @Synchronized fun learn(net: String, s: Server, st: ServerState, works: Boolean, weight: Double = 1.0) {
@@ -137,11 +139,13 @@ object Brain {
     }.getOrDefault(false)
 
     @Synchronized fun save(ctx: android.content.Context) {
+        NeuralRouting.save(ctx)
         if (!dirty) return
         ctx.getSharedPreferences("brain", 0).edit().putString("w", snapshot()).apply()
         dirty = false
     }
     @Synchronized fun load(ctx: android.content.Context) = runCatching {
+        NeuralRouting.load(ctx)
         if (w.isNotEmpty()) return@runCatching
         ctx.getSharedPreferences("brain", 0).getString("w", null)?.let { restore(it) }
     }
@@ -162,5 +166,5 @@ object Brain {
     }
     @Synchronized fun clear() { w.clear(); trained.clear(); contexts.clear(); seen = 0; cloudSig = ""; dirty = false }
     @Synchronized fun reload(ctx: android.content.Context) { clear(); load(ctx) }
-    @Synchronized fun report(): String = if (seen < 20) "Мини-нейросеть только учится (наблюдений: $seen)." else "Локальная модель: $seen наблюдений, отдельных профилей сетей: ${contexts.size}. Подсказывает порядок проверок; скорость решают реальные замеры."
+    @Synchronized fun report(): String = if (seen < 20) "Статистическая модель собирает опыт (наблюдений: $seen)." else "Локальная модель: $seen наблюдений, отдельных профилей сетей: ${contexts.size}. Подсказывает порядок проверок; скорость решают реальные замеры."
 }

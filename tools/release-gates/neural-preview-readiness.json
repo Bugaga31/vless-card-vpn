@@ -1,0 +1,6 @@
+{
+  "ready": true,
+  "scope": "Owner explicitly authorized a fast experimental prerelease without the full Android E2E/emulator matrix. Build, JVM/lint, package/certificate/signature/security gates remain. No stability, pretrained-language-model, superiority or physical-phone claim. Stable release workflow is unchanged.",
+  "android_e2e_required_for_this_preview": false,
+  "physical_phone_tested": false
+}

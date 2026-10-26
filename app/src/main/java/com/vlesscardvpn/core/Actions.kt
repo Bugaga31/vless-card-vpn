@@ -407,6 +407,8 @@ object Actions {
         if (Net.key(app) != net || Net.underlying(app)?.toString() != underlying) return 0
         val st = Store.state.value
         val variants = pinned.map { it to (Masks.byId(st.state(it).maskFor(net))) }
+        val neuralContext = kotlinx.coroutines.currentCoroutineContext()
+        val neuralTickets = variants.map { (s, m) -> NeuralRouting.ticket(net, underlying, s, st.state(s), m) }
         val (own, port) = dpiForTests(variants.map { it.second })
         val done = AtomicInteger(); val ok = AtomicInteger()
         val states = StateBatch(200)
@@ -416,6 +418,8 @@ object Actions {
                 // Do not train the old profile with a result completed after Wi-Fi/cellular handoff.
                 if (Net.key(app) != net || Net.underlying(app)?.toString() != underlying) return@real
                 val s = variants[i].first
+                neuralContext.ensureActive()
+                NeuralRouting.observe(neuralTickets[i], p, Net.key(app), Net.underlying(app)?.toString())
                 val speedSample = ServerChoice.acceptsSpeedSample(p.kbps, parallel)
                 val firstSuccess = p.works && ok.incrementAndGet() == 1
                 if (p.works) onSuccess?.invoke(s)
@@ -473,7 +477,7 @@ object Actions {
             val fresh = evoCand.filter(ok).shuffled().take(slots)
             val base = (CloudControl.maskHints(Net.family(net0)).mapNotNull { Masks.byId(it) }.filter(ok) + Masks.searchOrder(dpiOk, s, cfg.maskFamilies, cfg.maskFps) + kept.filter(ok)).distinctBy { it.id }
                 .filter { (tpwsOk || !it.dpi.startsWith("TPWS#")) && it !in fresh }
-                .sortedWith(compareBy<Mask>({ bucket(it) }, { Masks.cost(it) }, { -(stats[it.id]?.takeIf { s -> s.ok > 0 }?.score ?: 0.0) })).take((perServer - fresh.size).coerceAtLeast(1))
+                .sortedWith(compareBy<Mask>({ bucket(it) }, { Masks.cost(it) }, { -(stats[it.id]?.takeIf { s -> s.ok > 0 }?.score ?: 0.0) - NeuralRouting.adjustment(net0, s, st0.state(s), it) })).take((perServer - fresh.size).coerceAtLeast(1))
             // proven ones first, then one of every kind of trick (not a dozen variants of the same one)
             val proven = base.filter { bucket(it) == 0 }.take(3).ifEmpty { base.take(1) }
             val rest = Masks.diverse(base - proven.toSet())
@@ -531,12 +535,18 @@ object Actions {
         val confirm = pinned.flatMap { s -> good[s.id].orEmpty().let { g -> (g.sortedBy { it.second }.take(2) + g.sortedWith(compareBy({ Masks.cost(it.first) }, { it.second })).take(1)) }
             .distinctBy { it.first.id }.map { s to it.first } }
         if (confirm.size > pinned.size / 2 && System.currentTimeMillis() < deadline) {
+            val neuralConfirmContext = kotlinx.coroutines.currentCoroutineContext()
+            val neuralConfirm = confirm.map { (s, m) -> NeuralRouting.ticket(net0, maskNetwork, s, st0.state(s), m) }
             val res = java.util.concurrent.ConcurrentHashMap<Int, Probe>()
             progress.value = progress.value.copy(title = "Двойная проверка маскировок")
             val (own2, port2) = dpiForTests(confirm.map { it.second })
             try {
-                Tester.real(confirm, cfg.testUrl, port2, own2.ports, youtube = true, batch = 64, parallel = 24, attempts = 1, big = true) { i, p -> res[i] = p; step(i + 1, confirm.size) }
-            } finally { own2.close() }
+                Tester.real(confirm, cfg.testUrl, port2, own2.ports, youtube = true, batch = 64, parallel = 24, attempts = 1, big = true) { i, p ->
+                    neuralConfirmContext.ensureActive()
+                    NeuralRouting.observe(neuralConfirm[i], p, Net.key(app), Net.underlying(app)?.toString())
+                    res[i] = p; step(i + 1, confirm.size)
+                }
+            } finally { try { own2.close() } finally { NeuralRouting.save(app) } }
             pinned.forEach { s ->
                 val mine = confirm.indices.filter { confirm[it].first.id == s.id }
                 // passed again (with YouTube) and the fastest in real use: ping + download speed + how heavy the mask is

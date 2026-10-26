@@ -221,7 +221,7 @@ object Store {
         syncMasks()
         runCatching { LocalSecrets.deleteState(context) }
         runCatching { android.util.AtomicFile(File(context.filesDir, "state.json")).delete(); File(context.filesDir, "state.json.tmp").delete() }
-        CloudSync.forget(context); Report.stop(); Brain.clear(); runCatching { PhoneBrain.reset(context); DeviceCoach.background(context, false) }
+        CloudSync.forget(context); Report.stop(); Brain.clear(); runCatching { NeuralRouting.reset(context); PhoneBrain.reset(context); DeviceCoach.background(context, false) }
         listOf("brain", "report", "cloud_speed", "clip", "tor_bridge_updates").forEach { context.getSharedPreferences(it, 0).edit().clear().commit() }
         runCatching { LocalSecrets.destroy(context) }
         com.vlesscardvpn.tor.TorBridgeUpdates.consentCleared()

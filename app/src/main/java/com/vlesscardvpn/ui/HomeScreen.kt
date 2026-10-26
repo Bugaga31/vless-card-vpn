@@ -81,11 +81,11 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
             val compact = maxWidth < 320.dp || androidx.compose.ui.platform.LocalDensity.current.fontScale > 1.2f
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("VLESS Card", Modifier.weight(1f), fontSize = if (compact) 22.sp else 28.sp,
+                    Text("Equilibrium", Modifier.weight(1f), fontSize = if (compact) 22.sp else 28.sp,
                         maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis,
                         fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onBackground)
                     if (!compact) Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
-                        Text("XRAY", Modifier.padding(horizontal = 12.dp, vertical = 8.dp), color = MaterialTheme.colorScheme.primary,
+                        Text("PREVIEW", Modifier.padding(horizontal = 12.dp, vertical = 8.dp), color = MaterialTheme.colorScheme.primary,
                             fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.sp)
                     }
                 }

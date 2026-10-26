@@ -63,7 +63,7 @@ import com.vlesscardvpn.core.Store
             .safeDrawingPadding().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(16.dp)) {
             Surface(shape = RoundedCornerShape(8.dp), color = scheme.surfaceVariant) {
-                Text("XRAY · ${BuildConfig.VERSION_NAME}", Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                Text("PREVIEW · ${BuildConfig.VERSION_NAME}", Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
                     color = scheme.primary, fontSize = 12.sp, letterSpacing = 2.sp)
             }
             Box(Modifier.size(156.dp), contentAlignment = Alignment.Center) {
@@ -75,10 +75,10 @@ import com.vlesscardvpn.core.Store
                 }
                 Box(Modifier.size(96.dp).background(scheme.surface, CircleShape)
                     .border(1.dp, Accent.copy(alpha = .5f), CircleShape), contentAlignment = Alignment.Center) {
-                    Icon(Icons.Filled.PowerSettingsNew, contentDescription = null, tint = Accent, modifier = Modifier.size(42.dp))
+                    Icon(androidx.compose.ui.res.painterResource(com.vlesscardvpn.R.drawable.ic_launcher_foreground), contentDescription = "Equilibrium", tint = androidx.compose.ui.graphics.Color.Unspecified, modifier = Modifier.size(96.dp))
                 }
             }
-            Text("VLESS Card", fontSize = 30.sp, fontWeight = FontWeight.Bold, color = scheme.onBackground, textAlign = TextAlign.Center)
+            Text("Equilibrium", fontSize = 30.sp, fontWeight = FontWeight.Bold, color = scheme.onBackground, textAlign = TextAlign.Center)
             Text("На одной волне", fontSize = 20.sp, color = scheme.primary, textAlign = TextAlign.Center)
             Text("Спокойный интерфейс.\nВаш маршрут к связи.", fontSize = 16.sp, color = scheme.onSurfaceVariant, textAlign = TextAlign.Center)
             OutlinedButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("Открыть приложение") }
