@@ -35,6 +35,7 @@ fun DeviceScreen() {
     val brain by PhoneBrain.status.collectAsState()
     val settings by Store.settings.collectAsState()
     val power by PhonePower.state.collectAsState()
+    val reserveStatus by Actions.reserveStatus.collectAsState()
     var previousPreset by remember { mutableStateOf<com.vlesscardvpn.model.Settings?>(null) }
     var apps by remember { mutableStateOf<List<DeviceCoach.AppUse>>(emptyList()) }
     var showAllApps by rememberSaveable { mutableStateOf(false) }
@@ -189,6 +190,12 @@ fun DeviceScreen() {
                 Text(if (gaming) "Включена" else "Выключена", style = MaterialTheme.typography.bodyMedium)
             }
             DetailDisclosure("Что меняется", "Временно откладываются облачные обновления, резервные проверки и фоновое наблюдение. Выбор учитывает EMA задержки/джиттера HTTPS, а не предполагаемые потери UDP. Приоритет процессов других приложений и частоты CPU не меняются; режим сбрасывается при завершении процесса.")
+        }
+
+        DeviceSection("Резервы и облако", "Основной маршрут не ждёт проверки всего каталога.") {
+            Text(reserveStatus)
+            Text("Облачный каталог: ${CloudControl.count()} кандидатов. Рейтинги — подсказки, не доказательство доступности.")
+            Text("Приёмник ошибок vless-card-cloud не подключён. Отчёт ниже сохраняется локально; автоматической отправки нет.", style = MaterialTheme.typography.bodySmall)
         }
 
         DeviceSection("Диагностика поиска", "Последние 16 волн VLESS Card: результат, длительность и тип сети. Без адресов серверов, переписок, данных других приложений и автоматической отправки.") {

@@ -50,6 +50,10 @@ fun TorSettingsCard(settings: Settings, set: ((Settings) -> Settings) -> Unit) {
                     Text("Встроен в приложение · без Termux", style = MaterialTheme.typography.bodyMedium)
                 }
             }
+            Button(onClick = { set { TorConnectionPolicy.automatic(it) } }, modifier = Modifier.fillMaxWidth()) {
+                Text("Автонастройка Tor")
+            }
+            Text("Сам подберёт VLESS-сервер, применит профиль Wi-Fi/мобильной сети и ротацию. Tor работает через сервер без ручных мостов; сохранённые строки мостов не удаляются. Если этот путь блокируется, доступность не гарантируется.", style = MaterialTheme.typography.bodySmall)
             Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.surface) {
                 Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text(when (circuit) { true -> "Tor-цепочка через VLESS создана"; false -> "Готовая Tor-цепочка не обнаружена"; null -> "Tor-цепочка ещё не проверена" }, fontWeight = FontWeight.SemiBold)

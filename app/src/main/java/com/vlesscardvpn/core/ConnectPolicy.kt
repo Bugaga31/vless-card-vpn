@@ -8,7 +8,7 @@ object ConnectPolicy {
     data class FastStart(val candidates: Int, val parallel: Int, val stopAfter: Int, val budgetMs: Long)
     fun fastStart(background: Boolean = false) = FastStart(
         candidates = if (background) 3 else FIRST,
-        parallel = if (background) 2 else 4,
+        parallel = if (background) 2 else FIRST,
         stopAfter = 1,
         budgetMs = if (background) 1800L else QUICK_BUDGET_MS,
     )

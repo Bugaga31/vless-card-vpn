@@ -72,8 +72,9 @@ object Tester {
     }
 
     /** Bounded TCP hint, never an authenticated Reality/TLS verdict. Timeout is unknown, not a blacklist. */
-    suspend fun fastFilter(servers: List<Server>, budgetMs: Long = 600): Map<String, Int> = coroutineScope {
-        val sem = Semaphore(PowerPolicy.cap(6, PhonePower.state.value.tcpParallel))
+    suspend fun fastFilter(servers: List<Server>, budgetMs: Long = 600, foreground: Boolean = false): Map<String, Int> = coroutineScope {
+        val plan = PhonePower.state.value
+        val sem = Semaphore(PowerPolicy.cap(if (foreground) ConnectPolicy.FIRST else 6, if (foreground) plan.foregroundTcpParallel else plan.tcpParallel))
         servers.map { server -> async(Bg.io) { sem.withPermit {
             val result = if (!server.isTcpBased) -1 else try {
                 kotlinx.coroutines.withTimeoutOrNull(budgetMs) {
@@ -363,7 +364,7 @@ object Tester {
     /** Tests [variants] (server + mask) in parallel through one temporary Xray instance. */
     suspend fun real(
         variants: List<Pair<Server, Mask?>>, testUrl: String, byeDpiPort: Int?, dpiPorts: Map<String, Int> = emptyMap(), youtube: Boolean = true,
-        batch: Int = 32, parallel: Int = 12, attempts: Int = 2, big: Boolean = true, telegram: Boolean = youtube, calls: Boolean = false,
+        batch: Int = 32, parallel: Int = 12, attempts: Int = 2, big: Boolean = true, telegram: Boolean = youtube, calls: Boolean = false, foreground: Boolean = false,
         /** Early stop: variants for which this returns true are not probed (reported as skipped). */
         skip: (Int) -> Boolean = { false },
         stopAfter: Int = Int.MAX_VALUE,
@@ -375,7 +376,9 @@ object Tester {
             fun skipped(i: Int) = successes.get() >= stopAfter.coerceAtLeast(1) || skip(i) || (variants[i].first.protocol == "wireguard" && variants[i].first.secret in Tunnel.wireguardKeys)
             fun report(i: Int, p: Probe) { if (p.works) successes.incrementAndGet(); onEach(i, p) }
             // Bound config/socket footprint too, not merely simultaneous HTTP calls.
-            val effectiveBatch = PowerPolicy.cap(batch, if (PhonePower.state.value.realParallel <= 2) 4 else batch)
+            val plan = PhonePower.state.value
+            val probeLimit = if (foreground) plan.foregroundRealParallel else plan.realParallel
+            val effectiveBatch = PowerPolicy.cap(batch, if (probeLimit <= 2) 4 else batch)
             for (all in chunks(variants, effectiveBatch)) {
                 val idx = all.filter { i -> if (skipped(i)) { onEach(i, SKIPPED); false } else true }
                 if (idx.isEmpty()) continue
@@ -398,7 +401,7 @@ object Tester {
                 }
                 try {
                     coroutineScope {
-                        ProbeRace.run(chunk.indices.toList(), PowerPolicy.cap(parallel, PhonePower.state.value.realParallel), stopAfter,
+                        ProbeRace.run(chunk.indices.toList(), PowerPolicy.cap(parallel, probeLimit), stopAfter,
                             skip = { i -> skipped(idx[i]) }, staggerMs = if (stopAfter == 1) 120 else 0,
                             probe = { i -> CancellableProbe.run { bind -> probeSocks(ports[i], testUrl, big = big, youtube = youtube, telegram = telegram,
                                 attempts = attempts, budgetMs = budgetMs, onCall = { call -> bind { call.cancel() } }, calls = calls, onCancel = bind) } },

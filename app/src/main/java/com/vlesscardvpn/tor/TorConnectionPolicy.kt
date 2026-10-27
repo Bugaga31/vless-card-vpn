@@ -8,6 +8,10 @@ import com.vlesscardvpn.core.ServerOnlyPolicy
 object TorConnectionPolicy {
     fun selectTor(s: Settings): Settings = s.copy(mode = Mode.AUTO, torAll = true, torDirect = false,
         torNetworkRecommendations = true, torRotation = true, torFastOnly = true)
+    /** Explicit one-tap automatic preset: Tor uses the measured VPN upstream, not direct internet.
+     * Plain Tor behind that encrypted upstream needs no manually acquired bridge; stored lines are preserved.
+     */
+    fun automatic(s: Settings): Settings = selectTor(s).copy(torBridge = "none")
     fun selectMode(s: Settings, mode: Mode): Settings = s.copy(mode = if (mode == Mode.BYEDPI || mode == Mode.HYBRID) Mode.AUTO else mode, torAll = false)
     fun runtime(s: Settings): Settings = ServerOnlyPolicy.normalize(s)
     fun needsAutoSearch(s: Settings): Boolean = ServerOnlyPolicy.normalize(s).mode == Mode.AUTO
