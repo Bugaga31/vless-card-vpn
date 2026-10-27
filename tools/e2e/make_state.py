@@ -30,24 +30,26 @@ def write(path, servers, selected, masks, mode="SERVERS", balance="LEAST_PING", 
 out = sys.argv[1]
 write(f"{out}/single.json", [reality], ["e2e-reality"], {})
 write(f"{out}/multi.json", [reality, ws, xhttp, dead], ["e2e-reality", "e2e-ws-tls", "e2e-xhttp", "e2e-dead"],
-      {"e2e-reality": "chrome.h4", "e2e-ws-tls": "firefox.p2.b", "e2e-xhttp": "safari.h1"}, balance="ROUND_ROBIN")
+      {"e2e-reality": "chrome.h4", "e2e-ws-tls": "firefox.p2.b", "e2e-xhttp": "safari.h1"}, balance="ROUND_ROBIN", protectActiveTraffic=False)
 write(f"{out}/byedpi.json", [], [], {}, mode="SERVERS")
 write(f"{out}/test.json", [reality, ws, xhttp, dead], [], {})
-write(f"{out}/tpws.json", [reality], ["e2e-reality"], {"e2e-reality": "chrome.d"}, dpiStrategy="TPWS#SPLIT_DISORDER")
+write(f"{out}/tpws.json", [reality], ["e2e-reality"], {"e2e-reality": "chrome.n.b"}, dpiStrategy="TPWS#SPLIT_DISORDER")
 # Own VLESS Card cascade (ByeDPI) and zapret host shredder in front of two servers at once.
 write(f"{out}/ownmask.json", [reality, ws], ["e2e-reality", "e2e-ws-tls"],
       {"e2e-reality": "chrome.d:BYEDPI#VCARD_CASCADE", "e2e-ws-tls": "firefox.d:TPWS#VCARD_SHRED"}, balance="ROUND_ROBIN")
 # Xray fragmentation is exercised as a transport mask before a required server.
-write(f"{out}/xraydpi.json", [reality], ["e2e-reality"], {"e2e-reality": "chrome.d"}, dpiStrategy="XRAY#LADDER")
+write(f"{out}/xraydpi.json", [reality], ["e2e-reality"], {"e2e-reality": "chrome.n.b"}, dpiStrategy="XRAY#LADDER")
 write(f"{out}/services.json", [reality], ["e2e-reality"], {}, services=["youtube", "telegram"])
 write(f"{out}/auto.json", [reality, dead], [], {}, mode="AUTO", autoUpdateSubs=False, lastSubRefresh=4102444800000)
 # 1.0.62: proxy mode (no TUN: SOCKS 10808 + HTTP 10809), built-in WARP (registers itself, finds endpoint + noise mask).
 write(f"{out}/proxy.json", [reality], ["e2e-reality"], {}, proxyOnly=True)
 write(f"{out}/warp.json", [], [], {}, autoUpdateSubs=False, lastSubRefresh=4102444800000)
 
+# Isolate pool expansion from optional chain scouting and the deliberate active-transfer pause.
+# Production battery policy is unchanged; auto-chain is covered by its own case below.
 # Eight real authenticated outbounds; the foreground may start early but background must fill the pool.
 pool=[dict(ws,name=f"e2e-pool-{i}",address=f"r163-pool-{i}.test",sni=f"r163-pool-{i}.test",secret=f"00000000-0000-0000-0000-{i+2:012d}") for i in range(8)]
-write(f"{out}/auto-eight.json",pool,[],{},mode="AUTO",autoUpdateSubs=False,lastSubRefresh=4102444800000)
+write(f"{out}/auto-eight.json",pool,[],{},mode="AUTO",autoUpdateSubs=False,lastSubRefresh=4102444800000,protectActiveTraffic=False,autoChainSearch=False)
 
 # Live chain regression uses the production measurement gates, not mocked service PASS.
 write(f"{out}/auto-chain.json", [reality,dead], [], {}, mode="AUTO", dpiStrategy="TPWS#SPLIT_DISORDER", autoUpdateSubs=False, lastSubRefresh=4102444800000, autoChainSearch=True, torAuto=False)

@@ -271,28 +271,31 @@ if echo "$WR" | grep -q "WARP готов"; then
   okprobe "$R" || fail "warp: probe app traffic through WARP failed"
 else fail "warp: no working WARP endpoint"; fi
 
-echo "=== DPI strategy search (all engines start and carry HTTPS)"
-adb shell am start -n $PKG/.MainActivity --ez e2e_disconnect true >/dev/null; sleep 2
-adb logcat -c
-adb shell am start -n $PKG/.MainActivity --ez e2e_dpi true >/dev/null
-D=$(waitlog "action\[Подбор обхода DPI\]" 240) || fail "dpi search: no result"
-echo "dpi: $D"
-# Stage 1 stops after 12 passing strategies (the rest is skipped on purpose), so count passes, not "all of them".
-N=$(echo "$D" | sed -n 's/.*YouTube открыли \([0-9]*\) из \([0-9]*\).*/\1/p')
-[ "${N:-0}" -ge 10 ] || fail "dpi search: expected at least 10 strategies to open YouTube (no DPI on the emulator), got ${N:-0}"
-echo "$D" | grep -q "Выбрана:" || fail "dpi search: no strategy chosen"
-E=$(adb logcat -d -s E2E:I | grep "dpi engines" | tail -1); echo "dpi: $E"
-echo "$E" | grep -q "byedpi=[1-9]" || fail "dpi search: no ByeDPI strategy worked"
-echo "$E" | grep -qE "tpws=[1-9]|zapret=[1-9]" || echo "::warning title=dpi::no zapret strategy among the first passes"
-echo "$E" | grep -q "xray=[1-9]" || echo "::warning title=dpi::no Xray strategy among the first passes"
-
 echo "=== in-app tester (multi-inbound Xray instance)"
+CASE=tester; R=""
 adb shell am start -n $PKG/.MainActivity --ez e2e_disconnect true >/dev/null; sleep 2
 load test.json; adb logcat -c
 adb shell am start -n $PKG/.MainActivity --ez e2e_test true >/dev/null
 T=$(waitlog "action\[Проверка серверов\]" 120) || fail "tester: no result"
 echo "tester: $T"
 echo "$T" | grep -q "Работают: 3 из 3" || fail "tester: expected 3 working of 3 reachable"
+
+# Standalone DPI was retired: search now tests masks on authenticated servers.
+# TPWS, Xray and fixed ByeDPI engine transfers remain separate mandatory cases above.
+CASE=server-mask-search; R=""
+adb logcat -c
+adb shell am start -n $PKG/.MainActivity --ez e2e_dpi true >/dev/null
+D=$(waitlog "action\[Подбор маскировки VLESS\]" 240) || fail "mask search: no result"
+printf '%s' "$D" | python3 tools/e2e/verify_server_mask_search.py || fail "mask search: incomplete or invalid server-backed result"
+echo "mask search: $D"
+# Do not reload the state: use the actual masks persisted by the production search.
+: > $W/access.log; adb logcat -c
+adb shell am start -n $PKG/.MainActivity --ez e2e_connect true >/dev/null
+C=$(waitlog "check ok=|connect failed" 60) || fail "mask search: selected masks did not connect"
+printf '%s' "$C" | grep -q 'check ok=true' || fail "mask search: no live VPN success"
+R=$(probe server-mask-search); okprobe "$R" || fail "mask search: selected masks cannot carry other-UID HTTPS bodies"
+c=$(grep -c "email: u" $W/access.log)
+[ "$c" -gt 0 ] || fail "mask search: traffic bypassed authenticated servers"
 
 adb logcat -c
 echo "=== manual all-server check on a 128-entry catalogue"
