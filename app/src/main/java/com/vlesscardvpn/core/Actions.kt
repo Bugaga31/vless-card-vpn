@@ -400,6 +400,7 @@ object Actions {
         val (own, port) = dpiForTests(variants.map { it.second })
         val done = AtomicInteger(); val ok = AtomicInteger()
         val states = StateBatch(200)
+        val firstWinner = java.util.concurrent.atomic.AtomicReference<Server?>(null)
         try {
             Tester.real(variants, st.settings.testUrl, port, own.ports, batch = if (onFirst != null) ConnectPolicy.FIRST else batch, parallel = parallel, big = big, youtube = youtube, telegram = telegram, calls = calls, attempts = attempts, stopAfter = stopAfter, budgetMs = budgetMs) { i, p ->
                 if (p == Tester.SKIPPED) return@real
@@ -424,10 +425,20 @@ object Actions {
                         speedCheckedAt = if (speedSample) System.currentTimeMillis() else it.speedCheckedAt,
                         okCount = it.okCount + if (p.works) 1 else 0, failCount = it.failCount + if (p.works) 0 else 1)
                 }
-                if (firstSuccess && onFirst != null) { states.flush(); onFirst(s) }
+                if (firstSuccess && onFirst != null) firstWinner.compareAndSet(null, s)
                 step(done.incrementAndGet(), variants.size)
             }
         } finally { own?.close(); states.flush(); runCatching { Brain.save(app) } }
+        // stopAfter=1 already cancels the remaining probes. Finish their cleanup and
+        // commit all results before starting a VPN core; do not race two core lifecycles.
+        firstWinner.get()?.let { s ->
+            kotlinx.coroutines.currentCoroutineContext().ensureActive()
+            val committed = Store.state.value.state(s).works
+            val sameNetwork = Net.key(app) == net && Net.underlying(app)?.toString() == underlying
+            if (com.vlesscardvpn.BuildConfig.DEBUG) android.util.Log.i("E2E",
+                "auto first_probe committed=$committed same_network=$sameNetwork test_cleanup=true")
+            if (committed && sameNetwork) onFirst?.invoke(s)
+        }
         return ok.get()
     }
 
@@ -1243,9 +1254,17 @@ object Actions {
         val started = ConnectPolicy.StartGate()
         val attempted = mutableSetOf<String>()
         val firstReady: (Server) -> Unit = { server ->
-            if (started.claim()) {
+            if (started.claimSelected {
+                val n = selectBest(1, close = false, among = listOf(server))
+                val snapshot = Store.state.value
+                val net = Net.key(app)
+                val committed = snapshot.selected.any { it.id == server.id && snapshot.state(it).works &&
+                    AutoEligibility.vlessServer(it) && AutoEligibility.serviceRank(snapshot.state(it), net, System.currentTimeMillis()) != 2 }
+                if (com.vlesscardvpn.BuildConfig.DEBUG) android.util.Log.i("E2E",
+                    "auto handoff selected=$n committed=$committed working=${snapshot.servers.count { snapshot.state(it).works }}")
+                n > 0 && committed
+            }) {
                 deepPending = true
-                selectBest(1, close = false, among = listOf(server))
                 scope.launch(Dispatchers.Main) { onReady() }
             }
         }

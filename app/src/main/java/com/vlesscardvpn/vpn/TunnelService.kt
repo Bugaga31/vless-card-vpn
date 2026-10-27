@@ -277,6 +277,8 @@ class TunnelService : VpnService() {
                 selected = listOfNotNull(measuredChain.choice.server)
                 settings = settings.copy(mode=Mode.SERVERS, torAll = settings.torAll || measuredChain.choice.chain.layout.tor)
             }
+            if (com.vlesscardvpn.BuildConfig.DEBUG) Log.i("E2E",
+                "selection automatic=$automatic catalog=${st.servers.size} stored_selected=${st.selected.size} working=${st.servers.count { st.state(it).works }} eligible=${selected.size}")
             if (selected.isEmpty()) error("Нет рабочего VLESS-сервера. Прямой режим недоступен; нажмите «Авто» или обновите серверы.")
             selected = Actions.pinCertificates(com.vlesscardvpn.core.AutoEligibility.launchPool(selected, automatic))
             usedServers = selected

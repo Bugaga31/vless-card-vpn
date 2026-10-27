@@ -16,6 +16,11 @@ object ConnectPolicy {
         private val taken = java.util.concurrent.atomic.AtomicBoolean()
         val started get() = taken.get()
         fun claim() = taken.compareAndSet(false, true)
+        /** Do not consume the first-start slot until a working route is committed. */
+        @Synchronized fun claimSelected(select: () -> Boolean): Boolean {
+            if (taken.get() || !select()) return false
+            return taken.compareAndSet(false, true)
+        }
     }
     const val FIRST = 8
     const val NEXT = 16

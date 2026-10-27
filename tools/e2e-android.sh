@@ -250,8 +250,8 @@ WR=$(waitlog "action\[WARP\]" 420) || fail "warp: no result"
 adb logcat -d -s E2E:I | grep "warp " ; echo "warp: $WR"
 adb logcat -d -s E2E:I | grep "warp accounts" | grep -q "plus=[1-9]" && echo "warp: WARP+ key bound" || echo "::warning title=warp::no WARP+ key could be bound (all built-in keys busy?)"
 if echo "$WR" | grep -q "WARP готов"; then
-  adb logcat -c
-  adb shell am start -n $PKG/.MainActivity --ez e2e_connect true >/dev/null
+  # setupWarp starts the VPN itself when permission is already granted.
+  # Preserve that start/check in logcat; a second START tears down a live tunnel.
   C=$(waitlog "check ok=|connect failed" 90) || fail "warp: no connect result"
   echo "app: $C"; echo "$C" | grep -q "check ok=true" || fail "warp: in-app check through WARP failed"
   R=$(probe warp)
@@ -269,6 +269,8 @@ if echo "$WR" | grep -q "WARP готов"; then
     R=$(probe warp-dns-retry)
   fi
   okprobe "$R" || fail "warp: probe app traffic through WARP failed"
+  STARTS=$(adb logcat -d -s E2E:I | grep -c 'service command=start state=')
+  [ "$STARTS" -eq 1 ] || fail "warp: expected one automatic VPN start"
 else fail "warp: no working WARP endpoint"; fi
 
 echo "=== in-app tester (multi-inbound Xray instance)"
