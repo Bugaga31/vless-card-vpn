@@ -43,6 +43,17 @@ object Subs {
         SubSource(gh("Mosifree/-FREE2CONFIG/main/Reality"), "FREE2CONFIG · Reality", WORLD),
         SubSource(gh("MhdiTaheri/V2rayCollector/main/sub/mix"), "V2rayCollector", WORLD),
         SubSource(gh("SoliSpirit/v2ray-configs/main/Protocols/vless.txt"), "SoliSpirit · VLESS", WORLD),
+        // Additional public files: fetch/format checked, not availability evidence. Opt-in sources.
+        SubSource("https://raw.githubusercontent.com/s0ulcoil/HavenVPN/refs/heads/main/Haven", "HavenVPN", WORLD),
+        SubSource("https://raw.githubusercontent.com/opti4riponty-arch/VLESS-Co/refs/heads/main/VLESS%20%26%20Co", "VLESS & Co", WORLD),
+        SubSource("https://raw.githubusercontent.com/flaafix/AetrisVPN/refs/heads/main/AetrisVPN.txt", "AetrisVPN", WORLD),
+        SubSource("https://raw.githubusercontent.com/flaafix/AetrisVPN-black-list/refs/heads/main/configs.txt", "AetrisVPN · blacklist", WORLD),
+        SubSource("https://raw.githubusercontent.com/flaafix/AetrisVPN-white-list-lite/refs/heads/main/AetrisVPN.txt", "AetrisVPN · whitelist lite", WL, whitelist = true),
+        SubSource("https://gitverse.ru/api/repos/IvanBudko/Tarantul/raw/branch/master/tarantul.txt", "Tarantul", WORLD),
+        SubSource("https://gitverse.ru/api/repos/Catlerok_glasha/catwhiteMIRROR/raw/branch/master/configs.txt", "catwhiteMIRROR", WL, whitelist = true),
+        SubSource("https://gitverse.ru/api/repos/Pizduk/PizdukVPN/raw/branch/master/Mixer", "Mixer", WORLD),
+        SubSource("https://hub.mos.ru/akelladejavu/bunker/-/raw/main/BEST_LIST.txt", "bunker · BEST_LIST", WORLD),
+        SubSource("https://hub.mos.ru/akelladejavu/bunker/-/raw/main/WHITE_LIST.txt", "bunker · WHITE_LIST", WL, whitelist = true),
     )
     private val byUrl = CATALOG.associateBy { it.url }
     fun find(url: String): SubSource? = byUrl[url]

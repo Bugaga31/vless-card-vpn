@@ -191,6 +191,17 @@ fun DeviceScreen() {
             DetailDisclosure("Что меняется", "Временно откладываются облачные обновления, резервные проверки и фоновое наблюдение. Выбор учитывает EMA задержки/джиттера HTTPS, а не предполагаемые потери UDP. Приоритет процессов других приложений и частоты CPU не меняются; режим сбрасывается при завершении процесса.")
         }
 
+        DeviceSection("Диагностика поиска", "Последние 16 волн VLESS Card: результат, длительность и тип сети. Без адресов серверов, переписок, данных других приложений и автоматической отправки.") {
+            OutlinedButton(onClick = {
+                val report=AutoDiagnostics.report(ctx)
+                val send=android.content.Intent(android.content.Intent.ACTION_SEND).setType("text/plain")
+                    .putExtra(android.content.Intent.EXTRA_TEXT,report)
+                runCatching {ctx.startActivity(android.content.Intent.createChooser(send,"Поделиться диагностикой"))}
+                    .onFailure {message="Не удалось открыть отправку отчёта"}
+            }, modifier = Modifier.fillMaxWidth()) {Text("Поделиться обезличенным отчётом")}
+            TextButton(onClick = {AutoDiagnostics.clear(ctx);message="Диагностика поиска очищена"}) {Text("Удалить диагностику")}
+        }
+
         DeviceSection("Непрерывность VPN и сеть", "Эти параметры проверяются, но не переключаются автоматически.") {
             phone?.let { p ->
                 Text(

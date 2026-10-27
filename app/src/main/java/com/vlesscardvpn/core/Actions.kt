@@ -1013,10 +1013,10 @@ object Actions {
     private val autoGeneration = AtomicInteger()
     fun autoConnect(onReady: () -> Unit) {
         val ticket = autoGeneration.incrementAndGet()
-        val initialNetwork = Net.key(app) to Net.underlying(app)?.toString()
+        val expectedNetwork = java.util.concurrent.atomic.AtomicReference(Net.key(app) to Net.underlying(app)?.toString())
         val ready = {
             if (autoGeneration.get() == ticket) {
-                if (initialNetwork == (Net.key(app) to Net.underlying(app)?.toString())) onReady()
+                if (expectedNetwork.get() == (Net.key(app) to Net.underlying(app)?.toString())) onReady()
                 else {
                     if (com.vlesscardvpn.BuildConfig.DEBUG) android.util.Log.i("E2E", "auto ready_blocked=network_changed")
                     selectionNetworkChanged(); Unit
@@ -1056,7 +1056,7 @@ object Actions {
         }
         Tunnel.status.value = Tunnel.Status(Tunnel.State.CONNECTING, "Готовлю серверы…", check = "Ищу первый рабочий HTTPS-маршрут; полный поиск продолжится в фоне")
         if (busy?.isActive == true) cancel()
-        autoPrepare(ready)
+        autoPrepare(ready) { expectedNetwork.set(Net.key(app) to Net.underlying(app)?.toString()) }
     }
 
     /** «Подключение…» tapped again while Auto is still preparing: stop preparing. */
@@ -1234,20 +1234,49 @@ object Actions {
         return doAutoPrepare(onReady)
     }
 
-    private fun autoPrepare(onReady: () -> Unit) = launch("Авто-настройка") { doAutoPrepare(onReady) }
+    private fun autoPrepare(onReady: () -> Unit, setNetwork: () -> Unit) = launch("Авто-настройка") {
+        AutoSearchCampaign.run(network = { Net.key(app) + "|" + Net.underlying(app)?.toString() },
+            online = { online() }, elapsed = android.os.SystemClock::elapsedRealtime,
+            exhausted = { attempted -> Store.state.value.let { st -> preferred(st, st.servers).none { it.id !in attempted } } },
+            waiting = { round, offline ->
+                progress.value = progress.value.copy(title = "Авто: продолжаю поиск", message = if (offline)
+                    "Нет сети — жду её восстановления. Нажатие отменяет поиск."
+                    else "Волна ${round + 1} завершена. Облако: ${CloudControl.count()} кандидатов. Проверяю следующие маршруты. Нажатие отменяет поиск.")
+                Tunnel.status.value = Tunnel.Status(Tunnel.State.CONNECTING, if (offline) "Жду сеть…" else "Ищу следующий маршрут…",
+                    check = progress.value.message, checkOk = null)
+            }) { round, attempted ->
+            setNetwork()
+            refreshPublicCloud(foreground = true)
+            var selected = false
+            val startedAt = android.os.SystemClock.elapsedRealtime()
+            val network = Net.key(app) to Net.underlying(app)?.toString()
+            try {
+                val message = doAutoPrepare(onReady, attempted, continuous = true, round = round) { selected = true }
+                val stale = network != (Net.key(app) to Net.underlying(app)?.toString())
+                AutoDiagnostics.record(app, Net.family(network.first), if (stale) "STALE" else if (selected) "PASS" else "UNKNOWN",
+                    if (stale) "NETWORK_CHANGED" else if (selected) "NONE" else "NO_CANDIDATE", android.os.SystemClock.elapsedRealtime() - startedAt)
+                if (selected && !stale) message else null
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                AutoDiagnostics.record(app, Net.family(network.first), "CANCELLED", "CANCELLED", android.os.SystemClock.elapsedRealtime() - startedAt)
+                throw e
+            }
+        }
+    }
 
     private val autoSourceAttempts = java.util.concurrent.ConcurrentHashMap<String, Long>()
 
     /** Rescue is independent of the scheduled 12h full refresh; manual opt-out still applies. */
-    private suspend fun refreshAutoSources(onBatch: (List<Server>) -> Unit) = coroutineScope {
+    private suspend fun refreshAutoSources(round: Int = 0, onBatch: (List<Server>) -> Unit) = coroutineScope {
         val settings = Store.state.value.settings
         val network = Net.underlying(app)?.toString()
         val net = Net.key(app)
         val now = android.os.SystemClock.elapsedRealtime()
-        if (!AutoDiscoveryPolicy.refreshDue(settings.autoUpdateSubs, now, autoSourceAttempts[net])) return@coroutineScope
-        autoSourceAttempts[net] = now
-        if (autoSourceAttempts.size > 8) autoSourceAttempts.keys.filter { it != net }.take(autoSourceAttempts.size - 8).forEach { autoSourceAttempts.remove(it) }
-        val sources = AutoDiscoveryPolicy.sources(settings.subscriptions, Net.family(net).startsWith("Моб.: "))
+        if (!settings.autoUpdateSubs) return@coroutineScope
+        val sources = AutoDiscoveryPolicy.sources(settings.subscriptions, Net.family(net).startsWith("Моб.: "), round)
+            .filter { AutoDiscoveryPolicy.refreshDue(true, now, autoSourceAttempts[net + "|" + it]) }
+        sources.forEach { autoSourceAttempts[net + "|" + it] = now }
+        if (autoSourceAttempts.size > 256) autoSourceAttempts.entries.sortedBy { it.value }
+            .take(autoSourceAttempts.size - 256).forEach { autoSourceAttempts.remove(it.key, it.value) }
         kotlinx.coroutines.withTimeoutOrNull(AutoDiscoveryPolicy.SOURCE_MS + 1000) {
             sources.map { url -> async(Bg.io) {
                 val mirrors = Settings.mirrors(url)
@@ -1269,12 +1298,16 @@ object Actions {
         }
     }
 
-    private suspend fun doAutoPrepare(onReady: () -> Unit): String = coroutineScope {
+    private suspend fun doAutoPrepare(onReady: () -> Unit, attempted: MutableSet<String> = mutableSetOf(),
+        continuous: Boolean = false, round: Int = 0, onSelected: () -> Unit = {}): String = coroutineScope {
         val now = System.currentTimeMillis()
         val notes = mutableListOf<String>()
         val started = ConnectPolicy.StartGate()
-        val attempted = mutableSetOf<String>()
-        val firstReady: (Server) -> Unit = { server ->
+        val net = Net.key(app)
+        val handle = Net.underlying(app)?.toString()
+        fun sameNetwork() = Net.key(app) == net && Net.underlying(app)?.toString() == handle
+        val firstReady: (Server) -> Unit = first@ { server ->
+            if (!sameNetwork()) return@first
             if (started.claimSelected {
                 val n = selectBest(1, close = false, among = listOf(server))
                 val snapshot = Store.state.value
@@ -1286,12 +1319,10 @@ object Actions {
                 n > 0 && committed
             }) {
                 deepPending = true
-                scope.launch(Dispatchers.Main) { onReady() }
+                onSelected()
+                scope.launch(Dispatchers.Main) { if (sameNetwork()) onReady() }
             }
         }
-        val net = Net.key(app)
-        val handle = Net.underlying(app)?.toString()
-        fun sameNetwork() = Net.key(app) == net && Net.underlying(app)?.toString() == handle
         fun fresh(): List<Server> = Store.state.value.let { st ->
             AutoEligibility.servicePool(preferred(st, st.servers.filter {
                 st.state(it).works && st.state(it).checkedAt >= now
@@ -1299,7 +1330,7 @@ object Actions {
         }
         val batches = kotlinx.coroutines.channels.Channel<List<Server>>(AutoDiscoveryPolicy.SOURCES)
         val refresh = launch(Bg.io) {
-            try { refreshAutoSources { batches.trySend(it) } }
+            try { refreshAutoSources(round) { batches.trySend(it) } }
             finally { batches.close() }
         }
         try {
@@ -1312,15 +1343,22 @@ object Actions {
                     val batch = batches.receiveCatching().getOrNull() ?: break
                     notes += quickTest(batch, firstReady, attempted, firstWaveOnly = true)
                 }
+                if (continuous && !started.started && round % 3 == 2 && sameNetwork()) {
+                    val st = Store.state.value
+                    val candidates = ServerChoice.diverse(preferred(st, st.servers).filter {
+                        st.state(it).tcpMs > 0 && !st.state(it).works
+                    }.sortedBy { st.state(it).tcpMs }, 2)
+                    if (candidates.isNotEmpty()) notes += doFindMasks(candidates, 8, enough = 1, budgetMs = 4000)
+                }
             }
             if (sameNetwork()) fresh().firstOrNull()?.let(firstReady)
             if (started.started) return@coroutineScope "Первый HTTPS-маршрут найден — подключаюсь; подробные проверки в фоне"
             kotlinx.coroutines.currentCoroutineContext().ensureActive()
-            if (!sameNetwork()) return@coroutineScope selectionNetworkChanged()
+            if (!sameNetwork()) return@coroutineScope if (continuous) "Сеть изменилась — начинаю следующую волну" else selectionNetworkChanged()
             progress.value = progress.value.copy(title = "Авто: проверяю резервные маршруты")
             Tunnel.status.value = Tunnel.Status(Tunnel.State.CONNECTING, "Продолжаю поиск…",
                 check = "Быстрые кандидаты не подошли. Подписки обновляются автоматически; проверяю резерв и маскировки. Нажатие отменяет поиск.")
-            kotlinx.coroutines.withTimeoutOrNull(AutoDiscoveryPolicy.RECOVERY_MS) {
+            if (!continuous) kotlinx.coroutines.withTimeoutOrNull(AutoDiscoveryPolicy.RECOVERY_MS) {
                 // At most one bounded reserve pass, not a TCP sweep of every imported link.
                 notes += quickTest(Store.state.value.servers, firstReady, attempted)
                 if (!started.started && fresh().isEmpty() && sameNetwork()) {
@@ -1333,13 +1371,15 @@ object Actions {
             }
             if (started.started) return@coroutineScope "Рабочий HTTPS-маршрут найден — подключаюсь"
             kotlinx.coroutines.currentCoroutineContext().ensureActive()
-            if (!sameNetwork()) return@coroutineScope selectionNetworkChanged()
+            if (!sameNetwork()) return@coroutineScope if (continuous) "Сеть изменилась — начинаю следующую волну" else selectionNetworkChanged()
             val working = fresh()
             if (working.isNotEmpty() && selectBest(1, close = false, among = working) > 0) {
                 deepPending = true
-                withContext(Dispatchers.Main) { onReady() }
+                onSelected()
+                withContext(Dispatchers.Main) { if (sameNetwork()) onReady() }
                 return@coroutineScope "Авто: проверенный VLESS-маршрут выбран — подключаюсь"
             }
+            if (continuous) return@coroutineScope "Продолжаю поиск следующей порцией серверов; прямого обхода нет"
             val message = if (Store.state.value.settings.autoUpdateSubs)
                 "Авто попытался обновить подписки и проверил ограниченный набор маршрутов. Рабочий маршрут пока не подтверждён; прямого обхода нет. Повторите поиск после смены сети или проверьте доступ к источникам."
                 else "Рабочий маршрут не подтверждён. Автообновление подписок выключено в настройках; прямого обхода нет."
@@ -1359,7 +1399,12 @@ object Actions {
         val untried = list.filter { it.id !in attempted }
         if (untried.isEmpty()) return "Эти маршруты уже проверены в текущем поиске"
         val net = Net.key(app); val network = Net.underlying(app)?.toString()
-        val eligible = preferred(st, untried).filterNot { CloudSpeed.blocked(it) }.ifEmpty { preferred(st, untried) }
+        val allEligible = preferred(st, untried).filterNot { CloudSpeed.blocked(it) }.ifEmpty { preferred(st, untried) }
+        // Bound expensive scoring for a huge imported catalog; subsequent waves advance attempted IDs.
+        val rememberedIds = (st.settings.netServers[net] ?: st.settings.netServers[Net.family(net)]).orEmpty().toSet()
+        val eligible = if (firstWaveOnly) (CloudControl.ranked(allEligible, 32) +
+            allEligible.filter { it.id in rememberedIds }.take(32) + ServerChoice.diverse(allEligible, AutoDiscoveryPolicy.RANKING_WINDOW))
+            .distinctBy { it.id }.take(AutoDiscoveryPolicy.RANKING_WINDOW) else allEligible
         val affinity = SourceAffinity.order(eligible,Store.state.value.servers,{Store.state.value.state(it)},net,System.currentTimeMillis()) { CloudControl.sources(it) }
         val cloud = (CloudSpeed.pick(eligible, emptyList(), n = 4) + affinity.take(4) + CloudControl.ranked(eligible,8)).distinctBy { it.id }.take(ConnectPolicy.FIRST)
         val remembered = (st.settings.netServers[net] ?: st.settings.netServers[Net.family(net)]).orEmpty().toSet()
@@ -1396,10 +1441,11 @@ object Actions {
             if (firstFired.compareAndSet(false, true)) callback(server)
         } }
         val fast = ConnectPolicy.fastStart()
+        if (firstWaveOnly) attempted.addAll(shortlist.map { it.id })
         val fastOk = realTest(shortlist, "Авто: проверяю первый быстрый маршрут", big = true, youtube = false,
             attempts = 1, parallel = fast.parallel, stopAfter = if (onFirst != null) fast.stopAfter else Int.MAX_VALUE,
             budgetMs = fast.budgetMs, onFirst = firstCallback, onSuccess = { passed.add(it.id) })
-        if (Net.key(app) != net || Net.underlying(app)?.toString() != network) return selectionNetworkChanged()
+        if (Net.key(app) != net || Net.underlying(app)?.toString() != network) return if (firstWaveOnly) "Сеть изменилась — результаты отброшены" else selectionNetworkChanged()
         if (onFirst != null && firstFired.get()) return "Первый рабочий VLESS-маршрут найден — подключаюсь; сравнение продолжится после запуска"
         if (firstWaveOnly) {
             attempted.addAll(shortlist.map { it.id })
