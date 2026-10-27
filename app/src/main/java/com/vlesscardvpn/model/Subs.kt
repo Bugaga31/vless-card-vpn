@@ -53,7 +53,10 @@ object Subs {
 
     private val RAW = Regex("https://raw\\.githubusercontent\\.com/([^/]+)/([^/]+)/([^/]+)/(.+)")
     fun mirrors(url: String): List<String> {
-        val m = RAW.find(url) ?: return listOf(url)
+        // Never forward tokens/query strings or authenticated URLs to a public mirror.
+        val uri = runCatching { java.net.URI(url) }.getOrNull() ?: return listOf(url)
+        if (uri.rawUserInfo != null || uri.rawQuery != null || uri.rawFragment != null) return listOf(url)
+        val m = RAW.matchEntire(url) ?: return listOf(url)
         val (owner, repo, branch, path) = m.destructured
         return buildList {
             add(url)

@@ -81,8 +81,8 @@ object CloudControl {
         if (snapshot != null) return
         ctx.getSharedPreferences("cloud_control",0).getString("json",null)?.let { runCatching { apply(ctx,parse(it,System.currentTimeMillis())) } }
     }
-    @Synchronized fun refresh(ctx: Context) {
-        loadCached(ctx);if (!Report.enabled(ctx) || !PhonePower.refresh(ctx).allowLight) return
+    @Synchronized fun refresh(ctx: Context, foreground: Boolean = false) {
+        loadCached(ctx);if (!Report.enabled(ctx) || (!foreground && !PhonePower.refresh(ctx).allowLight)) return
         val now=System.currentTimeMillis()
         if (!CloudSpeed.refreshDue(now,fetched,attempted,snapshot != null && fetched > 0)) return
         attempted=now;val p=ctx.getSharedPreferences("cloud_control",0)

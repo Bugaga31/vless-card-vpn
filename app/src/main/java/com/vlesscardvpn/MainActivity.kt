@@ -9,6 +9,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.collect
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.Lifecycle
@@ -16,6 +17,7 @@ import com.vlesscardvpn.ui.AppUi
 import com.vlesscardvpn.vpn.TunnelService
 
 class MainActivity : ComponentActivity() {
+    private var batteryOffer: android.app.AlertDialog? = null
     private val vpnPermission = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { r ->
         if (r.resultCode == RESULT_OK) start()
     }
@@ -34,6 +36,28 @@ class MainActivity : ComponentActivity() {
         if (intent != null) vpnPermission.launch(intent) else start()
     }
 
+    /** Offered only after connection and while this activity is resumed; declining never stops VPN. */
+    private fun offerVpnBatteryExemption() {
+        val prefs = getSharedPreferences("vpn_background_offer", MODE_PRIVATE)
+        val exempt = Build.VERSION.SDK_INT < 23 || runCatching {
+            (getSystemService(POWER_SERVICE) as android.os.PowerManager).isIgnoringBatteryOptimizations(packageName)
+        }.getOrDefault(true)
+        if (!com.vlesscardvpn.core.VpnBatteryPromptPolicy.shouldOffer(Build.VERSION.SDK_INT,
+                com.vlesscardvpn.core.Tunnel.status.value.state == com.vlesscardvpn.core.Tunnel.State.CONNECTED,
+                exempt, prefs.getBoolean("offered", false), BuildConfig.DEBUG)) return
+        if (isFinishing || isDestroyed) return
+        // Persist before showing, so rotation or reconnect cannot produce repeated permission prompts.
+        prefs.edit().putBoolean("offered", true).apply()
+        batteryOffer = android.app.AlertDialog.Builder(this)
+            .setTitle("VPN без остановок в фоне")
+            .setMessage("Разрешить VLESS Card работать без ограничений батареи? Это может помочь Android не останавливать VPN при выключенном экране, но увеличивать расход батареи. Скорость серверов не меняется. Решение подтвердите в системном окне. Позже это доступно в разделе «Телефон».")
+            .setPositiveButton("Разрешить в Android") { _, _ ->
+                com.vlesscardvpn.core.DeviceCoach.open(this, "vpnBattery")
+            }
+            .setNegativeButton("Не сейчас", null)
+            .show()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED)
@@ -49,9 +73,20 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.RESUMED) {
+                com.vlesscardvpn.core.Tunnel.status.collect { offerVpnBatteryExemption() }
+            }
+        }
         setContent { AppUi(onConnect = { connect() }, onDisconnect = { com.vlesscardvpn.core.Actions.cancelPrepare(); TunnelService.stop(this) }) }
         e2e(intent, restored = savedInstanceState != null)
         importFrom(intent)
+    }
+
+    override fun onStop() {
+        batteryOffer?.dismiss()
+        batteryOffer = null
+        super.onStop()
     }
 
     override fun onNewIntent(intent: android.content.Intent) { super.onNewIntent(intent); e2e(intent); importFrom(intent) }

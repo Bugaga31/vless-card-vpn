@@ -110,7 +110,7 @@ fun TorSettingsCard(settings: Settings, set: ((Settings) -> Settings) -> Unit) {
                     enabled = validSeconds != null && validLatency != null, modifier = Modifier.fillMaxWidth()) { Text("Сохранить интервал и порог") }
                 Text("Параметры ротации и транспорта применяются при следующем подключении. Tor работает поверх VLESS; при отсутствии сервера маршрут не переключается напрямую.", style = MaterialTheme.typography.bodyMedium)
             }
-            TorOption("Весь TCP-трафик через Tor", "Tor работает вторым шагом после выбранного VLESS-сервера; UDP, включая звонки, остаётся на VLESS-маршруте. Если VLESS недоступен, VPN не уходит напрямую.", settings.torAll) { v -> set { it.copy(torAll = v) } }
+            TorOption("Весь TCP-трафик через Tor", "Tor работает вторым шагом после выбранного VLESS-сервера; UDP, включая звонки, остаётся на VLESS-маршруте. Если VLESS недоступен, VPN не уходит напрямую.", settings.torAll) { v -> set { if (v) TorConnectionPolicy.selectTor(it) else it.copy(torAll = false) } }
             Text("Транспорт и мосты", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
             listOf("obfs4" to "obfs4 · маскировка Tor", "webtunnel" to "WebTunnel · HTTPS-транспорт", "none" to "Без мостов · через VLESS").forEach { (id, label) ->
                 Surface(onClick = { circuit = null; set { it.copy(torBridge = id) } }, shape = RoundedCornerShape(12.dp),

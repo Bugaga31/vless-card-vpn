@@ -92,8 +92,8 @@ object CloudSpeed {
         status.value = if (kbps.isNotEmpty() || net.isNotEmpty()) "Облако: используются сохранённые рейтинги; подтверждение на телефоне" else "Облако: кэша рейтингов нет; используем локальное обучение"
     }
 
-    @Synchronized fun refresh(ctx: Context) {
-        if (!Report.enabled(ctx) || !PhonePower.refresh(ctx).allowLight) return
+    @Synchronized fun refresh(ctx: Context, foreground: Boolean = false) {
+        if (!Report.enabled(ctx) || (!foreground && !PhonePower.refresh(ctx).allowLight)) return
         runCatching { loadNet(ctx) }
         val p = ctx.getSharedPreferences("cloud_speed", Context.MODE_PRIVATE)
         val cached = p.getString("json", null)
