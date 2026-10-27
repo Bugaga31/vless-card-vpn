@@ -94,8 +94,6 @@ class TunnelService : VpnService() {
 
     /** Self-healing step after failed checks (0 = healthy); reset by a successful check or a user (re)connect. */
     private var healStep = 0
-    /** Auto mode gave up on servers for this connection: ByeDPI only (the search goes on in the background). */
-    private var autoDpiOnly = false
     /** Servers of the running connection (selected or the best ones taken automatically). */
     @Volatile private var usedTorRoute: Boolean = false
     private var chainJob: Job? = null
@@ -155,7 +153,7 @@ class TunnelService : VpnService() {
             ACTION_STOP -> { scope.launch { lock.withLock { teardown("") } ; stopSelf() } }
             else -> { // ACTION_START or always-on restart (null intent)
                 foreground("Подключение…")
-                healStep = 0; autoDpiOnly = false; dpiHeals = 0; connectFails = 0; safeMasks = false
+                healStep = 0; dpiHeals = 0; connectFails = 0; safeMasks = false
                 scope.launch { lock.withLock { connect() } }
             }
         }
@@ -241,8 +239,8 @@ class TunnelService : VpnService() {
             var settings = com.vlesscardvpn.tor.TorConnectionPolicy.runtime(
                 com.vlesscardvpn.tor.TorNetworkRecommendations.apply(st.settings, Net.family(network)))
             val automatic = settings.mode == Mode.AUTO
-            var selected = if (settings.torAll) emptyList() else st.selected.filter(com.vlesscardvpn.core.AutoEligibility::allowed)
-            if (settings.mode != Mode.BYEDPI && selected.isEmpty()) {
+            var selected = st.selected.filter(com.vlesscardvpn.core.AutoEligibility::allowed)
+            if (selected.isEmpty()) {
                 // Nothing chosen: take the best servers that passed the last test.
                 val candidates = Actions.preferred(st, st.servers.filter { st.state(it).works })
                 selected = if (automatic && !com.vlesscardvpn.core.GameSession.active()) candidates.sortedWith(
@@ -257,14 +255,13 @@ class TunnelService : VpnService() {
                 val usable = com.vlesscardvpn.core.AutoEligibility.servicePool(candidates,{st.state(it)},network,System.currentTimeMillis())
                 selected = com.vlesscardvpn.core.AutoEligibility.connectedPool(usable,{st.state(it)},network,
                     System.currentTimeMillis(),com.vlesscardvpn.core.GameSession.active())
-                settings = settings.copy(mode = if (selected.isEmpty() || autoDpiOnly) Mode.BYEDPI else Mode.SERVERS)
-                if (settings.mode == Mode.BYEDPI) selected = emptyList()
+                settings = settings.copy(mode = Mode.SERVERS)
             }
             // Xray round-robin treats an outbound with no observation yet as alive.
             // Exclude only explicit negative TCP hints before exposing a manual pool;
             // keep timeouts/unknown, and never turn this hint into working/PASS evidence.
             // Auto already uses measured eligibility; do not extend its search budget.
-            if (!automatic && settings.mode != Mode.BYEDPI && !settings.torAll && selected.size > 1) {
+            if (!automatic && selected.size > 1) {
                 val handle = Net.underlying(this)?.toString()
                 val hints = Tester.fastFilter(selected.take(16), budgetMs = 600)
                 check(Net.key(this) == network && Net.underlying(this)?.toString() == handle) { "Network changed during pool startup" }
@@ -278,20 +275,9 @@ class TunnelService : VpnService() {
             if (measuredChain == null) chainChoice = null
             if (measuredChain != null) {
                 selected = listOfNotNull(measuredChain.choice.server)
-                settings = if (measuredChain.choice.chain.layout == com.vlesscardvpn.core.AutoChainSelection.Layout.TOR)
-                    settings.copy(torAll=true,mode=Mode.BYEDPI)
-                else settings.copy(mode=Mode.SERVERS)
+                settings = settings.copy(mode=Mode.SERVERS, torAll = settings.torAll || measuredChain.choice.chain.layout.tor)
             }
-            // «Умный YouTube»: measured faster here through the DPI bypass straight to Google → only YouTube goes that way
-            val ytDpi = measuredChain == null && st.settings.mode == Mode.AUTO && settings.mode == Mode.SERVERS && settings.smartYoutube && settings.services.isEmpty() &&
-                !settings.proxyOnly && settings.ytDpi[network] == true &&
-                com.vlesscardvpn.core.YouTubeMediaProbe.freshProof(
-                    getSharedPreferences(com.vlesscardvpn.core.YouTubeMediaProbe.PROOF_PREFS, 0)
-                        .getLong(Net.fingerprint("media", network), 0), System.currentTimeMillis())
-            if (ytDpi) settings = settings.copy(mode = Mode.HYBRID, hybridDomains = Settings.YT_DOMAINS)
-            Tunnel.ytViaDpi = ytDpi
-            if (!settings.torAll && settings.mode != Mode.BYEDPI && selected.isEmpty())
-                error("Нет выбранных серверов. Откройте «Серверы», нажмите «Проверить» и отметьте рабочие.")
+            if (selected.isEmpty()) error("Нет рабочего VLESS-сервера. Прямой режим недоступен; нажмите «Авто» или обновите серверы.")
             selected = Actions.pinCertificates(com.vlesscardvpn.core.AutoEligibility.launchPool(selected, automatic))
             usedServers = selected
             val rotate = settings.rotateMasks
@@ -307,8 +293,8 @@ class TunnelService : VpnService() {
                 val id = com.vlesscardvpn.core.AutoRoutePolicy.launchMask(automatic, rotate, mine, pool) { it.random() }
                 srv to if (safeMasks) null else Masks.byId(id)
             }
-            val needCurrent = !settings.torAll && (settings.mode != Mode.SERVERS || withMasks.any { it.second?.dpi == Masks.CURRENT_DPI })
-            val fixed = if (settings.mode == Mode.BYEDPI) emptySet() else Masks.strategies(withMasks.map { it.second }) - Masks.CURRENT_DPI
+            val needCurrent = withMasks.any { it.second?.dpi == Masks.CURRENT_DPI }
+            val fixed = Masks.strategies(withMasks.map { it.second }) - Masks.CURRENT_DPI
             connectPhase = "dpi"
             val set = DpiSet(this); dpi = set
             set.start(settings, network, needCurrent, fixed, allowLocal = BuildConfig.DEBUG)
@@ -337,11 +323,9 @@ class TunnelService : VpnService() {
                 listen = if (proxy && settings.lanShare) "0.0.0.0" else "127.0.0.1", httpPort = if (proxy) settings.httpPort else null, warpHop = warpHop,
                 heavy = XrayConfigBuilder.heavyOf(used.map { if (automatic) com.vlesscardvpn.core.ServerChoice.measuredSpeed(st.state(it.first),network,System.currentTimeMillis()) else st.state(it.first).kbps },
                     used.map { if (automatic && com.vlesscardvpn.core.AutoEligibility.serviceRank(st.state(it.first),network,System.currentTimeMillis()) == 1) null else st.state(it.first).ytOk }),
-                serviceRoutes = if(measuredChain == null) com.vlesscardvpn.core.ServiceRoutes.snapshot(network, android.os.SystemClock.elapsedRealtime()) else emptyMap(),
+                serviceRoutes = if (measuredChain == null) com.vlesscardvpn.core.ServiceRoutes.snapshot(network, android.os.SystemClock.elapsedRealtime()) else emptyMap(),
                 quietLogs = !com.vlesscardvpn.core.PhonePower.refresh(this).allowLight,
-                downloadSpeeds = downloadSpeeds, downloadLatencies = downloadLatencies,
-                serverViaTor = if(measuredChain?.choice?.chain?.layout == com.vlesscardvpn.core.AutoChainSelection.Layout.TOR_SERVER)
-                    used.map {it.first.id}.toSet() else emptySet())
+                downloadSpeeds = downloadSpeeds, downloadLatencies = downloadLatencies)
             val c = XrayCore.Instance("vpn"); core = c
             Tunnel.wireguardKeys = (used.map { it.first } + listOfNotNull(warpHop)).filter { it.protocol == "wireguard" }.map { it.secret }.toSet()
             connectPhase = "core"
@@ -358,22 +342,15 @@ class TunnelService : VpnService() {
             if (!proxy && !keepTun) startTun(settings, socks)
 
             val auto = com.vlesscardvpn.tor.TorConnectionPolicy.needsAutoSearch(st.settings)
-            var route = when (settings.mode) {
-                Mode.BYEDPI -> "Без сервера · $dpiLabel"
-                Mode.HYBRID -> if (ytDpi) (if (selected.size == 1) selected[0].name else "${selected.size} серверов") + " · YouTube напрямую через обход DPI"
-                    else "${selected.size} серв. + $dpiLabel для YouTube/Discord"
-                else -> if (selected.size == 1) selected[0].name else "${selected.size} серверов · ${settings.balance.title.lowercase()}"
-            }
-            if(measuredChain != null) route = when(measuredChain.choice.chain.layout) {
-                com.vlesscardvpn.core.AutoChainSelection.Layout.TOR -> "Tor · TCP"
-                com.vlesscardvpn.core.AutoChainSelection.Layout.TOR_SERVER -> "Tor → ${selected.first().name} · TCP"
+            var route = if (selected.size == 1) selected[0].name else "${selected.size} серверов · ${settings.balance.title.lowercase()}"
+            if (measuredChain != null) route = when (measuredChain.choice.chain.layout) {
+                com.vlesscardvpn.core.AutoChainSelection.Layout.SERVER_TOR,
+                com.vlesscardvpn.core.AutoChainSelection.Layout.DPI_SERVER_TOR -> "${selected.first().name} → Tor · через VLESS"
                 com.vlesscardvpn.core.AutoChainSelection.Layout.DPI_SERVER -> "ByeDPI → ${selected.first().name}"
                 else -> selected.firstOrNull()?.name ?: "Измеренная цепочка"
-            }
-            else if (settings.torAll) route = "Tor · TCP (кроме прямых исключений)"
-            else if (usedTorRoute) route += " · выбранные сервисы через Tor (TCP)"
+            } else if (settings.torAll) route += " → Tor через VLESS · UDP через VLESS"
+            else if (usedTorRoute) route += " · выбранные TCP-сервисы через Tor/VLESS"
             if (auto) route = "Авто · $route"
-            if (settings.services.isNotEmpty() && !settings.torAll) route += " · через VPN только " + com.vlesscardvpn.core.Services.label(settings.services)
             if (proxy) route = "Прокси SOCKS5 :${socks.port} · HTTP :${settings.httpPort}" + (if (settings.lanShare) " (для всей сети: ${lanIp() ?: "IP телефона"})" else "") + " · $route"
             val since = if (keepTun && prev.since > 0) prev.since else System.currentTimeMillis()
             if (!keepTun) { com.vlesscardvpn.core.Traffic.start(); Tunnel.rx0 = android.net.TrafficStats.getUidRxBytes(android.os.Process.myUid()); Tunnel.tx0 = android.net.TrafficStats.getUidTxBytes(android.os.Process.myUid()) }
@@ -395,14 +372,40 @@ class TunnelService : VpnService() {
             if (BuildConfig.DEBUG) Log.i("E2E", com.vlesscardvpn.core.ConnectDiagnostics.describe("connect",connectPhase,e))
             Log.w(TAG, "connect failed", e)
             Log.i("E2E", "connect failed: ${e.message}")
-            // Auto mode doesn't give up on a failed start: 1) without masks, 2) DPI bypass without servers.
+            if (keepTun) {
+                if (connectFails == 0) {
+                    connectFails = 1
+                    safeMasks = true
+                    teardown(null, keepTun = true)
+                    Tunnel.status.value = prev.copy(check = "VLESS не запустился (${com.vlesscardvpn.core.Errors.human(e)}); повторяю с безопасной маскировкой. Трафик остаётся заблокированным до сервера.", checkOk = false)
+                    connect(soft = true)
+                    return
+                }
+                safeMasks = false
+                teardown(null, keepTun = true)
+                Tunnel.status.value = prev.copy(state = Tunnel.State.CONNECTED, message = "Защита VPN включена",
+                    check = "VLESS не восстановлен (${com.vlesscardvpn.core.Errors.human(e)}). Трафик заблокирован; ищу рабочий сервер.",
+                    checkOk = false)
+                foreground("Трафик заблокирован · поиск VLESS")
+                if (Store.state.value.settings.mode == Mode.AUTO) recoverServerRoute() else heal()
+                return
+            }
             if (com.vlesscardvpn.tor.TorConnectionPolicy.needsAutoSearch(Store.state.value.settings) && connectFails < 2) {
                 connectFails++
-                if (connectFails == 1) safeMasks = true else autoDpiOnly = true
-                Log.i("E2E", "connect retry #$connectFails safe=$safeMasks dpiOnly=$autoDpiOnly")
-                teardown(null)
-                Tunnel.status.value = Tunnel.Status(Tunnel.State.CONNECTING, "Подключение…", check = "Не запустилось (${com.vlesscardvpn.core.Errors.human(e)}) — пробую по-другому…")
-                connect(); return
+                if (connectFails == 1) {
+                    safeMasks = true
+                    teardown(null)
+                    Tunnel.status.value = Tunnel.Status(Tunnel.State.CONNECTING, "Подключение…", check = "Повторяю с безопасной маскировкой VLESS…")
+                    connect(); return
+                }
+                safeMasks = false
+                val found = runCatching { Store.busy { Actions.autoRescue(usedServers, 1) } }.getOrDefault(0)
+                if (found > 0) {
+                    connectFails = 2
+                    teardown(null)
+                    Tunnel.status.value = Tunnel.Status(Tunnel.State.CONNECTING, "Подключение…", check = "Проверенный резервный VLESS-сервер найден…")
+                    connect(); return
+                }
             }
             teardown(if (e is IllegalStateException) e.message ?: com.vlesscardvpn.core.Errors.human(e) else com.vlesscardvpn.core.Errors.human(e))
             stopSelf()
@@ -524,7 +527,7 @@ class TunnelService : VpnService() {
                 if (sinceNet < 90_000L && !netHardDone) { netHardDone = true; hardRestart("новая сеть, а интернет не пошёл", force = true); return@launch }
                 if (System.currentTimeMillis() - lastHard > 5 * 60_000L) { hardRestart("после переподключения интернет не пошёл"); return@launch }
             }
-            if (p.works) { healStep = 0; dpiHeals = 0; connectFails = 0; scheduleOptimize(if (com.vlesscardvpn.core.Actions.deepPending || usedServers.size < com.vlesscardvpn.core.AutoEligibility.TOP) 5_000 else 60_000); com.vlesscardvpn.core.AppWatch.start(this@TunnelService, reconnect = { scope.launch { lock.withLock { connect(soft = true) } } }, maintenanceReconnect = { scheduleMaintenanceReconnect() }, connectedAt = { connectedElapsed }); watchdog(); standbyScout(); coverTraffic(); torLoop(); serviceRoutes(); autoChainScout(); if (serverless()) rescueLater() } else heal()
+            if (p.works) { healStep = 0; dpiHeals = 0; connectFails = 0; scheduleOptimize(if (com.vlesscardvpn.core.Actions.deepPending || usedServers.size < com.vlesscardvpn.core.AutoEligibility.TOP) 5_000 else 60_000); com.vlesscardvpn.core.AppWatch.start(this@TunnelService, reconnect = { scope.launch { lock.withLock { connect(soft = true) } } }, maintenanceReconnect = { scheduleMaintenanceReconnect() }, connectedAt = { connectedElapsed }); watchdog(); standbyScout(); coverTraffic(); torLoop(); serviceRoutes(); autoChainScout() } else heal()
         }
     }
 
@@ -901,8 +904,12 @@ class TunnelService : VpnService() {
                 if (ok && offline) { verifySoon(0); break } // internet is back: full check (WARP, YouTube…)
                 miss = if (ok) 0 else miss + 1
                 if (miss >= 2) {
-                    // no answer twice in ~25 s: rebuild at once like the big button (seconds); if that already
-                    // happened in the last 5 min, hardRestart goes on to heal (other masks / servers)
+                    val callActive = com.vlesscardvpn.core.PhonePower.isVoiceCallActive(this@TunnelService)
+                    if (com.vlesscardvpn.core.VoiceCallPolicy.deferRepair(callActive, miss)) {
+                        val cur = Tunnel.status.value
+                        Tunnel.status.value = cur.copy(check = "Идёт звонок — перепроверяю маршрут без перезапуска", checkOk = false)
+                        continue
+                    }
                     Log.i("E2E", "watchdog: connection lost")
                     val cur = Tunnel.status.value
                     Tunnel.status.value = cur.copy(check = "Связь пропала — пересобираю соединение…", checkOk = false)
@@ -914,6 +921,12 @@ class TunnelService : VpnService() {
                     val now = TProxyService.stats()
                     stall = if (Tester.tunStalled(stats, now)) stall + 1 else 0
                     stats = now
+                    val callActive = com.vlesscardvpn.core.PhonePower.isVoiceCallActive(this@TunnelService)
+                    if ((dnsMiss >= 2 || stall >= 3) && com.vlesscardvpn.core.VoiceCallPolicy.deferRepair(callActive, maxOf(dnsMiss, stall))) {
+                        val cur = Tunnel.status.value
+                        Tunnel.status.value = cur.copy(check = "Идёт звонок — подтверждаю сбой перед перезапуском", checkOk = false)
+                        continue
+                    }
                     if (dnsMiss >= 2) { hardRestart("DNS перестал отвечать"); break }
                     if (stall >= 3) { hardRestart("трафик приложений завис"); break }
                 }
@@ -978,113 +991,74 @@ class TunnelService : VpnService() {
     }
 
     private var healJob: Job? = null
+    private var recoveryJob: Job? = null
     private fun healStatus(text: String) { val cur = Tunnel.status.value; if (cur.state == Tunnel.State.CONNECTED) Tunnel.status.value = cur.copy(check = text, checkOk = null) }
 
-    /**
-     * Masking got blocked (or the server died): 1) next good masks, 2) mask search for the selected servers.
-     * Auto mode never gives up: other working servers → mask search with mask evolution → fresh subscriptions,
-     * full re-test and WARP; only then ByeDPI without servers, and the search goes on in the background.
-     */
-    private fun heal() {
-        val st = Store.state.value
-        if (!st.settings.autoHeal || healJob?.isActive == true) return
-        if (st.settings.torAll) {
-            healJob = scope.launch {
-                healStatus("Восстанавливаю Tor-цепочку; прямой маршрут вместо Tor не включаю…")
-                delay(10_000L)
-                if (Store.state.value.settings.torAll && Net.underlying(this@TunnelService) != null)
-                    lock.withLock { connect(soft = true) }
-                else verifySoon(20_000L)
-            }
-            return
-        }
-        val auto = st.settings.mode == Mode.AUTO
-        if (com.vlesscardvpn.core.AutoChainLivePolicy.enabled(st.settings)) {
-            val backup=chainReserves.take(st.settings,Net.key(this),chainEpoch.get(),android.os.SystemClock.elapsedRealtime(),usedChain?.chain?.id)
-            if(backup != null) {
-                healJob=scope.launch {
-                    healStatus("Проверяю свежую запасную цепочку…")
-                    lock.withLock { chainChoice=backup;connect(soft=true) }
+    private fun recoverServerRoute() {
+        if (recoveryJob?.isActive == true || tun == null || Tunnel.socks == null) return
+        recoveryJob = scope.launch {
+            var attempt = 0
+            while (tun != null && Tunnel.socks != null && Tunnel.status.value.state == Tunnel.State.CONNECTED) {
+                if (com.vlesscardvpn.core.PhonePower.isVoiceCallActive(this@TunnelService)) {
+                    healStatus("Идёт звонок — не переключаю маршрут; VPN блокирует трафик до восстановления сервера")
+                    delay(10_000)
+                    continue
                 }
-                return
-            }
-        }
-        if (st.settings.mode == Mode.BYEDPI || autoDpiOnly) {
-            // DPI bypass without a server stopped working: the next strategy remembered for this network, else a new search
-            if (st.settings.dpiStrategy != Settings.DPI_AUTO || dpiHeals >= 6) {
-                healStatus(if (dpiHeals >= 6) "Обход DPI в этой сети не помогает — нужен сервер (режим «Авто» найдёт его сам)" else "Стратегия выбрана вручную — включите «Авто» в Настройках → Обход DPI")
-                return
-            }
-            dpiHeals++
-            healJob = scope.launch {
-                if (!Actions.online()) { healStatus("Нет интернета у самой сети — жду, когда появится…"); dpiHeals--; delay(20_000); verifySoon(0); return@launch }
-                if (dpiHeals % 3 != 0 && Actions.nextDpi()) healStatus("Стратегию, похоже, распознали — переключаюсь на запасную…")
-                else { healStatus("Подбираю новую стратегию обхода для этой сети…"); runCatching { Store.busy { Actions.doFindDpi() } } }
-                Log.i("E2E", "heal dpi=$dpiHeals")
-                delay(500); lock.withLock { connect(soft = true) }
-            }
-            return
-        }
-        val servers = usedServers
-        healStep++
-        healJob = scope.launch {
-            if (!Actions.online()) {
-                // no internet at all (lift, metro): nothing to fix, check again a bit later
-                healStatus("Нет интернета у самой сети — жду, когда появится…")
-                healStep--; delay(20_000); verifySoon(0); return@launch
-            }
-            // another mask helps only if the servers answer at all (TCP); dead servers → straight to the search
-            val reachable = healStep == 1 && servers.take(5).any { Tester.tcpOne(it.address, it.port, 1500) > 0 }
-            if (healStep == 1 && reachable && Actions.nextMasks(servers)) {
-                healStatus("Маскировку, похоже, распознали — переключаюсь на другую…")
-            } else if (!auto) {
-                if (healStep > 2) return@launch
-                healStep = 2
-                healStatus("Подбираю новую маскировку для серверов…")
-                runCatching { Store.busy { Actions.doFindMasks(servers, 24) } }
-            } else if (healStep <= 4) {
-                var n = 0
-                val k = Net.key(this@TunnelService)
-                // a DPI bypass known for this network: after the spares fail, connect through it at once and search in the background
-                val dpiKnown = (st.settings.dpiRemembered[k] ?: st.settings.dpiRemembered[Net.family(k)]) != null
-                for (level in 1..3) {
-                    healStatus("Авто-поиск, шаг $level из 3: " + when (level) { 1 -> "переключаюсь на другие рабочие серверы"; 2 -> "подбираю маскировку"; else -> "перепроверяю всё" } + "…")
-                    n = runCatching { Store.busy { Actions.autoRescue(servers, level) { step -> healStatus("Авто-поиск, шаг $level из 3: $step…") } } }.getOrDefault(0)
-                    if (n > 0) break
-                    if (level == 1 && dpiKnown) break
+                if (!Actions.online()) {
+                    healStatus("Сеть недоступна — VPN оставляет трафик заблокированным и повторит поиск")
+                    delay(20_000)
+                    continue
                 }
-                if (n == 0) { autoDpiOnly = true; fastRescue = true; healStatus("Серверы пока не нашлись — включаю обход DPI без сервера и ищу дальше в фоне…") }
-            } else {
-                autoDpiOnly = true
-                healStatus("Серверы раз за разом отваливаются — пока обход DPI без сервера, поиск идёт в фоне…")
+                healStatus(if (attempt == 0) "Сервер не отвечает — ищу рабочий VLESS-маршрут; прямого обхода нет" else "VLESS-маршрут не найден — повторяю поиск")
+                val level = if (attempt == 0) 1 else 3
+                val found = runCatching { Store.busy { Actions.autoRescue(usedServers, level) } }.getOrDefault(0)
+                if (found > 0) {
+                    safeMasks = false
+                    connectFails = 0
+                    lock.withLock {
+                        if (tun != null && Tunnel.status.value.state == Tunnel.State.CONNECTED) connect(soft = true)
+                    }
+                    if (Tunnel.status.value.check == "Проверяю интернет…") break
+                }
+                attempt++
+                healStatus("Рабочего VLESS-сервера пока нет. Трафик остаётся заблокированным; повторный поиск через ${minOf(60, attempt * 5)} с")
+                delay(minOf(60_000L, 5_000L * attempt.coerceAtMost(12)))
             }
-            Log.i("E2E", "heal step=$healStep dpiOnly=$autoDpiOnly")
-            safeMasks = false; connectFails = 0
-            delay(500)
-            lock.withLock { connect(soft = true) }
         }
     }
 
-    private var rescueJob: Job? = null
-    /** Auto mode running without servers (none worked, or none known yet). */
-    private fun serverless() = !Store.state.value.settings.torAll && Store.state.value.settings.mode == Mode.AUTO && (autoDpiOnly || usedServers.isEmpty())
-    /** Auto mode on ByeDPI only: every 3 min look for servers again; as soon as some work, switch back to them. */
-    /** The heal fell back to the DPI bypass early (servers not searched yet): the first background search starts soon. */
-    @Volatile private var fastRescue = false
-    private fun rescueLater() {
-        if (rescueJob?.isActive == true) return
-        rescueJob = scope.launch {
-            while (serverless() && Tunnel.status.value.state == Tunnel.State.CONNECTED) {
-                delay(if (fastRescue) { fastRescue = false; 10_000 } else 180_000)
-                if (healJob?.isActive == true) continue
-                val n = runCatching { Store.busy { Actions.autoRescue(emptyList(), 3) } }.getOrDefault(0)
-                if (n > 0 && serverless()) {
-                    Log.i("E2E", "rescue: servers found again")
-                    autoDpiOnly = false; healStep = 0
-                    lock.withLock { connect(soft = true) }
-                    break
-                }
+    private fun heal() {
+        val st = Store.state.value
+        if (healJob?.isActive == true) return
+        if (st.settings.mode == Mode.AUTO) {
+            recoverServerRoute()
+            return
+        }
+        if (!st.settings.autoHeal) return
+        val servers = usedServers.filter(com.vlesscardvpn.core.AutoEligibility::vlessServer)
+        if (servers.isEmpty()) return
+        healJob = scope.launch {
+            if (!Actions.online()) {
+                healStatus("Нет интернета у самой сети — маршрут через VLESS оставлен без прямого обхода")
+                delay(20_000)
+                verifySoon(0)
+                return@launch
             }
+            val reachable = healStep == 0 && servers.take(5).any { Tester.tcpOne(it.address, it.port, 1500) > 0 }
+            healStep++
+            if (reachable && healStep == 1 && Actions.nextMasks(servers)) {
+                healStatus("Проверяю следующую маскировку VLESS-сервера…")
+            } else {
+                healStatus("Ищу рабочую маскировку для выбранного VLESS-сервера…")
+                runCatching { Store.busy { Actions.doFindMasks(servers, 24) } }
+            }
+            val stillWorking = Store.state.value.servers.filter { server -> server.id in servers.map { it.id }.toSet() && Store.state.value.state(server).works }
+            if (stillWorking.isEmpty()) {
+                healStatus("Выбранный сервер не восстановлен. Трафик не отправляется напрямую; выберите другой сервер или Авто.")
+                return@launch
+            }
+            delay(500)
+            lock.withLock { connect(soft = true) }
         }
     }
 
@@ -1122,7 +1096,7 @@ class TunnelService : VpnService() {
             cancelChainSearch()
             curNet = network
             runCatching { setUnderlyingNetworks(network?.let { arrayOf(it) }) }
-            netJob?.cancel(); checkJob?.cancel(); healJob?.cancel(); optJob?.cancel(); scoutJob?.cancel(); rescueJob?.cancel()
+            netJob?.cancel(); checkJob?.cancel(); healJob?.cancel(); recoveryJob?.cancel(); optJob?.cancel(); scoutJob?.cancel()
             watchJob?.cancel(); coverJob?.cancel(); serviceJob?.cancel(); liveJob?.cancel(); torJob?.cancel(); torJob = null
             torBridgeRefreshJob?.cancel(); torBridgeRefreshJob = null
             com.vlesscardvpn.tor.TorCard.invalidateStartup()
@@ -1139,7 +1113,7 @@ class TunnelService : VpnService() {
                 if (!handoff.valid(change.revision)) return@reconnect
                 val state = Tunnel.status.value.state
                 if (state != Tunnel.State.CONNECTED && state != Tunnel.State.CONNECTING) return@reconnect
-                healStep = 0; dpiHeals = 0; connectFails = 0; safeMasks = false; autoDpiOnly = false
+                healStep = 0; dpiHeals = 0; connectFails = 0; safeMasks = false
                 healStatus("Новая сеть — подстраиваю сервер, маскировку и локальный профиль…")
                 if (com.vlesscardvpn.tor.TorConnectionPolicy.needsAutoSearch(Store.state.value.settings)) {
                     Actions.recallNet(profile!!)
@@ -1169,7 +1143,7 @@ class TunnelService : VpnService() {
         liveJob?.cancel()
         scoutJob?.cancel(); scoutJob=null
         checkJob?.cancel(); watchJob?.cancel(); coverJob?.cancel(); serviceJob?.cancel(); if (error != null) netJob?.cancel()
-        if (error != null) { healJob?.cancel(); rescueJob?.cancel() }
+        if (error != null) { healJob?.cancel(); recoveryJob?.cancel() }
         if (error != null) optJob?.cancel()
         if (error != null) {
             netCallback?.let { cb -> runCatching { getSystemService(ConnectivityManager::class.java)?.unregisterNetworkCallback(cb) } }

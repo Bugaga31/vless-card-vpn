@@ -176,10 +176,8 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
                 Row(Modifier.fillMaxWidth().clickable { opts = !opts }, verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Text("Как подключаться", fontWeight = FontWeight.SemiBold)
-                        Text(listOf(if (cfg.torAll) "Tor" else when (mode) { Mode.AUTO -> "Авто"; Mode.SERVERS -> "Серверы"; Mode.BYEDPI -> "ByeDPI"; Mode.HYBRID -> "Гибрид" },
-                            if (cfg.proxyOnly) "Прокси" else "VPN",
-                            if (!cfg.perApp || cfg.apps.isEmpty()) "все приложения" else if (cfg.onlyApps) "только ${cfg.apps.size} прил." else "кроме ${cfg.apps.size} прил.",
-                            if (cfg.services.isEmpty()) "весь трафик" else com.vlesscardvpn.core.Services.label(cfg.services)).joinToString(" · "),
+                        Text(listOf(if (cfg.torAll) "Tor через VLESS" else if (mode == Mode.AUTO) "Авто" else "Серверы",
+                            "VPN", "все приложения", "весь интернет через сервер").joinToString(" · "),
                             fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
                     }
                     Text(if (opts) "▴" else "▾", fontSize = 18.sp, color = Accent)
@@ -189,71 +187,28 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
                 Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     FilterChip(selected = cfg.torAll, onClick = {
                         Store.update { it.copy(settings = com.vlesscardvpn.tor.TorConnectionPolicy.selectTor(it.settings)) }
-                        if (!cfg.torAll && status.state == Tunnel.State.CONNECTED) onConnect()
-                    }, label = { Text("Tor") })
-                    Mode.values().forEach { m ->
+                        if (status.state == Tunnel.State.CONNECTED) onConnect()
+                    }, label = { Text("Tor через VLESS") })
+                    listOf(Mode.AUTO, Mode.SERVERS).forEach { m ->
                         FilterChip(selected = !cfg.torAll && mode == m, onClick = {
                             Store.update { it.copy(settings = com.vlesscardvpn.tor.TorConnectionPolicy.selectMode(it.settings, m)) }
-                            if ((cfg.torAll || m != mode) && status.state == Tunnel.State.CONNECTED) onConnect() // reconnect with the new mode
-                        },
-                            label = { Text(when (m) { Mode.AUTO -> "Авто"; Mode.SERVERS -> "Серверы"; Mode.BYEDPI -> "ByeDPI"; Mode.HYBRID -> "Гибрид" }) })
+                            if ((cfg.torAll || m != mode) && status.state == Tunnel.State.CONNECTED) onConnect()
+                        }, label = { Text(if (m == Mode.AUTO) "Авто" else "Серверы") })
                     }
                 }
-                Text(if (cfg.torAll) "Встроенный Tor без VLESS-сервера. TCP идёт через Tor, кроме сохранённых прямых исключений. Произвольный UDP не поддерживается; на мобильной сети могут понадобиться мосты."
-                else when (mode) {
-                    Mode.AUTO -> "Подберёт сервер и маскировку, затем в фоне сравнит совместимые цепочки по передаче данных и скорости. Tor участвует только если разрешён в настройках"
-                    Mode.SERVERS -> "Весь трафик через выбранные серверы (запросы распределяются между ними)"
-                    Mode.BYEDPI -> "Без сервера: обход DPI встроенными ByeDPI/zapret (YouTube, Discord и т.п.). Не помогает от блокировки по IP"
-                    Mode.HYBRID -> "YouTube/Discord — через обход DPI, остальное (и Telegram) — через серверы"
-                }, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 6.dp))
-                if (cfg.torAll || mode == Mode.AUTO) TextButton(onClick = { torDialog = true }) { Text(if(cfg.torAll) "Настроить Tor: мосты и ротация" else "Настроить цепочки Auto и Tor") }
+                Text(if (cfg.torAll) "Сначала VLESS/Hysteria, затем Tor для TCP. UDP, включая голосовые звонки, остаётся на VLESS. Если сервер недоступен, прямое подключение не включается."
+                    else if (mode == Mode.AUTO) "Авто выбирает проверенный быстрый сервер. Все приложения и внешний трафик идут через него; без рабочего сервера VPN не подключается."
+                    else "Весь внешний трафик идёт через выбранные рабочие серверы. Прямые исключения отключены.",
+                    fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 6.dp))
+                if (cfg.torAll || mode == Mode.AUTO) TextButton(onClick = { torDialog = true }) { Text(if (cfg.torAll) "Настроить Tor через VLESS" else "Настроить Auto и Tor") }
                 Spacer(Modifier.height(10.dp))
-                val st = cfg
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text("Тип:", fontSize = 13.sp)
-                    FilterChip(selected = !st.proxyOnly, onClick = { if (st.proxyOnly) { onDisconnect(); Store.update { it.copy(settings = it.settings.copy(proxyOnly = false)) } } }, label = { Text("VPN") })
-                    FilterChip(selected = st.proxyOnly, onClick = { if (!st.proxyOnly) { onDisconnect(); Store.update { it.copy(settings = it.settings.copy(proxyOnly = true)) } } }, label = { Text("Прокси") })
-                }
-                if (st.proxyOnly) Text("Без VPN: SOCKS5 127.0.0.1:${st.socksPort}, HTTP :${st.httpPort}" + (if (st.lanShare) " — раздаётся в Wi-Fi" else "") + ". Telegram — кнопка в Настройках",
-                    fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
-                else {
-                    var appsDialog by remember { mutableStateOf(false) }
-                    val n = st.apps.size
-                    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                        FilterChip(selected = !st.perApp || n == 0, onClick = { Store.update { it.copy(settings = it.settings.copy(perApp = false)) }; reconnect() }, label = { Text("Все приложения") })
-                        FilterChip(selected = st.perApp && n > 0 && st.onlyApps, onClick = {
-                            if (n == 0) appsDialog = true else { Store.update { it.copy(settings = it.settings.copy(perApp = true, onlyApps = true)) }; reconnect() }
-                        }, label = { Text(if (n > 0) "Только выбранные ($n)" else "Только выбранные") })
-                        FilterChip(selected = st.perApp && n > 0 && !st.onlyApps, onClick = {
-                            if (n == 0) appsDialog = true else { Store.update { it.copy(settings = it.settings.copy(perApp = true, onlyApps = false)) }; reconnect() }
-                        }, label = { Text("Все, кроме выбранных") })
-                        TextButton(onClick = { appsDialog = true }) { Text("Выбрать…") }
-                    }
-                    if (appsDialog) AppsDialog(st, onDismiss = { appsDialog = false }) { apps, only ->
-                        Store.update { it.copy(settings = it.settings.copy(apps = apps, onlyApps = only, perApp = true)) }; reconnect()
-                    }
-                }
-                // «Только YouTube и Telegram»: отмеченные сервисы идут через VPN, остальное — напрямую.
-                val services = cfg.services
-                fun toggleService(id: String, v: Boolean) {
-                    Store.update { it.copy(settings = it.settings.copy(services = if (v) (it.settings.services + id).distinct() else it.settings.services - id)) }
-                    if (status.state == Tunnel.State.CONNECTED) onConnect()
-                }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Через VPN только:", fontSize = 13.sp)
-                    Checkbox("youtube" in services, { toggleService("youtube", it) }); Text("YouTube", fontSize = 13.sp)
-                    Checkbox("telegram" in services, { toggleService("telegram", it) }); Text("Telegram", fontSize = 13.sp)
-                }
-                Text(if (services.isEmpty()) "Ничего не отмечено — через VPN идёт весь трафик"
-                    else "Через VPN: " + com.vlesscardvpn.core.Services.label(services) + ", остальное напрямую (другие сервисы — в Настройках)",
-                    fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
-                }
+                Text("Защищённый VPN · все приложения · весь внешний трафик через сервер",
+                    fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
             }
         }
         Spacer(Modifier.height(12.dp))
 
-        if (!cfg.torAll && mode != Mode.BYEDPI) {
-            Card(Modifier.fillMaxWidth().clickable { openServers() }, shape = RoundedCornerShape(14.dp),
+        Card(Modifier.fillMaxWidth().clickable { openServers() }, shape = RoundedCornerShape(14.dp),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
                 Column(Modifier.padding(14.dp)) {
                     Text(when {
@@ -277,9 +232,11 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
                 }
             }
         }
-        if (!cfg.torAll && mode != Mode.SERVERS) {
+        if (status.state == Tunnel.State.CONNECTED && sum.selectedCount > 0) {
             Spacer(Modifier.height(10.dp))
-            OutlinedButton(onClick = { Actions.findDpi() }, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text("Подобрать обход DPI для этой сети") }
+            OutlinedButton(onClick = { Actions.findMasks(Store.state.value.selected) }, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
+                Text("Подобрать маскировку VLESS-серверов")
+            }
         }
         val nowSec = System.currentTimeMillis() / 1000
         cfg.subInfo.filter { (u, i) -> u in cfg.subscriptions && i.ending(nowSec) }.forEach { (u, i) ->
@@ -300,32 +257,24 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
         Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
             Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text("Что с сетью?", fontWeight = FontWeight.SemiBold)
-                if (report.verdict.isEmpty()) Text("Проверю, режут ли YouTube (DPI) и не включены ли белые списки", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (report.verdict.isEmpty()) Text("Проверка идёт только через выбранный VLESS-сервер; прямые тесты отключены.", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 else {
                     Text(report.verdict, fontSize = 14.sp, color = when (report.kind) { Actions.Kind.OPEN -> Good; Actions.Kind.OFFLINE -> Bad; else -> Warn })
                     Text(report.details, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(onClick = { Actions.diagnoseNetwork() }, enabled = !busy) { Text("Проверить сеть") }
-                    when (report.kind) {
-                        Actions.Kind.WHITELIST -> Button(onClick = { Store.update { it.copy(settings = it.settings.copy(mode = Mode.SERVERS)) }; Actions.whitelistServers() },
-                            enabled = !busy) { Text("Серверы для белых списков") }
-                        Actions.Kind.DPI -> Button(onClick = { Actions.findDpi() }, enabled = !busy) { Text("Подобрать обход") }
-                        else -> {}
-                    }
-                }
+                OutlinedButton(onClick = { Actions.diagnoseNetwork() }, enabled = !busy) { Text("Проверить VLESS и звонки") }
             }
         }
         Spacer(Modifier.height(12.dp))
-        SiteCard(on = status.state == Tunnel.State.CONNECTED, reconnect = { reconnect() })
+        SiteCard()
         }
         Spacer(Modifier.height(12.dp)); LiveProgress(stop = true)
     }
 }
 
-/** «Сайт не открывается?»: directly vs through the VPN vs through the DPI bypass, then route it the way that works. */
+/** Checks a site only through the active VLESS route. */
 @Composable
-private fun SiteCard(on: Boolean, reconnect: () -> Unit) {
+private fun SiteCard() {
     val r by Actions.siteCheck.collectAsState()
     var input by remember { mutableStateOf("") }
     Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
@@ -336,13 +285,10 @@ private fun SiteCard(on: Boolean, reconnect: () -> Unit) {
                     placeholder = { Text("адрес, например rutracker.org", fontSize = 13.sp) })
                 OutlinedButton(onClick = { Actions.checkSite(input) }, enabled = !r.running) { Text("Проверить") }
             }
-            if (r.verdict.isEmpty()) Text("Сравню: напрямую, через VPN и через обход DPI — и скажу, кто виноват" + if (!on) " (лучше с включённым VPN)" else "", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (r.verdict.isEmpty()) Text("Проверю только через VLESS. Без рабочего сервера запрос не отправляется.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             else {
                 Text(r.verdict, fontSize = 14.sp, color = when { r.running -> MaterialTheme.colorScheme.onSurfaceVariant; r.good -> Good; else -> Warn })
                 if (r.details.isNotEmpty()) Text(r.details, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            if (!r.running && r.suggest.isNotEmpty()) Button(onClick = { Actions.routeSite(r.host, r.suggest); reconnect() }) {
-                Text(if (r.suggest == "vpn") "Всегда через VPN" else "Всегда напрямую")
             }
             val pop by Actions.popular.collectAsState()
             OutlinedButton(onClick = { Actions.checkPopular() }, enabled = !pop.running) { Text("Проверить популярные (YouTube, Instagram, ChatGPT…)") }

@@ -14,6 +14,7 @@ import java.util.concurrent.TimeUnit
  * All traffic uses the supplied local SOCKS listener; never direct fallback or account data.
  */
 object TelegramProbe {
+    data class Result(val ok: Boolean?, val ms: Int)
     private val dc = listOf("149.154.167.51", "149.154.175.50")
     private val timer = Executors.newSingleThreadScheduledExecutor { r -> Thread(r, "tg-probe-timeout").apply { isDaemon = true } }
     private val random = SecureRandom()
@@ -50,13 +51,16 @@ object TelegramProbe {
     }.getOrDefault(false)
 
     /** null = not enough budget/cancelled; false = neither sampled DC answered valid MTProto. */
-    fun check(port: Int, budgetMs: Long = 3000): Boolean? {
-        if (port !in 1..65535 || budgetMs < 200 || Thread.currentThread().isInterrupted) return null
-        val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(budgetMs.coerceAtMost(3000))
+    fun check(port: Int, budgetMs: Long = 3000): Boolean? = measure(port, budgetMs).ok
+
+    fun measure(port: Int, budgetMs: Long = 3000): Result {
+        val started = System.nanoTime()
+        if (port !in 1..65535 || budgetMs < 200 || Thread.currentThread().isInterrupted) return Result(null, 0)
+        val deadline = started + TimeUnit.MILLISECONDS.toNanos(budgetMs.coerceAtMost(3000))
         var tried = 0
         for (host in dc) {
             val left = TimeUnit.NANOSECONDS.toMillis(deadline - System.nanoTime())
-            if (left < 100 || Thread.currentThread().isInterrupted) return null
+            if (left < 100 || Thread.currentThread().isInterrupted) return Result(null, elapsedMs(started))
             val allowance = minOf(1500, left).coerceAtLeast(1)
             val socket = Socket(Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", port)))
             // A Future interrupt alone does not unblock java.net reads. Always close at a hard deadline.
@@ -76,8 +80,11 @@ object TelegramProbe {
                 }
             } catch (_: Exception) { false } finally { timeout.cancel(false); runCatching { socket.close() } }
             tried++
-            if (ok) return true
+            if (ok) return Result(true, elapsedMs(started))
         }
-        return if (Thread.currentThread().isInterrupted || tried != dc.size) null else false
+        val result = if (Thread.currentThread().isInterrupted || tried != dc.size) null else false
+        return Result(result, elapsedMs(started))
     }
+
+    private fun elapsedMs(started: Long) = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started).toInt().coerceAtLeast(1)
 }

@@ -100,6 +100,8 @@ object AppWatch {
     }
 
     private suspend fun guard(pkg: String, g: Guard, opened: Boolean, reconnect: () -> Unit) {
+        val context = appCtx ?: return
+        if (PhonePower.isVoiceCallActive(context)) return
         val now = System.currentTimeMillis()
         if (!opened && now - (guardAt[pkg] ?: 0) < 120_000L) return
         if (Actions.progress.value.running) return
@@ -210,18 +212,10 @@ object AppWatch {
         ecoOn = eco
         val s = Tunnel.status.value
         fails = if (s.checkOk == false) fails + 1 else 0
+        if (VoiceCallPolicy.deferRepair(plan.voiceCallActive, fails)) return
         val now = System.currentTimeMillis()
         // new network: masks that passed elsewhere may not pass here — evolve here ~15 min later instead of waiting 2 h
         val net = appCtx?.let { runCatching { Net.key(it) }.getOrNull() }.orEmpty()
-        if (!eco && net.isNotEmpty() && net != evolveNet && net.startsWith("Моб.")) {
-            // mobile network changed: are the operator's whitelists on? Then masks behind allowed sites are searched now
-            val r = Whitelist.check()
-            if (r.verdict == Whitelist.Verdict.WHITELIST) {
-                say("Автопилот: " + Whitelist.report(r).substringBefore("\nЧто").lowercase().let { "в этой сети " + it })
-                val sel = Store.state.value.selected
-                if (sel.isNotEmpty() && !Actions.progress.value.running) withContext(Dispatchers.Main) { Actions.findMasks(sel.take(4), perServer = 24) }
-            }
-        }
         if (net.isNotEmpty() && net != evolveNet) lastFreeze = now - 110 * 60_000L // new network: freeze check in ~10 min
         // mobile «заморозка» (TSPU stops downloads from hosting IPs after ~16 KB): 256 KB through the tunnel every 2 h
         if (!ecoOn && net.startsWith("Моб.") && now - lastFreeze > 2 * 3600_000L && fails == 0 && !Actions.progress.value.running) {
@@ -266,21 +260,14 @@ object AppWatch {
                 lastEvolve = now; evoN++
                 val st0 = Store.state.value
                 val sel = st0.selected
-                val m = st0.settings.mode
-                // ByeDPI strategies evolve too: always in «Без сервера», every second time in «Гибрид», in «Авто» without servers
-                if (m == com.vlesscardvpn.model.Mode.BYEDPI || m == com.vlesscardvpn.model.Mode.HYBRID && evoN % 2 == 0 || m == com.vlesscardvpn.model.Mode.AUTO && sel.isEmpty()) {
-                    say("Автопилот: эволюция обхода DPI — скрещиваю и проверяю мутантов рабочих стратегий")
-                    withContext(Dispatchers.Main) { Actions.findDpi() }
-                    delay(1000); while (Actions.progress.value.running) delay(1000)
-                    Actions.progress.value.message.takeIf { it.isNotEmpty() }?.let { say("Эволюция: $it") }
-                } else if (sel.isNotEmpty()) {
+                if (sel.isNotEmpty()) {
                     say("Автопилот: эволюция масок — скрещиваю и проверяю мутантов рабочих масок в этой сети")
                     withContext(Dispatchers.Main) { Actions.findMasks(sel.take(3), perServer = 12) }
                     delay(1000); while (Actions.progress.value.running) delay(1000)
                     Actions.progress.value.message.takeIf { it.isNotEmpty() }?.let { say("Эволюция: $it") }
                 }
             }
-            "fix" -> { lastFix = now; fails = 0; say("Автопилот: интернет через VPN пропал — чиню сам (серверы, маски, обход DPI)"); withContext(Dispatchers.Main) { Actions.fixAll { reconnect() } } }
+            "fix" -> { lastFix = now; fails = 0; say("Автопилот: VLESS-маршрут пропал — проверяю серверы и маскировки"); withContext(Dispatchers.Main) { Actions.fixAll { reconnect() } } }
             "lighten" -> { lastLight = now; say("Автопилот: маска тяжёлая, видео может тормозить — ищу лёгкую"); withContext(Dispatchers.Main) { Actions.lighten(maintenanceReconnect) } }
         }
     }

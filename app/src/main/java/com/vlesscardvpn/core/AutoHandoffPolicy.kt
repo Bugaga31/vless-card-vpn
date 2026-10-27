@@ -18,6 +18,6 @@ object AutoHandoffPolicy {
         val priorIds=previous.take(MAX_CANDIDATES).mapTo(HashSet()) { it.id }
         // A large old pool must not consume the whole wave before new-network challengers.
         val challengers=others.filter { it.id !in priorIds }
-        return ServerChoice.diverse((hints.take(2) + challengers + others).filter(AutoEligibility::allowed).distinctBy { it.id }, MAX_CANDIDATES)
+        return ServerChoice.diverse((hints.take(2) + challengers + others).filter(AutoEligibility::vlessServer).distinctBy { it.id }, MAX_CANDIDATES)
     }
 }

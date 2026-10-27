@@ -206,47 +206,31 @@ object Actions {
     // ---------- «Сайт не открывается?» ----------
     data class SiteCheck(val running: Boolean = false, val host: String = "", val verdict: String = "", val details: String = "", val good: Boolean = false, val suggest: String = "")
     val siteCheck = MutableStateFlow(SiteCheck())
-    /** Opens [input] three ways at once: directly (the app itself is outside the VPN), through the VPN, through the DPI bypass. */
     fun checkSite(input: String) {
         if (siteCheck.value.running) return
         val host = Settings.host(input) ?: run { siteCheck.value = SiteCheck(verdict = "Введите адрес сайта, например rutracker.org"); return }
-        siteCheck.value = SiteCheck(running = true, host = host, verdict = "Проверяю $host…")
-        val vpn = Tunnel.socks?.port; val dpi = Tunnel.byeDpiPort
+        val port = Tunnel.socks?.port ?: run {
+            siteCheck.value = SiteCheck(host = host, verdict = "Сначала подключитесь к рабочему VLESS-серверу", details = "Проверки без сервера отключены.")
+            return
+        }
+        siteCheck.value = SiteCheck(running = true, host = host, verdict = "Проверяю через VLESS…")
         scope.launch(Bg.io) {
-            val url = "https://$host/"
-            val d = async { Tester.site(url, null) }
-            val v = vpn?.let { p -> async { Tester.site(url, p) } }
-            val b = dpi?.takeIf { it != vpn }?.let { p -> async { Tester.site(url, p) } }
-            siteCheck.value = siteVerdict(host, d.await(), v?.await(), b?.await())
+            siteCheck.value = siteVerdict(host, Tester.site("https://$host/", port))
         }
     }
 
-    private fun word(p: Tester.SiteProbe?) = when (p?.result) {
-        null -> "—"; "ok" -> "открывается (${p.ms} мс)"; "timeout" -> "зависает"; "reset" -> "соединение сбрасывают"
-        "dns" -> "адрес не находится"; "tls" -> "подмена/ошибка шифрования"; "denied" -> "отказ в доступе (${p.code})"; else -> "не открывается"
+    private fun word(p: Tester.SiteProbe) = when (p.result) {
+        "ok" -> "открывается (${p.ms} мс)"; "timeout" -> "зависает"; "reset" -> "соединение сбрасывают"
+        "dns" -> "имя не находится через VLESS"; "tls" -> "ошибка шифрования"; "denied" -> "сайт отказал (${p.code})"; else -> "не открывается"
     }
 
-    fun siteVerdict(host: String, direct: Tester.SiteProbe, vpn: Tester.SiteProbe?, dpi: Tester.SiteProbe?): SiteCheck {
-        val details = "Напрямую: ${word(direct)} · через VPN: ${if (vpn == null) "VPN выключен" else word(vpn)}" + (dpi?.let { " · через обход DPI: ${word(it)}" } ?: "")
-        val s = Store.state.value.settings
+    fun siteVerdict(host: String, viaServer: Tester.SiteProbe): SiteCheck {
+        val details = "Через выбранный VLESS-сервер: ${word(viaServer)}"
         return when {
-            vpn != null && vpn.result == "denied" && direct.ok -> SiteCheck(host = host, verdict = "Через VPN сайт отказывает (не любит страну или IP сервера) — откройте напрямую", details = details,
-                suggest = if (host in s.alwaysDirect) "" else "direct")
-            vpn != null && direct.result == "denied" && vpn.ok -> SiteCheck(host = host, verdict = "Сайт закрыт для России, через VPN работает", details = details, good = true,
-                suggest = if (host in s.alwaysVpn) "" else "vpn")
-            direct.result == "denied" && (vpn == null || vpn.result == "denied") -> SiteCheck(host = host,
-                verdict = "Сайт отвечает, но отказывает" + (if (vpn == null) " — подключитесь и проверьте ещё раз" else " и напрямую, и через VPN (страна сервера тоже закрыта или он не пускает проверку) — попробуйте сервер другой страны"), details = details)
-            vpn == null && direct.ok -> SiteCheck(host = host, verdict = "Сайт открывается и без VPN", details = details, good = true)
-            vpn == null -> SiteCheck(host = host, verdict = "Без VPN сайт не открывается — подключитесь и проверьте ещё раз", details = details)
-            vpn.ok && direct.ok -> SiteCheck(host = host, verdict = "Сайт работает. Если в приложении не грузится — проблема в нём, не в сети", details = details, good = true,
-                suggest = if (host in s.alwaysDirect || host in s.alwaysVpn) "" else "direct")
-            vpn.ok -> SiteCheck(host = host, verdict = "Провайдер блокирует сайт, через VPN он работает", details = details, good = true,
-                suggest = if (host in s.alwaysVpn) "" else "vpn")
-            direct.ok -> SiteCheck(host = host, verdict = "Сайт не пускает через VPN (блокирует иностранные IP) — откройте его напрямую", details = details,
-                suggest = if (host in s.alwaysDirect) "" else "direct")
-            dpi?.ok == true -> SiteCheck(host = host, verdict = "Работает через обход DPI, но не через сервер — смените сервер или режим «Гибрид»", details = details)
-            direct.result == "dns" && vpn.result == "dns" -> SiteCheck(host = host, verdict = "Такого сайта нет или он выключен (адрес не находится нигде)", details = details)
-            else -> SiteCheck(host = host, verdict = "Сайт не открывается ни напрямую, ни через VPN — скорее всего он сам лежит", details = details)
+            viaServer.ok -> SiteCheck(host = host, verdict = "Сайт открывается через VLESS", details = details, good = true)
+            viaServer.result == "denied" -> SiteCheck(host = host, verdict = "Сайт ответил отказом через VLESS; смена маршрута на прямой отключена", details = details)
+            viaServer.result == "dns" -> SiteCheck(host = host, verdict = "Сайт не найден через DNS выбранного сервера", details = details)
+            else -> SiteCheck(host = host, verdict = "Сайт не открылся через выбранный сервер — попробуйте «Авто» или другой VLESS-сервер", details = details)
         }
     }
 
@@ -264,33 +248,34 @@ object Actions {
     val popular = MutableStateFlow(Popular())
     fun checkPopular() {
         if (popular.value.running) return
-        val vpn = Tunnel.socks?.port
-        popular.value = Popular(running = true, summary = "Проверяю ${POPULAR.size} сервисов…")
+        val port = Tunnel.socks?.port ?: run {
+            popular.value = Popular(summary = "Проверки без сервера отключены. Сначала подключитесь к VLESS.")
+            return
+        }
+        popular.value = Popular(running = true, summary = "Проверяю ${POPULAR.size} сервисов через VLESS…")
         scope.launch(Bg.io) {
+            val gate = Semaphore(4)
             val rows = coroutineScope {
                 POPULAR.map { (title, host) -> async {
-                    val d = async { Tester.site("https://$host/", null) }; val v = vpn?.let { p -> async { Tester.site("https://$host/", p) } }
-                    title to siteVerdict(host, d.await(), v?.await(), null)
+                    gate.withPermit { title to siteVerdict(host, Tester.site("https://$host/", port)) }
                 } }.awaitAll()
             }
-            popular.value = Popular(rows = rows, summary = popularSummary(rows, vpn != null))
+            popular.value = Popular(rows = rows, summary = popularSummary(rows, true))
         }
     }
 
     fun popularSummary(rows: List<Pair<String, SiteCheck>>, vpnOn: Boolean): String {
+        if (!vpnOn) return "Проверки без сервера отключены. Сначала подключитесь к VLESS."
         val bad = rows.filter { !it.second.good }.map { it.first }
-        return when {
-            !vpnOn -> "Без VPN: открывается ${rows.count { it.second.good }} из ${rows.size}. Подключитесь, чтобы сравнить"
-            bad.isEmpty() -> "Через VPN работает всё (${rows.size} из ${rows.size})"
-            else -> "Не работает: " + bad.joinToString(", ") + if (bad.size > rows.size / 2) ". Похоже, сервер плохой — «Не работает? Починить»" else ""
-        }
+        return if (bad.isEmpty()) "Через выбранный VLESS-сервер доступны все сервисы (${rows.size})"
+            else "Через выбранный VLESS-сервер не прошли: " + bad.joinToString(", ") + ". Попробуйте «Авто» или другой сервер."
     }
 
-    /** «Всегда через VPN» / «Всегда напрямую» (or [where] = "" to forget). Returns true when the tunnel should reconnect. */
     fun routeSite(host: String, where: String) {
-        Store.update { st -> val s = st.settings
-            st.copy(settings = s.copy(alwaysVpn = (s.alwaysVpn - host).let { if (where == "vpn") it + host else it },
-                alwaysDirect = (s.alwaysDirect - host).let { if (where == "direct") it + host else it }))
+        if (where !in setOf("", "vpn")) return
+        Store.update { st ->
+            val s = st.settings
+            st.copy(settings = s.copy(alwaysVpn = (s.alwaysVpn - host).let { if (where == "vpn") it + host else it }, alwaysDirect = emptyList()))
         }
         siteCheck.value = siteCheck.value.copy(suggest = "")
     }
@@ -402,7 +387,7 @@ object Actions {
     }
 
     private suspend fun realTest(servers: List<Server>, title: String, big: Boolean = true, attempts: Int = 2, parallel: Int = 32, youtube: Boolean = true,
-                                 stopAfter: Int = Int.MAX_VALUE, budgetMs: Long = 0, onFirst: ((Server) -> Unit)? = null, onSuccess: ((Server) -> Unit)? = null,
+                                 telegram: Boolean = youtube, calls: Boolean = false, stopAfter: Int = Int.MAX_VALUE, budgetMs: Long = 0, onFirst: ((Server) -> Unit)? = null, onSuccess: ((Server) -> Unit)? = null,
                                  batch: Int = 64): Int {
         if (servers.isEmpty()) return 0
         progress.value = progress.value.copy(title = title, done = 0, total = servers.size)
@@ -416,7 +401,7 @@ object Actions {
         val done = AtomicInteger(); val ok = AtomicInteger()
         val states = StateBatch(200)
         try {
-            Tester.real(variants, st.settings.testUrl, port, own.ports, batch = if (onFirst != null) ConnectPolicy.FIRST else batch, parallel = parallel, big = big, youtube = youtube, attempts = attempts, stopAfter = stopAfter, budgetMs = budgetMs) { i, p ->
+            Tester.real(variants, st.settings.testUrl, port, own.ports, batch = if (onFirst != null) ConnectPolicy.FIRST else batch, parallel = parallel, big = big, youtube = youtube, telegram = telegram, calls = calls, attempts = attempts, stopAfter = stopAfter, budgetMs = budgetMs) { i, p ->
                 if (p == Tester.SKIPPED) return@real
                 // Do not train the old profile with a result completed after Wi-Fi/cellular handoff.
                 if (Net.key(app) != net || Net.underlying(app)?.toString() != underlying) return@real
@@ -472,7 +457,6 @@ object Actions {
         val pool = if (evo) MaskLab.breed(parents, (slots * 4).coerceIn(6, 40), known = kept.map { it.id }.toSet()) else emptyList()
         val untried = kept.filter { stats[it.id] == null }
         val evoCand = (0 until maxOf(untried.size, pool.size)).flatMap { i -> listOfNotNull(untried.getOrNull(i), pool.getOrNull(i)) }
-        val whitelisted = Whitelist.last.value?.let { it.verdict == Whitelist.Verdict.WHITELIST && System.currentTimeMillis() - it.at < 3600_000L } == true
         val order = { s: Server ->
             val ok = { m: Mask -> Masks.compatible(m, s) && (dpiOk || !m.viaByeDpi) }
             val fresh = evoCand.filter(ok).shuffled().take(slots)
@@ -482,8 +466,7 @@ object Actions {
             // proven ones first, then one of every kind of trick (not a dozen variants of the same one)
             val proven = base.filter { bucket(it) == 0 }.take(3).ifEmpty { base.take(1) }
             val rest = Masks.diverse(base - proven.toSet())
-            // operator whitelist on: masks that present an allowed site (SNI vk.com / ya.ru…) go right after the proven ones
-            if (whitelisted) proven + rest.filter { it.sni.isNotEmpty() } + fresh + rest.filter { it.sni.isEmpty() } else proven + fresh + rest
+            proven + fresh + rest
         }
         // Interleaved (1st mask of every server, then the 2nd…): parallel probes hit different servers, and a server
         // that already has [enough] working masks stops early instead of trying all of them.
@@ -713,76 +696,36 @@ object Actions {
         }
     }
 
-    /**
-     * «Умный YouTube» (Авто): on this network, is YouTube faster through the DPI bypass straight to Google than through
-     * the servers? Measured once per network (two rounds, the better of each), remembered in [Settings.ytDpi]; the bypass
-     * must win clearly (×1.3 + 0.5 Мбит/с), otherwise the servers stay. True = a reconnect is needed to switch.
-     */
-    suspend fun decideYoutube(): Boolean {
-        val st = Store.state.value; val s = st.settings; val net = Net.key(app)
-        if (s.mode != com.vlesscardvpn.model.Mode.AUTO || !s.smartYoutube || s.services.isNotEmpty() || s.proxyOnly) return false
-        if (Tunnel.ytViaDpi) return false
-        val handle = Net.underlying(app)?.toString()
-        val prefs = app.getSharedPreferences("youtube_route",0)
-        val decisionKey = Net.fingerprint("youtube-v3-media",net)
-        val last = prefs.getLong(decisionKey,0)
-        val stamp = System.currentTimeMillis()
-        if (last > 0 && stamp >= last && stamp-last < 10*60000L) return false
-        if (s.dpiRemembered[net] == null && s.dpiRemembered[Net.family(net)] == null) {
-            if (!PhonePower.refresh(app).allowed) return false
-            // Optional search runs after connection, never on the one-button critical path.
-            prefs.edit().putLong(decisionKey, stamp).apply()
-            doFindDpi()
-            if (Net.key(app) != net || Net.underlying(app)?.toString() != handle) return false
-        }
-        val vpn = Tunnel.socks?.port ?: return false
-        val set = DpiSet(app)
-        val (srv, dpi) = try {
-            set.start(Store.state.value.settings, net, true, emptySet(), com.vlesscardvpn.BuildConfig.DEBUG)
-            val dp = set.currentPort ?: return false
-            Tester.compareYoutubeMedia(vpn, dp)
-        } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Throwable) { return false } finally { set.close() }
-        if (Net.key(app) != net || Net.underlying(app)?.toString() != handle || Tunnel.socks?.port != vpn) return false
-        val use = ytDpiWins(srv, dpi)
-        // The old HTML-based decision is not reusable as video evidence.
-        app.getSharedPreferences(YouTubeMediaProbe.PROOF_PREFS, 0).edit()
-            .putLong(Net.fingerprint("media", net), if (use) System.currentTimeMillis() else 0).apply()
-        prefs.edit().putLong(decisionKey,System.currentTimeMillis()).apply()
-        android.util.Log.i("E2E", "smart youtube net=$net server=$srv dpi=$dpi use=$use")
-        Store.update { a -> a.copy(settings = a.settings.copy(ytDpi = a.settings.ytDpi + (net to use))) }
-        return use
-    }
+    suspend fun decideYoutube(): Boolean = false
 
     fun ytDpiWins(serverKbps: Int, dpiKbps: Int) = dpiKbps > 0 && dpiKbps > serverKbps * 1.3 + 500
 
-    /**
-     * «Ускорь YouTube» (Помощник): Smart YouTube + phone speed-up on, the network's YouTube decision measured again,
-     * heavy masks replaced by light ones, real download speed of the best 5, the fastest selected; reconnects if on.
-     */
-    fun boostYoutube(maintenanceReconnect: (() -> Unit)? = null) = launch("Ускоряю YouTube") {
-        val net = Net.key(app)
-        Store.update { it.copy(settings = it.settings.copy(smartYoutube = true, turbo = true, blockQuic = true, ytDpi = it.settings.ytDpi - net)) }
-        progress.value = progress.value.copy(title = "Ускоряю YouTube: облегчаю маски")
+    fun boostYoutube(maintenanceReconnect: (() -> Unit)? = null) = launch("Ускоряю YouTube через сервер") {
+        Store.update { it.copy(settings = it.settings.copy(turbo = true, blockQuic = false, smartYoutube = false, ytDpi = emptyMap())) }
+        progress.value = progress.value.copy(title = "Ускоряю YouTube: облегчаю маски VLESS")
         lightenMasks(true)
-        // servers the cloud saw download fast that this phone has not got working yet: a real test here first
-        val s0 = Store.state.value
-        val fresh = runCatching { CloudSpeed.refresh(app); CloudSpeed.pick(s0.servers.filter { !s0.state(it).works }, emptyList(), n = 6) }.getOrDefault(emptyList())
-        if (fresh.isNotEmpty()) realTest(fresh, "Ускоряю: проверяю ${fresh.size} быстрых по облаку", big = true, attempts = 1)
-        val s1 = Store.state.value
-        val top = (s1.servers.filter { s1.state(it).works }.sortedBy { s1.state(it).score }.take(6) +
-            fresh.filter { s1.state(it).works }).distinctBy { it.id }
-        if (top.isEmpty()) return@launch "Рабочих серверов нет — сначала «Проверить серверы»."
-        progress.value = progress.value.copy(title = "Ускоряю YouTube: меряю скорость")
+        val initial = Store.state.value
+        val fresh = runCatching {
+            CloudSpeed.refresh(app)
+            CloudSpeed.pick(initial.servers.filter { !initial.state(it).works && AutoEligibility.vlessServer(it) }, emptyList(), n = 6)
+        }.getOrDefault(emptyList())
+        if (fresh.isNotEmpty()) realTest(fresh, "Проверяю быстрые VLESS-серверы", big = false, youtube = true, telegram = false, attempts = 1)
+        val state = Store.state.value
+        val top = (state.servers.filter { state.state(it).works && AutoEligibility.vlessServer(it) }
+            .sortedWith(ServerChoice.downloadOrder({ state.state(it) }, Net.key(app), System.currentTimeMillis())).take(6) +
+            fresh.filter { state.state(it).works }).distinctBy { it.id }
+        if (top.isEmpty()) return@launch "Рабочий VLESS-сервер не найден — прямое подключение не включено. Проверьте серверы и повторите."
+        progress.value = progress.value.copy(title = "Сравниваю YouTube и Telegram через VLESS")
+        realTest(top, "Сравниваю YouTube и Telegram через VLESS", big = false, youtube = true, telegram = true, attempts = 1, parallel = 4)
         realSpeed(top)
-        val s2 = Store.state.value
-        selectBest(10, close = true, among = top.filter { s2.state(it).works })
-        val viaDpi = runCatching { decideYoutube() }.getOrDefault(false)
+        val updated = Store.state.value
+        selectBest(10, close = true, among = top.filter { updated.state(it).works })
         val connected = Tunnel.socks != null
         if (connected) withContext(Dispatchers.Main) { maintenanceReconnect?.invoke() ?: com.vlesscardvpn.vpn.TunnelService.start(app) }
-        val best = Store.state.value.let { s -> s.selected.maxOfOrNull { s.state(it).kbps } ?: 0 }
-        "YouTube: " + (if (best > 0) "лучший сервер качает ${"%.1f".format(best / 1000.0)} Мбит/с" else "скорость не измерилась") +
-            (if (viaDpi) ", а напрямую через обход DPI ещё быстрее — YouTube пойдёт им" else "") +
-            ". Включены «Умный YouTube» и ускорение телефона" + if (connected) (if (maintenanceReconnect != null) ", применю в паузе трафика." else ", переподключаюсь.") else ". Подключитесь — всё применится."
+        val best = Store.state.value.let { current -> current.selected.maxOfOrNull { current.state(it).kbps } ?: 0 }
+        val speed = if (best > 0) "Лучший измеренный поток — ${"%.1f".format(java.util.Locale.US, best / 1000.0)} Мбит/с через VLESS" else
+            "Проверил YouTube через рабочие VLESS-серверы; реальная скорость пока не измерилась"
+        speed + if (connected) (if (maintenanceReconnect != null) ". Применю новый выбор без остановки VPN." else ". Переподключаюсь через выбранный сервер.") else ". Подключитесь, чтобы применить выбор."
     }
 
     /** «Облегчи маску» (Помощник). */
@@ -834,12 +777,13 @@ object Actions {
     /** Small endpoint checks also on mobile; each round is bounded and does not need Usage Access. */
     suspend fun checkServiceRoutes(): Boolean {
         val now = android.os.SystemClock.elapsedRealtime()
-        if (now - serviceAt < (if (serviceCursor < ServiceRoutes.targets.size) 30000L else 60000L) || progress.value.running || !PhonePower.refresh(app).allowLight) return false
+        if (now - serviceAt < (if (serviceCursor < ServiceRoutes.targets.size) 30000L else 300000L) || progress.value.running || !PhonePower.refresh(app).let { it.allowLight && !it.deferTraffic }) return false
         val st = Store.state.value; val selected = st.selected
         if (selected.isEmpty()) return false
         serviceAt = now
         val target = ServiceRoutes.targets[serviceCursor++ % ServiceRoutes.targets.size]
-        if (ServiceRoutes.native(target) && st.settings.services.isNotEmpty() && target.id !in st.settings.services) return false
+        if (target.id == "calls" && (st.settings.torAll || st.settings.torRouting && st.settings.services.any { it in setOf("telegram", "whatsapp", "discord") })) return false
+        if (target.id != "calls" && ServiceRoutes.native(target) && st.settings.services.isNotEmpty() && target.id !in st.settings.services) return false
         val eligible = selected.filter { !target.ai || Countries.of(it.name) !in AppWatch.AI_BAD }.take(4)
         if (eligible.isEmpty()) return false
         val net = Net.key(app); val handle = Net.underlying(app)?.toString()
@@ -848,7 +792,8 @@ object Actions {
         val (own, port) = dpiForTests(variants.map { it.second })
         try {
             Tester.real(variants, if (ServiceRoutes.native(target)) st.settings.testUrl else target.url,
-                port, own.ports, parallel = 2, attempts = 1, big = false, youtube = ServiceRoutes.native(target),
+                port, own.ports, parallel = 2, attempts = 1, big = false, youtube = target.id == "youtube",
+                telegram = target.id == "telegram", calls = target.id == "calls",
                 budgetMs = if (ServiceRoutes.native(target)) 6000 else ConnectPolicy.QUICK_BUDGET_MS) { i, p ->
                 if (Net.key(app) == net && Net.underlying(app)?.toString() == handle)
                     ServiceRoutes.measurement(target, p)?.let { results[eligible[i].id] = it }
@@ -893,7 +838,7 @@ object Actions {
         }
         val originalNet = Net.key(app)
         val originalSelection = st.selected.map { AutoRoutePolicy.configuration(it,st.state(it),originalNet) }.toSet()
-        if (st.settings.mode == com.vlesscardvpn.model.Mode.BYEDPI) return false
+        if (st.settings.mode == com.vlesscardvpn.model.Mode.BYEDPI || st.settings.mode == com.vlesscardvpn.model.Mode.HYBRID) return false
         val wifi = unmetered()
         catalogWave()
         st = Store.state.value
@@ -910,7 +855,6 @@ object Actions {
             lightenMasks(wifi)
             // Wi-Fi: a real 3-second download through the 5 best (≈ what YouTube gets), not a 256 KB guess
             if (wifi) Store.state.value.let { s1 -> realSpeed(automaticOrder(s1, s1.servers.filter { s1.state(it).works }).take(5)) }
-            if (PhonePower.refresh(app).allowed) ytSwitch = runCatching { decideYoutube() }.getOrDefault(false)
             progress.value = prev0
         }
         if (!PhonePower.refresh(app).allowLight) return ytSwitch
@@ -1074,7 +1018,7 @@ object Actions {
         val working = preferred(st,st.servers.filter { st.state(it).works })
         val busy = job
         // Instant start: something worked before → connect now; the tunnel itself re-checks, heals and keeps searching.
-        if (working.isNotEmpty() || st.servers.isEmpty() && Net.key(app).let { k -> st.settings.dpiRemembered[k] ?: st.settings.dpiRemembered[Net.family(k)] } != null) {
+        if (working.isNotEmpty()) {
             if (busy?.isActive == true && progress.value.title == "Фоновая подготовка") cancel()
             val now = System.currentTimeMillis()
             val net = Net.key(app)
@@ -1122,8 +1066,11 @@ object Actions {
         if (Tunnel.status.value.state == Tunnel.State.CONNECTING && Tunnel.socks == null) Tunnel.status.value = Tunnel.Status()
     }
 
-    /** Is there internet at all outside the VPN (this app is excluded from it)? Russian and foreign hosts. */
-    fun online(): Boolean = listOf("ya.ru" to 443, "1.1.1.1" to 443, "vk.com" to 443).any { (h, p) -> Tester.tcpOne(h, p, 2500) > 0 }
+    fun online(): Boolean = runCatching {
+        val cm = app.getSystemService(android.net.ConnectivityManager::class.java)
+        val network = Net.underlying(app)
+        network != null && cm?.getNetworkCapabilities(network)?.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
+    }.getOrDefault(false)
 
     /**
      * Auto mode, the connection stopped working: find something that works instead of giving up.
@@ -1298,7 +1245,7 @@ object Actions {
         val firstReady: (Server) -> Unit = { server ->
             if (started.claim()) {
                 deepPending = true
-                selectBest(10, close = false, among = listOf(server) + Store.state.value.let { a -> a.servers.filter { a.state(it).works } })
+                selectBest(1, close = false, among = listOf(server))
                 scope.launch(Dispatchers.Main) { onReady() }
             }
         }
@@ -1328,16 +1275,23 @@ object Actions {
         }
         val working = fresh()
         if (working.isEmpty()) {
-            val st = Store.state.value.settings
-            if (Net.key(app).let { k -> st.dpiRemembered[k] ?: st.dpiRemembered[Net.family(k)] } == null) { progress.value = progress.value.copy(title = "Авто: подбираю обход DPI"); notes += doFindDpi() }
+            val message = "Рабочий VLESS-сервер не найден. Прямое подключение отключено — обновите список серверов и повторите поиск."
+            withContext(Dispatchers.Main) {
+                Tunnel.status.value = Tunnel.Status(Tunnel.State.ERROR, "Сервер не найден", check = message, checkOk = false)
+            }
+            return message
         }
-        // A mask found only by connectivity/ping still needs an isolated throughput comparison.
-        val compared = if (working.isNotEmpty()) chooseCompared(working,null) else null
-        val primary = Store.state.value.settings.let { ServerChoice.automaticPrimary(
-            it.mode == Mode.AUTO,it.balance == com.vlesscardvpn.model.Balance.LEAST_PING,GameSession.active()) }
+        deepPending = true
         val n = selectBest(10, close = true, among = working)
+        if (n <= 0) {
+            val message = "Не удалось выбрать проверенный VLESS-сервер. Подключение не запущено."
+            withContext(Dispatchers.Main) {
+                Tunnel.status.value = Tunnel.Status(Tunnel.State.ERROR, "Нет рабочего сервера", check = message, checkOk = false)
+            }
+            return message
+        }
         withContext(Dispatchers.Main) { onReady() }
-        return if (n > 0) "Авто: выбрано $n лучших серверов — подключаюсь" else "Авто: рабочих серверов нет — подключаюсь через обход DPI без сервера"
+        return "Авто: выбрано $n проверенных серверов — подключаюсь"
     }
 
     /** Cached cloud/network candidates first; no whole-catalog TCP scan or video downloads before first connect. */
@@ -1375,21 +1329,30 @@ object Actions {
         val reachable = Tester.fastFilter(first.filter { it.id !in cachedGood })
         val available = first.filter { (reachable[it.id] ?: -1) != 0 }.ifEmpty { first }
         val ordered = available.sortedBy { if (it.id in cachedGood || (reachable[it.id] ?: -1) > 0) 0 else 1 }
-        // Check up to eight real routes; parallelism stays bounded and downloads remain sequential.
+        // First connect as soon as one real HTTPS route passes; compare the remaining candidates after the tunnel is up.
         val shortlist = ServerChoice.diverse(ordered, AutoEligibility.TOP)
         val passed = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
-        val fastOk = realTest(shortlist, "Авто: проверяю до восьми маршрутов", big = true, youtube = false,
-            attempts = 1, parallel = 4, budgetMs = ConnectPolicy.QUICK_BUDGET_MS,onSuccess={ passed.add(it.id) })
+        val firstFired = java.util.concurrent.atomic.AtomicBoolean(false)
+        val firstCallback: ((Server) -> Unit)? = onFirst?.let { callback -> { server ->
+            if (firstFired.compareAndSet(false, true)) callback(server)
+        } }
+        val fast = ConnectPolicy.fastStart()
+        val fastOk = realTest(shortlist, "Авто: проверяю первый быстрый маршрут", big = true, youtube = false,
+            attempts = 1, parallel = fast.parallel, stopAfter = if (onFirst != null) fast.stopAfter else Int.MAX_VALUE,
+            budgetMs = fast.budgetMs, onFirst = firstCallback, onSuccess = { passed.add(it.id) })
         if (Net.key(app) != net || Net.underlying(app)?.toString() != network) return selectionNetworkChanged()
+        if (onFirst != null && firstFired.get()) return "Первый рабочий VLESS-маршрут найден — подключаюсь; сравнение продолжится после запуска"
         if (fastOk > 0) {
-            chooseCompared(shortlist.filter { it.id in passed },onFirst, eligible.filter { s -> shortlist.none { it.id == s.id } })
-            deepPending = true; return "Выбран лучший из проверенных маршрутов; не просто первый ответивший"
+            chooseCompared(shortlist.filter { it.id in passed }, onFirst, eligible.filter { s -> shortlist.none { it.id == s.id } })
+            deepPending = true; return "Выбран лучший из проверенных VLESS-маршрутов"
         }
         attempted.addAll(first.map { it.id });passed.clear()
-        val ok = realTest(ordered, "Авто: первые ${first.size} маршрутов (облако: ${cloud.size})", big = true,
-            youtube = false, attempts = 1, stopAfter = Int.MAX_VALUE, budgetMs = ConnectPolicy.QUICK_BUDGET_MS,onSuccess={ passed.add(it.id) })
+        val ok = realTest(ordered, "Авто: проверяю резервные VLESS-маршруты", big = true,
+            youtube = false, attempts = 1, stopAfter = if (onFirst != null) fast.stopAfter else Int.MAX_VALUE,
+            budgetMs = fast.budgetMs, onFirst = firstCallback, onSuccess = { passed.add(it.id) })
         if (Net.key(app) != net || Net.underlying(app)?.toString() != network) return selectionNetworkChanged()
-        if (ok > 0) { chooseCompared(ordered.filter { it.id in passed },onFirst, eligible.filter { it.id !in attempted }); deepPending = true; return "Маршруты сравнены; облачные подсказки ${cloud.size}, полный поиск в фоне" }
+        if (onFirst != null && firstFired.get()) return "Найден рабочий VLESS-маршрут — подключаюсь"
+        if (ok > 0) { chooseCompared(ordered.filter { it.id in passed }, onFirst, eligible.filter { it.id !in attempted }); deepPending = true; return "Проверенные VLESS-маршруты готовы" }
         // Only if the first wave failed: bound DNS/TCP work to a small diverse wave, not thousands of subscriptions.
         val rest = ServerChoice.diverse(eligible.filter { it.id !in attempted }, ConnectPolicy.NEXT)
         attempted.addAll(rest.map { it.id })
@@ -1557,7 +1520,8 @@ object Actions {
 
     /** «Страна»: only servers of the chosen country when at least one of them works, otherwise all. */
     fun preferred(st: AppState, list: List<Server>): List<Server> {
-        val safe = if (st.settings.mode == Mode.AUTO) list.filter(AutoEligibility::allowed) else list
+        val remote = list.filter(ServerOnlyPolicy::userRoute)
+        val safe = if (st.settings.mode == Mode.AUTO) remote.filter(AutoEligibility::allowed) else remote
         val c = st.settings.country
         if (c.isEmpty()) return safe
         return safe.filter { Countries.of(it.name) == c }.ifEmpty { safe }
@@ -1657,44 +1621,43 @@ object Actions {
         return c
     }
 
-    /** Current strategy only: does the YouTube page load through it? */
-    fun testByeDpi() = launch("Проверка обхода DPI") {
-        val st = Store.state.value.settings
-        val strategy = DpiStrategies.resolve(st, Net.key(app))
-        val b = DpiProxy(app)
-        try {
-            val port = b.start(strategy, st.byeDpiSni, allowLocal = com.vlesscardvpn.BuildConfig.DEBUG)
-            val p = withContext(Bg.io) { Tester.probeDpi(port) }
-            if (p.ok) "${strategy.label}: YouTube открылся за ${p.ms} мс" else "${strategy.label}: не работает (${p.error})"
-        } finally { b.close() }
+    fun testByeDpi() = launch("Проверка маскировки VLESS") {
+        val st = Store.state.value
+        val servers = preferred(st, st.servers.filter { st.state(it).works && ServerOnlyPolicy.userRoute(it) }).take(4)
+        if (servers.isEmpty()) return@launch "Для проверки нужен рабочий VLESS-сервер. Прямой обход отключён."
+        doFindMasks(servers, perServer = 12)
     }
 
-    // ---------- DPI strategy search (как в ByeByeDPI «тест стратегий») ----------
     data class DpiResult(val ok: Boolean, val ms: Int, val error: String, val score: Int = -1)
-    /** Strategy id → result of the last search (this session). */
     val dpiResults = MutableStateFlow<Map<String, DpiResult>>(emptyMap())
 
-    /**
-     * Tries every strategy (custom line, the remembered one, 20 built-ins incl. zapret and own ones) through its
-     * own local proxy, 4 at a time; a strategy works if the real YouTube page downloads. The best one in plan order
-     * (gentlest first) is remembered for the current network and used automatically.
-     */
-    fun findDpi() = launch("Подбор обхода DPI") { doFindDpi() }
-
-    /**
-     * «Не работает? Починить»: one button for the user — check the network itself, fresh subscriptions + full re-test +
-     * mask search (with evolution) + WARP, a DPI bypass for this network, then reconnect. [then] runs on the main thread.
-     */
-    fun fixAll(then: () -> Unit) = launch("Чиню всё сам") {
-        if (!online()) return@launch "У самой сети нет интернета (ни ya.ru, ни 1.1.1.1 не открываются). Проверьте Wi-Fi/мобильные данные — VPN тут ни при чём."
-        val n = runCatching { autoRescue(emptyList(), 3) { step -> progress.value = progress.value.copy(title = "Чиню: $step") } }.getOrDefault(0)
-        val dpi = if (n == 0 || Store.state.value.settings.mode != com.vlesscardvpn.model.Mode.SERVERS) { progress.value = progress.value.copy(title = "Чиню: обход DPI"); doFindDpi() } else ""
-        android.os.Handler(android.os.Looper.getMainLooper()).post(then)
-        (if (n > 0) "Готово: рабочих серверов выбрано $n. " else "Серверы не нашлись — работаю через обход DPI. ") + dpi.take(160) + " Переподключаюсь…"
+    fun findDpi() = launch("Подбор маскировки VLESS") {
+        val st = Store.state.value
+        val servers = preferred(st, st.servers.filter { st.state(it).works && ServerOnlyPolicy.userRoute(it) }).take(4)
+        if (servers.isEmpty()) "Для подбора нужна рабочая VLESS-конфигурация. Прямой обход отключён."
+        else doFindMasks(servers, perServer = 24)
     }
 
-    /** "1,2 ГБ" / "35 МБ" for the session traffic line. */
-    /** 23400 kbit/s → "23 Мбит/с", 800 → "0.8 Мбит/с" */
+    suspend fun doFindDpi(): String {
+        val st = Store.state.value
+        val servers = preferred(st, st.servers.filter { st.state(it).works && ServerOnlyPolicy.userRoute(it) }).take(4)
+        if (servers.isEmpty()) return "Для подбора нужна рабочая VLESS-конфигурация. Прямой обход отключён."
+        return doFindMasks(servers, perServer = 24)
+    }
+
+    fun nextDpi(): Boolean {
+        val selected = Store.state.value.selected.filter(ServerOnlyPolicy::userRoute)
+        return selected.isNotEmpty() && nextMasks(selected)
+    }
+
+    fun fixAll(then: () -> Unit) = launch("Чиню всё сам") {
+        if (!online()) return@launch "Нет активной сети Wi-Fi или мобильных данных. После её появления проверю рабочие VLESS-серверы; прямой обход отключён."
+        val n = runCatching { autoRescue(emptyList(), 3) { step -> progress.value = progress.value.copy(title = "Чиню: $step") } }.getOrDefault(0)
+        if (n == 0) return@launch "Рабочий VLESS-сервер не найден. Прямой режим отключён; VPN не запускаю. Проверьте подписки или повторите позже."
+        android.os.Handler(android.os.Looper.getMainLooper()).post(then)
+        "Готово: выбрано рабочих VLESS-серверов $n. Переподключаюсь через проверенный маршрут…"
+    }
+
     fun mbps(kbps: Int): String = if (kbps >= 10_000) "${kbps / 1000} Мбит/с" else "%.1f Мбит/с".format(java.util.Locale.US, kbps / 1000.0)
 
     fun bytes(b: Long): String = when {
@@ -1703,154 +1666,50 @@ object Actions {
         else -> "${b shr 10} КБ"
     }
 
-    /**
-     * Smart DPI search: 1) every strategy against the YouTube page (fast); 2) the 8 fastest that passed plus mutants
-     * of the 3 best ByeDPI ones («эволюция стратегий») — two rounds against YouTube, its image CDN and Discord.
-     * The winner opens the most sites most reliably, then is the fastest. The top 5 are remembered for this network:
-     * if the chosen one stops working, the next is used at once instead of a new search.
-     */
-    suspend fun doFindDpi(): String {
-        val st = Store.state.value.settings
-        val network = Net.key(app)
-        val probe = DpiProxy(app)
-        val plan = DpiStrategies.plan(st, network, probe.available(DpiEngine.TPWS)).filter { probe.available(it.engine) }
-        if (plan.isEmpty()) return "Обход DPI недоступен на этом устройстве"
-        dpiResults.value = emptyMap()
-        val done = AtomicInteger()
-        step(0, plan.size)
-        suspend fun run(list: List<DpiStrategy>, par: Int, test: (DpiStrategy, Int) -> DpiResult) = coroutineScope {
-            val sem = Semaphore(par)
-            list.map { s ->
-                async(Bg.io) {
-                    sem.withPermit {
-                        val px = DpiProxy(app)
-                        val r = try { test(s, px.start(s, st.byeDpiSni, allowLocal = com.vlesscardvpn.BuildConfig.DEBUG)) }
-                            catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Throwable) { DpiResult(false, 0, Errors.human(e)) } finally { px.close() }
-                        synchronized(dpiResults) { dpiResults.value = dpiResults.value + (s.id to r) }
-                        step(done.incrementAndGet(), progress.value.total)
-                    }
-                }
-            }.awaitAll()
-        }
-        // Every available engine/custom/evolved strategy participates. Bounded by phone pressure.
-        val parallel = PhonePower.refresh(app).realParallel.coerceIn(1, 6)
-        run(plan, parallel) { _, port ->
-            Tester.probeDpi(port, attempts = 1).let { DpiResult(it.ok, it.ms, it.error) }
-        }
-        val first = dpiResults.value
-        val passed = plan.filter { first[it.id]?.ok == true }.sortedBy { first.getValue(it.id).ms }
-        // Stage 2: finals + evolution
-        // Reserve a final for each working engine; fastest initial ping must not exclude zapret/Xray.
-        val finals = (passed.groupBy { it.engine }.values.map { it.first() } + passed).distinctBy { it.id }.take(8)
-        val evoPool = st.dpiEvoPool.mapNotNull { DpiEvo.decode(it) }.take(3)
-        val mutants = if (finals.isEmpty()) DpiEvo.breed((evoPool + plan.filter { it.engine == DpiEngine.BYEDPI }).distinctBy { it.id }.take(8), 8)
-            else DpiEvo.breed((finals.take(3) + evoPool).distinctBy { it.id }, 12)
-        val stage2 = (finals + mutants).distinctBy { it.id }
-        val scores = java.util.concurrent.ConcurrentHashMap<String, MutableList<Tester.DpiScore>>()
-        if (stage2.isNotEmpty()) {
-            progress.value = progress.value.copy(title = "Финал: YouTube, видео-CDN, Discord", done = 0, total = stage2.size * 2)
-            done.set(0)
-            repeat(2) {
-                run(stage2, parallel.coerceAtMost(3)) { strat, port ->
-                    var sc = Tester.probeDpiSites(port)
-                    // a learning (--auto) strategy may spend the first connections on detection: one more chance
-                    if (strat.adaptive && sc.score < Tester.DPI_SITES.size) sc = Tester.probeDpiSites(port).takeIf { it.score > sc.score } ?: sc
-                    scores.getOrPut(strat.id) { java.util.Collections.synchronizedList(mutableListOf()) } += sc
-                    DpiResult(sc.youtube, sc.ms, sc.error, sc.score)
-                }
-            }
-        }
-        // rank: total score over 2 rounds, YouTube both times, then speed
-        fun total(id: String) = scores[id].orEmpty().sumOf { it.score }
-        fun ytBoth(id: String) = scores[id].orEmpty().count { it.youtube }
-        fun msOf(id: String) = scores[id].orEmpty().filter { it.ms > 0 }.map { it.ms }.average().takeIf { !it.isNaN() } ?: Double.MAX_VALUE
-        val ranked = stage2.filter { ytBoth(it.id) > 0 }.sortedWith(compareByDescending<DpiStrategy> { ytBoth(it.id) }.thenByDescending { total(it.id) }.thenBy { msOf(it.id) })
-        val best = ranked.firstOrNull() ?: passed.firstOrNull()
-        val max = Tester.DPI_SITES.size * 2
-        dpiResults.value = first + ranked.associate { it.id to DpiResult(true, msOf(it.id).toInt(), "", total(it.id)) }
-        if (best != null && Net.key(app) == network) Store.update { a ->
-            a.copy(settings = a.settings.copy(dpiRemembered = a.settings.dpiRemembered + (network to best.id) + (Settings.ANY_NETWORK to best.id),
-                dpiRanking = a.settings.dpiRanking + (network to (ranked.ifEmpty { passed }).take(5).map { it.id }),
-                dpiEvoPool = DpiEvo.keep(a.settings.dpiEvoPool, ranked.take(3).map { it.id })))
-        }
-        val evoWon = best?.id?.startsWith(DpiEvo.PREFIX) == true
-        android.util.Log.i("E2E", "dpi engines passed=${passed.size} plan=${plan.size} " +
-            DpiEngine.values().joinToString(" ") { e -> "${e.name.lowercase()}=${passed.count { it.engine == e }}" })
-        return if (best == null) "Сеть «$network»: ни одна из ${plan.size} стратегий не открыла YouTube. Нужен сервер — режим «Авто» найдёт его сам."
-        else "Сеть «$network»: YouTube открыли ${passed.size} из ${plan.size}, в финале ${stage2.size} (из них выведенных: ${mutants.size}). " +
-            "Выбрана: ${best.label}" + (if (scores.containsKey(best.id)) " — ${total(best.id)} из $max проверок (YouTube, видео-CDN, Discord)" else "") +
-            if (evoWon) ". Победила выведенная стратегия — такой нет ни в одном списке." else ""
-    }
-
-    /** ByeDPI-only stopped working: the next strategy remembered for this network (no new search). */
-    fun nextDpi(): Boolean {
-        val st = Store.state.value.settings
-        val net = Net.key(app)
-        val rank = (st.dpiRanking[net] ?: st.dpiRanking[Net.family(net)]).orEmpty()
-        val cur = DpiStrategies.resolve(st, net).id
-        if (st.dpiStrategy != Settings.DPI_AUTO || rank.size < 2) return false
-        val next = rank[(rank.indexOf(cur) + 1) % rank.size].takeIf { it != cur } ?: return false
-        Store.update { a -> a.copy(settings = a.settings.copy(dpiRemembered = a.settings.dpiRemembered + (net to next),
-            dpiRanking = a.settings.dpiRanking + (net to (rank - cur + cur)))) }
-        return true
-    }
-
-    // ---------- network diagnosis (DPI / white lists) ----------
     data class NetReport(val verdict: String = "", val details: String = "", val kind: Kind = Kind.NONE)
     enum class Kind { NONE, OPEN, DPI, WHITELIST, OFFLINE, PARTIAL }
     val netReport = MutableStateFlow(NetReport())
 
-    /**
-     * Direct checks (the app is outside the VPN): Russian sites vs foreign ones vs the real YouTube page.
-     * Only Russian sites open → the operator is in "white list" mode; foreign open but YouTube cut → DPI throttling.
-     */
-    fun diagnoseNetwork() = launch("Проверка сети") {
-        val client = http.newBuilder().connectTimeout(6, TimeUnit.SECONDS).readTimeout(6, TimeUnit.SECONDS).callTimeout(9, TimeUnit.SECONDS).build()
-        fun reach(url: String): Boolean = runCatching {
-            client.newCall(Request.Builder().url(url).header("User-Agent", Tester.UA).build()).execute().use { it.code in 100..499 }
-        }.getOrDefault(false)
-        fun bigYoutube(): Boolean = runCatching {
-            client.newCall(Request.Builder().url(Tester.DPI_URL).header("User-Agent", Tester.UA).build()).execute().use { r ->
-                val src = r.body!!.byteStream(); val buf = ByteArray(16384); var t = 0
-                while (t < Tester.DPI_BYTES) { val n = src.read(buf); if (n < 0) break; t += n }
-                t >= Tester.DPI_BYTES
-            }
-        }.getOrDefault(false)
-        val ru = listOf("https://ya.ru/", "https://www.gosuslugi.ru/", "https://vk.com/")
-        val foreign = listOf("https://www.gstatic.com/generate_204", "https://www.cloudflare.com/cdn-cgi/trace", "https://github.com/", "https://telegram.org/")
-        step(0, ru.size + foreign.size + 1)
-        val (ruOk, fOk, yt) = coroutineScope {
-            val a = ru.map { async(Bg.io) { reach(it) } }
-            val b = foreign.map { async(Bg.io) { reach(it) } }
-            val c = async(Bg.io) { bigYoutube() }
-            Triple(a.awaitAll().count { it }, b.awaitAll().count { it }, c.await())
+    fun diagnoseNetwork() = launch("Проверка маршрута VLESS") {
+        val auth = Tunnel.socks ?: run {
+            val report = NetReport("Сначала подключитесь к рабочему VLESS-серверу", "Проверки без сервера отключены.", Kind.NONE)
+            netReport.value = report
+            return@launch report.verdict
         }
-        step(ru.size + foreign.size + 1, ru.size + foreign.size + 1)
-        val net = Net.key(app)
-        val details = "Сеть «$net» · российские сайты: $ruOk/${ru.size} · зарубежные: $fOk/${foreign.size} · YouTube: ${if (yt) "открылся" else "не грузится"}"
-        val r = when {
-            ruOk == 0 && fOk == 0 -> NetReport("Нет интернета", details, Kind.OFFLINE)
-            fOk == 0 -> NetReport("Белые списки: открываются только российские сайты. Нужны серверы из подписки «White-Lists» — они на разрешённых адресах.", details, Kind.WHITELIST)
-            !yt -> NetReport("YouTube режут (DPI). Поможет обход DPI без сервера или любой рабочий сервер.", details, Kind.DPI)
-            fOk < foreign.size -> NetReport("Часть зарубежных сайтов заблокирована — нужен сервер.", details, Kind.PARTIAL)
-            else -> NetReport("Сеть без заметных ограничений.", details, Kind.OPEN)
+        val total = 6
+        step(0, total)
+        val settings = Store.state.value.settings
+        val results = coroutineScope {
+            val control = async(Bg.io) { Tester.site(settings.testUrl, auth.port).answers }
+            val youtube = async(Bg.io) { Tester.youtubeMedia(auth.port).ok == true }
+            val telegram = async(Bg.io) { TelegramProbe.check(auth.port) == true }
+            val whatsapp = async(Bg.io) { Tester.site("https://web.whatsapp.com/", auth.port).answers }
+            val discord = async(Bg.io) { Tester.site("https://discord.com/api/v9/gateway", auth.port).answers }
+            val voiceUdp = async(Bg.io) { UdpCallProbe.probe(auth.port, auth.user, auth.pass, 1500) }
+            listOf(control.await(), youtube.await(), telegram.await(), whatsapp.await(), discord.await(), voiceUdp.await())
         }
-        netReport.value = r
-        "${r.verdict} ($details)"
+        step(total, total)
+        if (Tunnel.socks?.port != auth.port) return@launch "Маршрут изменился во время проверки — результат отброшен."
+        val labels = listOf("базовый маршрут", "YouTube", "Telegram", "WhatsApp", "Discord")
+        val details = "Сеть «${Net.key(app)}» · только через VLESS: " + labels.zip(results.take(5)).joinToString(" · ") { (name, ok) -> "$name ${if (ok) "✓" else "✗"}" } +
+            " · UDP/STUN для звонков ${if (results[5]) "✓" else "не подтвердился"}"
+        val servicesOk = results.take(5).all { it }
+        val report = if (!results[0]) NetReport("Выбранный VLESS-маршрут не отвечает — попробуйте «Авто» или другой сервер", details, Kind.OFFLINE)
+            else if (servicesOk) NetReport("YouTube, Telegram, WhatsApp и Discord отвечают через VLESS", details, Kind.OPEN)
+            else NetReport("Часть проверок через VLESS не прошла — попробуйте «Авто» или другой сервер", details, Kind.PARTIAL)
+        netReport.value = report
+        "${report.verdict} ($details)"
     }
 
-    /** White-list mode: keep only servers from white-list subscriptions selected and test them. */
-    fun whitelistServers() = launch("Серверы для белых списков") {
+    fun whitelistServers() = launch("Проверка серверов подписки") {
         val loaded = doRefresh()
-        val wl = Store.state.value.servers.filter { com.vlesscardvpn.model.Subs.isWhitelist(it.source) }
-        if (wl.isEmpty()) return@launch "$loaded. Серверов для белых списков нет."
-        Store.update { st -> st.copy(states = st.servers.associate { s -> s.id to st.state(s).copy(selected = false) }) }
-        val working = realTest(wl.take(150), "Серверы для белых списков")
-        val n = selectBest(10, wl)
-        "Белые списки: работают $working из ${minOf(wl.size, 150)}. Выбрано лучших: $n — жмите «Подключить»."
+        val candidates = Store.state.value.servers.filter { com.vlesscardvpn.model.Subs.isWhitelist(it.source) && ServerOnlyPolicy.userRoute(it) }
+        if (candidates.isEmpty()) return@launch "$loaded. VLESS-серверов в такой подписке нет."
+        val working = realTest(candidates.take(150), "Проверка VLESS-серверов")
+        val n = selectBest(10, candidates)
+        "Через VLESS работают $working из ${minOf(candidates.size, 150)} серверов подписки; выбрано лучших: $n."
     }
 
-    /** Panic button: stop everything and erase servers, settings and test results. */
     fun wipe() {
         cancel()
         Store.wipe(app)

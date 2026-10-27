@@ -52,7 +52,7 @@ fun TorSettingsCard(settings: Settings, set: ((Settings) -> Settings) -> Unit) {
             }
             Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.surface) {
                 Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text(when (circuit) { true -> "Tor-цепочка создана"; false -> "Готовая Tor-цепочка не обнаружена"; null -> "Tor-цепочка ещё не проверена" }, fontWeight = FontWeight.SemiBold)
+                    Text(when (circuit) { true -> "Tor-цепочка через VLESS создана"; false -> "Готовая Tor-цепочка не обнаружена"; null -> "Tor-цепочка ещё не проверена" }, fontWeight = FontWeight.SemiBold)
                     Text("Статус локальной цепочки не подтверждает Telegram или YouTube. Их проверка выполняется отдельно.", style = MaterialTheme.typography.bodyMedium)
                     OutlinedButton(onClick = {
                         checking = true
@@ -77,9 +77,8 @@ fun TorSettingsCard(settings: Settings, set: ((Settings) -> Settings) -> Unit) {
                     }
                 }
             }
-            TorOption("Tor для сервисов", "Направлять выбранные сервисы через локальный Tor.", settings.torRouting) { v -> set { it.copy(torRouting = v) } }
-            TorOption("Tor в Авто", "Прогревать Tor и сравнивать Tor / Tor → сервер с обычными маршрутами. Холодный Tor не задерживает подключение; UDP через Tor недоступен.", settings.torAuto) { v -> set { it.copy(torAuto = v) } }
-            TorOption("Автоподбор сетевых цепочек", "В режиме Авто сравнивать сервер, ByeDPI → сервер и, если разрешён Tor в Авто, готовые Tor-маршруты. Переключение — после проверки передачи, без полного перебора каталога.", settings.autoChainSearch) {v -> set {it.copy(autoChainSearch=v)}}
+            Text("В режиме Авто сначала выбирается проверенный VLESS/Hysteria-сервер. Tor, если включён ниже, работает только поверх этого сервера; при отсутствии маршрута VPN не переключается на прямое соединение.", style = MaterialTheme.typography.bodyMedium)
+            TorOption("Автоподбор сетевых маршрутов", "Сравнивать ограниченный набор проверенных VLESS-маршрутов и их маскировок. Авто не использует прямое соединение и не проверяет Tor отдельно от VLESS.", settings.autoChainSearch) { v -> set { it.copy(autoChainSearch = v) } }
             Text("Приоритет подбора",fontWeight=FontWeight.Medium)
             Row(horizontalArrangement=Arrangement.spacedBy(6.dp)) {
                 listOf("balanced" to "Баланс","download" to "Скорость","interactive" to "Отклик").forEach {(id,title) ->
@@ -87,28 +86,33 @@ fun TorSettingsCard(settings: Settings, set: ((Settings) -> Settings) -> Unit) {
                 }
             }
             Text("Работает в VPN-режиме Авто без отдельной сервисной маршрутизации и WARP-цепочки. Измеряется лучший из ограниченного набора, не каждый сервер интернета.",style=MaterialTheme.typography.bodySmall)
-            TorOption("Рекомендуемые профили Wi-Fi / мобильная сеть", "При подключении и смене сети: Wi-Fi — порог HTTPS 2500 мс, интервал ротации 600 с; мобильная — 5000 мс и 900 с. Это начальные настройки, не измеренная скорость. Мосты, разрешение Tor и прямые исключения не меняются. Ротация используется только если включена отдельно.", settings.torNetworkRecommendations) { v -> set { it.copy(torNetworkRecommendations = v) } }
+            TorOption("Рекомендуемые профили Wi-Fi / мобильная сеть", "При подключении и смене сети: Wi-Fi — порог HTTPS 2500 мс, интервал ротации 600 с; мобильная — 5000 мс и 900 с. Это начальные настройки, не измеренная скорость. Мосты и выбор VLESS-сервера не меняются.", settings.torNetworkRecommendations) { v -> set { it.copy(torNetworkRecommendations = v) } }
             if (settings.torNetworkRecommendations) Text("Ручные интервал и порог ниже сохранены, но временно заменяются профилем Wi-Fi/мобильной сети. Выключите рекомендации, чтобы применять свои значения. На других типах сети используются ручные настройки.", style = MaterialTheme.typography.bodySmall)
-            TorOption("Ротация цепочек", "Запрашивать новую цепочку для новых соединений. Активные загрузки не обрываются; новый IP не гарантируется.", settings.torRotation) { v -> set { it.copy(torRotation = v) } }
-            var seconds by remember(settings.torRotationSeconds) { mutableStateOf(settings.torRotationSeconds.toString()) }
-            var latency by remember(settings.torMaxLatencyMs) { mutableStateOf(settings.torMaxLatencyMs.toString()) }
-            val validSeconds = seconds.toIntOrNull()?.takeIf { it in 30..86400 }
-            val validLatency = latency.toIntOrNull()?.takeIf { it > 0 }
-            OutlinedTextField(value = seconds, onValueChange = { if (it.length <= 5) seconds = it }, singleLine = true,
-                label = { Text("Запрашивать новую цепочку каждые N секунд") },
-                supportingText = { Text("30–86400 секунд. В режиме энергосбережения ротация может откладываться.") },
-                isError = validSeconds == null, modifier = Modifier.fillMaxWidth(),
-                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number))
-            TorOption("Предпочитать быстрые выходы", "Выбирать лучшую страну по свежим HTTPS-замерам Cloudflare, без исследования более медленных стран. Это задержка, не скорость скачивания и не гарантия каждого узла.", settings.torFastOnly) { v -> set { it.copy(torFastOnly = v) } }
-            OutlinedTextField(value = latency, onValueChange = { if (it.length <= 10) latency = it }, singleLine = true,
-                label = { Text("Порог задержки HTTPS, мс") }, supportingText = { Text("Любое целое от 1 до 2147483647 мс, например 100. Это фильтр, а не обещание скорости: слишком низкий порог может исключить все замеры. Для Snowflake допускается двойной порог. Если быстрых пока нет, продолжается обычное создание цепочек.") },
-                isError = validLatency == null, modifier = Modifier.fillMaxWidth(),
-                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number))
-            OutlinedButton(onClick = { if (validSeconds != null && validLatency != null) set { it.copy(torRotationSeconds = validSeconds, torMaxLatencyMs = validLatency) } },
-                enabled = validSeconds != null && validLatency != null, modifier = Modifier.fillMaxWidth()) { Text("Сохранить интервал и порог") }
-            Text("Параметры ротации и транспорта применяются при следующем подключении. Tor работает и по Wi-Fi, и по мобильной сети; мосты могут понадобиться в обеих.", style = MaterialTheme.typography.bodyMedium)
+            if (settings.torAll) {
+                TorOption("Ротация Tor-цепочек", "Запрашивать новую Tor-цепочку для новых соединений через VLESS. Активные соединения не обещано сохранить при смене выхода.", settings.torRotation) { v -> set { it.copy(torRotation = v) } }
+            }
+            if (settings.torAll) {
+                var seconds by remember(settings.torRotationSeconds) { mutableStateOf(settings.torRotationSeconds.toString()) }
+                var latency by remember(settings.torMaxLatencyMs) { mutableStateOf(settings.torMaxLatencyMs.toString()) }
+                val validSeconds = seconds.toIntOrNull()?.takeIf { it in 30..86400 }
+                val validLatency = latency.toIntOrNull()?.takeIf { it > 0 }
+                OutlinedTextField(value = seconds, onValueChange = { if (it.length <= 5) seconds = it }, singleLine = true,
+                    label = { Text("Запрашивать новую цепочку каждые N секунд") },
+                    supportingText = { Text("30–86400 секунд. В режиме энергосбережения ротация может откладываться.") },
+                    isError = validSeconds == null, modifier = Modifier.fillMaxWidth(),
+                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number))
+                TorOption("Предпочитать быстрые выходы", "Выбирать выход по свежей задержке HTTPS через Tor; это не обещание скорости скачивания.", settings.torFastOnly) { v -> set { it.copy(torFastOnly = v) } }
+                OutlinedTextField(value = latency, onValueChange = { if (it.length <= 10) latency = it }, singleLine = true,
+                    label = { Text("Порог задержки HTTPS, мс") }, supportingText = { Text("Положительное целое число. Слишком низкий порог может исключить все замеры.") },
+                    isError = validLatency == null, modifier = Modifier.fillMaxWidth(),
+                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number))
+                OutlinedButton(onClick = { if (validSeconds != null && validLatency != null) set { it.copy(torRotationSeconds = validSeconds, torMaxLatencyMs = validLatency) } },
+                    enabled = validSeconds != null && validLatency != null, modifier = Modifier.fillMaxWidth()) { Text("Сохранить интервал и порог") }
+                Text("Параметры ротации и транспорта применяются при следующем подключении. Tor работает поверх VLESS; при отсутствии сервера маршрут не переключается напрямую.", style = MaterialTheme.typography.bodyMedium)
+            }
+            TorOption("Весь TCP-трафик через Tor", "Tor работает вторым шагом после выбранного VLESS-сервера; UDP, включая звонки, остаётся на VLESS-маршруте. Если VLESS недоступен, VPN не уходит напрямую.", settings.torAll) { v -> set { it.copy(torAll = v) } }
             Text("Транспорт и мосты", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-            listOf("obfs4" to "obfs4 · маскировка Tor", "webtunnel" to "WebTunnel · HTTPS-транспорт", "none" to "Без мостов · прямой Tor").forEach { (id, label) ->
+            listOf("obfs4" to "obfs4 · маскировка Tor", "webtunnel" to "WebTunnel · HTTPS-транспорт", "none" to "Без мостов · через VLESS").forEach { (id, label) ->
                 Surface(onClick = { circuit = null; set { it.copy(torBridge = id) } }, shape = RoundedCornerShape(12.dp),
                     color = if (settings.torBridge == id) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface,
                     modifier = Modifier.fillMaxWidth()) {
@@ -141,9 +145,7 @@ fun TorSettingsCard(settings: Settings, set: ((Settings) -> Settings) -> Unit) {
                         android.net.Uri.parse("https://bridges.torproject.org/options"))) } }) { Text("Получить мосты Tor Project") }
                 }
             }
-            HorizontalDivider()
-            TorOption("Весь TCP-трафик через Tor", "Tor не передаёт произвольный UDP: голос Discord не гарантируется.", settings.torAll) { v -> set { it.copy(torAll = v) } }
-            TorOption("Отдельный путь Tor", "Демон может выходить напрямую. Это не подтверждённая цепочка Tor поверх VLESS и не гарантия анонимности.", settings.torDirect) { v -> set { it.copy(torDirect = v) } }
+
         }
     }
 }

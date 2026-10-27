@@ -28,22 +28,23 @@ class DomainRoutingBackupRegressionR73Test {
         val s = Settings(alwaysVpn = listOf("rutracker.org"), alwaysDirect = listOf("sber.ru"))
         val cfg = JSONObject(XrayConfigBuilder.vpnConfig(listOf(srv to null), s, null))
         val rules = cfg.getJSONObject("routing").getJSONArray("rules")
-        val idx = (0 until rules.length()).map { rules.getJSONObject(it).toString() }
-        val d = idx.indexOfFirst { it.contains("domain:sber.ru") }; val v = idx.indexOfFirst { it.contains("domain:rutracker.org") }
-        val ads = idx.indexOfFirst { it.contains("category-ads-all") }
-        assertTrue(d >= 0 && v >= 0 && d < ads && v < ads)
-        assertEquals("direct", rules.getJSONObject(d).getString("outboundTag"))
-        val back = Settings.fromJson(s.toJson()); assertEquals(s.alwaysVpn, back.alwaysVpn); assertEquals(s.alwaysDirect, back.alwaysDirect)
+        val rendered = (0 until rules.length()).map { rules.getJSONObject(it).toString() }
+        val direct = rendered.indexOfFirst { it.contains("domain:sber.ru") }
+        val pinned = rendered.indexOfFirst { it.contains("domain:rutracker.org") }
+        assertEquals(-1, direct)
+        assertTrue(pinned >= 0)
+        assertEquals("proxy0", rules.getJSONObject(pinned).getString("outboundTag"))
+        val back = Settings.fromJson(s.toJson()); assertEquals(s.alwaysVpn, back.alwaysVpn); assertTrue(back.alwaysDirect.isEmpty())
         java.io.File(System.getenv("XRAY_CONFIG_DUMP") ?: return).apply { mkdirs() }.resolve("sites.json").writeText(cfg.toString())
     }
 
-    @Test fun verdicts() {
+    @Test fun verdictsNeverSuggestDirectOrStandaloneDpi() {
         val ok = Tester.SiteProbe("ok", 120); val hang = Tester.SiteProbe("timeout")
-        assertEquals("vpn", Actions.siteVerdict("x.com", hang, ok, null).suggest)
-        assertEquals("direct", Actions.siteVerdict("x.ru", ok, Tester.SiteProbe("reset"), null).suggest)
-        assertTrue(Actions.siteVerdict("x.ru", hang, hang, ok).verdict.contains("обход DPI"))
-        assertTrue(Actions.siteVerdict("x.ru", Tester.SiteProbe("dns"), Tester.SiteProbe("dns"), null).verdict.contains("нет"))
-        assertTrue(Actions.siteVerdict("x.ru", hang, null, null).verdict.contains("подключитесь"))
+        val working = Actions.siteVerdict("x.com", ok)
+        assertTrue(working.good)
+        assertTrue(working.suggest.isEmpty())
+        assertTrue(Actions.siteVerdict("x.ru", hang).verdict.contains("VLESS-сервер"))
+        assertTrue(Actions.siteVerdict("x.ru", Tester.SiteProbe("dns")).verdict.contains("не найдено"))
     }
 
     @Test fun backupRoundTrip() {

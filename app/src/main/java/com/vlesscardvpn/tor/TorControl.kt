@@ -50,6 +50,14 @@ open class TorControl(private val host: String = "127.0.0.1", private val port: 
         if (!r.startsWith("250")) throw IOException("SETCONF failed: $r")
     }
 
+    open fun getConf(key: String): String? {
+        require(key.matches(Regex("[A-Za-z0-9]+"))) { "Invalid Tor configuration key" }
+        val response = command("GETCONF", key)
+        if (!response.startsWith("250")) throw IOException("GETCONF failed: $response")
+        return response.lineSequence().map(String::trim).firstOrNull { it.startsWith("250 $key=") }
+            ?.substringAfter('=' )?.trim()?.trim('"')
+    }
+
     /** Remove our previous country preference after a physical-network/session change. */
     open fun clearExitCountries() {
         val r = command("RESETCONF", "ExitNodes")

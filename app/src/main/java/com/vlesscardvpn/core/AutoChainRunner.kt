@@ -36,7 +36,7 @@ object AutoChainRunner {
         return Choice(Chain(layout,serverKey=server?.let { digest(it.toJson().toString()) }.orEmpty(),
             maskKey=digest(native?.toString().orEmpty()),torProfileKey=if(layout.tor)profileKey(s) else "",
             dpiKey=if(layout.dpi)digest(dpiIdentity) else "",tcpServer=server?.isTcpBased ?: true,
-            serverExitAllowed=server?.let(AutoEligibility::allowed) ?: true),server,native,dpiStrategy)
+            serverExitAllowed=server?.let(AutoEligibility::vlessServer) ?: false),server,native,dpiStrategy)
     }
     fun fresh(m: Measured, s: Settings, network: String, epoch: Long, now: Long): Boolean =
         s.autoChainSearch && cooldown.allowed(m.choice.chain,digest(network),now) && m.network == network && m.epoch == epoch && m.settingsKey == settingsKey(s) &&

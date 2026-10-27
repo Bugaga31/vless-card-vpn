@@ -18,7 +18,7 @@ data class Settings(
     val mode: Mode = Mode.AUTO,
     val balance: Balance = Balance.LEAST_PING,
     val socksPort: Int = 10808,
-    val ruDirect: Boolean = true,
+    val ruDirect: Boolean = false,
     val blockAds: Boolean = true,
     /** Tracker/telemetry block + DoT port 853: apps can't bypass the app's DNS to phone home unseen. */
     val blockTrackers: Boolean = true,
@@ -43,7 +43,7 @@ data class Settings(
     /** Each connect picks a random mask among the ones that passed the last search for that server. */
     val rotateMasks: Boolean = true,
     /** Russian domains resolved by Yandex DNS directly (with RU direct): RU sites see a normal Russian user. */
-    val ruDns: Boolean = true,
+    val ruDns: Boolean = false,
     /** Package names: excluded from VPN, or (if [onlyApps]) the only ones that use it. */
     val apps: List<String> = emptyList(),
     val onlyApps: Boolean = false,
@@ -61,7 +61,7 @@ data class Settings(
     /** Proxy mode: listen on 0.0.0.0 so other devices in the Wi-Fi / hotspot can use it. */
     val lanShare: Boolean = false,
     /** false = every app goes through the VPN regardless of [apps]. */
-    val perApp: Boolean = true,
+    val perApp: Boolean = false,
     /** Mask families used by the mask search (Masks.FAMILIES ids); empty = all. */
     val maskFamilies: List<String> = emptyList(),
     /** uTLS fingerprints used by the mask search; empty = all. */
@@ -95,11 +95,11 @@ data class Settings(
     val dpiRanking: Map<String, List<String>> = emptyMap(),
     // ---- masking beyond packets (core/Disguise)
     /** Russian apps (banks, Госуслуги, маркетплейсы…) go around the VPN (VPN mode, unless «Только выбранные»). */
-    val ruAppsDirect: Boolean = true,
+    val ruAppsDirect: Boolean = false,
     /** Random TUN address on every connect and a neutral VPN session name. */
     val randomTun: Boolean = true,
     /** Now and then open an ordinary Russian site directly while connected (looks like a usual user). */
-    val coverTraffic: Boolean = true,
+    val coverTraffic: Boolean = false,
     /** Tor exit rotator (absorbed tor-rotator-vless): rotate Tor exit via the ControlPort every ~10 min while connected. */
     val torRotation: Boolean = false,
     /** Requested NEWNYM cadence for new connections, not an IP/stream replacement guarantee. */
@@ -139,7 +139,7 @@ data class Settings(
     /** «Избранное»: server ids Auto always includes when they work. */
     val favorites: List<String> = emptyList(),
     /** «Умный YouTube» (Авто): YouTube through the DPI bypass straight to Google when that measured faster than the servers. */
-    val smartYoutube: Boolean = true,
+    val smartYoutube: Boolean = false,
     /** «Под приложение»: Gemini/ChatGPT → servers of a country where they work, YouTube → speed-up (needs usage access). */
     val appAware: Boolean = true,
     /** «Автопилот помощника»: repairs and lightens the connection by itself while the VPN is on. */
@@ -193,12 +193,11 @@ data class Settings(
         /** "https://www.Site.com/path" → "site.com"; null when it is not a domain. */
         fun host(input: String): String? = input.trim().lowercase().substringAfter("://").substringBefore('/').substringBefore('?')
             .substringBefore(':').removePrefix("www.").trim('.').takeIf { Regex("^[a-z0-9а-яё-]+(\\.[a-z0-9а-яё-]+)+$").matches(it) }
-        const val REV = 75
+        const val REV = 77
         /** YouTube video, pictures and player — what «Умный YouTube» sends through the DPI bypass. */
         val YT_DOMAINS = listOf("geosite:youtube", "domain:googlevideo.com", "domain:ytimg.com", "domain:ggpht.com", "domain:youtu.be", "domain:youtube.com")
         /**
-         * Once per update, step by step (a later choice of the user is kept): 71 — all masking on (hidden proxy, QUIC off,
-         * rotating masks, evolution, behaviour layers, signature masks in the search); 72 — phone speed-up and ad blocking.
+         * Once per update, step by step; revision 76 forces every public route through the VLESS server.
          */
         fun migrate(s0: Settings): Settings {
             var s = s0
@@ -211,7 +210,8 @@ data class Settings(
             // Add the requested source once; a later removal by the user is respected.
             if (s.rev < 74 && Subs.DIMAN !in s.subscriptions) s = s.copy(subscriptions = s.subscriptions + Subs.DIMAN)
             if (s.rev < 75 && Subs.CLOUD_WORKS !in s.subscriptions) s = s.copy(subscriptions = listOf(Subs.CLOUD_WORKS) + s.subscriptions)
-            return if (s.rev >= REV) s else s.copy(rev = REV)
+            if (s.rev < 76) s = s.copy(rev = REV)
+            return com.vlesscardvpn.core.ServerOnlyPolicy.normalize(s.copy(rev = REV))
         }
         const val DPI_AUTO = "auto"
         const val ANY_NETWORK = "*"
@@ -224,7 +224,7 @@ data class Settings(
         fun fromJson(o: JSONObject): Settings {
             val d = Settings()
             fun list(k: String, def: List<String>) = o.optJSONArray(k)?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: def
-            return Settings(
+            return com.vlesscardvpn.core.ServerOnlyPolicy.normalize(Settings(
                 mode = runCatching { Mode.valueOf(o.getString("mode")) }.getOrDefault(d.mode),
                 balance = runCatching { Balance.valueOf(o.getString("balance")) }.getOrDefault(d.balance),
                 socksPort = o.optInt("socksPort", d.socksPort).takeIf { it in 1024..65535 } ?: d.socksPort,
@@ -261,7 +261,7 @@ data class Settings(
                 chargeOnly = o.optBoolean("chargeOnly", false), wifiMaintenance = o.optBoolean("wifiMaintenance", true), protectActiveTraffic = o.optBoolean("protectActiveTraffic", true), gpsSpoof = o.optBoolean("gpsSpoof", false), ytDpi = o.optJSONObject("ytDpi")?.let { m -> m.keys().asSequence().associateWith { m.optBoolean(it) } } ?: emptyMap(),
                 netServers = o.optJSONObject("netServers")?.let { m -> m.keys().asSequence().associateWith { k -> m.optJSONArray(k)?.let { a -> (0 until a.length()).map { a.getString(it) } }.orEmpty() } } ?: emptyMap(),
                 subInfo = o.optJSONObject("subInfo")?.let { m -> m.keys().asSequence().mapNotNull { k -> m.optJSONObject(k)?.let { k to SubInfo.fromJson(it) } }.toMap() } ?: emptyMap(),
-            )
+            ))
         }
     }
 }

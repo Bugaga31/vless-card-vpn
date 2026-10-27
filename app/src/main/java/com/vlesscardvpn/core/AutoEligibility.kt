@@ -5,13 +5,16 @@ import com.vlesscardvpn.model.ServerState
 
 /** Labels are hints, not IP geolocation. Never silently fall back to a known Russian exit in Auto. */
 object AutoEligibility {
-    fun allowed(server: Server): Boolean = !server.name.contains("🇷🇺") && Countries.of(server.name) != "RU"
+    fun allowed(server: Server): Boolean = ServerOnlyPolicy.userRoute(server) && !server.name.contains("🇷🇺") && Countries.of(server.name) != "RU"
+    fun vlessServer(server: Server): Boolean = allowed(server) && !com.vlesscardvpn.xray.Masks.isWarp(server)
     const val TOP = 8
     /** Every returned route is handed to Xray's multi-outbound pool, not held as a hidden spare. */
     fun connectedPool(servers: List<Server>, state: (Server) -> ServerState, net: String, now: Long, gaming: Boolean): List<Server> =
-        servers.distinctBy { it.id }.filter { allowed(it) && state(it).works && serviceRank(state(it),net,now)!=2 }.let { routes ->
-            if (gaming) routes.sortedBy { ServerChoice.latencyScore(state(it).evidenceFor(net),state(it).realMs) }
-            else routes.sortedWith(ServerChoice.downloadOrder(state,net,now))
+        servers.distinctBy { it.id }.filter { vlessServer(it) && state(it).works }.let { candidates ->
+            val routes = servicePool(candidates, state, net, now)
+            val usable = routes.ifEmpty { candidates }
+            if (gaming) usable.sortedBy { ServerChoice.latencyScore(state(it).evidenceFor(net),state(it).realMs) }
+            else usable.sortedWith(ServerChoice.downloadOrder(state,net,now))
         }.let(::independent).take(TOP)
     /** WireGuard endpoints of one account are alternatives, not independent channels.
      *  Same for the rest of the catalog: one /24 subnet or one SNI is a single blocking
@@ -26,8 +29,10 @@ object AutoEligibility {
         }
     }
     /** Manual selections are explicit; diversity pruning belongs to Auto, not manual masks. */
-    fun launchPool(servers: List<Server>, automatic: Boolean): List<Server> =
-        if (automatic) independent(servers) else servers.distinctBy { it.id }
+    fun launchPool(servers: List<Server>, automatic: Boolean): List<Server> {
+        val remote = servers.distinctBy { it.id }.filter(ServerOnlyPolicy::userRoute)
+        return if (automatic) independent(remote.filter(::vlessServer)) else remote
+    }
     private fun String.isIpv4(): Boolean {
         val parts = split('.')
         return parts.size == 4 && parts.all { p -> p.toIntOrNull() in 0..255 }
@@ -39,15 +44,17 @@ object AutoEligibility {
         return st.copy(servers=keep, states=st.states.filterKeys { it in ids },
             settings=st.settings.copy(netServers=st.settings.netServers.mapValues { (_,v) -> v.filter { it in ids } }))
     }
-    fun serviceRank(s: ServerState, net: String, now: Long): Int {
+    fun serviceRank(s: ServerState, net: String, now: Long, services: Set<String> = setOf("youtube", "telegram")): Int {
+        val relevant = services.intersect(setOf("youtube", "telegram"))
+        if (relevant.isEmpty()) return 1
         if (s.serviceNetwork != net || s.serviceMask != s.maskFor(net) || s.serviceCheckedAt <= 0 ||
             now < s.serviceCheckedAt || now - s.serviceCheckedAt > 5 * 60000L) return 1
-        if (s.ytOk == false || s.tgOk == false) return 2
-        return if (s.ytOk == true && s.tgOk == true) 0 else 1
+        val results = relevant.map { if (it == "youtube") s.ytOk else s.tgOk }
+        if (results.all { it == false }) return 2
+        return if (results.all { it == true }) 0 else 1
     }
     fun <T> servicePool(list: List<T>, state: (T) -> ServerState, net: String, now: Long): List<T> {
-        // Unknown is not failed. One fully tested route must not discard seven HTTPS-working routes.
-        // Explicit current-network failures stay out even when every candidate failed.
-        return list.filter { serviceRank(state(it),net,now) != 2 }
+        val usable = list.filter { serviceRank(state(it),net,now) != 2 }
+        return usable.ifEmpty { list }
     }
 }

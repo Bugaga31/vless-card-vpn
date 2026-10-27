@@ -16,6 +16,8 @@ object XrayConfigBuilder {
     const val PROXY_PREFIX = "proxy-"
     const val WARP_CHAIN = "warp-chain"
     const val TOR_TAG = "tor"
+    const val TOR_UPLINK_INBOUND = "tor-uplink"
+    const val TOR_PT_UPLINK_INBOUND = "tor-pt-uplink"
     const val RU_DNS = "77.88.8.8"
     val DNS_FALLBACKS = listOf("https://8.8.8.8/dns-query", "https://9.9.9.9/dns-query", "8.8.8.8", "1.1.1.1")
     /** DoH/DoT names resolved without asking anyone (Private DNS and «свой DNS» by name work even when DNS is broken). */
@@ -214,12 +216,19 @@ object XrayConfigBuilder {
      */
     fun vpnConfig(servers: List<Pair<Server, Mask?>>, settings0: Settings, byeDpiPort: Int?, socks: SocksAuth = SocksAuth(settings0.socksPort),
                   dpiPorts: Map<String, Int> = emptyMap(), listen: String = "127.0.0.1", httpPort: Int? = null, warpHop: Server? = null,
-                  heavy: Set<Int> = emptySet(), serviceRoutes: Map<String, List<String>> = emptyMap(), quietLogs: Boolean = false, downloadSpeeds: List<Int> = emptyList(), downloadLatencies: List<Int> = emptyList(), serverViaTor: Set<String> = emptySet()): String {
-        // Auto: servers when there are working ones, otherwise the DPI engine alone.
-        val settings = if (settings0.mode == Mode.AUTO) settings0.copy(mode = if (servers.isEmpty()) Mode.BYEDPI else Mode.SERVERS) else settings0
-        require(settings.torAll || settings.mode == Mode.BYEDPI || servers.isNotEmpty()) { "Не выбран ни один сервер" }
-        require(settings.torAll || settings.mode == Mode.SERVERS || byeDpiPort != null) { "ByeDPI не запущен" }
-        require(serverViaTor.isEmpty() || (servers.size == 1 && servers[0].first.id in serverViaTor && servers[0].first.isTcpBased && servers[0].second?.viaByeDpi != true && warpHop == null && !settings.torAll)) { "Invalid Tor-to-server chain" }
+                  heavy: Set<Int> = emptySet(), serviceRoutes: Map<String, List<String>> = emptyMap(), quietLogs: Boolean = false, downloadSpeeds: List<Int> = emptyList(), downloadLatencies: List<Int> = emptyList(), serverViaTor: Set<String> = emptySet(), torUpstreamPort: Int = com.vlesscardvpn.tor.TorCard.DEFAULT_UPSTREAM_PORT, torPtUpstreamPort: Int = com.vlesscardvpn.tor.TorCard.DEFAULT_PT_UPSTREAM_PORT, torUpstreamIndex: Int = 0): String {
+        val settings = com.vlesscardvpn.core.ServerOnlyPolicy.normalize(settings0)
+        require(servers.isNotEmpty()) { "Для VPN нужен рабочий VLESS-сервер" }
+        require(servers.all { com.vlesscardvpn.core.ServerOnlyPolicy.userRoute(it.first) }) { "Только удалённые VLESS/Xray-серверы могут передавать пользовательский трафик" }
+        require(settings.mode in setOf(Mode.AUTO, Mode.SERVERS)) { "Режим без VLESS-сервера недоступен" }
+        require(serverViaTor.isEmpty()) { "Tor must not dial a server through itself" }
+        val torOn = com.vlesscardvpn.tor.TorRoutePolicy.active(settings) || settings.torRotation
+        if (torOn) {
+            val reserved = setOf(socks.port, settings.socksPort, settings.httpPort, com.vlesscardvpn.tor.TorCard.DEFAULT_SOCKS_PORT, com.vlesscardvpn.tor.TorCard.DEFAULT_CONTROL_PORT)
+            require(torUpstreamPort in 1024..65535 && torUpstreamPort !in reserved) { "Invalid Tor HTTP upstream port" }
+            require(torPtUpstreamPort in 1024..65535 && torPtUpstreamPort !in reserved && torPtUpstreamPort != torUpstreamPort) { "Invalid Tor transport upstream port" }
+            require(torUpstreamIndex in servers.indices) { "Invalid VLESS upstream server" }
+        }
         val c = base()
         if (quietLogs) c.getJSONObject("log").put("loglevel", "error")
         val inSettings = JSONObject().put("udp", true).put("ip", "127.0.0.1")
@@ -228,26 +237,19 @@ object XrayConfigBuilder {
         fun sniff() = JSONObject().put("enabled", true).put("destOverride", JSONArray(com.vlesscardvpn.core.TransportPolicy.sniff(!settings.blockQuic))).put("routeOnly", true)
         val inbounds = arr(JSONObject().put("tag", "socks").put("listen", listen).put("port", socks.port)
             .put("protocol", "socks").put("settings", inSettings).put("sniffing", sniff()))
-        // Proxy mode: an HTTP proxy next to SOCKS for apps/browsers that only know HTTP proxies.
-        if (httpPort != null) inbounds.put(JSONObject().put("tag", "http").put("listen", listen).put("port", httpPort)
-            .put("protocol", "http").put("settings", JSONObject()).put("sniffing", sniff()))
+        if (torOn) {
+            inbounds.put(JSONObject().put("tag", TOR_UPLINK_INBOUND).put("listen", "127.0.0.1").put("port", torUpstreamPort)
+                .put("protocol", "http").put("settings", JSONObject()))
+            inbounds.put(JSONObject().put("tag", TOR_PT_UPLINK_INBOUND).put("listen", "127.0.0.1").put("port", torPtUpstreamPort)
+                .put("protocol", "socks").put("settings", JSONObject().put("auth", "noauth").put("udp", false)))
+        }
         c.put("inbounds", inbounds)
         val outs = JSONArray()
-        val useServers = !settings.torAll && settings.mode != Mode.BYEDPI
-        if (useServers) servers.forEachIndexed { i, (s, m) ->
-            val out = outbound(s, "$PROXY_PREFIX$i", resolveMask(m, byeDpiPort, dpiPorts), settings.mux)
-            if (s.id in serverViaTor) {
-                val stream = out.optJSONObject("streamSettings") ?: JSONObject().also { out.put("streamSettings",it) }
-                val sock = stream.optJSONObject("sockopt") ?: JSONObject().also { stream.put("sockopt",it) }
-                require(!sock.has("dialerProxy")) { "Cannot overwrite an existing chain" }
-                sock.put("dialerProxy", TOR_TAG)
-            }
-            outs.put(out)
+        val useServers = true
+        servers.forEachIndexed { i, (s, m) ->
+            outs.put(outbound(s, "$PROXY_PREFIX$i", resolveMask(m, byeDpiPort, dpiPorts), settings.mux))
         }
         outs.put(JSONObject().put("tag", "direct").put("protocol", "freedom").put("settings", JSONObject().put("domainStrategy", "UseIPv4")))
-        // Embedded Tor (or an explicitly configured local Tor) uses its own SOCKS listener.
-        // Standalone Tor needs neither a VLESS outbound nor a ByeDPI process.
-        val torOn = com.vlesscardvpn.tor.TorRoutePolicy.active(settings) || serverViaTor.isNotEmpty()
         if (torOn) outs.put(JSONObject().put("tag", TOR_TAG).put("protocol", "socks")
             .put("settings", JSONObject().put("servers", arr(JSONObject().put("address", "127.0.0.1").put("port", com.vlesscardvpn.tor.TorCard.DEFAULT_SOCKS_PORT)))))
         outs.put(JSONObject().put("tag", "block").put("protocol", "blackhole"))
@@ -266,13 +268,14 @@ object XrayConfigBuilder {
         c.put("outbounds", outs)
 
         val many = useServers && servers.size > 1
-        fun toMain(rule: JSONObject): JSONObject = when {
-            settings.torAll && torOn -> rule.put("outboundTag", TOR_TAG)
-            !useServers -> rule.put("outboundTag", BYEDPI_TAG)
+        fun toServer(rule: JSONObject): JSONObject = when {
             hopIdx >= 0 -> rule.put("outboundTag", WARP_CHAIN)
             many -> rule.put("balancerTag", "balancer")
             else -> rule.put("outboundTag", "${PROXY_PREFIX}0")
         }
+        fun toTor(rule: JSONObject): JSONObject = rule.put("network", "tcp").put("outboundTag", TOR_TAG)
+        fun toTorUpstream(rule: JSONObject): JSONObject = rule.put("network", "tcp").put("outboundTag", if (hopIdx >= 0) WARP_CHAIN else "$PROXY_PREFIX$torUpstreamIndex")
+        fun toMain(rule: JSONObject): JSONObject = if (settings.torAll && torOn) toTor(rule) else toServer(rule)
         val dnsServers = JSONArray()
         val ruDns = settings.ruDns && settings.ruDirect && (useServers || settings.torAll)
         if (ruDns) dnsServers.put(JSONObject().put("address", RU_DNS).put("port", 53)
@@ -293,7 +296,7 @@ object XrayConfigBuilder {
 
         val rules = JSONArray()
         rules.put(JSONObject().put("inboundTag", arr("socks")).put("port", "53").put("outboundTag", "dns-out"))
-        if (ruDns) rules.put(JSONObject().put("inboundTag", arr("dns-module")).put("ip", arr(RU_DNS)).put("outboundTag", "direct"))
+        if (torOn) rules.put(toTorUpstream(JSONObject().put("inboundTag", arr(TOR_UPLINK_INBOUND, TOR_PT_UPLINK_INBOUND))))
         rules.put(toMain(JSONObject().put("inboundTag", arr("dns-module"))))
         rules.put(JSONObject().put("ip", arr("geoip:private")).put("outboundTag", "direct"))
         rules.put(JSONObject().put("ip", arr("::/0")).put("outboundTag", "block"))
@@ -305,23 +308,19 @@ object XrayConfigBuilder {
         // «Сайт не открывается?» — the user's own choice wins over everything below (RU direct, services, hybrid)
         if (settings.alwaysDirect.isNotEmpty()) rules.put(JSONObject().put("domain", JSONArray(settings.alwaysDirect.map { "domain:$it" })).put("outboundTag", "direct"))
         if (settings.alwaysVpn.isNotEmpty()) rules.put(toMain(JSONObject().put("domain", JSONArray(settings.alwaysVpn.map { "domain:$it" }))))
-        if (serverViaTor.isNotEmpty()) rules.put(JSONObject().put("network", "udp").put("outboundTag", "block"))
+
         // AI services (Gemini, ChatGPT, Claude…) refuse Russian addresses: always through the servers, never direct or via the DPI bypass
-        val servicePools = if (useServers && warpHop == null) com.vlesscardvpn.core.ServiceRoutes.indices(servers.map { it.first.id }, serviceRoutes) else emptyMap()
+        val servicePools = if (warpHop == null) com.vlesscardvpn.core.ServiceRoutes.indices(servers.map { it.first.id }, serviceRoutes) else emptyMap()
         servicePools.forEach { (id, pool) ->
             val target = com.vlesscardvpn.core.ServiceRoutes.targets.first { it.id == id }
-            // Keep explicit Hybrid / a proven Auto DPI video route. Server pins must not override it.
-            val included = id !in setOf("youtube", "telegram") || settings.services.isEmpty() || id in settings.services
-            if (included && (settings.mode != Mode.HYBRID || hybridDomains(settings).none { it in target.domains })) {
-                fun pinned(rule: JSONObject): JSONObject = when {
-                    torOn && (settings.torAll || id in settings.services) -> rule.put("outboundTag", TOR_TAG)
-                    pool.size == 1 -> rule.put("outboundTag", "$PROXY_PREFIX${pool.first()}")
-                    else -> rule.put("balancerTag", "service-$id")
-                }
-                rules.put(pinned(JSONObject().put("domain", JSONArray(target.domains))))
-                // Telegram's Android app commonly connects by DC IP, not by a web hostname.
-                if (target.ips.isNotEmpty()) rules.put(pinned(JSONObject().put("ip", JSONArray(target.ips))))
+            val throughTor = torOn && (settings.torAll || settings.torRouting && id in settings.services)
+            fun pinned(rule: JSONObject): JSONObject = when {
+                throughTor -> toTor(rule)
+                pool.size == 1 -> rule.put("outboundTag", "$PROXY_PREFIX${pool.first()}")
+                else -> rule.put("balancerTag", "service-$id")
             }
+            rules.put(pinned(JSONObject().put("domain", JSONArray(target.domains))))
+            if (target.ips.isNotEmpty()) rules.put(pinned(JSONObject().put("ip", JSONArray(target.ips))))
         }
         if (useServers) rules.put(toMain(JSONObject().put("domain", JSONArray(com.vlesscardvpn.core.AppWatch.AI_DOMAINS))))
         if (settings.blockAds) rules.put(JSONObject().put("domain", JSONArray(listOf("geosite:category-ads-all") + YT_ADS)).put("outboundTag", "block"))
@@ -340,28 +339,18 @@ object XrayConfigBuilder {
         }
         if (!settings.torAll && settings.mode == Mode.HYBRID && hybridDomains(settings).isNotEmpty())
             rules.put(JSONObject().put("domain", JSONArray(hybridDomains(settings))).put("outboundTag", BYEDPI_TAG))
-        if (useServers && (settings.services.isEmpty() || "telegram" in settings.services)) {
-            rules.put(toMain(JSONObject().put("domain", JSONArray(com.vlesscardvpn.core.Services.domains(listOf("telegram"))))))
-            rules.put(toMain(JSONObject().put("ip", JSONArray(com.vlesscardvpn.core.Services.ips(listOf("telegram"))))))
+        if (!settings.torAll && !(settings.torRouting && "telegram" in settings.services)) {
+            rules.put(toServer(JSONObject().put("domain", JSONArray(com.vlesscardvpn.core.Services.domains(listOf("telegram"))))))
+            rules.put(toServer(JSONObject().put("ip", JSONArray(com.vlesscardvpn.core.Services.ips(listOf("telegram"))))))
         }
-        if (settings.ruDirect && (useServers || settings.torAll)) {
-            rules.put(JSONObject().put("domain", JSONArray(RU_DOMAINS)).put("outboundTag", "direct"))
-            rules.put(JSONObject().put("ip", arr("geoip:ru")).put("outboundTag", "direct"))
-        }
-        val only = if (settings.torAll) emptyList() else com.vlesscardvpn.core.Services.domains(settings.services)
-        // video goes to the 1–2 servers that really downloaded fastest (balancer «heavy»), the rest is spread over all
+        val only = emptyList<String>()
         val speedAware = downloadSpeeds.size == servers.size && downloadSpeeds.any { it > 0 }
-        val heavyOn = !settings.torAll && !speedAware && many && hopIdx < 0 && servers.size <= 10 && heavy.isNotEmpty() && heavy.size < servers.size && heavy.all { it in servers.indices } &&
-            (only.isEmpty() || "youtube" in settings.services)
+        val heavyOn = !settings.torAll && !speedAware && many && hopIdx < 0 && servers.size <= 10 && heavy.isNotEmpty() && heavy.size < servers.size && heavy.all { it in servers.indices }
         if (heavyOn) rules.put(JSONObject().put("domain", JSONArray(HEAVY_DOMAINS)).put("balancerTag", "heavy"))
-        if (only.isNotEmpty()) {
-            // "Only YouTube + Telegram through the VPN": those services → main route, everything else direct.
-            rules.put(toMain(JSONObject().put("domain", JSONArray(only))))
-            com.vlesscardvpn.core.Services.ips(settings.services).takeIf { it.isNotEmpty() }?.let { rules.put(toMain(JSONObject().put("ip", JSONArray(it)))) }
-            // Discord voice: datagrams go to raw voice-server IPs, no hostname to sniff — without this the catch-all direct below kills the mic.
-            if ("discord" in settings.services) rules.put(toMain(JSONObject().put("network", "udp").put("port", "50000-65535")))
-            rules.put(JSONObject().put("network", "tcp,udp").put("outboundTag", "direct"))
-        } else rules.put(toMain(JSONObject().put("network", "tcp,udp")))
+        if (settings.torAll && torOn) {
+            rules.put(toTor(JSONObject().put("network", "tcp")))
+            rules.put(toServer(JSONObject().put("network", "udp")))
+        } else rules.put(toServer(JSONObject().put("network", "tcp,udp")))
         val routing = JSONObject().put("domainStrategy", "AsIs").put("rules", rules)
         if (many) {
             fun strategy() = if (speedAware) com.vlesscardvpn.core.SpeedBalance.strategy(downloadSpeeds,downloadLatencies)

@@ -76,7 +76,7 @@ object Assistant {
             }
             has(q, "почему не работ", "почему не подкл", "диагност", "что не так", "в чём причин", "в чем причин", "заморозк") -> Msg(false, "Проверю причину: белые списки, блокировку серверов по IP или по имени (SNI) и «заморозку» загрузки внутри VPN.", listOf(Btn("Проверить", "!diag")), auto = true)
             has(q, "оживи", "нерабочие сервер", "мёртвые сервер", "мертвые сервер", "дохлые", "не работают сервер", "чистый ip", "чистые ip") -> Msg(false, "Попробую оживить нерабочие серверы за Cloudflare: тот же сервер часто отвечает на другом адресе Cloudflare, если оператор заблокировал только его IP.", listOf(Btn("Оживить", "!revive")), auto = true)
-            has(q, "белые списк", "белый спис", "белых спис", "вайтлист", "whitelist") -> Msg(false, "Проверю, включены ли белые списки у оператора: открою напрямую разрешённые, обычные и заблокированные сайты.", listOf(Btn("Проверить", "!wl")), auto = true)
+            has(q, "белые списк", "белый спис", "белых спис", "вайтлист", "whitelist") -> Msg(false, "Проверю доступность сайтов только через выбранный VLESS-сервер. Проверки напрямую отключены.", listOf(Btn("Проверить маршрут", "!wl")), auto = true)
             has(q, "охлад", "греет", "горяч", "нагрел", "нагрев", "температур", "перегр") -> Msg(false, cooling(f), listOf(Btn("Снизить нагрузку", "!cool")), auto = has(q, "охлади", "остуди", "снизь"))
             has(q, "ускорь телефон", "ускорение телефона", "разгони телефон", "оптимизируй телефон", "автоускор") ->
                 Msg(false, "Ускоряю телефон в VPN: крупные пакеты (меньше работы процессору), блокировка рекламы (меньше трафика и батареи), лёгкие маски. Память и чужие приложения Android трогать не даёт — это делают только системные «очистки».", listOf(Btn("Ускорить", "!boostphone")), auto = true)
@@ -102,10 +102,10 @@ object Assistant {
             has(q, "тор", "tor", "лук", "луковичн", "onion", "анонимн") -> {
                 val off = has(q, "выключи", "отключи", "не надо", "убери")
                 when {
-                    off -> Msg(false, "Выключаю Tor-режим для сервисов: выбранные приложения снова пойдут через основной VPN-маршрут.", listOf(Btn("Применить", "!set torRouting off")), auto = true)
+                    off -> Msg(false, "Выключаю Tor через VLESS.", listOf(Btn("Применить", "!set torAll off")), auto = true)
                     has(q, "мост", "маски тор", "obfs", "снежинк", "snowflake", "бридж") -> Msg(false, "В приложение встроены мостовые транспорты obfs4 и WebTunnel. Они могут помочь при блокировке обычного Tor, но доступность у оператора не гарантируется. Snowflake и Meek не встроены. Мосты и ротация настраиваются в разделе Tor; он доступен и с главного экрана.", listOf(Btn("Открыть настройки", "!settings")))
-                    has(q, "отдельн", "напрям", "мимо vpn", "свой путь") -> Msg(false, "Отдельный путь Tor: демон Tor исключается из VPN и ходит в интернет напрямую — своё шифрование и мосты, работает даже если серверы недоступны. Хорошо как запасной путь.", listOf(Btn("Включить", "!set torDirect on"), Btn("Мосты Tor", "тор мосты")))
-                    else -> Msg(false, "Tor-режим направляет выбранные TCP-сервисы через встроенный Tor. Автоматическая цепочка Tor поверх VLESS не реализована. Ротация включается отдельно: интервал и предпочтение быстрых измеренных выходов задаются в настройках Tor. Запрос новой цепочки не гарантирует новый IP.", listOf(Btn("Включить Tor", "!set torRouting on"), Btn("Мосты Tor", "тор мосты")))
+                    has(q, "отдельн", "напрям", "мимо vpn", "свой путь") -> Msg(false, "Отдельный Tor без VLESS отключён. Tor может работать только поверх проверенного VLESS-сервера; при недоступном сервере прямой выход не включается.", listOf(Btn("Tor через VLESS", "!set torAll on"), Btn("Мосты Tor", "тор мосты")))
+                    else -> Msg(false, "Tor подключается вторым шагом после VLESS: TCP идёт через Tor, UDP и звонки остаются на VLESS. Без рабочего VLESS-сервера Tor не стартует.", listOf(Btn("Включить Tor через VLESS", "!set torAll on"), Btn("Мосты Tor", "тор мосты")))
                 }
             }
             has(q, "привет", "здравств", "кто ты", "ты кто") -> Msg(false, HELLO, START)
@@ -308,9 +308,28 @@ object Assistant {
             cmd == "!disconnect" -> { com.vlesscardvpn.vpn.TunnelService.stop(app); post(Msg(false, "VPN отключён.")) }
             cmd.startsWith("!set ") -> {
                 val (key, v) = cmd.removePrefix("!set ").split(" ").let { it[0] to (it.getOrNull(1) == "on") }
-                Store.update { s -> s.copy(settings = when (key) { "blockAds" -> s.settings.copy(blockAds = v); "blockQuic" -> s.settings.copy(blockQuic = v); "gps" -> s.settings.copy(gpsSpoof = v); "torRouting" -> s.settings.copy(torRouting = v); "torAuto" -> s.settings.copy(torAuto = v); "torDirect" -> s.settings.copy(torDirect = v); "warpChain" -> s.settings.copy(warpChain = v); "autopilot" -> s.settings.copy(autopilot = v); "appAware" -> s.settings.copy(appAware = v); else -> s.settings.copy(turbo = v) }) }
+                Store.update { s -> s.copy(settings = when (key) {
+                    "blockAds" -> s.settings.copy(blockAds = v)
+                    "blockQuic" -> s.settings.copy(blockQuic = v)
+                    "blockStun" -> s.settings.copy(blockStun = v)
+                    "gps" -> s.settings.copy(gpsSpoof = v)
+                    "torRouting", "torAll" -> s.settings.copy(torAll = v, torRouting = false, torDirect = false)
+                    "torAuto" -> s.settings.copy(torAuto = v)
+                    "torDirect" -> s.settings.copy(torDirect = v)
+                    "warpChain" -> s.settings.copy(warpChain = v)
+                    "autopilot" -> s.settings.copy(autopilot = v)
+                    "appAware" -> s.settings.copy(appAware = v)
+                    else -> s.settings.copy(turbo = v)
+                }) }
                 reconnect(app)
-                post(Msg(false, (when (key) { "blockAds" -> "Блокировка рекламы"; "blockQuic" -> "Блокировка QUIC"; "gps" -> "Подмена GPS"; "warpChain" -> "WARP через сервер"; "autopilot" -> "Автопилот"; "appAware" -> "Подстройка под приложения"; "torRouting" -> "Tor для сервисов"; "torAuto" -> "Tor в Авто"; "torDirect" -> "Отдельный путь Tor"; else -> "Ускорение телефона" }) + if (v) " включена." else " выключена."))
+                val message = when (key) {
+                    "torDirect" -> "Tor без VLESS отключён; используйте Tor через VLESS."
+                    "blockStun" -> "Фильтрация STUN отключена, чтобы не прерывать звонки."
+                    "blockQuic" -> "QUIC-фильтрация отключена; UDP остаётся внутри VLESS."
+                    "torRouting", "torAll" -> "Tor через VLESS " + if (v) "включён." else "выключен."
+                    else -> (when (key) { "blockAds" -> "Блокировка рекламы"; "gps" -> "Подмена GPS"; "warpChain" -> "WARP через сервер"; "autopilot" -> "Автопилот"; "appAware" -> "Подстройка под приложения"; "torAuto" -> "Tor в Авто"; else -> "Ускорение телефона" }) + if (v) " включена." else " выключена."
+                }
+                post(Msg(false, message))
                 if (v && key == "autopilot") { Actions.boostYoutube(); post(Msg(false, "Начал улучшать соединение — результат напишу здесь.")) }
                 if (v && key == "gps") post(Msg(false, "Подмена GPS работает, пока включён VPN: телефон «окажется» в столице страны сервера. Нужно один раз разрешить: Параметры разработчика → «Приложение для фиктивных местоположений» → VLESS Card." +
                     GpsMock.state.value.let { if (it.isNotEmpty()) "\nСейчас: $it" else "" }, listOf(Btn("Открыть параметры разработчика", "!devsettings"))))

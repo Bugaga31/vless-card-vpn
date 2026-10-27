@@ -100,7 +100,7 @@ object MaskLab {
             if (rnd.nextInt(8) == 0) { if (p.tfo) o.remove("tfo") else o.put("tfo", true) }
             if (rnd.nextInt(10) == 0) { if (p.ipv6) o.remove("v6") else o.put("v6", true) }
             // «белый» SNI: another allowed site (whitelist mode — only allowed names pass)
-            if (rnd.nextInt(if (com.vlesscardvpn.core.Whitelist.last.value?.verdict == com.vlesscardvpn.core.Whitelist.Verdict.WHITELIST) 3 else 9) == 0) {
+            if (rnd.nextInt(9) == 0) {
                 if (p.sni.isNotEmpty() && rnd.nextInt(3) == 0) o.remove("sni") else o.put("sni", Masks.WHITE_POOL[rnd.nextInt(Masks.WHITE_POOL.size)])
             }
             if (o.has("dpi")) { o.remove("mss"); o.remove("tfo"); o.remove("v6") } // through a local DPI engine the MSS of 127.0.0.1 means nothing
