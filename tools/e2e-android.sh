@@ -149,10 +149,19 @@ run_case single single.json
 N1=$(grep -c "email: u8443" $W/access.log); echo "server :8443 accepted after single: $N1"
 [ "$N1" -gt 0 ] || fail "single: server saw no traffic (traffic did not go through the server)"
 
-: > $W/access.log
-run_case byedpi byedpi.json
-c=$(grep -c "email: u" $W/access.log); echo "byedpi: server lines $c (must be 0; runs before multi so no balancer observatory can linger)"
-[ "$c" -eq 0 ] || { fail "byedpi: traffic unexpectedly went through a server"; cat $W/access.log | tail -5; }
+# An empty server catalogue must fail closed as a VPN connection.
+# Android's ordinary internet while disconnected is not a VPN success.
+CASE=byedpi-rejected; R=""
+adb shell am start -n $PKG/.MainActivity --ez e2e_disconnect true >/dev/null
+sleep 3; : > $W/access.log; adb logcat -c
+load byedpi.json true || fail "serverless: fixture load failed"
+C=$(waitlog "connect failed|check ok=" 60) || fail "serverless: no explicit rejection"
+printf '%s\n' "$C" | grep -q 'connect failed' || fail "serverless: empty catalogue was not rejected"
+adb logcat -d -s E2E:I | grep -q 'check ok=true' && fail "serverless: reported false VPN success"
+R=$(probe serverless-rejected)
+printf '%s' "$R" | python3 -c 'import json,sys;r=json.load(sys.stdin);sys.exit(0 if r.get("vpn") is False else 1)' || fail "serverless: VPN unexpectedly active"
+c=$(grep -c "email: u" $W/access.log)
+[ "$c" -eq 0 ] || fail "serverless: unexpected fixture server traffic"
 
 : > $W/access.log
 run_case multi multi.json
@@ -195,7 +204,7 @@ run_case services services.json
 yt=$(grep "email: u8443" $W/access.log | grep -c "qa-youtube"); gs=$(grep "email: u8443" $W/access.log | grep -c "qa-gstatic\|qa-speed\|qa-google")
 echo "services: through server youtube=$yt other=$gs"
 [ "$yt" -gt 0 ] || fail "services: YouTube did not go through the server"
-[ "$gs" -eq 0 ] || fail "services: other sites went through the server (must be direct)"
+[ "$gs" -gt 0 ] || fail "services: other sites bypassed the required server"
 
 : > $W/access.log
 run_case auto auto.json 180
@@ -225,23 +234,12 @@ if echo "$CH" | grep -q "applied=DPI_SERVER" && okprobe "$R" >/dev/null && [ "$c
   echo "::notice title=Auto chain verified::Production selector applied DPI_SERVER; other-UID HTTPS transfer PASS; authenticated server reached"
 fi
 
-CASE=proxy; R=""
-echo "=== case proxy (no VPN: SOCKS5 10808 + HTTP 10809 for other apps)"
-adb shell am start -n $PKG/.MainActivity --ez e2e_disconnect true >/dev/null; sleep 3; : > $W/access.log
-load proxy.json || { fail "proxy: fixture state load failed"; exit 1; }; adb logcat -c
-adb shell am start -n $PKG/.MainActivity --ez e2e_connect true >/dev/null
-C=$(waitlog "check ok=|connect failed" 60) || fail "proxy: no connect result"
-echo "app: $C"; echo "$C" | grep -q "check ok=true" || fail "proxy: in-app check failed"
-adb logcat -d -s E2E:I | grep "socks port=" | tail -1 | grep -q "port=10808 auth=false.*proxy=true" || fail "proxy: not a plain SOCKS on 10808"
-adb shell ip addr | grep -q "tun0" && fail "proxy: a TUN interface exists (must be proxy only)"
-adb forward tcp:18081 tcp:10809 >/dev/null; adb forward tcp:18080 tcp:10808 >/dev/null
-H=$(curl -s -m 20 -o /dev/null -w '%{http_code}' -x http://127.0.0.1:18081 https://www.gstatic.com/generate_204); echo "proxy: HTTP proxy → $H"
-[ "$H" = "204" ] || fail "proxy: HTTP proxy 10809 does not work"
-S5=$(curl -s -m 20 -o /dev/null -w '%{http_code}' -x socks5h://127.0.0.1:18080 https://www.google.com/); echo "proxy: SOCKS5 → $S5"
-[ "$S5" = "200" ] || fail "proxy: SOCKS5 10808 does not work"
-adb forward --remove-all
-c=$(grep -c "email: u8443" $W/access.log); echo "proxy: server :8443 accepted $c"
-[ "$c" -gt 0 ] || fail "proxy: traffic did not go through the server"
+# Stored legacy proxyOnly must not reopen unauthenticated public listeners.
+run_case retired-proxy proxy.json
+adb logcat -d -s E2E:I | grep "socks port=" | tail -1 | grep -q 'auth=true.*proxy=false' || fail "retired-proxy: legacy preference exposed proxy instead of protected VPN"
+adb shell cat /proc/net/tcp /proc/net/tcp6 | awk '$4=="0A"{print $2}' | grep -qi ':2A39$' && fail "retired-proxy: HTTP port 10809 unexpectedly open"
+c=$(grep -c "email: u8443" $W/access.log)
+[ "$c" -gt 0 ] || fail "retired-proxy: required server saw no traffic"
 
 CASE=warp; R=""
 echo "=== case warp (register free WARP accounts, find endpoint + mask, connect)"

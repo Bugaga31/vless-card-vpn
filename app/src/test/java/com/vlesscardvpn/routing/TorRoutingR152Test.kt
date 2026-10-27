@@ -16,21 +16,14 @@ import org.junit.Test
 class TorRoutingR152Test {
     private fun server(i: Int, host: String = "host$i.example") = Server("NL-$i", "vless", host, 443, "uuid-$i")
 
-    @Test fun torRoutingSendsSelectedServicesThroughTheTorOutbound() {
-        val s = Settings(mode = Mode.SERVERS, services = listOf("discord"), torRouting = true)
-        val cfg = JSONObject(XrayConfigBuilder.vpnConfig(listOf(server(1) to null), s, null,
-            serviceRoutes = mapOf("discord" to listOf(server(1).id))))
-        val outs = cfg.getJSONArray("outbounds")
-        val tor = (0 until outs.length()).map { outs.getJSONObject(it) }.firstOrNull { it.optString("tag") == "tor" }
-        assertNotNull("tor outbound must exist when torRouting is on", tor)
-        assertEquals(com.vlesscardvpn.tor.TorCard.DEFAULT_SOCKS_PORT,
-            tor!!.getJSONObject("settings").getJSONArray("servers").getJSONObject(0).getInt("port"))
-        val rules = cfg.getJSONObject("routing").getJSONArray("rules")
-        val withDiscord = (0 until rules.length()).map { rules.getJSONObject(it) }
-            .filter { it.optJSONArray("domain")?.toString()?.contains("discord") == true }
-        println("DISCORD-RULES: ${withDiscord} torOn-check: tor tag present=${(0 until outs.length()).any { outs.getJSONObject(it).optString("tag") == "tor" }}")
-        val discord = withDiscord.first()
-        assertEquals("tor", discord.optString("outboundTag", "<missing> RULE=" + discord.toString()))
+    @Test fun fullTorUsesTheServerUplink() {
+        val c=JSONObject(XrayConfigBuilder.vpnConfig(listOf(server(1) to null),Settings(mode=Mode.SERVERS,torAll=true),null))
+        val outs=c.getJSONArray("outbounds").let {a->(0 until a.length()).map(a::getJSONObject)}
+        assertTrue(outs.any {it.optString("tag")=="tor"})
+        assertTrue(outs.any {it.optString("tag")=="proxy-0"})
+        val rows=c.getJSONObject("routing").getJSONArray("rules").let {a->(0 until a.length()).map(a::getJSONObject)}
+        assertEquals("proxy-0",rows.first {it.optJSONArray("inboundTag")?.toString()?.contains("tor-uplink")==true}.getString("outboundTag"))
+        assertEquals("tor",rows.last {it.optString("network")=="tcp"}.getString("outboundTag"))
     }
 
     @Test fun withoutTorRoutingServicesRideTheMainProxy() {

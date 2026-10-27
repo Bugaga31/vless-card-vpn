@@ -24,13 +24,14 @@ class NativeServiceRoutingTest {
         val video = rules.first { it.optJSONArray("domain")?.toString()?.contains("googlevideo.com") == true }
         assertEquals("proxy-1", video.getString("outboundTag"))
     }
-    @Test fun hybridVideoChoiceAndExplicitServiceScopeArePreserved() {
-        val routes = mapOf("youtube" to listOf(server(2).id))
-        val hybrid = rules(Settings(mode = Mode.HYBRID, hybridDomains = Settings.YT_DOMAINS), routes)
-            .first { it.optJSONArray("domain")?.toString()?.contains("googlevideo.com") == true }
-        assertEquals(XrayConfigBuilder.BYEDPI_TAG, hybrid.getString("outboundTag"))
-        val restricted = rules(Settings(mode = Mode.SERVERS, services = listOf("telegram")), routes)
-        assertFalse(restricted.any { it.optJSONArray("domain")?.toString()?.contains("googlevideo.com") == true && it.optString("outboundTag") == "proxy-1" })
+    @Test fun legacyHybridAndServiceScopeCannotRestoreDirectVideo() {
+        val routes=mapOf("youtube" to listOf(server(2).id))
+        val hybrid=rules(Settings(mode=Mode.HYBRID,hybridDomains=Settings.YT_DOMAINS),routes)
+        val video=hybrid.first {it.optJSONArray("domain")?.toString()?.contains("googlevideo.com")==true}
+        assertEquals("proxy-1",video.getString("outboundTag"))
+        assertFalse(hybrid.any {it.optString("outboundTag")==XrayConfigBuilder.BYEDPI_TAG})
+        val restricted=rules(Settings(mode=Mode.SERVERS,services=listOf("telegram")),routes)
+        assertFalse(restricted.any {it.optString("outboundTag")=="direct" && it.optString("network")=="tcp,udp"})
     }
     @Test fun nativePinsRejectWebOnlyPassesAndUnknowns() {
         val yt = ServiceRoutes.targets.first { it.id == "youtube" }

@@ -6,8 +6,8 @@ import com.vlesscardvpn.core.ServerOnlyPolicy
 
 /** Tor is an exit path behind a measured VLESS upstream; it never replaces the server. */
 object TorConnectionPolicy {
-    fun selectTor(s: Settings): Settings = ServerOnlyPolicy.normalize(s.copy(torAll = true, torDirect = false))
-    fun selectMode(s: Settings, mode: Mode): Settings = ServerOnlyPolicy.normalize(s.copy(mode = mode, torAll = false))
+    fun selectTor(s: Settings): Settings = s.copy(torAll = true, torDirect = false)
+    fun selectMode(s: Settings, mode: Mode): Settings = s.copy(mode = if (mode == Mode.BYEDPI || mode == Mode.HYBRID) Mode.AUTO else mode, torAll = false)
     fun runtime(s: Settings): Settings = ServerOnlyPolicy.normalize(s)
     fun needsAutoSearch(s: Settings): Boolean = ServerOnlyPolicy.normalize(s).mode == Mode.AUTO
     fun rotation(s: Settings, now: () -> Long): TorRotation = TorRotation(

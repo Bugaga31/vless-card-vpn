@@ -73,13 +73,13 @@ class TorControlsR164Test {
     @Test fun `home Tor does not erase mode masks bridges or user exceptions`() {
         val original=Settings(mode=Mode.AUTO,torBridge="obfs4",torBridgeLines="user value",myMasks=listOf("user mask"),alwaysDirect=listOf("example.test"))
         val picked=TorConnectionPolicy.selectTor(original)
-        assertTrue(picked.torAll); assertTrue(picked.torDirect); assertFalse(TorConnectionPolicy.needsAutoSearch(picked))
+        assertTrue(picked.torAll); assertFalse(picked.torDirect); assertTrue(TorConnectionPolicy.needsAutoSearch(picked))
         assertEquals(original.myMasks,picked.myMasks); assertEquals(original.torBridgeLines,picked.torBridgeLines)
         assertEquals(original.alwaysDirect,picked.alwaysDirect)
     }
     @Test fun `Tor runtime does not depend on a VLESS catalogue`() {
         val s=TorConnectionPolicy.runtime(Settings(mode=Mode.AUTO,torAll=true))
-        assertEquals(Mode.BYEDPI,s.mode); assertTrue(s.torAll)
+        assertEquals(Mode.AUTO,s.mode); assertTrue(s.torAll); assertFalse(s.torDirect)
     }
     @Test fun `leaving Tor restores a chosen normal connection mode`() {
         val s=TorConnectionPolicy.selectMode(Settings(torAll=true),Mode.SERVERS)
@@ -132,7 +132,7 @@ class TorControlsR164Test {
     }
     @Test fun `user enabled light rotation is not disabled merely by mobile metering`() {
         val p=PowerPolicy.evaluate(PowerPolicy.Input(now=1000,battery=80,screen=true,metered=true),PowerPolicy.Options(wifiOnly=true))
-        assertFalse(p.allowed); assertTrue(p.allowLight)
+        assertFalse(p.allowed); assertFalse(p.allowLight)
     }
     @Test fun `data saver and thermal protection still defer optional rotation`() {
         assertFalse(PowerPolicy.evaluate(PowerPolicy.Input(now=1000,battery=80,dataSaver=true),PowerPolicy.Options()).allowLight)

@@ -8,6 +8,7 @@ import com.vlesscardvpn.xray.SocksAuth
 import com.vlesscardvpn.xray.XrayConfigBuilder
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -38,16 +39,15 @@ class CryptoWarpRegressionR62Test {
         assertEquals(4, ch.size)
     }
 
-    @Test fun proxyModeConfig() {
-        val s = Server("a", "vless", "1.2.3.4", 443, "11111111-1111-1111-1111-111111111111", security = "tls", sni = "a.com")
-        val c = JSONObject(XrayConfigBuilder.vpnConfig(listOf(s to null), Settings(mode = com.vlesscardvpn.model.Mode.SERVERS, proxyOnly = true, lanShare = true),
-            null, SocksAuth(10808), listen = "0.0.0.0", httpPort = 10809))
-        val ins = c.getJSONArray("inbounds")
-        assertEquals(2, ins.length())
-        assertEquals("http", ins.getJSONObject(1).getString("protocol")); assertEquals(10809, ins.getJSONObject(1).getInt("port"))
-        assertEquals("0.0.0.0", ins.getJSONObject(0).getString("listen"))
-        val st = Settings.fromJson(Settings(proxyOnly = true, lanShare = true, perApp = false, maskFamilies = listOf("ladder"), maskFps = listOf("firefox")).toJson())
-        assertTrue(st.proxyOnly && st.lanShare && !st.perApp && st.maskFamilies == listOf("ladder") && st.maskFps == listOf("firefox"))
+    @Test fun retiredProxyModeCannotExposePublicUnauthenticatedListener() {
+        val s=Server("fixture","vless","192.0.2.1",443,"fixture")
+        val c=JSONObject(XrayConfigBuilder.vpnConfig(listOf(s to null),Settings(proxyOnly=true,lanShare=true),null,SocksAuth(10808),listen="0.0.0.0",httpPort=10809))
+        val ins=c.getJSONArray("inbounds")
+        assertEquals(1,ins.length());assertEquals("socks",ins.getJSONObject(0).getString("protocol"))
+        assertEquals("127.0.0.1",ins.getJSONObject(0).getString("listen"))
+        val saved=Settings(proxyOnly=true,lanShare=true)
+        assertEquals(saved,Settings.fromJson(saved.toJson()))
+        assertFalse(com.vlesscardvpn.core.ServerOnlyPolicy.normalize(saved).proxyOnly)
     }
 
     @Test fun maskFamilies() {

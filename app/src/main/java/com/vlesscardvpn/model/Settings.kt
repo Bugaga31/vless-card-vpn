@@ -210,8 +210,7 @@ data class Settings(
             // Add the requested source once; a later removal by the user is respected.
             if (s.rev < 74 && Subs.DIMAN !in s.subscriptions) s = s.copy(subscriptions = s.subscriptions + Subs.DIMAN)
             if (s.rev < 75 && Subs.CLOUD_WORKS !in s.subscriptions) s = s.copy(subscriptions = listOf(Subs.CLOUD_WORKS) + s.subscriptions)
-            if (s.rev < 76) s = s.copy(rev = REV)
-            return com.vlesscardvpn.core.ServerOnlyPolicy.normalize(s.copy(rev = REV))
+            return if (s.rev >= REV) s else s.copy(rev = REV)
         }
         const val DPI_AUTO = "auto"
         const val ANY_NETWORK = "*"
@@ -224,7 +223,7 @@ data class Settings(
         fun fromJson(o: JSONObject): Settings {
             val d = Settings()
             fun list(k: String, def: List<String>) = o.optJSONArray(k)?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: def
-            return com.vlesscardvpn.core.ServerOnlyPolicy.normalize(Settings(
+            return Settings(
                 mode = runCatching { Mode.valueOf(o.getString("mode")) }.getOrDefault(d.mode),
                 balance = runCatching { Balance.valueOf(o.getString("balance")) }.getOrDefault(d.balance),
                 socksPort = o.optInt("socksPort", d.socksPort).takeIf { it in 1024..65535 } ?: d.socksPort,
@@ -253,7 +252,7 @@ data class Settings(
                 alwaysVpn = list("alwaysVpn", emptyList()), alwaysDirect = list("alwaysDirect", emptyList()),
                 traffic = o.optJSONObject("traffic")?.let { m -> m.keys().asSequence().associateWith { m.optLong(it) } } ?: emptyMap(),
                 monthLimitGb = o.optInt("monthLimitGb", 0), country = o.optString("country", ""), favorites = list("favorites", emptyList()),
-                smartYoutube = o.optBoolean("smartYoutube", true), appAware = o.optBoolean("appAware", true), autopilot = o.optBoolean("autopilot", true), autoCool = o.optBoolean("autoCool", true),
+                smartYoutube = o.optBoolean("smartYoutube", d.smartYoutube), appAware = o.optBoolean("appAware", true), autopilot = o.optBoolean("autopilot", true), autoCool = o.optBoolean("autoCool", true),
                 oceanBackground = o.optBoolean("oceanBackground", true), oceanMotion = o.optBoolean("oceanMotion", true), welcomeSound = o.optBoolean("welcomeSound", true),
                 phoneLearning = o.optBoolean("phoneLearning", true),
                 powerProfile = o.optString("powerProfile", "balanced").takeIf { it in listOf("balanced", "eco", "fast") } ?: "balanced",
@@ -261,7 +260,7 @@ data class Settings(
                 chargeOnly = o.optBoolean("chargeOnly", false), wifiMaintenance = o.optBoolean("wifiMaintenance", true), protectActiveTraffic = o.optBoolean("protectActiveTraffic", true), gpsSpoof = o.optBoolean("gpsSpoof", false), ytDpi = o.optJSONObject("ytDpi")?.let { m -> m.keys().asSequence().associateWith { m.optBoolean(it) } } ?: emptyMap(),
                 netServers = o.optJSONObject("netServers")?.let { m -> m.keys().asSequence().associateWith { k -> m.optJSONArray(k)?.let { a -> (0 until a.length()).map { a.getString(it) } }.orEmpty() } } ?: emptyMap(),
                 subInfo = o.optJSONObject("subInfo")?.let { m -> m.keys().asSequence().mapNotNull { k -> m.optJSONObject(k)?.let { k to SubInfo.fromJson(it) } }.toMap() } ?: emptyMap(),
-            ))
+            )
         }
     }
 }

@@ -235,7 +235,7 @@ object XrayConfigBuilder {
         if (socks.auth) inSettings.put("auth", "password").put("accounts", arr(JSONObject().put("user", socks.user).put("pass", socks.pass)))
         else inSettings.put("auth", "noauth")
         fun sniff() = JSONObject().put("enabled", true).put("destOverride", JSONArray(com.vlesscardvpn.core.TransportPolicy.sniff(!settings.blockQuic))).put("routeOnly", true)
-        val inbounds = arr(JSONObject().put("tag", "socks").put("listen", listen).put("port", socks.port)
+        val inbounds = arr(JSONObject().put("tag", "socks").put("listen", "127.0.0.1").put("port", socks.port)
             .put("protocol", "socks").put("settings", inSettings).put("sniffing", sniff()))
         if (torOn) {
             inbounds.put(JSONObject().put("tag", TOR_UPLINK_INBOUND).put("listen", "127.0.0.1").put("port", torUpstreamPort)
@@ -313,14 +313,15 @@ object XrayConfigBuilder {
         val servicePools = if (warpHop == null) com.vlesscardvpn.core.ServiceRoutes.indices(servers.map { it.first.id }, serviceRoutes) else emptyMap()
         servicePools.forEach { (id, pool) ->
             val target = com.vlesscardvpn.core.ServiceRoutes.targets.first { it.id == id }
-            val throughTor = torOn && (settings.torAll || settings.torRouting && id in settings.services)
+            val throughTor = id != "calls" && torOn && (settings.torAll || settings.torRouting && id in settings.services)
             fun pinned(rule: JSONObject): JSONObject = when {
                 throughTor -> toTor(rule)
                 pool.size == 1 -> rule.put("outboundTag", "$PROXY_PREFIX${pool.first()}")
                 else -> rule.put("balancerTag", "service-$id")
             }
-            rules.put(pinned(JSONObject().put("domain", JSONArray(target.domains))))
-            if (target.ips.isNotEmpty()) rules.put(pinned(JSONObject().put("ip", JSONArray(target.ips))))
+            fun serviceRule(rule: JSONObject): JSONObject = pinned(rule).also { if (id == "calls") it.put("network", "udp") }
+            rules.put(serviceRule(JSONObject().put("domain", JSONArray(target.domains))))
+            if (target.ips.isNotEmpty()) rules.put(serviceRule(JSONObject().put("ip", JSONArray(target.ips))))
         }
         if (useServers) rules.put(toMain(JSONObject().put("domain", JSONArray(com.vlesscardvpn.core.AppWatch.AI_DOMAINS))))
         if (settings.blockAds) rules.put(JSONObject().put("domain", JSONArray(listOf("geosite:category-ads-all") + YT_ADS)).put("outboundTag", "block"))

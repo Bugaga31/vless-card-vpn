@@ -31,14 +31,14 @@ out = sys.argv[1]
 write(f"{out}/single.json", [reality], ["e2e-reality"], {})
 write(f"{out}/multi.json", [reality, ws, xhttp, dead], ["e2e-reality", "e2e-ws-tls", "e2e-xhttp", "e2e-dead"],
       {"e2e-reality": "chrome.h4", "e2e-ws-tls": "firefox.p2.b", "e2e-xhttp": "safari.h1"}, balance="ROUND_ROBIN")
-write(f"{out}/byedpi.json", [reality], [], {}, mode="BYEDPI")
+write(f"{out}/byedpi.json", [], [], {}, mode="SERVERS")
 write(f"{out}/test.json", [reality, ws, xhttp, dead], [], {})
-write(f"{out}/tpws.json", [reality], [], {}, mode="BYEDPI", dpiStrategy="TPWS#SPLIT_DISORDER")
+write(f"{out}/tpws.json", [reality], ["e2e-reality"], {"e2e-reality": "chrome.d"}, dpiStrategy="TPWS#SPLIT_DISORDER")
 # Own VLESS Card cascade (ByeDPI) and zapret host shredder in front of two servers at once.
 write(f"{out}/ownmask.json", [reality, ws], ["e2e-reality", "e2e-ws-tls"],
       {"e2e-reality": "chrome.d:BYEDPI#VCARD_CASCADE", "e2e-ws-tls": "firefox.d:TPWS#VCARD_SHRED"}, balance="ROUND_ROBIN")
-# 1.0.61: VLESS Card × Xray no-server strategy, "only YouTube + Telegram through the VPN", Auto mode (tests and picks by itself).
-write(f"{out}/xraydpi.json", [reality], [], {}, mode="BYEDPI", dpiStrategy="XRAY#LADDER")
+# Xray fragmentation is exercised as a transport mask before a required server.
+write(f"{out}/xraydpi.json", [reality], ["e2e-reality"], {"e2e-reality": "chrome.d"}, dpiStrategy="XRAY#LADDER")
 write(f"{out}/services.json", [reality], ["e2e-reality"], {}, services=["youtube", "telegram"])
 write(f"{out}/auto.json", [reality, dead], [], {}, mode="AUTO", autoUpdateSubs=False, lastSubRefresh=4102444800000)
 # 1.0.62: proxy mode (no TUN: SOCKS 10808 + HTTP 10809), built-in WARP (registers itself, finds endpoint + noise mask).

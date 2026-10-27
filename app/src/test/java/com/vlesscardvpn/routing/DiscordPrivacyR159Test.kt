@@ -15,12 +15,10 @@ class DiscordPrivacyR159Test {
         .getJSONObject("routing").getJSONArray("rules").let { a -> (0 until a.length()).map { a.getJSONObject(it) } }
 
     @Test fun discordVoiceUdpGoesThroughVpnNotDirect() {
-        val r = rules(Settings(mode = Mode.SERVERS, services = listOf("discord")))
-        val voice = r.filter { it.optString("port") == "50000-65535" && it.optString("network") == "udp" }
-        assertTrue("voice rule missing: $r", voice.isNotEmpty())
-        assertTrue(voice.none { it.optString("outboundTag") == "direct" })
-        val direct = r.last { it.optString("outboundTag") == "direct" && it.optString("network") == "tcp,udp" }
-        val idxVoice = r.indexOf(voice.first()); assertTrue(idxVoice < r.indexOf(direct))
+        val r = rules(Settings(mode=Mode.SERVERS,services=listOf("discord")))
+        val catchAll=r.last {it.optString("network")=="tcp,udp"}
+        assertEquals("balancer",catchAll.getString("balancerTag"))
+        assertFalse(r.any {it.optString("outboundTag")=="direct" && !it.optJSONArray("ip").toString().contains("geoip:private")})
     }
 
     @Test fun antiTrackerBlocksTelemetryAndDoTByDefault() {

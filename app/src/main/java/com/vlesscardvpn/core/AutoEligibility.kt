@@ -12,7 +12,7 @@ object AutoEligibility {
     fun connectedPool(servers: List<Server>, state: (Server) -> ServerState, net: String, now: Long, gaming: Boolean): List<Server> =
         servers.distinctBy { it.id }.filter { vlessServer(it) && state(it).works }.let { candidates ->
             val routes = servicePool(candidates, state, net, now)
-            val usable = routes.ifEmpty { candidates }
+            val usable = routes
             if (gaming) usable.sortedBy { ServerChoice.latencyScore(state(it).evidenceFor(net),state(it).realMs) }
             else usable.sortedWith(ServerChoice.downloadOrder(state,net,now))
         }.let(::independent).take(TOP)
@@ -50,11 +50,11 @@ object AutoEligibility {
         if (s.serviceNetwork != net || s.serviceMask != s.maskFor(net) || s.serviceCheckedAt <= 0 ||
             now < s.serviceCheckedAt || now - s.serviceCheckedAt > 5 * 60000L) return 1
         val results = relevant.map { if (it == "youtube") s.ytOk else s.tgOk }
-        if (results.all { it == false }) return 2
+        if (results.any { it == false }) return 2
         return if (results.all { it == true }) 0 else 1
     }
     fun <T> servicePool(list: List<T>, state: (T) -> ServerState, net: String, now: Long): List<T> {
         val usable = list.filter { serviceRank(state(it),net,now) != 2 }
-        return usable.ifEmpty { list }
+        return usable
     }
 }

@@ -67,7 +67,7 @@ class Socks(socketserver.BaseRequestHandler):
             port = struct.unpack('!H', exact(s, 2))[0]
             require((host, port) == self.server.allowed, 'destination not in closed fixture allowlist')
             # Exact allowlisted name maps locally, never public DNS.
-            with socket.create_connection(('127.0.0.1', port), timeout=4) as dst:
+            with (connect_http(self.server.http_uplink, host, port) if hasattr(self.server, 'http_uplink') else connect_socks(self.server.uplink, host, port) if hasattr(self.server, 'uplink') else socket.create_connection(('127.0.0.1', port), timeout=4)) as dst:
                 self.server.seen.append((host, port))
                 s.sendall(b'\x05\x00\x00\x01\x7f\x00\x00\x01\x00\x00')
                 until = time.monotonic() + 8
@@ -99,6 +99,44 @@ def start(server):
     return thread
 
 
+def connect_http(port, host, target_port):
+    raw = socket.create_connection(('127.0.0.1', port), timeout=4)
+    try:
+        raw.settimeout(4)
+        authority = f'{host}:{target_port}'
+        raw.sendall(f'CONNECT {authority} HTTP/1.1\r\nHost: {authority}\r\n\r\n'.encode())
+        response = b''
+        while not response.endswith(b'\r\n\r\n'):
+            require(len(response) < 4096, 'oversized HTTP uplink response')
+            response += exact(raw, 1)
+        require(response.split(b'\r\n', 1)[0].split()[1] == b'200', 'HTTP uplink CONNECT failed')
+        return raw
+    except BaseException:
+        raw.close()
+        raise
+
+
+def connect_socks(port, host, target_port):
+    raw = socket.create_connection(('127.0.0.1', port), timeout=4)
+    try:
+        raw.settimeout(4)
+        raw.sendall(b'\x05\x01\x00')
+        require(exact(raw, 2) == b'\x05\x00', 'uplink SOCKS negotiation failed')
+        name = host.encode('ascii')
+        raw.sendall(b'\x05\x01\x00\x03' + bytes([len(name)]) + name + struct.pack('!H', target_port))
+        head = exact(raw, 4)
+        require(head[:3] == b'\x05\x00\x00', 'uplink CONNECT failed')
+        if head[3] == 1: exact(raw, 4)
+        elif head[3] == 4: exact(raw, 16)
+        elif head[3] == 3: exact(raw, exact(raw, 1)[0])
+        else: raise RuntimeError('invalid uplink address')
+        exact(raw, 2)
+        return raw
+    except BaseException:
+        raw.close()
+        raise
+
+
 def transfer(port, origin_port, context):
     with socket.create_connection(('127.0.0.1', port), timeout=3) as raw:
         raw.settimeout(4)
@@ -126,7 +164,7 @@ def transfer(port, origin_port, context):
             require(data == BODY, 'TLS body mismatch')
 
 
-def run_case(xray, configs, layout, cert, key, tmp):
+def run_case(xray, configs, layout, cert, key, tmp, http_uplink=False):
     origin = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Origin)
     origin.daemon_threads = True
     origin.transfers = 0
@@ -140,13 +178,25 @@ def run_case(xray, configs, layout, cert, key, tmp):
     try:
         server = Proxy((HOST, origin.server_port))
         servers.append(server); threads.append(start(server))
-        uses_outer = layout in ('DPI_SERVER', 'TOR_SERVER', 'LIVE_TOR_SERVER')
+        uses_outer = layout in ('DPI_SERVER', 'TOR_SERVER')
         outer = Proxy(('127.0.0.1', server.server_address[1]) if uses_outer else (HOST, origin.server_port))
         servers.append(outer); threads.append(start(outer))
         with socket.socket() as free:
             free.bind(('127.0.0.1', 0)); listener = free.getsockname()[1]
         c = json.loads((configs / (layout + '.json')).read_text())
         c['inbounds'][0]['port'] = listener
+        if layout == 'LIVE_SERVER_TOR':
+            # A simulated Tor SOCKS endpoint makes its transport connection through
+            # the actual generated PT uplink and remote-server outbound. NOT real Tor.
+            for inbound in c['inbounds'][1:]:
+                with socket.socket() as free:
+                    free.bind(('127.0.0.1', 0)); inbound['port'] = free.getsockname()[1]
+                if inbound['tag'] == 'tor-pt-uplink': outer.uplink = inbound['port']
+                if inbound['tag'] == 'tor-uplink' and http_uplink: outer.http_uplink = inbound['port']
+            require(hasattr(outer, 'uplink'), 'missing generated Tor PT uplink')
+            main_address = c['outbounds'][0]['settings'].get('servers', [c['outbounds'][0]['settings']])[0]
+            main_address['address'] = '127.0.0.1'
+
         main = c['outbounds'][0]
         endpoint = main['settings'].get('servers', [main['settings']])[0]
         endpoint['port'] = outer.server_address[1] if layout == 'TOR' else server.server_address[1]
@@ -173,7 +223,7 @@ def run_case(xray, configs, layout, cert, key, tmp):
         require(bool(outer.seen) == (layout != 'SERVER'), 'Outer hop was skipped or unexpectedly used')
         require(bool(server.seen) == (layout != 'TOR'), 'Server hop was skipped or unexpectedly used')
         require(not server.errors and not outer.errors, 'Fixture handshake error on positive path')
-        cut = server if layout == 'SERVER' else outer
+        cut = server if layout in ('SERVER', 'LIVE_SERVER_TOR') else outer
         cut.shutdown(); cut.server_close(); stopped.add(cut)
         try:
             transfer(listener, origin.server_port, context)
@@ -182,7 +232,7 @@ def run_case(xray, configs, layout, cert, key, tmp):
         else:
             raise RuntimeError('Chain silently bypassed dead required hop')
         require(origin.transfers == 1, 'Traffic bypassed the stopped chain hop')
-        return {'layout': layout, 'tls_body_bytes': len(BODY), 'sha256': hashlib.sha256(BODY).hexdigest(),
+        return {'layout': layout, 'uplink': 'http' if http_uplink else 'socks', 'tls_body_bytes': len(BODY), 'sha256': hashlib.sha256(BODY).hexdigest(),
                 'required_hop_failure_blocks_transfer': True, 'real_tor': False, 'real_byedpi': False}
     finally:
         if process is not None:
@@ -210,7 +260,7 @@ def main():
         subprocess.run(['openssl', 'req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-days', '1',
                         '-keyout', str(key), '-out', str(cert), '-subj', '/CN=' + HOST,
                         '-addext', 'subjectAltName=DNS:' + HOST], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        for layout in ('SERVER', 'DPI_SERVER', 'TOR', 'TOR_SERVER', 'LIVE_TOR_SERVER'):
+        for layout in ('SERVER', 'DPI_SERVER', 'TOR', 'TOR_SERVER', 'LIVE_SERVER_TOR'):
             print(json.dumps(run_case(a.xray.resolve(), a.configs, layout, cert, key, tmp)), flush=True)
     print(json.dumps({'cleanup': 'PASS', 'public_endpoints_used': False, 'android_tested': False}))
 

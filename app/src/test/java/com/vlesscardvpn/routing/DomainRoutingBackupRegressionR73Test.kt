@@ -33,8 +33,8 @@ class DomainRoutingBackupRegressionR73Test {
         val pinned = rendered.indexOfFirst { it.contains("domain:rutracker.org") }
         assertEquals(-1, direct)
         assertTrue(pinned >= 0)
-        assertEquals("proxy0", rules.getJSONObject(pinned).getString("outboundTag"))
-        val back = Settings.fromJson(s.toJson()); assertEquals(s.alwaysVpn, back.alwaysVpn); assertTrue(back.alwaysDirect.isEmpty())
+        assertEquals("proxy-0", rules.getJSONObject(pinned).getString("outboundTag"))
+        val back = Settings.fromJson(s.toJson()); assertEquals(s.alwaysVpn, back.alwaysVpn); assertEquals(s.alwaysDirect, back.alwaysDirect); assertTrue(com.vlesscardvpn.core.ServerOnlyPolicy.normalize(back).alwaysDirect.isEmpty())
         java.io.File(System.getenv("XRAY_CONFIG_DUMP") ?: return).apply { mkdirs() }.resolve("sites.json").writeText(cfg.toString())
     }
 
@@ -44,7 +44,7 @@ class DomainRoutingBackupRegressionR73Test {
         assertTrue(working.good)
         assertTrue(working.suggest.isEmpty())
         assertTrue(Actions.siteVerdict("x.ru", hang).verdict.contains("VLESS-сервер"))
-        assertTrue(Actions.siteVerdict("x.ru", Tester.SiteProbe("dns")).verdict.contains("не найдено"))
+        assertTrue(Actions.siteVerdict("x.ru", Tester.SiteProbe("dns")).verdict.contains("не найден"))
     }
 
     @Test fun backupRoundTrip() {

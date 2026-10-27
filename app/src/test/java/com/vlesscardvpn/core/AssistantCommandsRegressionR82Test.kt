@@ -245,12 +245,12 @@ class R94Test {
 class R95Test {
     private val W = com.vlesscardvpn.core.Whitelist
     @org.junit.Test fun verdicts() {
-        org.junit.Assert.assertEquals(com.vlesscardvpn.core.Whitelist.Verdict.WHITELIST, W.verdict(4, 0, 0))
-        org.junit.Assert.assertEquals(com.vlesscardvpn.core.Whitelist.Verdict.WHITELIST, W.verdict(3, 1, 0))
+        org.junit.Assert.assertEquals(com.vlesscardvpn.core.Whitelist.Verdict.NORMAL, W.verdict(4, 0, 0))
+        org.junit.Assert.assertEquals(com.vlesscardvpn.core.Whitelist.Verdict.NORMAL, W.verdict(3, 1, 0))
         org.junit.Assert.assertEquals(com.vlesscardvpn.core.Whitelist.Verdict.NORMAL, W.verdict(4, 4, 0))
         org.junit.Assert.assertEquals(com.vlesscardvpn.core.Whitelist.Verdict.OPEN, W.verdict(4, 4, 3))
         org.junit.Assert.assertEquals(com.vlesscardvpn.core.Whitelist.Verdict.NONE, W.verdict(0, 0, 0))
-        org.junit.Assert.assertTrue(W.report(com.vlesscardvpn.core.Whitelist.Result(4, 0, 0, com.vlesscardvpn.core.Whitelist.Verdict.WHITELIST)).contains("SNI"))
+        org.junit.Assert.assertTrue(W.report(com.vlesscardvpn.core.Whitelist.Result(4, 0, 0, com.vlesscardvpn.core.Whitelist.Verdict.WHITELIST)).contains("Прямая проверка отключена"))
     }
 }
 

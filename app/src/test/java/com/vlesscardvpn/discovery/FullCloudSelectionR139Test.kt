@@ -58,13 +58,11 @@ class FullCloudSelectionR139Test {
         assertEquals(s.serviceNetwork,loaded.serviceNetwork);assertEquals(s.serviceMask,loaded.serviceMask)
         assertEquals(s.serviceCheckedAt,loaded.serviceCheckedAt);assertEquals(0,AutoEligibility.serviceRank(loaded,"wifi",now))
     }
-    @Test fun telegramIpRulePrecedesRussianDirectAndExplicitUserOverrideStillWins() {
-        val rules=org.json.JSONObject(XrayConfigBuilder.vpnConfig(listOf(server("DE-1") to null),Settings(alwaysDirect=listOf("telegram.org")),null)).getJSONObject("routing").getJSONArray("rules")
-        val rows=(0 until rules.length()).map {rules.getJSONObject(it)}
-        val tg=rows.indexOfFirst {it.optJSONArray("ip")?.toString()?.contains("geoip:telegram")==true}
-        val ru=rows.indexOfFirst {it.optJSONArray("ip")?.toString()?.contains("geoip:ru")==true}
-        val user=rows.indexOfFirst {it.optJSONArray("domain")?.toString()?.contains("domain:telegram.org")==true && it.optString("outboundTag")=="direct"}
-        assertTrue(tg>=0 && ru>tg);assertTrue(user>=0 && user<tg)
+    @Test fun telegramAndSavedDirectExceptionsRemainOnServer() {
+        val r=org.json.JSONObject(XrayConfigBuilder.vpnConfig(listOf(server("DE-1") to null),Settings(alwaysDirect=listOf("telegram.org"),ruDirect=true),null)).getJSONObject("routing").getJSONArray("rules")
+        val rows=(0 until r.length()).map(r::getJSONObject)
+        assertTrue(rows.any {it.optJSONArray("ip")?.toString()?.contains("geoip:telegram")==true && it.optString("outboundTag")=="proxy-0"})
+        assertFalse(rows.any {it.optString("outboundTag")=="direct" && (it.optJSONArray("ip")?.toString()?.contains("geoip:ru")==true || it.optJSONArray("domain")?.toString()?.contains("telegram.org")==true)})
     }
     @Test fun apkChecksAreHourlyAndStillRateLimitedAfterErrors() {
         val t=100_000_000L

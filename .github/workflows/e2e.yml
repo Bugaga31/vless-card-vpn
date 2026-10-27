@@ -52,8 +52,8 @@ jobs:
           mkdir -p /tmp/xray && unzip -qo /tmp/xray.zip -d /tmp/xray && /tmp/xray/xray version | head -1
       - name: Automatic DNS failover (closed loopback fixtures)
         run: python3 tools/e2e/dns-failover-smoke.py --xray /tmp/xray/xray --config /tmp/dns-auto-config.json
-      - name: Standalone Tor startup without ByeDPI (loopback fixture)
-        run: python3 tools/e2e/tor-standalone-smoke.py --xray /tmp/xray/xray --config /tmp/xcfg/vpn-tor-standalone.json
+      - name: Tor server-uplink startup without standalone ByeDPI (loopback fixture)
+        run: python3 tools/e2e/tor-standalone-smoke.py --xray /tmp/xray/xray --config /tmp/chain-probe-configs/LIVE_SERVER_TOR.json
       - name: Isolated Auto chain TLS body and required-hop failure gates
         run: python3 tools/auto-chain-lab/smoke.py --xray /tmp/xray/xray --configs /tmp/chain-probe-configs
       - name: Enable KVM

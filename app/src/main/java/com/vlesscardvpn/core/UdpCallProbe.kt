@@ -23,12 +23,12 @@ object UdpCallProbe {
     }
 
     fun isBindingResponse(data: ByteArray, length: Int, transactionId: ByteArray): Boolean {
-        if (length < 20 || transactionId.size != 12) return false
+        if (length < 20 || length > data.size || transactionId.size != 12) return false
         val type = ((data[0].toInt() and 0xff) shl 8) or (data[1].toInt() and 0xff)
         val bodyLength = ((data[2].toInt() and 0xff) shl 8) or (data[3].toInt() and 0xff)
         val magic = ((data[4].toInt() and 0xff) shl 24) or ((data[5].toInt() and 0xff) shl 16) or
             ((data[6].toInt() and 0xff) shl 8) or (data[7].toInt() and 0xff)
-        return type == 0x0101 && bodyLength % 4 == 0 && bodyLength <= length - 20 && magic == MAGIC &&
+        return type == 0x0101 && bodyLength % 4 == 0 && bodyLength == length - 20 && magic == MAGIC &&
             transactionId.indices.all { data[8 + it] == transactionId[it] }
     }
 
@@ -40,7 +40,7 @@ object UdpCallProbe {
     }
 
     fun socksUdpPayload(data: ByteArray, length: Int): ByteArray? {
-        if (length < 4 || data[0] != 0.toByte() || data[1] != 0.toByte() || data[2] != 0.toByte()) return null
+        if (length < 4 || length > data.size || data[0] != 0.toByte() || data[1] != 0.toByte() || data[2] != 0.toByte()) return null
         var pos = 4
         val addressLength = when (data[3].toInt() and 0xff) {
             1 -> 4
@@ -59,13 +59,15 @@ object UdpCallProbe {
     fun measure(socksPort: Int, user: String = "", pass: String = "", budgetMs: Int = 1800,
                 onCancel: ((() -> Unit) -> Unit)? = null): Result {
         val started = System.nanoTime()
-        val deadline = started + TimeUnit.MILLISECONDS.toNanos(budgetMs.coerceIn(250, 5000).toLong())
+        val deadline = started + TimeUnit.MILLISECONDS.toNanos(budgetMs.coerceIn(1, 5000).toLong())
         var udp: DatagramSocket? = null
+        val cancelled = java.util.concurrent.atomic.AtomicBoolean(false)
         val control = Socket()
-        fun cancel() { runCatching { udp?.close() }; runCatching { control.close() } }
+        fun cancel() { cancelled.set(true); runCatching { udp?.close() }; runCatching { control.close() } }
         onCancel?.invoke(::cancel)
         fun remaining(): Int {
             val left = TimeUnit.NANOSECONDS.toMillis(deadline - System.nanoTime())
+            if (cancelled.get() || Thread.currentThread().isInterrupted) throw java.io.InterruptedIOException("UDP check cancelled")
             if (left <= 0) throw SocketTimeoutException("UDP check deadline")
             return left.toInt().coerceAtLeast(1)
         }
@@ -88,6 +90,7 @@ object UdpCallProbe {
             out.write(if (user.isNotEmpty()) byteArrayOf(5, 1, 2) else byteArrayOf(5, 1, 0)); out.flush()
             val method = ByteArray(2); readFully(input, method)
             check(method[0].toInt() == 5)
+            check(method[1].toInt() == if (user.isNotEmpty()) 2 else 0) { "Unexpected SOCKS authentication method" }
             if (method[1].toInt() == 2) {
                 val u = user.toByteArray(StandardCharsets.UTF_8); val p = pass.toByteArray(StandardCharsets.UTF_8)
                 check(u.size in 1..255 && p.size <= 255)
@@ -108,9 +111,12 @@ object UdpCallProbe {
             check(relayPort > 0)
             val relayAddress = InetAddress.getByAddress(address)
             val relay = if (relayAddress.isAnyLocalAddress) InetAddress.getByName("127.0.0.1") else relayAddress
-            udp = DatagramSocket().apply { soTimeout = remaining() }
+            check(relay.isLoopbackAddress) { "SOCKS UDP relay must stay on loopback" }
+            remaining()
+            udp = DatagramSocket().apply { connect(relay, relayPort); soTimeout = remaining() }
             val transactionId = ByteArray(12).also(SecureRandom()::nextBytes)
             val request = socksUdpFrame(HOST, PORT, bindingRequest(transactionId))
+            remaining()
             udp.send(DatagramPacket(request, request.size, relay, relayPort))
             val response = ByteArray(1200)
             val packet = DatagramPacket(response, response.size)

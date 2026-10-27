@@ -16,7 +16,10 @@ object ServerOnlyPolicy {
         return protocol in remoteProtocols && server.port in 1..65535 && !isLocalHost(server.address)
     }
 
-    fun userRoute(server: Server): Boolean = isRemoteServer(server)
+    fun userRoute(server: Server): Boolean = isRemoteServer(server) ||
+        // Only debug builds can use an in-process encrypted-protocol fixture. Never admit local Tor/SOCKS.
+        com.vlesscardvpn.BuildConfig.DEBUG && server.protocol in setOf("vless", "vmess", "trojan", "shadowsocks", "hysteria2") &&
+        server.address in setOf("127.0.0.1", "::1") && server.port in 1..65535
 
     private fun isLocalHost(value: String): Boolean {
         val host = value.trim().trim('[', ']').trimEnd('.').lowercase()
@@ -25,12 +28,8 @@ object ServerOnlyPolicy {
         val parts = host.split('.')
         if (parts.size == 4 && parts.all { it.toIntOrNull() in 0..255 }) {
             val p = parts.map { it.toInt() }
-            return p[0] == 0 || p[0] == 10 || p[0] == 127 || p[0] >= 224 ||
-                p[0] == 169 && p[1] == 254 || p[0] == 172 && p[1] in 16..31 ||
-                p[0] == 192 && p[1] == 168 || p[0] == 100 && p[1] in 64..127 ||
-                p[0] == 192 && p[1] == 0 && p[2] == 2 ||
-                p[0] == 198 && p[1] == 51 && p[2] == 100 ||
-                p[0] == 203 && p[1] == 0 && p[2] == 113
+            return p[0] == 0 || p[0] == 127 || p[0] >= 224 ||
+                p[0] == 169 && p[1] == 254
         }
         if (':' in host) {
             val address = runCatching { InetAddress.getByName(host) }.getOrNull() ?: return true
@@ -62,8 +61,6 @@ object ServerOnlyPolicy {
             alwaysDirect = emptyList(),
             smartYoutube = false,
             ytDpi = emptyMap(),
-            blockStun = false,
-            blockQuic = false,
         )
         return if (normalized == settings) settings else normalized
     }

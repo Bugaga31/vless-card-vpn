@@ -126,9 +126,8 @@ object Store {
 
     fun update(change: (AppState) -> AppState) {
         _state.update { old ->
-            val changed = change(old)
-            val normalized = ServerOnlyPolicy.normalize(changed.settings)
-            val next = if (normalized === changed.settings) changed else changed.copy(settings = normalized)
+            // Keep saved preferences for rollback; runtime routing enforces ServerOnlyPolicy.
+            val next = change(old)
             if (next.servers !== old.servers) AutoEligibility.clean(next) else next
         }
         syncMasks()

@@ -85,35 +85,43 @@ class AutoChainLiveTest {
     @Test fun `old settings never opt in to Tor silently`() {val s=Settings.fromJson(JSONObject());assertFalse(s.torAuto);assertTrue(s.autoChainSearch);assertEquals("balanced",s.autoChainPurpose)}
     @Test fun `invalid persisted purpose sanitized`() {assertEquals("balanced",Settings.fromJson(JSONObject().put("autoChainPurpose","bogus")).autoChainPurpose)}
 
-    private val server=Server("fixture","socks","127.0.0.1",19051,"")
-    private val settings=Settings(mode=Mode.SERVERS,ruDirect=false,ruDns=false,blockAds=false,blockTrackers=false,blockQuic=false)
-    private fun config(s:Settings=settings)=JSONObject(XrayConfigBuilder.vpnConfig(listOf(server to null),s,null,serverViaTor=setOf(server.id)))
+    private val server=Server("fixture","socks","192.0.2.1",19051,"")
+    private val settings=Settings(mode=Mode.SERVERS,torAll=true,ruDirect=false,ruDns=false,blockAds=false,blockTrackers=false,blockQuic=false)
+    private fun config(s:Settings=settings)=JSONObject(XrayConfigBuilder.vpnConfig(listOf(server to null),s,null))
     private fun rules(c:JSONObject)=c.getJSONObject("routing").getJSONArray("rules").let {a -> (0 until a.length()).map {a.getJSONObject(it)}}
-    @Test fun `live VPN config actually dials server through Tor`() {
-        val c=config();val out=c.getJSONArray("outbounds")
-        assertEquals("tor",out.getJSONObject(0).getJSONObject("streamSettings").getJSONObject("sockopt").getString("dialerProxy"))
-        assertTrue((0 until out.length()).any {out.getJSONObject(it).optString("tag")=="tor"})
-        assertEquals("proxy-0",rules(c).last().getString("outboundTag"))
+    @Test fun `Tor uplink must use selected server and remain loopback only`() {
+        val c=config(); val ins=c.getJSONArray("inbounds")
+        listOf("tor-uplink","tor-pt-uplink").forEach { tag ->
+            val inbound=(0 until ins.length()).map { ins.getJSONObject(it) }.first { it.optString("tag")==tag }
+            assertEquals("127.0.0.1",inbound.getString("listen"))
+            assertEquals("proxy-0",rules(c).first {it.optJSONArray("inboundTag")?.toString()?.contains(tag)==true}.getString("outboundTag"))
+        }
+        assertFalse(c.getJSONArray("outbounds").getJSONObject(0).getJSONObject("streamSettings").optJSONObject("sockopt")?.has("dialerProxy")==true)
+        assertTrue(rules(c).any {it.optString("network")=="tcp" && it.optString("outboundTag")=="tor"})
     }
-    @Test fun `live Tor server config keeps explicit direct exception`() {
+    @Test fun `Tor ignores public direct exception`() {
         val c=config(settings.copy(alwaysDirect=listOf("example.test")))
-        assertEquals("direct",rules(c).first {it.optJSONArray("domain")?.toString()?.contains("example.test")==true}.getString("outboundTag"))
+        assertFalse(rules(c).any {it.optString("outboundTag")=="direct" && it.optJSONArray("domain")?.toString()?.contains("example.test")==true})
     }
-    @Test fun `live Tor server chain DNS uses server route and encrypted upstreams`() {
+    @Test fun `Tor DNS uses encrypted upstreams through Tor`() {
         val c=config();val dns=c.getJSONObject("dns").getJSONArray("servers")
         for(i in 0 until dns.length())assertTrue(dns.getJSONObject(i).getString("address").startsWith("https://"))
-        assertEquals("proxy-0",rules(c).first {it.optJSONArray("inboundTag")?.toString()?.contains("dns-module")==true}.getString("outboundTag"))
+        assertEquals("tor",rules(c).first {it.optJSONArray("inboundTag")?.toString()?.contains("dns-module")==true}.getString("outboundTag"))
     }
-    @Test fun `live Tor server chain blocks UDP before main route`() {assertTrue(rules(config()).any {it.optString("network")=="udp" && it.optString("outboundTag")=="block"})}
-    @Test fun `cannot accidentally compose Tor with DPI dialer`() {
+    @Test fun `Tor TCP does not send UDP to Tor or direct internet`() {
+        val rs=rules(config())
+        assertFalse(rs.any {it.optString("network")=="udp" && it.optString("outboundTag") in setOf("tor","direct")})
+        assertEquals("proxy-0",rs.last().getString("outboundTag"))
+    }
+    @Test fun `cannot accidentally compose Tor with reverse DPI dialer`() {
         try {XrayConfigBuilder.vpnConfig(listOf(server to Mask("fixture","Fixture","",dpi="cur")),settings,19053,serverViaTor=setOf(server.id));fail()}catch(_:IllegalArgumentException){}
     }
     @Test fun `cannot chain unknown server id`() {
         try {XrayConfigBuilder.vpnConfig(listOf(server to null),settings,null,serverViaTor=setOf("unknown"));fail()}catch(_:IllegalArgumentException){}
     }
-    @Test fun `live chain config exported for real Xray fixture`() {
+    @Test fun `live server Tor config exported for real Xray fixture`() {
         val dir=java.io.File("/tmp/chain-probe-configs");dir.mkdirs()
-        java.io.File(dir,"LIVE_TOR_SERVER.json").writeText(config().toString(2))
+        java.io.File(dir,"LIVE_SERVER_TOR.json").writeText(config().toString(2))
     }
     @Test fun `Tor exit must be measured non RU not a model guess`() {
         val choice=AutoChainRunner.choice(null,null,AutoChainSelection.Layout.TOR,Settings())

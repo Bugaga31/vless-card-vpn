@@ -31,9 +31,9 @@ class HeavyRoutingRegressionR128Test {
         assertEquals("proxy-1", bals.getJSONObject(1).getJSONArray("selector").getString(0))
         val rules = r.getJSONArray("rules"); val heavy = (0 until rules.length()).map { rules.getJSONObject(it) }.first { it.optString("balancerTag") == "heavy" }
         assertTrue(heavy.getJSONArray("domain").toString().contains("googlevideo"))
-        // services-only without YouTube: no heavy route (YouTube goes direct there)
+        // A legacy services-only setting no longer sends other traffic direct.
         val only = JSONObject(XrayConfigBuilder.vpnConfig(listOf(srv(1) to null, srv(2) to null), st.copy(services = listOf("telegram")), null, heavy = setOf(1)))
-        assertEquals(1, only.getJSONObject("routing").getJSONArray("balancers").length())
+        assertEquals(2, only.getJSONObject("routing").getJSONArray("balancers").length())
         // one server: nothing to split
         val one = JSONObject(XrayConfigBuilder.vpnConfig(listOf(srv(1) to null), st, null, heavy = setOf(0)))
         assertNull(one.getJSONObject("routing").optJSONArray("balancers"))
