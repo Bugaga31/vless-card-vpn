@@ -29,8 +29,7 @@ class MainActivity : ComponentActivity() {
     private val notifPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
 
     fun connect() {
-        // Proxy mode has no TUN: no VPN permission needed.
-        if (com.vlesscardvpn.core.Store.state.value.settings.proxyOnly) { start(); return }
+        // Stored legacy proxyOnly cannot bypass Android VPN consent.
         val intent = VpnService.prepare(this)
         if (intent != null) vpnPermission.launch(intent) else start()
     }

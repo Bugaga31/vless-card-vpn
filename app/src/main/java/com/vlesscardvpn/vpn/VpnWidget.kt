@@ -47,7 +47,7 @@ class VpnWidget : AppWidgetProvider() {
             v.setInt(R.id.w_btn, "setBackgroundResource", bg)
             v.setTextViewText(R.id.w_title, title)
             v.setTextViewText(R.id.w_sub, sub)
-            val needsPermission = !Store.state.value.settings.proxyOnly && VpnService.prepare(ctx) != null
+            val needsPermission = VpnService.prepare(ctx) != null
             val click = if (needsPermission) PendingIntent.getActivity(ctx, 0, Intent(ctx, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
                 else PendingIntent.getBroadcast(ctx, 1, Intent(ctx, VpnWidget::class.java).setAction(TOGGLE), PendingIntent.FLAG_IMMUTABLE)
             v.setOnClickPendingIntent(R.id.w_btn, click)

@@ -222,7 +222,7 @@ class TunnelService : VpnService() {
     private suspend fun connect(soft: Boolean = false) {
         if (!soft) chainChoice = null
         val prevSocks = Tunnel.socks
-        val keepTun = soft && tun != null && prevSocks != null && !Store.state.value.settings.proxyOnly
+        val keepTun = soft && tun != null && prevSocks != null
         lastSoft = keepTun
         teardown(null, keepTun)
         Store.init(this); Actions.init(this)
@@ -761,7 +761,6 @@ class TunnelService : VpnService() {
      */
     private fun warmUp() {
         val auth = Tunnel.socks ?: return
-        if (Store.state.value.settings.proxyOnly) return
         scope.launch(Dispatchers.IO) {
             if (!com.vlesscardvpn.core.PhonePower.refresh(this@TunnelService).allowed) return@launch
             WARM.take(com.vlesscardvpn.core.PhonePower.state.value.realParallel).forEach { h -> launch { runCatching { Tester.dnsViaSocks(auth.port, auth.user, auth.pass, h) } } }
@@ -890,7 +889,7 @@ class TunnelService : VpnService() {
                 if (healJob?.isActive == true || asleep()) continue
                 val auth = Tunnel.socks ?: break
                 val port = auth.port
-                val vpnMode = !Store.state.value.settings.proxyOnly
+                val vpnMode = true
                 // the TUN engine stopped: nothing in the phone works, though the proxy itself is fine — rebuild like the big button
                 if (vpnMode && runCatching { !TProxyService.TProxyIsRunning() }.getOrDefault(false)) { hardRestart("движок VPN остановился"); break }
                 val ok = Tester.probeSocks(port, Store.state.value.settings.testUrl, big = false, youtube = false, attempts = 1).realMs > 0

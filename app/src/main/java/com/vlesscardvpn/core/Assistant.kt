@@ -302,7 +302,7 @@ object Assistant {
             }
             cmd == "!auto" -> { Store.update { it.copy(settings = it.settings.copy(mode = Mode.AUTO)) }; reconnect(app); post(Msg(false, "Режим «Авто» включён" + if (Tunnel.socks != null) " — переподключаюсь." else ". Нажмите «Подключить».")) }
             cmd == "!connect" -> {
-                if (Store.state.value.settings.proxyOnly || android.net.VpnService.prepare(app) == null) { com.vlesscardvpn.vpn.TunnelService.start(app); post(Msg(false, "Подключаюсь…")) }
+                if (android.net.VpnService.prepare(app) == null) { com.vlesscardvpn.vpn.TunnelService.start(app); post(Msg(false, "Подключаюсь…")) }
                 else post(Msg(false, "Нажмите «Подключить» на главной один раз — Android спросит разрешение на VPN, дальше смогу сам."))
             }
             cmd == "!disconnect" -> { com.vlesscardvpn.vpn.TunnelService.stop(app); post(Msg(false, "VPN отключён.")) }

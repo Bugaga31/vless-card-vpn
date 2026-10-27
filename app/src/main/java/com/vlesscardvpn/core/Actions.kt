@@ -923,7 +923,7 @@ object Actions {
         // Ready = connect right away (or reconnect onto WARP): no guessing whether WARP is on.
         val st = Store.state.value
         val warpOk = st.selected.any { Masks.isWarp(it) && st.state(it).works }
-        if (warpOk && (st.settings.proxyOnly || android.net.VpnService.prepare(app) == null)) {
+        if (warpOk && (android.net.VpnService.prepare(app) == null)) {
             withContext(Dispatchers.Main) { com.vlesscardvpn.vpn.TunnelService.start(app) }
             msg.replace("Нажмите «Подключить».", "Подключаюсь через WARP — на главном экране будет «WARP: включён ✓».")
         } else msg
