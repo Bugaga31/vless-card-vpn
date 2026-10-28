@@ -38,7 +38,7 @@ class MaskExperimentMemory(private val capacity:Int=512) {
         if(before.scheduled!=started || before.completed || now<started) return
         if(result==null) {entries[key]=before.copy(completed=true,unknown=true);unknown=(unknown+1).coerceAtMost(1_000_000);return}
         val sample=latencyMs?.takeIf {result && it in 1..AutoLatencyPolicy.MAX_MS}
-        val latency=if(sample==null) before.latency else if(before.latency<=0) sample else (before.latency*3+sample)/4
+        val latency=if(sample==null) {if(result) 0 else before.latency} else if(before.latency<=0) sample else (before.latency*3+sample)/4
         entries[key]=before.copy(observed=now,ok=result,streak=if(result) 0 else (before.streak+1).coerceAtMost(4),
             latency=latency,successes=if(result && sample!=null) (before.successes+1).coerceAtMost(1000) else before.successes,
             completed=true,unknown=false)

@@ -15,9 +15,9 @@ object Traffic {
         TrafficStats.getUidRxBytes(Process.myUid()),TrafficStats.getUidTxBytes(Process.myUid())) }.getOrNull()
 
     /** Start of a session: count only what comes after. */
-    fun start() { last = now() }
+    @Synchronized fun start() { last = now() }
 
-    fun tick() {
+    @Synchronized fun tick() {
         val n=now(); val d=TrafficAccountingPolicy.delta(last,n); last=n
         if (d > 0) Store.update { it.copy(settings = add(it.settings, d, month())) }
     }
