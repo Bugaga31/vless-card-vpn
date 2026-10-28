@@ -17,11 +17,12 @@ class StrictEligibilityR163Test {
     @Test fun zeroServerNonceIsNotTelegramProof() { assertTrue(TelegramProbe.validResponse(response(),nonce));val b=response();b.fill(0,40,56);assertFalse(TelegramProbe.validResponse(b,nonce)) }
     @Test fun invalidPqAndPaddingCannotBecomeTelegramPass() { for(offset in listOf(64,65)) { val b=response();b[offset]=1;assertFalse(TelegramProbe.validResponse(b,nonce)) };val b=response();b.fill(0,57,65);assertFalse(TelegramProbe.validResponse(b,nonce)) }
     @Test fun zeroRsaFingerprintAndEvenServerMessageAreRejected() { val b=response();b.fill(0,76,84);assertFalse(TelegramProbe.validResponse(b,nonce));val c=response();c[8]=2;assertFalse(TelegramProbe.validResponse(c,nonce)) }
-    @Test fun servicePassCannotRescueIncompleteDataTransfer() { assertFalse(Probe(1,false,true,tgOk=true).works) }
+    @Test fun servicePassCannotRescueIncompleteDataTransfer() { assertFalse(Probe(1,false,true,tgOk=true,tgMs=120).works) }
     @Test fun measuredDownloadLeaderWinsDespiteLowerPingCompetitor() {
         val fast=Server("fast","vless","192.0.2.1",443,"fast")
         val lowPing=Server("low-ping","vless","198.51.100.1",443,"low-ping")
-        fun state(s:Server)=ServerState(realMs=if(s==fast) 500 else 5,kbps=if(s==fast) 30000 else 1000,speedNetwork="wifi",speedMask="",speedCheckedAt=100)
+        fun state(s:Server)=ServerState(realMs=if(s==fast) 500 else 5,kbps=if(s==fast) 30000 else 1000,speedNetwork="wifi",speedMask="",speedCheckedAt=100,
+            tgOk=true,tgMs=120,serviceNetwork="wifi",serviceMask="",serviceCheckedAt=100)
         assertEquals(fast,AutoEligibility.connectedPool(listOf(lowPing,fast),::state,"wifi",101,false).first())
     }
 }

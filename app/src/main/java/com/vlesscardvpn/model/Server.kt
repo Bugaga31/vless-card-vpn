@@ -94,6 +94,8 @@ data class ServerState(
     /** Network ("Wi-Fi", "Моб.: Beeline") → mask found on that network: switching networks switches masks. */
     val netMasks: Map<String, String> = emptyMap(),
     val tgOk: Boolean? = null,
+    /** Cold req_pq/resPQ through SOCKS, including setup; 0 means unmeasured. */
+    val tgMs: Int = 0,
     /** Download speed of the 256 KB test file through the server (kbit/s), 0 = not measured. */
     val kbps: Int = 0,
     val netEvidence: Map<String, RouteEvidence> = emptyMap(),
@@ -121,7 +123,7 @@ data class ServerState(
         if (selected) put("sel", true); put("tcp", tcpMs); put("real", realMs); bigOk?.let { put("big", it) }; ytOk?.let { put("yt", it) }
         if (maskId.isNotEmpty()) put("mask", maskId); put("at", checkedAt); put("ok", okCount); put("fail", failCount)
         if (goodMasks.isNotEmpty()) put("good", org.json.JSONArray(goodMasks))
-        if (netMasks.isNotEmpty()) put("net", JSONObject(netMasks as Map<*, *>)); tgOk?.let { put("tg", it) }; if (kbps > 0) put("kbps", kbps)
+        if (netMasks.isNotEmpty()) put("net", JSONObject(netMasks as Map<*, *>)); tgOk?.let { put("tg", it) }; if(tgMs>0) put("tgMs",tgMs); if (kbps > 0) put("kbps", kbps)
     }
     companion object {
         fun fromJson(o: JSONObject) = ServerState(
@@ -130,7 +132,7 @@ data class ServerState(
             maskId = o.optString("mask"), checkedAt = o.optLong("at"), okCount = o.optInt("ok"), failCount = o.optInt("fail"),
             goodMasks = o.optJSONArray("good")?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: emptyList(),
             netMasks = o.optJSONObject("net")?.let { m -> m.keys().asSequence().associateWith { m.getString(it) } } ?: emptyMap(),
-            tgOk = if (o.has("tg")) o.optBoolean("tg") else null, kbps = o.optInt("kbps"),
+            tgOk = if (o.has("tg")) o.optBoolean("tg") else null, tgMs = o.optInt("tgMs").coerceAtLeast(0), kbps = o.optInt("kbps"),
             serviceNetwork = o.optString("serviceNetwork"), serviceMask = o.optString("serviceMask"), serviceCheckedAt = o.optLong("serviceAt"),
             speedNetwork = o.optString("speedNetwork"), speedMask = o.optString("speedMask"), speedCheckedAt = o.optLong("speedAt"),
             netEvidence = o.optJSONObject("netEvidence")?.let { m -> m.keys().asSequence().take(8).mapNotNull { k -> m.optJSONObject(k)?.let { RouteEvidence.parse(it) }?.let { k to it } }.toMap() } ?: emptyMap(),

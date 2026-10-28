@@ -44,15 +44,17 @@ class AutoRoutePolicyTest {
         assertFalse("chrome.hello.fast" in trials)
     }
     @Test fun onlySuccessfulFullFasterDownloadChangesMask() {
+        assertFalse(AutoRoutePolicy.improved(state(),"wifi",now,Probe(100,true,null,kbps=9000)))
+        assertFalse(AutoRoutePolicy.improved(state(),"wifi",now,Probe(100,true,null,kbps=9000,tgOk=false)))
         assertFalse(AutoRoutePolicy.improved(state(),"wifi",now,Probe(10,null,null,kbps=9000)))
         assertFalse(AutoRoutePolicy.improved(state(),"wifi",now,Probe(10,false,null,kbps=9000)))
-        assertFalse(AutoRoutePolicy.improved(state(),"wifi",now,Probe(10,true,null,kbps=0)))
-        assertFalse(AutoRoutePolicy.improved(state(),"wifi",now,Probe(10,true,null,kbps=999)))
-        assertTrue(AutoRoutePolicy.improved(state(),"wifi",now,Probe(100,true,null,kbps=9000)))
+        assertFalse(AutoRoutePolicy.improved(state(),"wifi",now,Probe(10,true,null,kbps=0,tgOk=true,tgMs=120)))
+        assertFalse(AutoRoutePolicy.improved(state(),"wifi",now,Probe(10,true,null,kbps=999,tgOk=true,tgMs=120)))
+        assertTrue(AutoRoutePolicy.improved(state(),"wifi",now,Probe(100,true,null,kbps=9000,tgOk=true,tgMs=120)))
     }
     @Test fun acceptedMaskAndBandwidthProvenanceChangeAtomically() {
         val old=state().copy(netMasks=mapOf("cell" to "firefox.h4"))
-        val result=AutoRoutePolicy.apply(old,"wifi","",now,Probe(100,true,null,kbps=9000))
+        val result=AutoRoutePolicy.apply(old,"wifi","",now,Probe(100,true,null,kbps=9000,tgOk=true,tgMs=120))
         assertEquals("",result.maskFor("wifi"));assertEquals("firefox.h4",result.maskFor("cell"))
         assertEquals("",result.speedMask);assertEquals("wifi",result.speedNetwork)
         assertEquals(9000,ServerChoice.measuredSpeed(result,"wifi",now))
@@ -70,7 +72,7 @@ class AutoRoutePolicyTest {
     }
     @Test fun sameServerWithDifferentMaskRequiresCoreReconfiguration() {
         val old=state()
-        val changed=AutoRoutePolicy.apply(old,"wifi","",now,Probe(100,true,null,kbps=9000))
+        val changed=AutoRoutePolicy.apply(old,"wifi","",now,Probe(100,true,null,kbps=9000,tgOk=true,tgMs=120))
         assertNotEquals(AutoRoutePolicy.configuration(server,old,"wifi"),AutoRoutePolicy.configuration(server,changed,"wifi"))
         assertEquals(AutoRoutePolicy.configuration(server,old,"wifi"),AutoRoutePolicy.configuration(server,old.copy(kbps=9000),"wifi"))
     }
@@ -85,12 +87,12 @@ class AutoRoutePolicyTest {
         assertEquals(listOf(Subs.DIMAN),Subs.mirrors(Subs.DIMAN))
     }
     @Test fun smallBandwidthNoiseCannotFlipTheMask() {
-        assertFalse(AutoRoutePolicy.improved(state(10000),"wifi",now,Probe(30,true,null,kbps=10001)))
-        assertFalse(AutoRoutePolicy.improved(state(10000),"wifi",now,Probe(30,true,null,kbps=11999)))
-        assertTrue(AutoRoutePolicy.improved(state(10000),"wifi",now,Probe(30,true,null,kbps=12000)))
-        assertFalse(AutoRoutePolicy.improved(state(100),"wifi",now,Probe(30,true,null,kbps=120)))
-        assertTrue(AutoRoutePolicy.improved(state(100),"wifi",now,Probe(30,true,null,kbps=356)))
-        assertTrue(AutoRoutePolicy.improved(state(0),"wifi",now,Probe(30,true,null,kbps=100)))
+        assertFalse(AutoRoutePolicy.improved(state(10000),"wifi",now,Probe(30,true,null,kbps=10001,tgOk=true,tgMs=120)))
+        assertFalse(AutoRoutePolicy.improved(state(10000),"wifi",now,Probe(30,true,null,kbps=11999,tgOk=true,tgMs=120)))
+        assertTrue(AutoRoutePolicy.improved(state(10000),"wifi",now,Probe(30,true,null,kbps=12000,tgOk=true,tgMs=120)))
+        assertFalse(AutoRoutePolicy.improved(state(100),"wifi",now,Probe(30,true,null,kbps=120,tgOk=true,tgMs=120)))
+        assertTrue(AutoRoutePolicy.improved(state(100),"wifi",now,Probe(30,true,null,kbps=356,tgOk=true,tgMs=120)))
+        assertTrue(AutoRoutePolicy.improved(state(0),"wifi",now,Probe(30,true,null,kbps=100,tgOk=true,tgMs=120)))
     }
 
 }

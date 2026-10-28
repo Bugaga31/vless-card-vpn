@@ -415,7 +415,7 @@ object Actions {
                 if(Store.state.value.state(s).maskFor(net)!=st.state(s).maskFor(net)) return@real
                 val speedSample = ServerChoice.acceptsSpeedSample(p.kbps, parallel)
                 if (telegram && p.works) TelegramRouteMemory.record(net,s.id,st.state(s).maskFor(net),p.tgOk,System.currentTimeMillis())
-                val routeReady = p.works && (st.settings.mode != Mode.AUTO || !telegram || p.tgOk == true)
+                val routeReady = p.works && (st.settings.mode != Mode.AUTO || !telegram || AutoLatencyPolicy.accepts(p))
                 val firstSuccess = routeReady && ok.incrementAndGet() == 1
                 if (routeReady) onSuccess?.invoke(s)
                 // A deliberately short attempt is inconclusive when it times out; confirm with the normal budget.
@@ -424,7 +424,7 @@ object Actions {
                 runCatching { Brain.learn(net, s, st.state(s), p.works) }
                 states.put(s.id) {
                     if (Net.key(app) != net || Net.underlying(app)?.toString() != underlying || it.maskFor(net)!=st.state(s).maskFor(net) || it.checkedAt>sampleStartedAt) it else
-                    it.copy(netEvidence = (it.netEvidence + ((net + "|" + st.state(s).maskFor(net)) to it.evidenceFor(net).observe(p.works, p.realMs, System.currentTimeMillis()))).entries.sortedByDescending { e -> e.value.at }.take(8).associate { e -> e.toPair() }, realMs = p.realMs, bigOk = p.bigOk ?: it.bigOk?.takeIf { old -> old }, ytOk = if (youtube) p.ytOk else if (telegram) null else it.ytOk, tgOk = if (telegram) p.tgOk else if (youtube) null else it.tgOk, checkedAt = System.currentTimeMillis(), kbps = if (speedSample) p.kbps else it.kbps,
+                    it.copy(netEvidence = (it.netEvidence + ((net + "|" + st.state(s).maskFor(net)) to it.evidenceFor(net).observe(p.works, p.realMs, System.currentTimeMillis()))).entries.sortedByDescending { e -> e.value.at }.take(8).associate { e -> e.toPair() }, realMs = p.realMs, bigOk = p.bigOk ?: it.bigOk?.takeIf { old -> old }, ytOk = if (youtube) p.ytOk else if (telegram) null else it.ytOk, tgOk = if (telegram) p.tgOk else if (youtube) null else it.tgOk, tgMs = if(telegram) p.tgMs else if(youtube) 0 else it.tgMs, checkedAt = System.currentTimeMillis(), kbps = if (speedSample) p.kbps else it.kbps,
                         serviceNetwork = if ((youtube || telegram) && p.works) net else it.serviceNetwork,
                         serviceMask = if ((youtube || telegram) && p.works) st.state(s).maskFor(net) else it.serviceMask,
                         serviceCheckedAt = if ((youtube || telegram) && p.works) System.currentTimeMillis() else it.serviceCheckedAt,
@@ -477,7 +477,7 @@ object Actions {
         val pool = if (evo) MaskLab.breed(parents, (slots * 4).coerceIn(6, 40), known = kept.map { it.id }.toSet()) else emptyList()
         val untried = kept.filter { stats[it.id] == null }
         val evoCand = (0 until maxOf(untried.size, pool.size)).flatMap { i -> listOfNotNull(untried.getOrNull(i), pool.getOrNull(i)) }
-        fun maskReady(p:Probe)=p.works && (cfg.mode!=Mode.AUTO || p.tgOk==true)
+        fun maskReady(p:Probe)=p.works && (cfg.mode!=Mode.AUTO || AutoLatencyPolicy.accepts(p))
         val order = { s: Server ->
             val ok = { m: Mask -> Masks.compatible(m, s) && (dpiOk || !m.viaByeDpi) }
             val fresh = evoCand.filter(ok).shuffled().take(slots)
@@ -556,8 +556,8 @@ object Actions {
             pinned.forEach { s ->
                 val mine = confirm.indices.filter { confirm[it].first.id == s.id }
                 // passed again (with YouTube) and the fastest in real use: ping + download speed + how heavy the mask is
-                val pick = mine.filter { res[it]?.works == true && res[it]?.ytOk == true && (cfg.mode!=Mode.AUTO && res[it]?.tgOk!=false || res[it]?.tgOk==true) }.minByOrNull { eff(confirm[it].second, res.getValue(it)) }
-                    ?: mine.filter { res[it]?.let { p -> p.works && p.ytOk != false && (cfg.mode!=Mode.AUTO && p.tgOk!=false || p.tgOk==true) } == true }.minByOrNull { eff(confirm[it].second, res.getValue(it)) }
+                val pick = mine.filter { res[it]?.works == true && res[it]?.ytOk == true && (cfg.mode!=Mode.AUTO && res[it]?.tgOk!=false || res[it]?.let(AutoLatencyPolicy::accepts)==true) }.minByOrNull { eff(confirm[it].second, res.getValue(it)) }
+                    ?: mine.filter { res[it]?.let { p -> p.works && p.ytOk != false && (cfg.mode!=Mode.AUTO && p.tgOk!=false || AutoLatencyPolicy.accepts(p)) } == true }.minByOrNull { eff(confirm[it].second, res.getValue(it)) }
                 if (pick != null) best[s.id] = confirm[pick].second to res.getValue(pick)
                 else if (mine.any { res[it] != null && res[it] !== Tester.SKIPPED }) best.remove(s.id)
                 mine.forEach { i -> if (res[i]?.works == false) synchronized(best) { tried += Triple(s.id, confirm[i].second.id, false) } }
@@ -1460,7 +1460,7 @@ object Actions {
             val message = if (Store.state.value.settings.autoUpdateSubs)
                 "Авто попытался обновить подписки и проверил ограниченный набор маршрутов. Рабочий маршрут пока не подтверждён; прямого обхода нет. Повторите поиск после смены сети или проверьте доступ к источникам."
                 else "Рабочий маршрут не подтверждён. Автообновление подписок выключено в настройках; прямого обхода нет."
-            Tunnel.status.value = Tunnel.Status(Tunnel.State.ERROR, "Маршрут пока не найден", check = message, checkOk = false)
+            Tunnel.status.value = Tunnel.Status(Tunnel.State.ERROR, "Пока нет подтверждённого маршрута ≤500 мс", check = message, checkOk = false)
             message
         } finally {
             refresh.cancel()
@@ -1573,18 +1573,31 @@ object Actions {
         if(start.settings.mode!=Mode.AUTO) return null
         val expected=candidates.associate {it.id to start.state(it).maskFor(net)}
         val pinned=pinCertificates(candidates.take(2))
-        val variants=pinned.flatMap {s->MaskWarmStart.trials(s,expected[s.id].orEmpty(),start.settings).map{s to it}}
+        val lab=start.settings.experimentalMaskLab
+        val trialStarted=android.os.SystemClock.elapsedRealtime()
+        val variants=pinned.flatMap {s->
+            val available=MaskWarmStart.trials(s,expected[s.id].orEmpty(),start.settings,if(lab) 5 else 2)
+            val ids=if(lab) MaskExperiment.memory.choose(net,network,s.id,available.map {it.id},trialStarted) else available.map {it.id}
+            available.filter {it.id in ids}.map{s to it}
+        }
         if(variants.isEmpty() || Net.key(app)!=net || Net.underlying(app)?.toString()!=network) return null
         val winner=java.util.concurrent.atomic.AtomicReference<Pair<Int,Probe>?>(null)
-        progress.value=progress.value.copy(title="Авто: лёгкая маскировка Hello",message="До двух серверов · без тяжёлого дробления; нужны HTTPS и Telegram MTProto")
+        progress.value=progress.value.copy(title="Авто: лёгкая маскировка Hello",message="До двух серверов · лёгкий Hello; HTTPS и Telegram MTProto ≤500 мс")
+        if(lab) variants.forEach {(server,mask)->MaskExperiment.memory.schedule(net,network,server.id,mask.id,trialStarted)}
         kotlinx.coroutines.withTimeoutOrNull(3800L) {
             Tester.real(variants,start.settings.testUrl,null,youtube=false,telegram=true,requireTelegram=true,
                 foreground=true,batch=4,parallel=4,attempts=1,big=false,stopAfter=1,budgetMs=3500L) {i,p->
-                if(p.works && p.tgOk==true) winner.compareAndSet(null,i to p)
+                if(lab && p!=Tester.SKIPPED && Net.key(app)==net && Net.underlying(app)?.toString()==network) {
+                    val (server,mask)=variants[i]
+                    MaskExperiment.memory.observe(net,network,server.id,mask.id,trialStarted,
+                        android.os.SystemClock.elapsedRealtime(),MaskExperiment.verdict(p))
+                }
+                if(AutoLatencyPolicy.accepts(p)) winner.compareAndSet(null,i to p)
             }
         }
         kotlinx.coroutines.currentCoroutineContext().ensureActive()
         if(Net.key(app)!=net || Net.underlying(app)?.toString()!=network) return null
+        if(Store.state.value.settings.mode!=Mode.AUTO || lab && !Store.state.value.settings.experimentalMaskLab) return null
         val (index,p)=winner.get() ?: return null
         val (server,mask)=variants[index]
         val stamp=System.currentTimeMillis()
@@ -1593,7 +1606,7 @@ object Actions {
             if(!MaskSamplePolicy.unchanged(current,start.state(server),net)) current else {
                 committed=true
                 current.copy(maskId=mask.id,netMasks=current.netMasks+(net to mask.id),realMs=p.realMs,bigOk=null,
-                    kbps=0,speedCheckedAt=0,speedNetwork="",speedMask="",tgOk=true,ytOk=null,
+                    kbps=0,speedCheckedAt=0,speedNetwork="",speedMask="",tgOk=true,tgMs=p.tgMs,ytOk=null,
                     serviceNetwork=net,serviceMask=mask.id,serviceCheckedAt=stamp,checkedAt=stamp,
                     okCount=current.okCount+1)
             }
@@ -1684,7 +1697,7 @@ object Actions {
                 Tester.real(listOf(pinned to Masks.byId(id)),settings.testUrl,null,
                     youtube=false,telegram=true,requireTelegram=true,batch=1,parallel=1,attempts=1,big=true,budgetMs=2000) {_,p->result=p}
             }
-            return result?.takeIf {valid() && it.works && it.tgOk==true && it.bigOk==true && it.kbps>0}
+            return result?.takeIf {valid() && AutoLatencyPolicy.accepts(it) && it.bigOk==true && it.kbps>0}
         }
         // A speed-only replacement needs a measured current baseline, not an old/global kbps hint.
         if(ServerChoice.measuredSpeed(expected,net,System.currentTimeMillis())<=0) {

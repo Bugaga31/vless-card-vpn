@@ -20,7 +20,9 @@ class ReleaseQualityR141Test {
         val a=server("DE-slow"); val b=server("DE-fast")
         val states=mapOf(a.id to ServerState(realMs=10,bigOk=true,kbps=1000,speedCheckedAt=100000,speedNetwork="wifi"),
             b.id to ServerState(realMs=200,bigOk=true,kbps=30000,speedCheckedAt=100000,speedNetwork="wifi"))
-        assertEquals(listOf(b),AutoEligibility.connectedPool(listOf(a,b),{states.getValue(it.id)},"wifi",100000,false))
+        val ranked=listOf(a,b).sortedWith(ServerChoice.downloadOrder({states.getValue(it.id)},"wifi",100000))
+        assertEquals(listOf(b),AutoEligibility.independent(ranked))
+        assertTrue(AutoEligibility.connectedPool(listOf(a,b),{states.getValue(it.id)},"wifi",100000,false).isEmpty())
     }
     @Test fun coverProfilesNeverChangeRealitySniOrBypassCertificateAuthentication() {
         val m=Masks.byId("vc.sni.vk.com.fast")!!
