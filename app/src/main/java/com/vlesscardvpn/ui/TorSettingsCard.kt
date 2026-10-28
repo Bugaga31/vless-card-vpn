@@ -1,9 +1,12 @@
 package com.vlesscardvpn.ui
 
+import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
+
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -30,67 +33,101 @@ fun TorSettingsCard(settings: Settings, set: ((Settings) -> Settings) -> Unit) {
     var checking by remember { mutableStateOf(false) }
     var circuit by remember(settings.torBridge, settings.torBridgeLines, settings.torRouting, settings.torAll, vpn.state, vpn.since) { mutableStateOf<Boolean?>(null) }
     var editing by remember { mutableStateOf(false) }
+    var advanced by rememberSaveable { mutableStateOf(false) }
+    val torEnabled = settings.torAll || settings.torRouting || (settings.mode == com.vlesscardvpn.model.Mode.AUTO && settings.torAuto)
+
     LaunchedEffect(settings.torBridge) { auto = TorBridgeUpdates.enabled(ctx) }
     val parsed = remember(settings.torBridgeLines, settings.torBridge) {
         runCatching { TorBridgeCatalog.parse(settings.torBridgeLines).forTransport(settings.torBridge).size }.getOrDefault(0)
+    }
+    LaunchedEffect(torEnabled, vpn.state, vpn.since, settings.torBridge, settings.torBridgeLines) {
+        if (!torEnabled || vpn.state != Tunnel.State.CONNECTED) {
+            circuit = null
+            return@LaunchedEffect
+        }
+        while (true) {
+            circuit = torCircuitReady(ctx)
+            kotlinx.coroutines.delay(if (circuit == true) 15_000L else 2_500L)
+        }
     }
     fun refresh() {
         loading = true
         scope.launch { try { TorBridgeUpdates.refresh(ctx, manual = true) } finally { loading = false } }
     }
-    Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = .65f)) {
+    Surface(modifier = Modifier.fillMaxWidth().animateContentSize(), shape = RoundedCornerShape(24.dp), color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = .72f)) {
         Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.primaryContainer) {
-                    Text("TOR", Modifier.padding(12.dp), fontSize = 16.sp, fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer)
+                Surface(shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.primaryContainer) {
+                    Text("TOR", Modifier.padding(horizontal = 14.dp, vertical = 12.dp), fontSize = 15.sp, fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer, letterSpacing = 1.sp)
                 }
-                Column(Modifier.weight(1f)) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                     Text("Tor-подключение", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-                    Text("Встроен в приложение · без Termux", style = MaterialTheme.typography.bodyMedium)
+                    Text(if (settings.torAll) "Весь TCP через Tor · UDP через VLESS" else if (settings.torRouting) "Tor для выбранных приложений" else if (settings.torAuto) "Tor для авто-восстановления" else "Tor выключен",
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                Surface(shape = RoundedCornerShape(50), color = if (torEnabled) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surface) {
+                    Text(if (!torEnabled) "ВЫКЛ" else if (circuit == true) "ГОТОВ" else "ВКЛ",
+                        Modifier.padding(horizontal = 10.dp, vertical = 7.dp), style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold, color = if (torEnabled) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
-            Button(onClick = { set { TorConnectionPolicy.automatic(it) } }, modifier = Modifier.fillMaxWidth()) {
-                Text("Автонастройка Tor")
+            Button(onClick = { set { TorConnectionPolicy.automatic(it) } }, modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp)) {
+                Text(if (settings.mode == com.vlesscardvpn.model.Mode.AUTO && settings.torAll && settings.torBridge == "none" && settings.torNetworkRecommendations && settings.torRotation && settings.torFastOnly && !settings.torDirect) "Автонастройка включена" else "Настроить Tor автоматически")
             }
-            Text("Сам подберёт VLESS-сервер, применит профиль Wi-Fi/мобильной сети и ротацию. Tor работает через сервер без ручных мостов; сохранённые строки мостов не удаляются. Если этот путь блокируется, доступность не гарантируется.", style = MaterialTheme.typography.bodySmall)
-            Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.surface) {
-                Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text(when (circuit) { true -> "Tor-цепочка через VLESS создана"; false -> "Готовая Tor-цепочка не обнаружена"; null -> "Tor-цепочка ещё не проверена" }, fontWeight = FontWeight.SemiBold)
-                    Text("Статус локальной цепочки не подтверждает Telegram или YouTube. Их проверка выполняется отдельно.", style = MaterialTheme.typography.bodyMedium)
+            Text("Профиль применится к настройкам; подключение запускается главной кнопкой. Tor работает поверх VPN без прямого обхода и может строить первую цепочку дольше пяти секунд.",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surface) {
+                Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(when {
+                        !torEnabled -> "Tor пока не включён"
+                        vpn.state != Tunnel.State.CONNECTED -> "Сначала подключите VPN"
+                        circuit == true -> "Tor-цепочка готова"
+                        circuit == false -> "Tor-цепочка пока не подтвердилась"
+                        else -> "VPN подключён · ожидает проверки Tor"
+                    }, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.titleSmall)
+                    Text("Это проверяет локальную Tor-цепочку, но не скорость и не доступность отдельных приложений.",
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     OutlinedButton(onClick = {
                         checking = true
                         val observed = Store.state.value.settings
                         val observedVpn = Tunnel.status.value
                         scope.launch {
                             try {
-                                val result = withContext(Dispatchers.IO) {
-                                    val cookie = TorCard.readCookieHex(ctx) ?: return@withContext false
-                                    val control = TorControl("127.0.0.1", TorCard.DEFAULT_CONTROL_PORT)
-                                    try { control.connect(cookie); control.circuitEstablished() }
-                                    catch (_: Exception) { false } finally { control.close() }
-                                }
+                                val result = torCircuitReady(ctx)
                                 val current = Store.state.value.settings
                                 if (current.torBridge == observed.torBridge && current.torBridgeLines == observed.torBridgeLines &&
                                     current.torRouting == observed.torRouting && current.torAll == observed.torAll &&
                                     Tunnel.status.value == observedVpn) circuit = result
                             } finally { checking = false }
                         }
-                    }, enabled = !checking && vpn.state == Tunnel.State.CONNECTED, modifier = Modifier.fillMaxWidth()) {
-                        Text(if (checking) "Проверяю локальный Tor…" else "Проверить Tor-цепочку")
+                    }, enabled = !checking && torEnabled && vpn.state == Tunnel.State.CONNECTED, modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(14.dp)) {
+                        Text(if (checking) "Проверяю цепочку…" else "Проверить Tor")
                     }
                 }
             }
-            Text("В режиме Авто сначала выбирается проверенный VLESS/Hysteria-сервер. Tor, если включён ниже, работает только поверх этого сервера; при отсутствии маршрута VPN не переключается на прямое соединение.", style = MaterialTheme.typography.bodyMedium)
-            TorOption("Автоподбор сетевых маршрутов", "Сравнивать ограниченный набор проверенных VLESS-маршрутов и их маскировок. Авто не использует прямое соединение и не проверяет Tor отдельно от VLESS.", settings.autoChainSearch) { v -> set { it.copy(autoChainSearch = v) } }
-            Text("Приоритет подбора",fontWeight=FontWeight.Medium)
-            Row(horizontalArrangement=Arrangement.spacedBy(6.dp)) {
-                listOf("balanced" to "Баланс","download" to "Скорость","interactive" to "Отклик").forEach {(id,title) ->
-                    FilterChip(selected=settings.autoChainPurpose==id,onClick={set {it.copy(autoChainPurpose=id)}},label={Text(title)})
-                }
+            TextButton(onClick = { advanced = !advanced }, modifier = Modifier.fillMaxWidth()) {
+                Text(if (advanced) "Скрыть дополнительные настройки" else "Маршруты, выходы и мосты")
             }
-            Text("Работает в VPN-режиме Авто без отдельной сервисной маршрутизации и WARP-цепочки. Измеряется лучший из ограниченного набора, не каждый сервер интернета.",style=MaterialTheme.typography.bodySmall)
-            TorOption("Рекомендуемые профили Wi-Fi / мобильная сеть", "При подключении и смене сети: Wi-Fi — порог HTTPS 2500 мс, интервал ротации 600 с; мобильная — 5000 мс и 900 с. Это начальные настройки, не измеренная скорость. Мосты и выбор VLESS-сервера не меняются.", settings.torNetworkRecommendations) { v -> set { it.copy(torNetworkRecommendations = v) } }
+            if (advanced) {
+                Text("В режиме Авто Tor работает поверх выбранного VLESS-маршрута. При отсутствии маршрута прямого обхода нет.", style = MaterialTheme.typography.bodySmall)
+                val autoChainAvailable = settings.mode == com.vlesscardvpn.model.Mode.AUTO && !settings.torAll && !settings.torRouting &&
+                    settings.services.isEmpty() && !settings.warpChain && !settings.proxyOnly
+                if (autoChainAvailable) {
+                    TorOption("Автоподбор сетевых цепочек", "Сравнивать ограниченный набор проверенных маршрутов. Прямое соединение не используется.", settings.autoChainSearch) { v -> set { it.copy(autoChainSearch = v) } }
+                    Text("Приоритет подбора", fontWeight = FontWeight.Medium)
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        listOf("balanced" to "Баланс", "download" to "Скорость", "interactive" to "Отклик").forEach { (id, title) ->
+                            FilterChip(selected = settings.autoChainPurpose == id, onClick = { set { it.copy(autoChainPurpose = id) } }, label = { Text(title) })
+                        }
+                    }
+                    Text("Измеряется небольшой набор маршрутов, не весь интернет.", style = MaterialTheme.typography.bodySmall)
+                } else {
+                    Text("В текущем режиме автоподбор сетевых цепочек не используется. Для Tor включены отдельный VLESS-маршрут и измеряемая ротация выходов.", style = MaterialTheme.typography.bodySmall)
+                }
+            TorOption("Рекомендуемые профили Wi-Fi / мобильная сеть", "При подключении и смене сети: Wi-Fi — допуск задержки ${TorNetworkRecommendations.WIFI_LATENCY_MS} мс и ротация 600 с; мобильная — ${TorNetworkRecommendations.MOBILE_LATENCY_MS} мс и 900 с. Допуск нужен, чтобы Tor не отбрасывал медленные, но рабочие выходы; это не обещание скорости.", settings.torNetworkRecommendations) { v -> set { it.copy(torNetworkRecommendations = v) } }
             if (settings.torNetworkRecommendations) Text("Ручные интервал и порог ниже сохранены, но временно заменяются профилем Wi-Fi/мобильной сети. Выключите рекомендации, чтобы применять свои значения. На других типах сети используются ручные настройки.", style = MaterialTheme.typography.bodySmall)
             if (settings.torAll) {
                 TorOption("Ротация Tor-цепочек", "Запрашивать новую Tor-цепочку для новых соединений через VLESS. Активные соединения не обещано сохранить при смене выхода.", settings.torRotation) { v -> set { it.copy(torRotation = v) } }
@@ -150,17 +187,27 @@ fun TorSettingsCard(settings: Settings, set: ((Settings) -> Settings) -> Unit) {
                 }
             }
 
+            }
+
         }
+    }
+}
+
+private suspend fun torCircuitReady(ctx: android.content.Context): Boolean = withContext(Dispatchers.IO) {
+    TorCard.controlEndpoints(ctx).any { endpoint ->
+        val control = TorControl("127.0.0.1", endpoint.port, 600)
+        try { control.connect(endpoint.cookieHex); control.circuitEstablished() }
+        catch (_: Exception) { false } finally { control.close() }
     }
 }
 
 @Composable
 private fun TorOption(title: String, description: String, value: Boolean, onChange: (Boolean) -> Unit) {
-    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(title, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
-            Text(description, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        Switch(checked = value, onCheckedChange = onChange)
+        Switch(checked = value, onCheckedChange = onChange, modifier = Modifier.padding(top = 2.dp))
     }
 }

@@ -124,16 +124,32 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
             textAlign = TextAlign.Center, fontWeight = FontWeight.Medium)
         if (status.route.isNotEmpty()) Text(status.route, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp, textAlign = TextAlign.Center)
         val cloudStatus by com.vlesscardvpn.core.CloudSpeed.status.collectAsState()
-        Card(Modifier.fillMaxWidth().padding(top = 16.dp), shape = RoundedCornerShape(20.dp),
+        Card(Modifier.fillMaxWidth().padding(top = 16.dp), shape = RoundedCornerShape(24.dp),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(if (busy) "Ищем вашу волну" else if (on) "Маршрут подключён" else "Готовы к подключению", fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
+            Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(if (busy) "Ищу быстрый маршрут" else if (on) "Маршрут подключён" else "Готовы к подключению",
+                            fontWeight = FontWeight.SemiBold, fontSize = 17.sp)
+                        Text(when {
+                            busy && cfg.torAll -> "Цель — VPN-маршрут примерно за 5 секунд; Tor строит цепочку отдельно."
+                            busy -> "Цель — первый VPN-маршрут примерно за 5 секунд. Если быстрых кандидатов нет, поиск продолжится."
+                            on && cfg.torAll -> "VPN работает; первая Tor-цепочка может собираться дольше пяти секунд."
+                            on -> "Сравнение скорости резервов продолжается после подключения."
+                            else -> "Авто начинает с сохранённых маршрутов и памяти этой сети."
+                        }, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    Surface(shape = CircleShape, color = color.copy(alpha = .14f)) {
+                        Text(if (busy) "ПОИСК" else if (on) "АКТИВНО" else "АВТО",
+                            Modifier.padding(horizontal = 11.dp, vertical = 8.dp),
+                            style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = color)
+                    }
+                }
                 if (busy) LiveProgress(stop = false) { it.running }
-                Text(if (busy) "Сравниваем маршруты и проверяем связь. Кнопка выше отменяет подключение; проценты показываются только для известного числа проверок."
-                    else "Авто учитывает память этой сети и облачные подсказки. Решает проверка на вашем устройстве.",
-                    fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = .35f))
-                Text(cloudStatus, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
+                if (cloudStatus.isNotBlank()) {
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = .35f))
+                    Text(cloudStatus, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
             }
         }
         val pausedUntil by Tunnel.pausedUntil.collectAsState()

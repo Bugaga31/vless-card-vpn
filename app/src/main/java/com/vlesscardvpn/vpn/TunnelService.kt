@@ -563,11 +563,10 @@ class TunnelService : VpnService() {
                     if(settings.torAuto) {
                         torReady=kotlinx.coroutines.withTimeoutOrNull(1500) {
                             com.vlesscardvpn.core.CancellableProbe.run {bind ->
-                                val cookie=com.vlesscardvpn.tor.TorCard.readCookieHex(this@TunnelService)
-                                if(cookie==null) false else {
-                                    val control=com.vlesscardvpn.tor.TorControl("127.0.0.1",com.vlesscardvpn.tor.TorCard.DEFAULT_CONTROL_PORT,600)
+                                com.vlesscardvpn.tor.TorCard.controlEndpoints(this@TunnelService).any { endpoint ->
+                                    val control=com.vlesscardvpn.tor.TorControl("127.0.0.1",endpoint.port,600)
                                     bind {control.close()}
-                                    try {control.connect(cookie);control.circuitEstablished()}catch(_:java.io.IOException){false}finally{control.close()}
+                                    try {control.connect(endpoint.cookieHex);control.circuitEstablished()}catch(_:java.io.IOException){false}finally{control.close()}
                                 }
                             }
                         } ?: false
@@ -665,21 +664,29 @@ class TunnelService : VpnService() {
             }
             // A new daemon creates its cookie asynchronously. Do not permanently abandon rotation
             // because the first read raced startup. Delay is cancellable and the wait is bounded.
-            val cookie = kotlinx.coroutines.withTimeoutOrNull(30_000L) {
-                var found: String? = null
+            val endpoint = kotlinx.coroutines.withTimeoutOrNull(30_000L) {
+                var found: com.vlesscardvpn.tor.TorCard.ControlEndpoint? = null
                 while (found == null) {
-                    found = com.vlesscardvpn.tor.TorCard.readCookieHex(this@TunnelService)
-                    if (found == null) delay(200)
+                    for (candidate in com.vlesscardvpn.tor.TorCard.controlEndpoints(this@TunnelService)) {
+                        val control = com.vlesscardvpn.tor.TorControl("127.0.0.1", candidate.port, 600)
+                        try {
+                            control.connect(candidate.cookieHex)
+                            found = candidate
+                            break
+                        } catch (_: Exception) {
+                        } finally { control.close() }
+                    }
+                    if (found == null) delay(500)
                 }
                 found
             }
-            if (cookie == null) { Log.i("TOR", "control cookie unavailable; rotator idle"); return@launch }
+            if (endpoint == null) { Log.i("TOR", "control endpoint unavailable; rotator idle"); return@launch }
             if (!st.torRotation) return@launch
             val rotator = com.vlesscardvpn.tor.TorRotator(
-                com.vlesscardvpn.tor.TorControl("127.0.0.1", com.vlesscardvpn.tor.TorCard.DEFAULT_CONTROL_PORT),
+                com.vlesscardvpn.tor.TorControl("127.0.0.1", endpoint.port),
                 rotation = com.vlesscardvpn.tor.TorConnectionPolicy.rotation(st, android.os.SystemClock::elapsedRealtime),
-                countries = emptyList(), // Server hostnames do not establish a Tor exit country.
-                cookieHex = cookie,
+                countries = emptyList(),
+                cookieHex = endpoint.cookieHex,
                 clearInheritedCountries = true,
             )
             try {

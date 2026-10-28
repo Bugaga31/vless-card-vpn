@@ -21,14 +21,25 @@ object TorCard {
     /** Termux data dir holding the ControlPort authentication cookie. */
     const val TERMUX_COOKIE_PATH = "/data/data/com.termux/files/usr/var/lib/tor/control_auth_cookie"
 
-    /** Control cookie: Termux instance first, then the embedded daemon's own cookie. */
-    fun readCookieHex(ctx: android.content.Context?): String? {
-        runCatching { TorControl.readCookieHex(TERMUX_COOKIE_PATH).takeIf { it.length == 64 }?.let { return it } }
-        if (ctx != null) runCatching {
-            TorControl.readCookieHex(java.io.File(java.io.File(ctx.filesDir, "tor"), "cookie").absolutePath).takeIf { it.length == 64 }?.let { return it }
-        }
-        return null
+    data class ControlEndpoint(val cookieHex: String, val port: Int)
+
+    fun controlEndpoints(ctx: android.content.Context?, embeddedPort: Int = DEFAULT_CONTROL_PORT): List<ControlEndpoint> {
+        val termux = runCatching { TorControl.readCookieHex(TERMUX_COOKIE_PATH) }.getOrNull()
+        val embedded = ctx?.let { context -> runCatching {
+            TorControl.readCookieHex(java.io.File(java.io.File(context.filesDir, "tor"), "cookie").absolutePath)
+        }.getOrNull() }
+        return controlEndpoints(termux, embedded, embeddedPort)
     }
+
+    fun controlEndpoints(termuxCookie: String?, embeddedCookie: String?, embeddedPort: Int = DEFAULT_CONTROL_PORT): List<ControlEndpoint> =
+        buildList {
+            termuxCookie?.takeIf(::validCookie)?.let { add(ControlEndpoint(it, TorControl.DEFAULT_CONTROL_PORT)) }
+            embeddedCookie?.takeIf(::validCookie)?.let { add(ControlEndpoint(it, embeddedPort)) }
+        }.distinctBy { it.port to it.cookieHex }
+
+    fun readCookieHex(ctx: android.content.Context?): String? = controlEndpoints(ctx).firstOrNull()?.cookieHex
+
+    private fun validCookie(value: String): Boolean = value.length == 64 && value.all { it in "0123456789abcdefABCDEF" }
 
     /** Preferred exit countries, best first (measured by the app's own probes). */
     fun preferredCountries() = listOf("de", "nl", "fi", "se", "ch")
@@ -153,13 +164,17 @@ object TorCard {
             embedded = null
         }
         if (portUp(socksPort)) {
-            val cookie = readCookieHex(ctx) ?: error("Tor port occupied without control authentication")
-            val control = TorControl("127.0.0.1", controlPort)
-            try {
-                control.connect(cookie)
-                val upstream = control.getConf("HTTPSProxy")?.trim('"')
-                check(bridge == "none" && upstream == "127.0.0.1:$upstreamHttpPort") { "Tor is already running without the VLESS upstream proxy" }
-            } finally { control.close() }
+            val endpoints = controlEndpoints(ctx, controlPort)
+            check(endpoints.isNotEmpty()) { "Tor port occupied without control authentication" }
+            val accepted = endpoints.any { endpoint ->
+                val control = TorControl("127.0.0.1", endpoint.port)
+                try {
+                    control.connect(endpoint.cookieHex)
+                    val upstream = control.getConf("HTTPSProxy")?.trim('"')
+                    bridge == "none" && upstream == "127.0.0.1:$upstreamHttpPort"
+                } catch (_: Exception) { false } finally { control.close() }
+            }
+            check(accepted) { "Tor is already running without the VLESS upstream proxy" }
             return null
         }
         check(available(ctx)) { "Embedded Tor unavailable for this device" }

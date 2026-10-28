@@ -16,11 +16,11 @@ class TorNetworkRecommendationsTest {
     }
     @Test fun wifiHasConservativeStartingPreset() {
         val s=TorNetworkRecommendations.apply(enabled,"Wi-Fi")
-        assertEquals(2500,s.torMaxLatencyMs);assertEquals(600,s.torRotationSeconds)
+        assertEquals(TorNetworkRecommendations.WIFI_LATENCY_MS,s.torMaxLatencyMs);assertEquals(600,s.torRotationSeconds)
     }
     @Test fun mobileHasMoreTolerantStartingPreset() {
         val s=TorNetworkRecommendations.apply(enabled,"Моб.: оператор")
-        assertEquals(5000,s.torMaxLatencyMs);assertEquals(900,s.torRotationSeconds)
+        assertEquals(TorNetworkRecommendations.MOBILE_LATENCY_MS,s.torMaxLatencyMs);assertEquals(900,s.torRotationSeconds)
     }
     @Test fun unknownAndOfflineDoNotGuessTransport() {
         listOf("Ethernet","Нет сети","Другая сеть","","Моб.: ","Wi-Fi-unknown").forEach { assertEquals(enabled,TorNetworkRecommendations.apply(enabled,it)) }

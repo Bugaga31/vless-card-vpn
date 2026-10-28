@@ -45,10 +45,12 @@ class AutoDiscoveryR174Test {
         assertTrue(selected.all { it in sources });assertEquals(4,selected.distinct().size)
         assertTrue(AutoDiscoveryPolicy.sources(emptyList(),false).isEmpty())
     }
-    @Test fun tenSecondStageCannotAcquireAnUnboundedBudget() {
-        assertEquals(10000L,AutoDiscoveryPolicy.FAST_MS)
+    @Test fun firstSearchStageTargetsFiveSecondsAndRemainsBounded() {
+        assertEquals(10_000L,AutoDiscoveryPolicy.FAST_MS)
+        assertEquals(5000L,AutoDiscoveryPolicy.FIRST_CONNECT_MS)
         assertTrue(AutoDiscoveryPolicy.SOURCE_MS<=3500)
         assertTrue(AutoDiscoveryPolicy.RECOVERY_MS<=45000)
+        assertTrue(ConnectPolicy.fastStart().budgetMs<=AutoDiscoveryPolicy.FIRST_CONNECT_MS)
         assertEquals(8,ConnectPolicy.FIRST)
     }
     @Test fun mirrorsMatchRealRawGithubHostname() {

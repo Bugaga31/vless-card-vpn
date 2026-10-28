@@ -5,8 +5,9 @@ import com.vlesscardvpn.tor.TorConnectionPolicy
 import org.junit.Assert.*
 import org.junit.Test
 class ForegroundAutoR176Test {
- @Test fun explicitFastSearchRequestsEightNotBackgroundTwo() {assertEquals(8,ConnectPolicy.fastStart().parallel);assertEquals(2,ConnectPolicy.fastStart(true).parallel)}
+ @Test fun explicitFastSearchRequestsEightNotBackgroundTwo() {assertEquals(8,ConnectPolicy.fastStart().parallel);assertEquals(2,ConnectPolicy.fastStart(true).parallel);assertEquals(4500L,ConnectPolicy.fastStart().budgetMs)}
  @Test fun firstUsableHttpsRouteIsNotHeldForBulkTransfer() {assertFalse(ConnectPolicy.requiresBodyProof(true));assertTrue(ConnectPolicy.requiresBodyProof(false))}
+ @Test fun firstHandoffSkipsRedundantTcpPrecheck() {assertFalse(ConnectPolicy.requiresTcpFilter(true));assertTrue(ConnectPolicy.requiresTcpFilter(false))}
  @Test fun balancedForegroundIsEight() {val p=PowerPolicy.evaluate(PowerPolicy.Input(0),PowerPolicy.Options());assertEquals(8,p.foregroundTcpParallel);assertEquals(8,p.foregroundRealParallel)}
  @Test fun ecoDoesNotTurnUserTcpSearchIntoBackgroundTwo() {val p=PowerPolicy.evaluate(PowerPolicy.Input(0),PowerPolicy.Options(profile="eco"));assertEquals(8,p.foregroundTcpParallel)}
  @Test fun mobileForegroundNotLimitedByBackgroundWifiPreference() {val p=PowerPolicy.evaluate(PowerPolicy.Input(0,metered=true),PowerPolicy.Options());assertFalse(p.allowLight);assertEquals(8,p.foregroundTcpParallel);assertEquals(8,p.foregroundRealParallel)}

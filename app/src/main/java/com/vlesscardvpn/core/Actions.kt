@@ -1074,7 +1074,7 @@ object Actions {
                 return
             }
         }
-        Tunnel.status.value = Tunnel.Status(Tunnel.State.CONNECTING, "Готовлю серверы…", check = "Ищу первый рабочий HTTPS-маршрут; полный поиск продолжится в фоне")
+        Tunnel.status.value = Tunnel.Status(Tunnel.State.CONNECTING, "Готовлю серверы…", check = "Цель — первый маршрут примерно за 5 секунд; если быстрых кандидатов нет, поиск продолжится дольше")
         if (busy?.isActive == true) cancel()
         autoPrepare(ready) { expectedNetwork.set(Net.key(app) to Net.underlying(app)?.toString()) }
     }
@@ -1248,7 +1248,7 @@ object Actions {
             return if (connected) "Авто: лучший из проверенных — ${after.size} из ${ok.size} рабочих" + (if (after != before) ", обновил маршрут" else "")
                 else "Авто: работают ${ok.size} из ${cand.size} — подключаюсь"
         }
-        if (!connected) Tunnel.status.value = Tunnel.Status(Tunnel.State.CONNECTING, "Готовлю серверы…", check = "Прежние серверы здесь не работают: ищу другие, обычно 10–20 секунд")
+        if (!connected) Tunnel.status.value = Tunnel.Status(Tunnel.State.CONNECTING, "Готовлю серверы…", check = "Быстрые маршруты не подошли — продолжаю поиск источников и резервов; срок зависит от сети")
         return doAutoPrepare(onReady)
     }
 
@@ -1365,7 +1365,7 @@ object Actions {
         try {
             // Fetch immediately, alongside cached-catalog probes. First useful source wins;
             // one blocked subscription cannot hold the connect button for all other sources.
-            kotlinx.coroutines.withTimeoutOrNull(AutoDiscoveryPolicy.FAST_MS) {
+            kotlinx.coroutines.withTimeoutOrNull(AutoDiscoveryPolicy.FIRST_CONNECT_MS) {
                 val cached = Store.state.value.servers
                 if (cached.isNotEmpty()) notes += quickTest(cached, firstReady, attempted, firstWaveOnly = true)
                 while (!started.started && sameNetwork()) {
@@ -1386,7 +1386,7 @@ object Actions {
             if (!sameNetwork()) return@coroutineScope if (continuous) "Сеть изменилась — начинаю следующую волну" else selectionNetworkChanged()
             progress.value = progress.value.copy(title = "Авто: проверяю резервные маршруты")
             Tunnel.status.value = Tunnel.Status(Tunnel.State.CONNECTING, "Продолжаю поиск…",
-                check = "Быстрые кандидаты не подошли. Подписки обновляются автоматически; проверяю резерв и маскировки. Нажатие отменяет поиск.")
+                check = "Быстрая пятисекундная попытка не нашла маршрут. Проверяю источники, резерв и маскировки; кнопка отменяет поиск.")
             if (!continuous) kotlinx.coroutines.withTimeoutOrNull(AutoDiscoveryPolicy.RECOVERY_MS) {
                 // At most one bounded reserve pass, not a TCP sweep of every imported link.
                 notes += quickTest(Store.state.value.servers, firstReady, attempted)
@@ -1459,13 +1459,18 @@ object Actions {
         }) { s -> learned[s.id] ?: Int.MAX_VALUE }
         val cachedGood = first.filter { st.state(it).evidenceFor(net).let { e -> e.successes > 0 && e.streak == 0 && time >= e.at && time - e.at < 1800000 } }.map { it.id }.toSet()
         val ping = first.filter { it.id !in cachedGood }
+        val earlyHandoff = firstWaveOnly && onFirst != null
         val plan = PhonePower.refresh(app)
         val slots = minOf(ping.size, PowerPolicy.cap(ConnectPolicy.FIRST, plan.foregroundTcpParallel))
-        progress.value = progress.value.copy(title = "Авто: TCP-проверка ${ping.size} кандидатов", done = 0, total = ping.size,
-            message = "Одновременно до $slots · ${cachedGood.size} с недавним подтверждением" +
-                (if (slots < minOf(ConnectPolicy.FIRST, ping.size)) " · ${plan.reason}" else ""))
-        val reachable = Tester.fastFilter(ping, foreground = true)
-        Store.setStates(reachable.mapValues { (_, ms) -> { old: com.vlesscardvpn.model.ServerState -> old.copy(tcpMs = ms) } })
+        progress.value = progress.value.copy(
+            title = if (earlyHandoff) "Авто: быстрый HTTPS-поиск" else "Авто: TCP-проверка ${ping.size} кандидатов",
+            done = 0,
+            total = ping.size,
+            message = if (earlyHandoff) "До $slots параллельно · подключаю сразу после первого успешного HTTPS" else
+                "Одновременно до $slots · ${cachedGood.size} с недавним подтверждением" +
+                    (if (slots < minOf(ConnectPolicy.FIRST, ping.size)) " · ${plan.reason}" else ""))
+        val reachable = if (ConnectPolicy.requiresTcpFilter(earlyHandoff)) Tester.fastFilter(ping, foreground = true) else emptyMap()
+        if (reachable.isNotEmpty()) Store.setStates(reachable.mapValues { (_, ms) -> { old: com.vlesscardvpn.model.ServerState -> old.copy(tcpMs = ms) } })
         val available = first.filter { (reachable[it.id] ?: -1) != 0 }.ifEmpty { first }
         val ordered = available.sortedBy { if (it.id in cachedGood || (reachable[it.id] ?: -1) > 0) 0 else 1 }
         // First connect as soon as one real HTTPS route passes; compare the remaining candidates after the tunnel is up.
@@ -1476,15 +1481,13 @@ object Actions {
             if (firstFired.compareAndSet(false, true)) callback(server)
         } }
         val fast = ConnectPolicy.fastStart()
-        val earlyHandoff = firstWaveOnly && onFirst != null
-        if (firstWaveOnly) attempted.addAll(shortlist.map { it.id })
         val fastOk = realTest(shortlist, "Авто: проверяю первый быстрый маршрут", big = ConnectPolicy.requiresBodyProof(earlyHandoff), youtube = false,
             attempts = 1, parallel = fast.parallel, foreground = firstWaveOnly, stopAfter = if (onFirst != null) fast.stopAfter else Int.MAX_VALUE,
             budgetMs = fast.budgetMs, onFirst = firstCallback, onSuccess = { passed.add(it.id) })
+        if (firstWaveOnly) attempted.addAll(shortlist.map { it.id })
         if (Net.key(app) != net || Net.underlying(app)?.toString() != network) return if (firstWaveOnly) "Сеть изменилась — результаты отброшены" else selectionNetworkChanged()
         if (onFirst != null && firstFired.get()) return "Первый рабочий VLESS-маршрут найден — подключаюсь; сравнение продолжится после запуска"
         if (firstWaveOnly) {
-            attempted.addAll(shortlist.map { it.id })
             return "Первая волна: проверено ${shortlist.size}, HTTPS-ответов $fastOk"
         }
         if (fastOk > 0) {

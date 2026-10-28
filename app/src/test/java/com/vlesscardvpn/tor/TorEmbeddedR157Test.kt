@@ -37,6 +37,29 @@ class TorEmbeddedR157Test {
     }
 
     @Test
+    fun `control endpoints pair cookies with the correct daemon ports`() {
+        val termux = "ab".repeat(32)
+        val embedded = "cd".repeat(32)
+        assertEquals(
+            listOf(
+                TorCard.ControlEndpoint(termux, TorControl.DEFAULT_CONTROL_PORT),
+                TorCard.ControlEndpoint(embedded, TorCard.DEFAULT_CONTROL_PORT)
+            ),
+            TorCard.controlEndpoints(termux, embedded)
+        )
+    }
+
+    @Test
+    fun `invalid control cookies are ignored`() {
+        val embedded = "cd".repeat(32)
+        assertEquals(
+            listOf(TorCard.ControlEndpoint(embedded, TorCard.DEFAULT_CONTROL_PORT)),
+            TorCard.controlEndpoints("invalid", embedded)
+        )
+        assertTrue(TorCard.controlEndpoints("invalid", "also-invalid").isEmpty())
+    }
+
+    @Test
     fun `embedded bridges list matches what the APK ships`() {
         assertEquals(listOf("none", "obfs4", "webtunnel"), TorCard.EMBEDDED_BRIDGES)
     }
