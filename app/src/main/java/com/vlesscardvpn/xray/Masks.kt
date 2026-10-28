@@ -130,6 +130,10 @@ object Masks {
         listOf("hello.balanced", "Hello 64–128 байт · пауза 0–1 мс · до 8 частей", "tlshello", "64-128", "0-1", "8"),
         listOf("hello.coarse", "Hello 256–512 байт · без паузы · до 4 частей", "tlshello", "256-512", "0-0", "4"),
         listOf("hello.mobile", "Hello 128–256 байт · пауза 0–2 мс · до 6 частей", "tlshello", "128-256", "0-2", "6"),
+        // Bounded heterogeneous ClientHello segmentation; no server identity or payload changes.
+        listOf("hello.stair", "Hello: растущие части · до 6", "tlshello", "", "", "6", "32-64,96-160,192-320", "0-0,0-1,0-1"),
+        listOf("hello.pulse", "Hello: чередование частей · до 6", "tlshello", "", "", "6", "64-96,256-384,96-160", "0-1,0-0,0-1"),
+        listOf("hello.wide", "Hello: крупные части · до 3", "tlshello", "320-640", "0-0", "3"),
         listOf("h1", "дробление Hello 1-3 байт", "tlshello", "1-3", "1-3", "0"),
         listOf("h2", "дробление Hello 3-8", "tlshello", "3-8", "2-5", "0"),
         listOf("h3", "дробление Hello 10-30", "tlshello", "10-30", "5-10", "0"),

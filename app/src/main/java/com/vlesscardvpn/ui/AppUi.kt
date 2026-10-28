@@ -23,7 +23,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.text.style.TextAlign
 
-private val DarkAccent = Color(0xFF78DEEA)
+private val DarkAccent = Color(0xFF8FC1FF)
 val Accent: Color @Composable get() = MaterialTheme.colorScheme.primary
 val Good: Color @Composable get() = if(MaterialTheme.colorScheme.surface.luminance() > .5f) Color(0xFF17643E) else Color(0xFF7AE4BA)
 val Bad: Color @Composable get() = if(MaterialTheme.colorScheme.surface.luminance() > .5f) Color(0xFFAD2334) else Color(0xFFFFA4AC)
@@ -44,17 +44,17 @@ fun AppUi(onConnect: () -> Unit, onDisconnect: () -> Unit) {
         onDispose { if(hadFlag) window?.addFlags(flag) else window?.clearFlags(flag) }
     }
     val scheme = when {
-        light -> lightColorScheme(primary=Color(0xFF006675),onPrimary=Color.White,
-            secondary=Color(0xFF585181),background=Color(0xFFF9FAFB),surface=Color.White,
-            surfaceVariant=Color(0xFFE8EEF1),onSurface=Color(0xFF202B33),onBackground=Color(0xFF202B33),
-            onSurfaceVariant=Color(0xFF47575F),outline=Color(0xFF657780))
+        light -> lightColorScheme(primary=Color(0xFF125BB2),onPrimary=Color.White,
+            secondary=Color(0xFF585181),background=Color(0xFFF3F6FB),surface=Color.White,
+            surfaceVariant=Color(0xFFE7EDF5),onSurface=Color(0xFF172334),onBackground=Color(0xFF172334),
+            onSurfaceVariant=Color(0xFF40536A),outline=Color(0xFF60748A))
         theme.theme == "you" && android.os.Build.VERSION.SDK_INT >= 31 -> dynamicDarkColorScheme(ctx)
-        theme.theme == "amoled" -> darkColorScheme(primary = DarkAccent, onPrimary = Color(0xFF05212B), secondary = Color(0xFFB6AFF6),
+        theme.theme == "amoled" -> darkColorScheme(primary = DarkAccent, onPrimary = Color(0xFF092D52), secondary = Color(0xFFB6AFF6),
             onSurfaceVariant = Color(0xFFB3C6D5), outline = Color(0xFF536D80), background = Color.Black, surface = Color(0xFF0A0A0C),
             surfaceVariant = Color(0xFF16181D), onBackground = Color(0xFFF0F6FC), onSurface = Color(0xFFF0F6FC))
-        else -> darkColorScheme(primary = DarkAccent, onPrimary = Color(0xFF05212B), secondary = Color(0xFFB6AFF6),
-            onSurfaceVariant = Color(0xFFB3C6D5), outline = Color(0xFF536D80), background = Color(0xFF07131F), surface = Color(0xFF102536),
-            surfaceVariant = Color(0xFF183345), onBackground = Color(0xFFF0F6FC), onSurface = Color(0xFFF0F6FC))
+        else -> darkColorScheme(primary = DarkAccent, onPrimary = Color(0xFF092D52), secondary = Color(0xFFB6AFF6),
+            onSurfaceVariant = Color(0xFFB3C6D5), outline = Color(0xFF536D80), background = Color(0xFF10151C), surface = Color(0xFF1A222E),
+            surfaceVariant = Color(0xFF263345), onBackground = Color(0xFFF0F6FC), onSurface = Color(0xFFF0F6FC))
     }
     MaterialTheme(colorScheme = scheme) {
         var tab by rememberSaveable { mutableIntStateOf(0) }
