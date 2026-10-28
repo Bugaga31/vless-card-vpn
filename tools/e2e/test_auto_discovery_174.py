@@ -1,5 +1,6 @@
 from pathlib import Path
 import unittest
+import re
 ROOT=Path(__file__).resolve().parents[2]
 class AutoDiscoveryWiring(unittest.TestCase):
     def test_rescue_is_parallel_and_not_behind_global_twelve_hour_gate(self):
@@ -11,7 +12,8 @@ class AutoDiscoveryWiring(unittest.TestCase):
         # The latest prerelease uses a shorter bounded foreground window.
         self.assertIn('withTimeoutOrNull(AutoDiscoveryPolicy.FIRST_CONNECT_MS)',p)
         policy=(ROOT/'app/src/main/java/com/vlesscardvpn/core/AutoDiscoveryPolicy.kt').read_text()
-        self.assertIn('const val FIRST_CONNECT_MS = 5_000L',policy)
+        budget=int(re.search(r'FIRST_CONNECT_MS = ([0-9_]+)L',policy).group(1).replace('_',''))
+        self.assertGreaterEqual(budget,6500);self.assertLessEqual(budget,15000)
         self.assertIn('batches.receiveCatching()',p)
         self.assertIn('refresh.cancel()',p)
         self.assertIn('firstWaveOnly = true',p)

@@ -1,5 +1,6 @@
 from pathlib import Path
 import unittest
+import re
 ROOT=Path(__file__).resolve().parents[2]/'app/src/main/java/com/vlesscardvpn'
 class ForegroundWiring(unittest.TestCase):
  def test_user_tcp_uses_explicit_foreground_limit(self):
@@ -13,10 +14,13 @@ class ForegroundWiring(unittest.TestCase):
  def test_rescue_has_no_full_catalog_scan_or_two_minute_masks(self):
   a=(ROOT/'core/Actions.kt').read_text().split('suspend fun autoRescue',1)[1].split('\n    }',1)[0]
   self.assertNotIn('doTestAll(',a);self.assertNotIn('doRefresh()',a);self.assertNotIn('120_000',a)
-  self.assertIn('firstWaveOnly = true',a)
+  self.assertRegex(a,r'firstWaveOnly\s*=\s*true')
+  self.assertIn('attempted.addAll',a)
  def test_skipped_masks_are_not_failed_servers(self):
   a=(ROOT/'core/Actions.kt').read_text().split('suspend fun doFindMasks',1)[1].split('\n    }',1)[0]
-  self.assertIn('if (b == null && tried.none { it.first == s.id }) return@forEach',a)
+  self.assertRegex(a,r'if\s*\(b\s*==\s*null\)\s*return@forEach')
+  self.assertIn('MaskSamplePolicy.unchanged',a)
+  self.assertNotIn('copy(realMs = 0',a)
   self.assertIn('kotlinx.coroutines.withTimeoutOrNull',a)
   self.assertNotIn('System.currentTimeMillis() > deadline',a)
  def test_background_reserves_are_wired_and_visible(self):
