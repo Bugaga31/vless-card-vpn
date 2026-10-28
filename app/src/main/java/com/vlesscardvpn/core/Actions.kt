@@ -1130,7 +1130,7 @@ object Actions {
     }
 
     /** Recheck current routes separately, then bounded alternatives; no direct fallback or account login. */
-    suspend fun repairTelegram(used: List<Server>): Int {
+    suspend fun repairTelegram(used: List<Server>, preferAlternative: Boolean = false): Int {
         val snapshot = Store.state.value
         val net = Net.key(app); val handle = Net.underlying(app)?.toString()
         val stamp = System.currentTimeMillis()
@@ -1148,7 +1148,8 @@ object Actions {
         }
         if (Net.key(app) != net || Net.underlying(app)?.toString() != handle) return 0
         val ready = candidates.filter { it.id in passed }
-        return if (ready.isEmpty()) 0 else selectBest(1, among = ready, close = true)
+        val preferred = if (preferAlternative) ready.filter { s -> used.none { it.id == s.id } }.ifEmpty { ready } else ready
+        return if (preferred.isEmpty()) 0 else selectBest(1, among = preferred, close = true)
     }
 
     /** Dead servers that could be revived through another Cloudflare edge (Revive). */
