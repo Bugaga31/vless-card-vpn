@@ -371,6 +371,7 @@ object Tester {
         requireTelegram: Boolean = false, skip: (Int) -> Boolean = { false },
         stopAfter: Int = Int.MAX_VALUE,
         budgetMs: Long = 0,
+        onStarted: ((Int) -> Unit)? = null,
         onEach: (Int, Probe) -> Unit,
     ) = withContext(Bg.io) {
         run {
@@ -397,6 +398,7 @@ object Tester {
                     core.stop()
                     chunk.forEachIndexed { i, v ->
                         if (skipped(idx[i])) { onEach(idx[i], SKIPPED); return@forEachIndexed }
+                        onStarted?.invoke(idx[i])
                         val one = XrayCore.Instance("test1")
                         val p = freePorts(1)
                         val ok = runCatching { one.start(XrayConfigBuilder.testConfig(listOf(v), p, byeDpiPort, dpiPorts)) }.isSuccess && one.running
@@ -409,7 +411,7 @@ object Tester {
                     coroutineScope {
                         ProbeRace.run(chunk.indices.toList(), PowerPolicy.cap(parallel, probeLimit), stopAfter,
                             skip = { i -> skipped(idx[i]) }, staggerMs = if (stopAfter == 1) 120 else 0,
-                            probe = { i -> CancellableProbe.run { bind -> probeSocks(ports[i], testUrl, big = big, youtube = youtube, telegram = telegram,
+                            probe = { i -> onStarted?.invoke(idx[i]); CancellableProbe.run { bind -> probeSocks(ports[i], testUrl, big = big, youtube = youtube, telegram = telegram,
                                 attempts = attempts, budgetMs = budgetMs, onCall = { call -> bind { call.cancel() } }, calls = calls, onCancel = bind) } },
                             accepted = { accepted(it) }, onEach = { i, p -> report(idx[i], p) })
                     }

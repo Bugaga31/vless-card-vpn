@@ -388,7 +388,7 @@ object Actions {
 
     private suspend fun realTest(servers: List<Server>, title: String, big: Boolean = true, attempts: Int = 2, parallel: Int = 32, youtube: Boolean = true,
                                  telegram: Boolean = youtube, calls: Boolean = false, stopAfter: Int = Int.MAX_VALUE, budgetMs: Long = 0, onFirst: ((Server) -> Unit)? = null, onSuccess: ((Server) -> Unit)? = null,
-                                 batch: Int = 64, foreground: Boolean = false): Int {
+                                 batch: Int = 64, foreground: Boolean = false, onAttempt: ((Server)->Unit)? = null, onObservation: ((Probe)->Unit)? = null): Int {
         if (servers.isEmpty()) return 0
         val plan = PhonePower.refresh(app)
         val slots = PowerPolicy.cap(parallel, if (foreground) plan.foregroundRealParallel else plan.realParallel).coerceAtMost(servers.size)
@@ -407,12 +407,15 @@ object Actions {
         val states = StateBatch(200)
         val firstWinner = java.util.concurrent.atomic.AtomicReference<Server?>(null)
         try {
-            Tester.real(variants, st.settings.testUrl, port, own.ports, batch = if (onFirst != null) ConnectPolicy.FIRST else batch, parallel = parallel, big = big, youtube = youtube, telegram = telegram, calls = calls, foreground = foreground, attempts = attempts, requireTelegram = st.settings.mode == Mode.AUTO && telegram, stopAfter = stopAfter, budgetMs = budgetMs) { i, p ->
+            Tester.real(variants, st.settings.testUrl, port, own.ports, batch = if (onFirst != null) ConnectPolicy.FIRST else batch, parallel = parallel, big = big, youtube = youtube, telegram = telegram, calls = calls, foreground = foreground, attempts = attempts, requireTelegram = st.settings.mode == Mode.AUTO && telegram, stopAfter = stopAfter, budgetMs = budgetMs, onStarted = { i ->
+                if(Net.key(app)==net && Net.underlying(app)?.toString()==underlying) onAttempt?.invoke(variants[i].first)
+            }) { i, p ->
                 if (p == Tester.SKIPPED) return@real
                 // Do not train the old profile with a result completed after Wi-Fi/cellular handoff.
                 if (Net.key(app) != net || Net.underlying(app)?.toString() != underlying) return@real
                 val s = variants[i].first
                 if(Store.state.value.state(s).maskFor(net)!=st.state(s).maskFor(net)) return@real
+                onObservation?.invoke(p)
                 val speedSample = ServerChoice.acceptsSpeedSample(p.kbps, parallel)
                 if (telegram && p.works) TelegramRouteMemory.record(net,s.id,st.state(s).maskFor(net),p.tgOk,System.currentTimeMillis())
                 val routeReady = p.works && (st.settings.mode != Mode.AUTO || !telegram || AutoLatencyPolicy.accepts(p))
@@ -1299,13 +1302,15 @@ object Actions {
     }
 
     private fun autoPrepare(onReady: () -> Unit, setNetwork: () -> Unit) = launch("Авто-настройка") {
-        AutoSearchCampaign.run(network = { Net.key(app) + "|" + Net.underlying(app)?.toString() },
+        val statistics=AutoSearchStatistics()
+        val handoffNetwork=java.util.concurrent.atomic.AtomicReference<String?>(null)
+        val outcome=AutoSearchCampaign.runBounded(network = { Net.key(app) + "|" + Net.underlying(app)?.toString() },
             online = { online() }, elapsed = android.os.SystemClock::elapsedRealtime,
             exhausted = { attempted -> Store.state.value.let { st -> preferred(st, st.servers).none { it.id !in attempted } } },
             waiting = { round, offline ->
                 progress.value = progress.value.copy(title = "Авто: продолжаю поиск", message = if (offline)
                     "Нет сети — жду её восстановления. Нажатие отменяет поиск."
-                    else "Волна ${round + 1} завершена. Облако: ${CloudControl.count()} кандидатов. Проверяю следующие маршруты. Нажатие отменяет поиск.")
+                    else "Волна ${round + 1}/${AutoSearchCampaign.MAX_WAVES} завершена. Облако: ${CloudControl.count()} кандидатов. Проверяю следующие маршруты. Нажатие отменяет поиск.")
                 Tunnel.status.value = Tunnel.Status(Tunnel.State.CONNECTING, if (offline) "Жду сеть…" else "Ищу следующий маршрут…",
                     check = progress.value.message, checkOk = null)
             }) { round, attempted ->
@@ -1315,7 +1320,7 @@ object Actions {
             val startedAt = android.os.SystemClock.elapsedRealtime()
             val network = Net.key(app) to Net.underlying(app)?.toString()
             try {
-                val message = doAutoPrepare(onReady, attempted, continuous = true, round = round) { selected = true }
+                val message = doAutoPrepare(onReady, attempted, continuous = true, round = round, statistics = statistics) { selected = true;handoffNetwork.set(network.first+"|"+network.second) }
                 val stale = network != (Net.key(app) to Net.underlying(app)?.toString())
                 AutoDiagnostics.record(app, Net.family(network.first), if (stale) "STALE" else if (selected) "PASS" else "UNKNOWN",
                     if (stale) "NETWORK_CHANGED" else if (selected) "NONE" else "NO_CANDIDATE", android.os.SystemClock.elapsedRealtime() - startedAt)
@@ -1324,6 +1329,18 @@ object Actions {
                 AutoDiagnostics.record(app, Net.family(network.first), "CANCELLED", "CANCELLED", android.os.SystemClock.elapsedRealtime() - startedAt)
                 throw e
             }
+        }
+        // A committed first winner can be handed off just before timeout during cleanup.
+        // Never replace that same-network handoff with an ERROR screen.
+        val handedOff=handoffNetwork.get()==Net.key(app)+"|"+Net.underlying(app)?.toString()
+        val result=outcome.value ?: if(handedOff) "Проверенный маршрут выбран — подключаюсь" else null
+        AutoDiagnostics.recordSearch(app,Net.family(Net.key(app)),if(result!=null) "FOUND" else outcome.stop.name,outcome.waves,statistics.snapshot())
+        result ?: run {
+            val message="Поиск остановлен: ${outcome.waves}/${AutoSearchCampaign.MAX_WAVES} волн, общий бюджет ${AutoSearchCampaign.MAX_TOTAL_MS/1000} с. " +
+                statistics.explanation()+" Порог HTTPS и Telegram ≤500 мс не ослаблялся. Проверьте источники/сеть или повторите поиск. Прямого обхода нет."
+            Tunnel.status.value=Tunnel.Status(Tunnel.State.ERROR,"Маршрут ≤500 мс не найден",check=message,checkOk=false)
+            progress.value=progress.value.copy(title="Авто: поиск завершён",message=message)
+            message
         }
     }
 
@@ -1374,7 +1391,7 @@ object Actions {
     }
 
     private suspend fun doAutoPrepare(onReady: () -> Unit, attempted: MutableSet<String> = mutableSetOf(),
-        continuous: Boolean = false, round: Int = 0, onSelected: () -> Unit = {}): String = coroutineScope {
+        continuous: Boolean = false, round: Int = 0, statistics: AutoSearchStatistics? = null, onSelected: () -> Unit = {}): String = coroutineScope {
         val now = System.currentTimeMillis()
         val notes = mutableListOf<String>()
         val started = ConnectPolicy.StartGate()
@@ -1413,10 +1430,10 @@ object Actions {
             // one blocked subscription cannot hold the connect button for all other sources.
             kotlinx.coroutines.withTimeoutOrNull(AutoDiscoveryPolicy.FIRST_CONNECT_MS) {
                 val cached = Store.state.value.servers
-                if (cached.isNotEmpty()) notes += quickTest(cached, firstReady, attempted, firstWaveOnly = true, allowMaskRescue = false)
+                if (cached.isNotEmpty()) notes += quickTest(cached, firstReady, attempted, firstWaveOnly = true, allowMaskRescue = false, statistics = statistics)
                 while (!started.started && sameNetwork()) {
                     val batch = batches.receiveCatching().getOrNull() ?: break
-                    notes += quickTest(batch, firstReady, attempted, firstWaveOnly = true, allowMaskRescue = false)
+                    notes += quickTest(batch, firstReady, attempted, firstWaveOnly = true, allowMaskRescue = false, statistics = statistics)
                 }
             }
             // A separate small budget: a slow native wave/source cannot silently starve mask rescue.
@@ -1470,7 +1487,7 @@ object Actions {
     }
 
     /** Cached cloud/network candidates first; no whole-catalog TCP scan or video downloads before first connect. */
-    suspend fun quickTest(list: List<Server>, onFirst: ((Server) -> Unit)? = null, attempted: MutableSet<String> = mutableSetOf(), firstWaveOnly: Boolean = false, allowMaskRescue: Boolean = true): String {
+    suspend fun quickTest(list: List<Server>, onFirst: ((Server) -> Unit)? = null, attempted: MutableSet<String> = mutableSetOf(), firstWaveOnly: Boolean = false, allowMaskRescue: Boolean = true, statistics: AutoSearchStatistics? = null): String {
         CloudSpeed.loadCached(app)
         val st = Store.state.value
         val untried = list.filter { it.id !in attempted }
@@ -1524,10 +1541,11 @@ object Actions {
             if (firstFired.compareAndSet(false, true)) callback(server)
         } }
         val fast = ConnectPolicy.fastStart()
-        if (firstWaveOnly) attempted.addAll(shortlist.map { it.id })
         val fastOk = realTest(shortlist, "Авто: проверяю первый быстрый маршрут", big = ConnectPolicy.requiresBodyProof(earlyHandoff), youtube = false, telegram = st.settings.mode == Mode.AUTO,
             attempts = 1, parallel = fast.parallel, foreground = firstWaveOnly, stopAfter = if (onFirst != null || firstWaveOnly) fast.stopAfter else Int.MAX_VALUE,
-            budgetMs = if (st.settings.mode == Mode.AUTO) 6500L else fast.budgetMs, onFirst = firstCallback, onSuccess = { passed.add(it.id) })
+            budgetMs = if (st.settings.mode == Mode.AUTO) 6500L else fast.budgetMs, onFirst = firstCallback, onSuccess = { passed.add(it.id) },
+            onAttempt = {server->if(firstWaveOnly) attempted.add(server.id);statistics?.start()},
+            onObservation = {p->statistics?.observe(p.works,p.realMs,p.tgOk,p.tgMs)})
         if (Net.key(app) != net || Net.underlying(app)?.toString() != network) return if (firstWaveOnly) "Сеть изменилась — результаты отброшены" else selectionNetworkChanged()
         if (onFirst != null && firstFired.get()) return "Первый рабочий VLESS-маршрут найден — подключаюсь; сравнение продолжится после запуска"
         if (firstWaveOnly) {
