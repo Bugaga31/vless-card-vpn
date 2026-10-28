@@ -17,6 +17,8 @@ CODE=${PIPESTATUS[0]}
 set -e
 export CODE
 adb logcat -d > runtime-r187.log
+mkdir -p docs/validation/r187-ui
+adb pull /sdcard/Android/data/com.vlesscardvpn/files/ui187/. docs/validation/r187-ui/ || true
 python3 - <<'CHECK'
 from pathlib import Path
 import json,re,os

@@ -24,11 +24,11 @@ class DashboardUiR187Test {
     private fun capture(name:String,expected:String) {
         ins.waitForIdleSync();Thread.sleep(1200)
         val text=labels(ins.uiAutomation.rootInActiveWindow)
-        assertTrue("$name must expose $expected: $text",text.any {expected in it})
         val target=File(ins.targetContext.getExternalFilesDir(null),"ui187").apply {mkdirs()}
         File(target,"$name.labels.txt").writeText(text.joinToString("\n"))
         val bitmap=ins.uiAutomation.takeScreenshot() ?: error("Real rendered screenshot is required")
         File(target,"$name.png").outputStream().use {assertTrue(bitmap.compress(Bitmap.CompressFormat.PNG,100,it))};bitmap.recycle()
+        assertTrue("$name must expose $expected: $text",text.any {expected in it})
     }
     private fun scroll(node:AccessibilityNodeInfo?):Boolean {
         if(node==null) return false

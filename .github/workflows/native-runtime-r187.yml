@@ -17,7 +17,7 @@ jobs:
         run: |
           set -euo pipefail
           base64 -d tools/patches/design-mask-r187.patch.gz.b64 | gzip -d > "$RUNNER_TEMP/design-mask-r187.patch"
-          echo 'c411679cc505ec66f8385cd48b049e4355477bff8a5d671c3630a1e0b7e7a205  '"$RUNNER_TEMP/design-mask-r187.patch" | sha256sum -c -
+          echo '30577c6a7f31596b9aa3909451ddad25b2a372de7c3742b8ff0d1e5b2de2e575  '"$RUNNER_TEMP/design-mask-r187.patch" | sha256sum -c -
           PATCH="$RUNNER_TEMP/design-mask-r187.patch"
           git apply --check "$PATCH"
           git apply "$PATCH"
