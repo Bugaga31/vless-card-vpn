@@ -28,13 +28,16 @@ jobs:
         run: |
           set -euo pipefail
           test "$GITHUB_REF" = refs/heads/experiment/prerelease-179
-          if git apply --reverse --check tools/patches/telegram-auto-r179.patch 2>/dev/null; then
-            echo "Source patch is already committed"
-          else
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          if ! grep -q 'suspend fun repairTelegram' app/src/main/java/com/vlesscardvpn/core/Actions.kt; then
             git apply --index tools/patches/telegram-auto-r179.patch
-            git config user.name 'github-actions[bot]'
-            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-            git commit -m 'fix(auto): apply Telegram MTProto selection and bounded repair'
+          fi
+          if ! git apply --reverse --check tools/patches/auto-primary-r179.patch 2>/dev/null; then
+            git apply --index tools/patches/auto-primary-r179.patch
+          fi
+          if ! git diff --cached --quiet; then
+            git commit -m 'feat(auto): stable primary, service-aware cooldown and anti-flapping'
             AUTH=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
             git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $AUTH" push origin HEAD:refs/heads/experiment/prerelease-179
           fi
