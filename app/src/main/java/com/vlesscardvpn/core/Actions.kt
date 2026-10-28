@@ -412,6 +412,7 @@ object Actions {
                 if (Net.key(app) != net || Net.underlying(app)?.toString() != underlying) return@real
                 val s = variants[i].first
                 val speedSample = ServerChoice.acceptsSpeedSample(p.kbps, parallel)
+                if (telegram && p.works) TelegramRouteMemory.record(net,s.id,st.state(s).maskFor(net),p.tgOk,System.currentTimeMillis())
                 val routeReady = p.works && (st.settings.mode != Mode.AUTO || !telegram || p.tgOk == true)
                 val firstSuccess = routeReady && ok.incrementAndGet() == 1
                 if (routeReady) onSuccess?.invoke(s)
@@ -1136,8 +1137,8 @@ object Actions {
         val current = used.filter(AutoEligibility::vlessServer).take(4)
         val alternatives = preferred(snapshot, snapshot.servers.filter { s ->
             AutoEligibility.vlessServer(s) && used.none { it.id == s.id }
-        }).sortedWith(compareBy<Server> { AutoEligibility.telegramRank(snapshot.state(it),net,stamp) }
-            .thenBy { snapshot.state(it).score })
+        }).sortedWith(compareBy<Server> { TelegramRouteMemory.cooling(net,it.id,snapshot.state(it).maskFor(net),stamp) }
+            .thenBy { AutoEligibility.telegramRank(snapshot.state(it),net,stamp) }.thenBy { snapshot.state(it).score })
         val candidates = (current + ServerChoice.diverse(alternatives, 8)).distinctBy { it.id }
         val passed = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
         kotlinx.coroutines.withTimeoutOrNull(18_000L) {
@@ -1477,7 +1478,8 @@ object Actions {
         ).mapIndexed { i, server -> server.id to i }.toMap()
         val first = ConnectPolicy.candidates(eligible, cloud, remembered, cooling = { server ->
             val e = st.state(server).evidenceFor(net)
-            probeMemory.cooling(net, server.id, st.state(server).maskFor(net), time) ||
+            TelegramRouteMemory.cooling(net, server.id, st.state(server).maskFor(net), time) ||
+                probeMemory.cooling(net, server.id, st.state(server).maskFor(net), time) ||
                 (e.streak > 0 && time >= e.at && time - e.at < ProbeMemory.cooldownMs(e.streak))
         }, serviceRank = { server -> AutoEligibility.telegramRank(st.state(server),net,time) }) { s -> learned[s.id] ?: Int.MAX_VALUE }
         val cachedGood = first.filter { st.state(it).evidenceFor(net).let { e -> e.successes > 0 && e.streak == 0 && time >= e.at && time - e.at < 1800000 } }.map { it.id }.toSet()
@@ -1511,7 +1513,7 @@ object Actions {
         if (Net.key(app) != net || Net.underlying(app)?.toString() != network) return if (firstWaveOnly) "Сеть изменилась — результаты отброшены" else selectionNetworkChanged()
         if (onFirst != null && firstFired.get()) return "Первый рабочий VLESS-маршрут найден — подключаюсь; сравнение продолжится после запуска"
         if (firstWaveOnly) {
-            return "Первая волна: проверено ${shortlist.size}, HTTPS-ответов $fastOk"
+            return "Первая волна: проверено ${shortlist.size}, HTTPS+MTProto маршрутов $fastOk"
         }
         if (fastOk > 0) {
             chooseCompared(shortlist.filter { it.id in passed }, onFirst, eligible.filter { s -> shortlist.none { it.id == s.id } })
@@ -1783,7 +1785,8 @@ object Actions {
             val pool = preferred(st, all)
             val ranked = if (st.settings.mode == Mode.AUTO && !gaming)
                 pool.sortedWith(ServerChoice.downloadOrder({ st.state(it) },netKey,rankTime)) else pool.sortedBy(spread)
-            val sorted = ranked.distinctBy { if (it.protocol == "wireguard") "wg:" + it.secret else it.id }.take(if (st.settings.mode == Mode.AUTO) AutoEligibility.TOP else if (primary) 1 else n)
+            val stable = if (st.settings.mode == Mode.AUTO) AutoPrimaryPolicy.choose(ranked,{st.state(it)},netKey,rankTime,gaming) else ranked
+            val sorted = stable.distinctBy { if (it.protocol == "wireguard") "wg:" + it.secret else it.id }.take(if (st.settings.mode == Mode.AUTO) AutoEligibility.ACTIVE else if (primary) 1 else n)
             val favs = if (st.settings.mode != Mode.AUTO && close && !primary) all.filter { it.id in st.settings.favorites } else emptyList()
             val best = ((if (st.settings.mode != Mode.AUTO && close && !primary) closeOnes(sorted.map(spread)).let { k -> sorted.take(k) } else sorted) + favs).map { it.id }.toSet()
             c = best.size

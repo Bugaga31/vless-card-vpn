@@ -135,7 +135,7 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
                             busy && cfg.torAll -> "Проверяю HTTPS и Telegram; Tor строит цепочку отдельно."
                             busy -> "Авто выбирает маршрут после HTTPS и ответа Telegram MTProto. Если готового нет, поиск продолжится."
                             on && cfg.torAll -> "VPN работает; первая Tor-цепочка может собираться дольше пяти секунд."
-                            on -> "Сравнение скорости резервов продолжается после подключения."
+                            on -> "Один устойчивый маршрут; проверенные резервы — для восстановления. Мелкий выигрыш скорости не вызывает переключение."
                             else -> "Авто начинает с сохранённых маршрутов и памяти этой сети."
                         }, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }

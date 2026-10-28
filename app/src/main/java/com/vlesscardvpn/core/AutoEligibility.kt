@@ -8,14 +8,15 @@ object AutoEligibility {
     fun allowed(server: Server): Boolean = ServerOnlyPolicy.userRoute(server) && !server.name.contains("🇷🇺") && Countries.of(server.name) != "RU"
     fun vlessServer(server: Server): Boolean = allowed(server) && !com.vlesscardvpn.xray.Masks.isWarp(server)
     const val TOP = 8
-    /** Every returned route is handed to Xray's multi-outbound pool, not held as a hidden spare. */
+    const val ACTIVE = 1
+    /** Only the chosen stable primary carries traffic; validated alternatives remain reserves. */
     fun connectedPool(servers: List<Server>, state: (Server) -> ServerState, net: String, now: Long, gaming: Boolean): List<Server> =
         servers.distinctBy { it.id }.filter { vlessServer(it) && state(it).works }.let { candidates ->
             val routes = servicePool(candidates, state, net, now)
             val usable = routes
             if (gaming) usable.sortedBy { ServerChoice.latencyScore(state(it).evidenceFor(net),state(it).realMs) }
             else usable.sortedWith(ServerChoice.downloadOrder(state,net,now))
-        }.let(::independent).take(TOP)
+        }.let(::independent).let { AutoPrimaryPolicy.choose(it,state,net,now,gaming) }.take(ACTIVE)
     /** WireGuard endpoints of one account are alternatives, not independent channels.
      *  Same for the rest of the catalog: one /24 subnet or one SNI is a single blocking
      *  blast radius (community RKN scanners harvest by ASN and by TLS fingerprint), so

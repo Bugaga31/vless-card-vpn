@@ -249,8 +249,8 @@ class TunnelService : VpnService() {
                     .let { l -> l.take(Actions.closeOnes(l.map { st.state(it).score })) }
             }
             if (settings.mode == Mode.AUTO) {
-                // Retain eight working outbounds, including routes discovered after the first success.
-                // Xray's selected balancer distributes connections; this is not bandwidth bonding.
+                // Stable single-primary Auto: keep verified alternatives out of the active balancer.
+                // A native app no longer gets a different exit on every new connection.
                 val candidates = Actions.preferred(st, (selected + st.servers.filter { st.state(it).works }).distinctBy { it.id })
                 val usable = com.vlesscardvpn.core.AutoEligibility.servicePool(candidates,{st.state(it)},network,System.currentTimeMillis())
                 selected = com.vlesscardvpn.core.AutoEligibility.connectedPool(usable,{st.state(it)},network,
@@ -548,7 +548,7 @@ class TunnelService : VpnService() {
                 if (sinceNet < 90_000L && !netHardDone) { netHardDone = true; hardRestart("новая сеть, а интернет не пошёл", force = true); return@launch }
                 if (System.currentTimeMillis() - lastHard > 5 * 60_000L) { hardRestart("после переподключения интернет не пошёл"); return@launch }
             }
-            if (p.works) { healStep = 0; dpiHeals = 0; connectFails = 0; scheduleOptimize(if (com.vlesscardvpn.core.Actions.deepPending || usedServers.size < com.vlesscardvpn.core.AutoEligibility.TOP) 5_000 else 60_000); com.vlesscardvpn.core.AppWatch.start(this@TunnelService, reconnect = { scope.launch { lock.withLock { connect(soft = true) } } }, maintenanceReconnect = { scheduleMaintenanceReconnect() }, connectedAt = { connectedElapsed }); watchdog(); standbyScout(); coverTraffic(); torLoop(); serviceRoutes(); autoChainScout() } else heal()
+            if (p.works) { healStep = 0; dpiHeals = 0; connectFails = 0; scheduleOptimize(if (com.vlesscardvpn.core.Actions.deepPending || usedServers.size < com.vlesscardvpn.core.AutoEligibility.ACTIVE) 5_000 else 60_000); com.vlesscardvpn.core.AppWatch.start(this@TunnelService, reconnect = { scope.launch { lock.withLock { connect(soft = true) } } }, maintenanceReconnect = { scheduleMaintenanceReconnect() }, connectedAt = { connectedElapsed }); watchdog(); standbyScout(); coverTraffic(); torLoop(); serviceRoutes(); autoChainScout() } else heal()
         }
     }
 
@@ -852,7 +852,7 @@ class TunnelService : VpnService() {
                 if (startupRemaining > 0) { delay(startupRemaining); continue }
                 if (!com.vlesscardvpn.core.PhonePower.refresh(this@TunnelService).allowLight) { delay(60_000); continue }
                 if (Store.state.value.settings.protectActiveTraffic && userActive() &&
-                    !(Store.state.value.settings.mode == Mode.AUTO && usedServers.size < com.vlesscardvpn.core.AutoEligibility.TOP)) { delay(60_000); continue } // hot phone: no background re-tests
+                    !(Store.state.value.settings.mode == Mode.AUTO && usedServers.size < com.vlesscardvpn.core.AutoEligibility.ACTIVE)) { delay(60_000); continue } // hot phone: no background re-tests
                 if (chainMeasuring || usedChain != null) { delay(60_000);continue }
                 val result = runCatching { Store.busy { Actions.optimize() } }.getOrElse {
                     if (it is kotlinx.coroutines.CancellationException) throw it
@@ -875,7 +875,7 @@ class TunnelService : VpnService() {
                 }
                 calm = if (Actions.lastOptimizeSwitched) 0 else minOf(calm + 1, 3)
                 // sleep until the next pass, or wake early (45 s) when the network changes
-                val incomplete = Store.state.value.settings.mode == Mode.AUTO && usedServers.size < com.vlesscardvpn.core.AutoEligibility.TOP
+                val incomplete = Store.state.value.settings.mode == Mode.AUTO && usedServers.size < com.vlesscardvpn.core.AutoEligibility.ACTIVE
                 val next = if (incomplete) 30_000L else longArrayOf(60_000L,120_000L,180_000L,300_000L)[calm]
                 if (kotlinx.coroutines.withTimeoutOrNull(next) { optKick.receive() } != null) { calm = 0; delay(5_000) }
             }
@@ -941,7 +941,7 @@ class TunnelService : VpnService() {
                         Tunnel.status.value = cur.copy(check = "HTTPS отвечает, Telegram MTProto — нет. Перепроверяю и подбираю маршрут…", checkOk = false)
                     }
                     if (telegramMiss >= 2) { repairTelegramRoute(); telegramMiss = 0 }
-                    else if (live.tgOk == true && (wasFailing || Tunnel.status.value.checkOk == null)) verifySoon(0)
+                    else if (live.tgOk == true && (wasFailing || Tunnel.status.value.checkOk != true)) verifySoon(0)
                 }
                 if (!ok && !Actions.online()) {
                     miss = 0
