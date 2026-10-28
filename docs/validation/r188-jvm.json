@@ -1,0 +1,13 @@
+{
+  "source_sha": "d629edf3dfa850cdac19072c83c4a73eab1531d0",
+  "run_id": "40761998999",
+  "steps": {
+    "source": "failure",
+    "host": "skipped",
+    "jvm": "skipped",
+    "lint": "skipped"
+  },
+  "suites": [],
+  "failures": [],
+  "lint_errors": []
+}
