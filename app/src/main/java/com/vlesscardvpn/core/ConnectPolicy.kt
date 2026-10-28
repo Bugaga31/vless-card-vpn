@@ -12,6 +12,7 @@ object ConnectPolicy {
         stopAfter = 1,
         budgetMs = if (background) 1800L else QUICK_BUDGET_MS,
     )
+    fun requiresBodyProof(earlyHandoff: Boolean) = !earlyHandoff
     class StartGate {
         private val taken = java.util.concurrent.atomic.AtomicBoolean()
         val started get() = taken.get()

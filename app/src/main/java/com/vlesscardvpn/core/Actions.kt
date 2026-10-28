@@ -1476,8 +1476,9 @@ object Actions {
             if (firstFired.compareAndSet(false, true)) callback(server)
         } }
         val fast = ConnectPolicy.fastStart()
+        val earlyHandoff = firstWaveOnly && onFirst != null
         if (firstWaveOnly) attempted.addAll(shortlist.map { it.id })
-        val fastOk = realTest(shortlist, "Авто: проверяю первый быстрый маршрут", big = true, youtube = false,
+        val fastOk = realTest(shortlist, "Авто: проверяю первый быстрый маршрут", big = ConnectPolicy.requiresBodyProof(earlyHandoff), youtube = false,
             attempts = 1, parallel = fast.parallel, foreground = firstWaveOnly, stopAfter = if (onFirst != null) fast.stopAfter else Int.MAX_VALUE,
             budgetMs = fast.budgetMs, onFirst = firstCallback, onSuccess = { passed.add(it.id) })
         if (Net.key(app) != net || Net.underlying(app)?.toString() != network) return if (firstWaveOnly) "Сеть изменилась — результаты отброшены" else selectionNetworkChanged()
