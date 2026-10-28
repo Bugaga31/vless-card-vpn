@@ -23,7 +23,13 @@ class DashboardUiR187Test {
     }
     private fun capture(name:String,expected:String) {
         ins.waitForIdleSync();Thread.sleep(1200)
-        val text=labels(ins.uiAutomation.rootInActiveWindow)
+        var text=labels(ins.uiAutomation.rootInActiveWindow)
+        // Startup can briefly expose no accessibility window even after main-thread idle.
+        // Wait for a populated tree, never scroll or bypass the expected-action assertion.
+        val deadline=android.os.SystemClock.elapsedRealtime()+10_000
+        while(text.isEmpty() && android.os.SystemClock.elapsedRealtime()<deadline) {
+            Thread.sleep(250);ins.waitForIdleSync();text=labels(ins.uiAutomation.rootInActiveWindow)
+        }
         val target=File(ins.targetContext.getExternalFilesDir(null),"ui187").apply {mkdirs()}
         File(target,"$name.labels.txt").writeText(text.joinToString("\n"))
         val bitmap=ins.uiAutomation.takeScreenshot() ?: error("Real rendered screenshot is required")
