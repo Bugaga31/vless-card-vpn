@@ -1,0 +1,527 @@
+--- a/app/src/main/java/com/vlesscardvpn/core/AutoEligibility.kt
++++ b/app/src/main/java/com/vlesscardvpn/core/AutoEligibility.kt
+@@ -53,8 +53,10 @@
+         if (results.any { it == false }) return 2
+         return if (results.all { it == true }) 0 else 1
+     }
++    fun telegramRank(s: ServerState, net: String, now: Long): Int = serviceRank(s, net, now, setOf("telegram"))
+     fun <T> servicePool(list: List<T>, state: (T) -> ServerState, net: String, now: Long): List<T> {
+-        val usable = list.filter { serviceRank(state(it),net,now) != 2 }
+-        return usable
++        // HTTPS alone is not proof that a native Telegram connection works.
++        // Unknown, expired and different-mask samples must be revalidated before Auto selects them.
++        return list.filter { serviceRank(state(it),net,now) != 2 && telegramRank(state(it),net,now) == 0 }
+     }
+ }
+--- a/app/src/main/java/com/vlesscardvpn/core/Actions.kt
++++ b/app/src/main/java/com/vlesscardvpn/core/Actions.kt
+@@ -406,24 +406,25 @@
+         val states = StateBatch(200)
+         val firstWinner = java.util.concurrent.atomic.AtomicReference<Server?>(null)
+         try {
+-            Tester.real(variants, st.settings.testUrl, port, own.ports, batch = if (onFirst != null) ConnectPolicy.FIRST else batch, parallel = parallel, big = big, youtube = youtube, telegram = telegram, calls = calls, foreground = foreground, attempts = attempts, stopAfter = stopAfter, budgetMs = budgetMs) { i, p ->
++            Tester.real(variants, st.settings.testUrl, port, own.ports, batch = if (onFirst != null) ConnectPolicy.FIRST else batch, parallel = parallel, big = big, youtube = youtube, telegram = telegram, calls = calls, foreground = foreground, attempts = attempts, requireTelegram = st.settings.mode == Mode.AUTO && telegram, stopAfter = stopAfter, budgetMs = budgetMs) { i, p ->
+                 if (p == Tester.SKIPPED) return@real
+                 // Do not train the old profile with a result completed after Wi-Fi/cellular handoff.
+                 if (Net.key(app) != net || Net.underlying(app)?.toString() != underlying) return@real
+                 val s = variants[i].first
+                 val speedSample = ServerChoice.acceptsSpeedSample(p.kbps, parallel)
+-                val firstSuccess = p.works && ok.incrementAndGet() == 1
+-                if (p.works) onSuccess?.invoke(s)
++                val routeReady = p.works && (st.settings.mode != Mode.AUTO || !telegram || p.tgOk == true)
++                val firstSuccess = routeReady && ok.incrementAndGet() == 1
++                if (routeReady) onSuccess?.invoke(s)
+                 // A deliberately short attempt is inconclusive when it times out; confirm with the normal budget.
+                 if (!p.works && budgetMs in 1 until ConnectPolicy.QUICK_BUDGET_MS) return@real
+                 probeMemory.record(net, s.id, st.state(s).maskFor(net), p.works, System.currentTimeMillis())
+                 runCatching { Brain.learn(net, s, st.state(s), p.works) }
+                 states.put(s.id) {
+                     if (Net.key(app) != net || Net.underlying(app)?.toString() != underlying) it else
+-                    it.copy(netEvidence = (it.netEvidence + ((net + "|" + st.state(s).maskFor(net)) to it.evidenceFor(net).observe(p.works, p.realMs, System.currentTimeMillis()))).entries.sortedByDescending { e -> e.value.at }.take(8).associate { e -> e.toPair() }, realMs = p.realMs, bigOk = p.bigOk ?: it.bigOk?.takeIf { old -> old }, ytOk = if (youtube) p.ytOk else it.ytOk, tgOk = if (youtube) p.tgOk else it.tgOk, checkedAt = System.currentTimeMillis(), kbps = if (speedSample) p.kbps else it.kbps,
+-                        serviceNetwork = if (youtube && p.works) net else it.serviceNetwork,
+-                        serviceMask = if (youtube && p.works) st.state(s).maskFor(net) else it.serviceMask,
+-                        serviceCheckedAt = if (youtube && p.works) System.currentTimeMillis() else it.serviceCheckedAt,
++                    it.copy(netEvidence = (it.netEvidence + ((net + "|" + st.state(s).maskFor(net)) to it.evidenceFor(net).observe(p.works, p.realMs, System.currentTimeMillis()))).entries.sortedByDescending { e -> e.value.at }.take(8).associate { e -> e.toPair() }, realMs = p.realMs, bigOk = p.bigOk ?: it.bigOk?.takeIf { old -> old }, ytOk = if (youtube) p.ytOk else if (telegram) null else it.ytOk, tgOk = if (telegram) p.tgOk else if (youtube) null else it.tgOk, checkedAt = System.currentTimeMillis(), kbps = if (speedSample) p.kbps else it.kbps,
++                        serviceNetwork = if ((youtube || telegram) && p.works) net else it.serviceNetwork,
++                        serviceMask = if ((youtube || telegram) && p.works) st.state(s).maskFor(net) else it.serviceMask,
++                        serviceCheckedAt = if ((youtube || telegram) && p.works) System.currentTimeMillis() else it.serviceCheckedAt,
+                         speedNetwork = if (speedSample) net else it.speedNetwork,
+                         speedMask = if (speedSample) st.state(s).maskFor(net) else it.speedMask,
+                         speedCheckedAt = if (speedSample) System.currentTimeMillis() else it.speedCheckedAt,
+@@ -1074,7 +1075,7 @@
+                 return
+             }
+         }
+-        Tunnel.status.value = Tunnel.Status(Tunnel.State.CONNECTING, "Готовлю серверы…", check = "Цель — первый маршрут примерно за 5 секунд; если быстрых кандидатов нет, поиск продолжится дольше")
++        Tunnel.status.value = Tunnel.Status(Tunnel.State.CONNECTING, "Готовлю серверы…", check = "Проверяю HTTPS и Telegram MTProto; время зависит от сети и доступности серверов")
+         if (busy?.isActive == true) cancel()
+         autoPrepare(ready) { expectedNetwork.set(Net.key(app) to Net.underlying(app)?.toString()) }
+     }
+@@ -1106,13 +1107,13 @@
+         working().let { w -> Store.state.value.let { st -> runCatching { Brain.load(app) }; Brain.order(Net.key(app), preferred(st, w)) { st.state(it) }.take(12) } }.takeIf { it.isNotEmpty() }?.let {
+             onStep("проверяю запасные серверы"); realTest(it, "Авто: проверяю запасные", big = false, attempts = 1)
+         }
+-        working().takeIf { it.isNotEmpty() }?.let { return selectBest(10, close = true, among = it) }
++        working().takeIf { it.isNotEmpty() }?.let { val n = selectBest(10, close = true, among = it); if (n > 0) return n }
+         if (level < 2) return 0
+         onStep("подбираю маскировку для доступных серверов")
+         val st = Store.state.value
+         val cand = (failed + st.servers.filter { st.state(it).tcpMs > 0 && it.id !in ids }.sortedBy { st.state(it).tcpMs }.take(10)).distinctBy { it.id }
+         if (cand.isNotEmpty()) doFindMasks(cand.take(2), 8, enough = 1, budgetMs = 4000)
+-        Store.state.value.let { s2 -> s2.servers.filter { s2.state(it).works } }.takeIf { it.isNotEmpty() }?.let { return selectBest(10, close = true, among = it) }
++        Store.state.value.let { s2 -> s2.servers.filter { s2.state(it).works } }.takeIf { it.isNotEmpty() }?.let { val n = selectBest(10, close = true, among = it); if (n > 0) return n }
+         // dead servers behind Cloudflare: the same server on another (unblocked) edge address
+         (failed.filter { Revive.cdnLike(it) } + deadCdn()).distinctBy { it.id }.takeIf { it.isNotEmpty() }?.let { d ->
+             onStep("оживляю серверы за Cloudflare"); if (doRevive(d, 6) > 0) return selectBest(10, close = true)
+@@ -1123,8 +1124,30 @@
+             refreshAutoSources { }
+             quickTest(Store.state.value.servers, attempted = ids, firstWaveOnly = true)
+         }
+-        Store.state.value.let { s3 -> s3.servers.filter { s3.state(it).works } }.takeIf { it.isNotEmpty() }?.let { return selectBest(10, close = true, among = it) }
++        Store.state.value.let { s3 -> s3.servers.filter { s3.state(it).works } }.takeIf { it.isNotEmpty() }?.let { val n = selectBest(10, close = true, among = it); if (n > 0) return n }
+         return 0 // No full-catalog scan, WARP setup or another two-minute mask loop on the repair path.
++    }
++
++    /** Recheck current routes separately, then bounded alternatives; no direct fallback or account login. */
++    suspend fun repairTelegram(used: List<Server>): Int {
++        val snapshot = Store.state.value
++        val net = Net.key(app); val handle = Net.underlying(app)?.toString()
++        val stamp = System.currentTimeMillis()
++        val current = used.filter(AutoEligibility::vlessServer).take(4)
++        val alternatives = preferred(snapshot, snapshot.servers.filter { s ->
++            AutoEligibility.vlessServer(s) && used.none { it.id == s.id }
++        }).sortedWith(compareBy<Server> { AutoEligibility.telegramRank(snapshot.state(it),net,stamp) }
++            .thenBy { snapshot.state(it).score })
++        val candidates = (current + ServerChoice.diverse(alternatives, 8)).distinctBy { it.id }
++        val passed = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
++        kotlinx.coroutines.withTimeoutOrNull(18_000L) {
++            realTest(candidates, "Авто: восстанавливаю Telegram MTProto", big = false, youtube = false,
++                telegram = true, attempts = 1, parallel = 4, budgetMs = 6500L, foreground = true,
++                onSuccess = { passed.add(it.id) })
++        }
++        if (Net.key(app) != net || Net.underlying(app)?.toString() != handle) return 0
++        val ready = candidates.filter { it.id in passed }
++        return if (ready.isEmpty()) 0 else selectBest(1, among = ready, close = true)
+     }
+ 
+     /** Dead servers that could be revived through another Cloudflare edge (Revive). */
+@@ -1225,8 +1248,8 @@
+         CloudSpeed.status.value = "Облако: ${CloudControl.count()} конфигураций; каталог ${eligible.size}; очередь волны ${cand.size}, остальные проверяются в фоне"
+         // Check the first bounded wave; continue if fewer than eight routes passed.
+         val passed = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+-        realTest(cand.take(12), "Авто: проверяю серверы", big = false, attempts = 1, youtube = false, budgetMs = ConnectPolicy.QUICK_BUDGET_MS,onSuccess={ passed.add(it.id) })
+-        if (cand.size > 12 && passed.size < AutoEligibility.TOP) realTest(cand.drop(12).take(12), "Авто: проверяю серверы", big = false, attempts = 1, youtube = false, budgetMs = ConnectPolicy.QUICK_BUDGET_MS,onSuccess={ passed.add(it.id) })
++        realTest(cand.take(12), "Авто: HTTPS и Telegram", big = false, attempts = 1, youtube = false, telegram = true, budgetMs = 6500L,onSuccess={ passed.add(it.id) })
++        if (cand.size > 12 && passed.size < AutoEligibility.TOP) realTest(cand.drop(12).take(12), "Авто: HTTPS и Telegram", big = false, attempts = 1, youtube = false, telegram = true, budgetMs = 6500L,onSuccess={ passed.add(it.id) })
+         if (Net.key(app) != net || Net.underlying(app)?.toString() != network) return selectionNetworkChanged()
+         val ok = cand.filter { it.id in passed }
+         if (ok.isNotEmpty()) {
+@@ -1381,12 +1404,12 @@
+                 }
+             }
+             if (sameNetwork()) fresh().firstOrNull()?.let(firstReady)
+-            if (started.started) return@coroutineScope "Первый HTTPS-маршрут найден — подключаюсь; подробные проверки в фоне"
++            if (started.started) return@coroutineScope "HTTPS и Telegram подтверждены — подключаюсь; подробные проверки в фоне"
+             kotlinx.coroutines.currentCoroutineContext().ensureActive()
+             if (!sameNetwork()) return@coroutineScope if (continuous) "Сеть изменилась — начинаю следующую волну" else selectionNetworkChanged()
+             progress.value = progress.value.copy(title = "Авто: проверяю резервные маршруты")
+             Tunnel.status.value = Tunnel.Status(Tunnel.State.CONNECTING, "Продолжаю поиск…",
+-                check = "Быстрая пятисекундная попытка не нашла маршрут. Проверяю источники, резерв и маскировки; кнопка отменяет поиск.")
++                check = "Быстрая проверка HTTPS и Telegram не нашла маршрут. Проверяю источники, резерв и маскировки; кнопка отменяет поиск.")
+             if (!continuous) kotlinx.coroutines.withTimeoutOrNull(AutoDiscoveryPolicy.RECOVERY_MS) {
+                 // At most one bounded reserve pass, not a TCP sweep of every imported link.
+                 notes += quickTest(Store.state.value.servers, firstReady, attempted)
+@@ -1456,17 +1479,17 @@
+             val e = st.state(server).evidenceFor(net)
+             probeMemory.cooling(net, server.id, st.state(server).maskFor(net), time) ||
+                 (e.streak > 0 && time >= e.at && time - e.at < ProbeMemory.cooldownMs(e.streak))
+-        }) { s -> learned[s.id] ?: Int.MAX_VALUE }
++        }, serviceRank = { server -> AutoEligibility.telegramRank(st.state(server),net,time) }) { s -> learned[s.id] ?: Int.MAX_VALUE }
+         val cachedGood = first.filter { st.state(it).evidenceFor(net).let { e -> e.successes > 0 && e.streak == 0 && time >= e.at && time - e.at < 1800000 } }.map { it.id }.toSet()
+         val ping = first.filter { it.id !in cachedGood }
+         val earlyHandoff = firstWaveOnly && onFirst != null
+         val plan = PhonePower.refresh(app)
+         val slots = minOf(ping.size, PowerPolicy.cap(ConnectPolicy.FIRST, plan.foregroundTcpParallel))
+         progress.value = progress.value.copy(
+-            title = if (earlyHandoff) "Авто: быстрый HTTPS-поиск" else "Авто: TCP-проверка ${ping.size} кандидатов",
++            title = if (earlyHandoff) "Авто: HTTPS и Telegram MTProto" else "Авто: TCP-проверка ${ping.size} кандидатов",
+             done = 0,
+             total = ping.size,
+-            message = if (earlyHandoff) "До $slots параллельно · подключаю сразу после первого успешного HTTPS" else
++            message = if (earlyHandoff) "До $slots параллельно · подключаю после HTTPS и ответа Telegram MTProto" else
+                 "Одновременно до $slots · ${cachedGood.size} с недавним подтверждением" +
+                     (if (slots < minOf(ConnectPolicy.FIRST, ping.size)) " · ${plan.reason}" else ""))
+         val reachable = if (ConnectPolicy.requiresTcpFilter(earlyHandoff)) Tester.fastFilter(ping, foreground = true) else emptyMap()
+@@ -1481,9 +1504,9 @@
+             if (firstFired.compareAndSet(false, true)) callback(server)
+         } }
+         val fast = ConnectPolicy.fastStart()
+-        val fastOk = realTest(shortlist, "Авто: проверяю первый быстрый маршрут", big = ConnectPolicy.requiresBodyProof(earlyHandoff), youtube = false,
++        val fastOk = realTest(shortlist, "Авто: проверяю первый быстрый маршрут", big = ConnectPolicy.requiresBodyProof(earlyHandoff), youtube = false, telegram = st.settings.mode == Mode.AUTO,
+             attempts = 1, parallel = fast.parallel, foreground = firstWaveOnly, stopAfter = if (onFirst != null) fast.stopAfter else Int.MAX_VALUE,
+-            budgetMs = fast.budgetMs, onFirst = firstCallback, onSuccess = { passed.add(it.id) })
++            budgetMs = if (st.settings.mode == Mode.AUTO) 6500L else fast.budgetMs, onFirst = firstCallback, onSuccess = { passed.add(it.id) })
+         if (firstWaveOnly) attempted.addAll(shortlist.map { it.id })
+         if (Net.key(app) != net || Net.underlying(app)?.toString() != network) return if (firstWaveOnly) "Сеть изменилась — результаты отброшены" else selectionNetworkChanged()
+         if (onFirst != null && firstFired.get()) return "Первый рабочий VLESS-маршрут найден — подключаюсь; сравнение продолжится после запуска"
+@@ -1496,8 +1519,8 @@
+         }
+         attempted.addAll(first.map { it.id });passed.clear()
+         val ok = realTest(ordered, "Авто: проверяю резервные VLESS-маршруты", big = true,
+-            youtube = false, attempts = 1, stopAfter = if (onFirst != null) fast.stopAfter else Int.MAX_VALUE,
+-            budgetMs = fast.budgetMs, onFirst = firstCallback, onSuccess = { passed.add(it.id) })
++            youtube = false, telegram = st.settings.mode == Mode.AUTO, attempts = 1, stopAfter = if (onFirst != null) fast.stopAfter else Int.MAX_VALUE,
++            budgetMs = if (st.settings.mode == Mode.AUTO) 6500L else fast.budgetMs, onFirst = firstCallback, onSuccess = { passed.add(it.id) })
+         if (Net.key(app) != net || Net.underlying(app)?.toString() != network) return selectionNetworkChanged()
+         if (onFirst != null && firstFired.get()) return "Найден рабочий VLESS-маршрут — подключаюсь"
+         if (ok > 0) { chooseCompared(ordered.filter { it.id in passed }, onFirst, eligible.filter { it.id !in attempted }); deepPending = true; return "Проверенные VLESS-маршруты готовы" }
+--- a/app/src/main/java/com/vlesscardvpn/core/AutoDiscoveryPolicy.kt
++++ b/app/src/main/java/com/vlesscardvpn/core/AutoDiscoveryPolicy.kt
+@@ -5,7 +5,7 @@
+ /** User-triggered discovery, not a background whole-catalog scan. Times are monotonic. */
+ object AutoDiscoveryPolicy {
+     const val FAST_MS = 10_000L
+-    const val FIRST_CONNECT_MS = 5_000L
++    const val FIRST_CONNECT_MS = 10_000L
+     const val RECOVERY_MS = 45_000L
+     const val SOURCE_MS = 3000L
+     const val SOURCES = 4
+--- a/app/src/main/java/com/vlesscardvpn/vpn/TunnelService.kt
++++ b/app/src/main/java/com/vlesscardvpn/vpn/TunnelService.kt
+@@ -476,6 +476,12 @@
+             // right after connecting the first packets may still be on their way (WireGuard/WARP handshake, a slow
+             // mobile network): one calm second try before calling the route bad and starting a heal or a reconnect
+             if (!p.works) { delay(3000); if (Tunnel.socks?.port == port) p = Tester.probeSocks(port, st.testUrl, big = false, youtube = checkServices, attempts = 1, budgetMs = 5000) }
++            if (p.works && checkServices && p.tgOk == false) {
++                delay(1500)
++                if (core !== sampledCore || Tunnel.socks != auth || Net.key(this@TunnelService) != sampledNet ||
++                    Net.underlying(this@TunnelService)?.toString() != sampledHandle) return@launch
++                p = Tester.probeSocks(port, st.testUrl, big = false, youtube = checkServices, attempts = 1, budgetMs = 6500L)
++            }
+             // A SOCKS HTTPS success uses remote name resolution and does not prove
+             // Android apps' UDP DNS path. Never show a healthy VPN on that evidence alone.
+             val dnsOk = if (p.works && !st.proxyOnly) com.vlesscardvpn.core.CancellableProbe.run { bind ->
+@@ -498,10 +504,16 @@
+                 Net.key(this@TunnelService) != sampledNet || Net.underlying(this@TunnelService)?.toString() != sampledHandle) return@launch
+             val text = if(chainExitRejected) "Выход Tor не подтверждён или недопустим — возвращаюсь к проверенному Auto" else if (p.realMs > 0) "HTTPS · ${p.realMs} мс · Видео YouTube: ${if(p.ytOk==true) "✓" else if(p.ytOk==false) "нет ответа" else "не проверен"} · Telegram MTProto: ${if(p.tgOk==true) "✓" else if(p.tgOk==false) "нет ответа" else "не проверен"}$warp"
+                 else "Нет ответа через выбранный маршрут (${p.error}). " + if (st.mode == Mode.AUTO && st.autoHeal) "Ищу рабочий вариант сам…" else "Проверьте серверы или включите маскировку."
+-            Tunnel.status.value = cur.copy(check = text, checkOk = p.works && !chainExitRejected)
++            val liveHealthy: Boolean? = when {
++                !p.works || chainExitRejected -> false
++                st.mode == Mode.AUTO && (p.tgOk == false || p.ytOk == false) -> false
++                st.mode == Mode.AUTO && p.tgOk == null -> null
++                else -> true
++            }
++            Tunnel.status.value = cur.copy(check = text, checkOk = liveHealthy)
+             if (attributeServers) runCatching { val stv = Store.state.value; com.vlesscardvpn.core.Brain.lived(sampledNet, sampledServers, { stv.state(it) }, p.works); com.vlesscardvpn.core.Brain.save(this@TunnelService) }
+             Log.i("E2E", "check ok=${p.works} ms=${p.realMs} big=${p.bigOk} yt=${p.ytOk} tg=${p.tgOk} err=${p.error} warp=$warp dns=$dnsOk")
+-            if (attributeServers && p.works && st.mode == Mode.AUTO) Actions.rememberNet(sampledNet)
++            if (attributeServers && liveHealthy == true && st.mode == Mode.AUTO) Actions.rememberNet(sampledNet)
+             // «Умный YouTube» broke YouTube here (the bypass stopped working): back to the servers for YouTube
+             if (p.realMs > 0 && p.ytOk == false && Tunnel.ytViaDpi) {
+                 val net = Net.key(this@TunnelService)
+@@ -515,6 +527,13 @@
+                 chainChoice=chainReserves.take(st,sampledNet,chainEpoch.get(),android.os.SystemClock.elapsedRealtime(),usedChain?.chain?.id)
+                 usedChain=null; chainScanAfter=if(chainChoice == null) android.os.SystemClock.elapsedRealtime()+120_000 else 0L
+                 scope.launch { lock.withLock { connect(soft=true) } }
++                return@launch
++            }
++            // HTTPS success must not suppress recovery of a broken native service.
++            if (p.works && st.mode == Mode.AUTO && p.tgOk == false && usedChain == null && !st.torAll &&
++                !(st.torRouting && "telegram" in st.services)) {
++                watchdog()
++                repairTelegramRoute()
+                 return@launch
+             }
+             if (!p.works && lastSoft && Store.state.value.settings.autoHeal) {
+@@ -886,13 +905,13 @@
+     private fun watchdog() {
+         if (watchJob?.isActive == true) return
+         watchJob = scope.launch {
+-            var miss = 0; var dnsMiss = 0; var stall = 0
++            var miss = 0; var dnsMiss = 0; var stall = 0; var telegramMiss = 0
+             var offline = false
+             var wasAsleep = false
+             var stats = TProxyService.stats()
+             while (Tunnel.status.value.state == Tunnel.State.CONNECTED) {
+                 // wait 45 s (10 s offline), but check right away when the screen turns back on — that's when apps are opened
+-                var waited = 0L; val period = if (offline) 10_000L else if (miss > 0) 3_000L else com.vlesscardvpn.core.PhonePower.refresh(this@TunnelService).healthyMs
++                var waited = 0L; val period = if (offline) 10_000L else if (miss > 0 || telegramMiss > 0) 3_000L else com.vlesscardvpn.core.PhonePower.refresh(this@TunnelService).healthyMs
+                 while (waited < period) { val d = if (asleep()) maxOf(60000L, period - waited) else minOf(5000L, period - waited); delay(d); waited += d; val a = asleep(); if (wasAsleep && !a) { wasAsleep = false; delay(1500); break }; wasAsleep = a }
+                 com.vlesscardvpn.core.Traffic.tick()
+                 if (healJob?.isActive == true || asleep()) continue
+@@ -901,7 +920,29 @@
+                 val vpnMode = true
+                 // the TUN engine stopped: nothing in the phone works, though the proxy itself is fine — rebuild like the big button
+                 if (vpnMode && runCatching { !TProxyService.TProxyIsRunning() }.getOrDefault(false)) { hardRestart("движок VPN остановился"); break }
+-                val ok = Tester.probeSocks(port, Store.state.value.settings.testUrl, big = false, youtube = false, attempts = 1).realMs > 0
++                val settings = Store.state.value.settings
++                val sampledCore = core
++                val network = Net.key(this@TunnelService)
++                val handle = Net.underlying(this@TunnelService)?.toString()
++                val checkTelegram = settings.mode == Mode.AUTO && !settings.torAll &&
++                    !(settings.torRouting && "telegram" in settings.services) && usedChain == null
++                val live = com.vlesscardvpn.core.CancellableProbe.run { bind ->
++                    Tester.probeSocks(port, settings.testUrl, big = false, youtube = false, telegram = checkTelegram,
++                        attempts = 1, budgetMs = 6500L, onCall = { call -> bind { call.cancel() } }, onCancel = bind)
++                }
++                if (core !== sampledCore || Tunnel.socks != auth || Net.key(this@TunnelService) != network ||
++                    Net.underlying(this@TunnelService)?.toString() != handle) { telegramMiss = 0; continue }
++                val ok = live.works
++                if (ok && checkTelegram) {
++                    val wasFailing = telegramMiss > 0
++                    telegramMiss = when (live.tgOk) { true -> 0; false -> telegramMiss + 1; null -> telegramMiss }
++                    if (live.tgOk == false) {
++                        val cur = Tunnel.status.value
++                        Tunnel.status.value = cur.copy(check = "HTTPS отвечает, Telegram MTProto — нет. Перепроверяю и подбираю маршрут…", checkOk = false)
++                    }
++                    if (telegramMiss >= 2) { repairTelegramRoute(); telegramMiss = 0 }
++                    else if (live.tgOk == true && (wasFailing || Tunnel.status.value.checkOk == null)) verifySoon(0)
++                }
+                 if (!ok && !Actions.online()) {
+                     miss = 0
+                     val cur = Tunnel.status.value
+@@ -996,6 +1037,39 @@
+         if (cur.state == Tunnel.State.CONNECTED) Tunnel.status.value = cur.copy(check = "Сам переподключаюсь: $why", checkOk = null)
+         com.vlesscardvpn.core.AppWatch.note("Связь: $why — переподключился сам, нажимать кнопку не нужно")
+         scope.launch { lock.withLock { connect(soft = false) } }
++    }
++
++    private var telegramRepairAt = -60_000L
++    /** Isolate bad members instead of restarting the same aggregate pool indefinitely. */
++    private fun repairTelegramRoute() {
++        if (recoveryJob?.isActive == true || tun == null || Tunnel.socks == null) return
++        if (com.vlesscardvpn.core.PhonePower.isVoiceCallActive(this)) return
++        val now = android.os.SystemClock.elapsedRealtime()
++        if (now - telegramRepairAt < 60_000L) return
++        telegramRepairAt = now
++        val sampledCore = core
++        val auth = Tunnel.socks
++        val network = Net.key(this); val handle = Net.underlying(this)?.toString()
++        val servers = usedServers.toList()
++        recoveryJob = scope.launch {
++            val before = Tunnel.status.value
++            Tunnel.status.value = before.copy(check = "Telegram не отвечает — проверяю серверы отдельно и ищу резерв", checkOk = false)
++            val found = try { Store.busy { Actions.repairTelegram(servers) } }
++                catch (e: kotlinx.coroutines.CancellationException) { throw e }
++                catch (e: Exception) { Log.w(TAG, "Telegram repair failed", e); 0 }
++            if (core !== sampledCore || Tunnel.socks != auth || Net.key(this@TunnelService) != network ||
++                Net.underlying(this@TunnelService)?.toString() != handle || Tunnel.status.value.state != Tunnel.State.CONNECTED) return@launch
++            if (found > 0) lock.withLock {
++                if (core === sampledCore && Tunnel.socks == auth && Net.key(this@TunnelService) == network &&
++                    Net.underlying(this@TunnelService)?.toString() == handle &&
++                    !com.vlesscardvpn.core.PhonePower.isVoiceCallActive(this@TunnelService)) connect(soft = true)
++            } else {
++                val cur = Tunnel.status.value
++                Tunnel.status.value = cur.copy(check = "HTTPS есть, Telegram пока не подтверждён. Рабочий резерв не найден; повторю поиск автоматически", checkOk = false)
++                Actions.deepPending = true
++                scheduleOptimize(5_000)
++            }
++        }
+     }
+ 
+     private var healJob: Job? = null
+--- a/app/src/main/java/com/vlesscardvpn/ui/HomeScreen.kt
++++ b/app/src/main/java/com/vlesscardvpn/ui/HomeScreen.kt
+@@ -118,7 +118,7 @@
+         fun reconnect() { if (status.state == Tunnel.State.CONNECTED) onConnect() }
+         val on = status.state == Tunnel.State.CONNECTED
+         val busy = status.state == Tunnel.State.CONNECTING
+-        val color = when { on && status.checkOk == false -> Warn; on -> Good; busy -> Accent; else -> MaterialTheme.colorScheme.primary }
++        val color = when { on && status.checkOk == false -> Warn; on && status.checkOk == null -> Accent; on -> Good; busy -> Accent; else -> MaterialTheme.colorScheme.primary }
+         PowerButton(on, busy, color) { if (on || busy) onDisconnect() else onConnect() }
+         if (status.message.isNotEmpty()) Text(status.message, color = if (status.state == Tunnel.State.ERROR) Bad else MaterialTheme.colorScheme.onBackground,
+             textAlign = TextAlign.Center, fontWeight = FontWeight.Medium)
+@@ -129,11 +129,11 @@
+             Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+-                        Text(if (busy) "Ищу быстрый маршрут" else if (on) "Маршрут подключён" else "Готовы к подключению",
++                        Text(if (busy) "Ищу быстрый маршрут" else if (on && status.checkOk == false) "Часть проверок не прошла" else if (on && status.checkOk == null) "Проверяю маршрут" else if (on) "Маршрут подключён" else "Готовы к подключению",
+                             fontWeight = FontWeight.SemiBold, fontSize = 17.sp)
+                         Text(when {
+-                            busy && cfg.torAll -> "Цель — VPN-маршрут примерно за 5 секунд; Tor строит цепочку отдельно."
+-                            busy -> "Цель — первый VPN-маршрут примерно за 5 секунд. Если быстрых кандидатов нет, поиск продолжится."
++                            busy && cfg.torAll -> "Проверяю HTTPS и Telegram; Tor строит цепочку отдельно."
++                            busy -> "Авто выбирает маршрут после HTTPS и ответа Telegram MTProto. Если готового нет, поиск продолжится."
+                             on && cfg.torAll -> "VPN работает; первая Tor-цепочка может собираться дольше пяти секунд."
+                             on -> "Сравнение скорости резервов продолжается после подключения."
+                             else -> "Авто начинает с сохранённых маршрутов и памяти этой сети."
+--- /dev/null
++++ b/tools/release-gates/prepare_experimental_179.py
+@@ -0,0 +1,84 @@
++import hashlib
++import json
++import os
++from pathlib import Path
++import re
++import subprocess
++import zipfile
++from verify_candidate import CERT, PACKAGE, require, verify_package, verify_signature
++
++
++def run(*args):
++    return subprocess.check_output(args, text=True, stderr=subprocess.STDOUT)
++
++
++def prepare(root, sha, run_id, docs):
++    bt = Path(os.environ["ANDROID_HOME"]) / "build-tools/34.0.0"
++    expected = {
++        "VLESS-Card-Beta.apk": "VLESS-Card-Beta-1.2.68-experimental.apk",
++        "VLESS-Card-Beta-arm64.apk": "VLESS-Card-Beta-1.2.68-experimental-arm64.apk",
++    }
++    report = {
++        "candidate_sha": sha,
++        "run_id": str(run_id),
++        "version": "1.2.68",
++        "version_code": 179,
++        "channel": "experimental",
++        "functional_checks": {
++            "unit_tests": "not_run_by_request",
++            "lint": "not_run_by_request",
++            "emulator": "not_run_by_request",
++            "physical_device": "not_run",
++        },
++        "apks": [],
++    }
++    sums = []
++    for old_name, new_name in expected.items():
++        apk = root / old_name
++        signature = run(str(bt / "apksigner"), "verify", "--min-sdk-version", "21", "--verbose", "--print-certs", str(apk))
++        verify_signature(signature)
++        run(str(bt / "zipalign"), "-c", "-p", "4", str(apk))
++        package = run(str(bt / "aapt2"), "dump", "badging", str(apk)).splitlines()[0]
++        verify_package(package, 179)
++        manifest = run(str(bt / "aapt2"), "dump", "xmltree", str(apk), "--file", "AndroidManifest.xml")
++        for attr in ("debuggable", "testOnly"):
++            require(not re.search(rf"android:{attr}[^\n]*0xffffffff", manifest), "Debug/test-only APK")
++        require("networkSecurityConfig" not in manifest, "Unexpected release network security override")
++        with zipfile.ZipFile(apk) as archive:
++            require(archive.testzip() is None, "Corrupt APK archive")
++            abi = "x86_64" if old_name == "VLESS-Card-Beta.apk" else "arm64-v8a"
++            for library in ("libTor.so", "libLyrebird.so", "libgojni.so", "libhev-socks5-tunnel.so"):
++                require(f"lib/{abi}/{library}" in archive.namelist(), f"Missing {abi} library: {library}")
++        digest = hashlib.sha256(apk.read_bytes()).hexdigest()
++        new_path = root / new_name
++        apk.rename(new_path)
++        report["apks"].append({
++            "file": new_name,
++            "sha256": digest,
++            "certificate_sha256": CERT,
++            "package": package,
++        })
++        sums.append(f"{digest}  {new_name}")
++    (root / "verification.json").write_text(json.dumps(report, indent=2) + "\n")
++    (root / "SHA256SUMS-Beta.txt").write_text("\n".join(sums) + "\n")
++    notice = f"""# Experimental prerelease — functional checks skipped
++
++This is an experimental build, not a stable release. Unit tests, lint, emulator checks and physical-device checks were not run by request. The release job compiled the app, signed both APKs, verified the persistent Beta certificate and checked APK package integrity.
++
++Commit: `{sha}`  
++Build: https://github.com/Bugaga31/vless-card-vpn/actions/runs/{run_id}  
++Package: `{PACKAGE}`, version 1.2.68, code 179.  
++The attached `verification.json` and `SHA256SUMS-Beta.txt` identify the exact signed files.
++
++Auto now requires a fresh sampled MTProto response as well as HTTPS before selecting a route. This is unauthenticated reachability, not proof of account login, all Telegram data centers, media or calls. Connection time depends on the network; Tor bootstrap can take longer.
++
++---
++
++"""
++    (root / "notes-experimental.md").write_text(notice + docs.read_text())
++
++
++if __name__ == "__main__":
++    require(os.environ.get("GITHUB_REPOSITORY") == "Bugaga31/vless-card-vpn", "Wrong repository")
++    require(os.environ.get("GITHUB_REF") == "refs/heads/experiment/prerelease-179", "Wrong experimental branch")
++    prepare(Path("release"), os.environ["CANDIDATE_SHA"], os.environ["GITHUB_RUN_ID"], Path("docs/release-1.2.68.md"))
+--- /dev/null
++++ b/docs/release-1.2.68.md
+@@ -0,0 +1,15 @@
++# VLESS Card 1.2.68 · Experimental — Telegram-aware Auto
++
++## Авто и Telegram
++- Быстрый поиск проверяет HTTPS и Telegram MTProto перед первым выбором сервера. Неизвестный, просроченный или относящийся к другой сети/маске результат Telegram больше не допускается в пул Авто.
++- Исправлено сохранение результата Telegram-only проверки: раньше tgOk и время сервисной проверки зависели от флага YouTube.
++- Первая ограниченная волна получила до 10 секунд вместо 5, отдельная проба — до 6,5 секунд. Мгновенное подключение не обещается; если рабочего маршрута нет, поиск продолжается.
++- Живой туннель больше не показывает успешную проверку только из-за HTTPS, если Telegram или YouTube явно отказали. Неизвестный Telegram — незавершённая проверка, не зелёный успех.
++- Watchdog проверяет MTProto без разрешения на статистику использования приложений. Повторный отказ запускает изолированные проверки текущих серверов и ограниченной порции резервов.
++- Восстановление Telegram ограничено одной попыткой в минуту, не переключает маршрут во время обнаруженного звонка и отбрасывает результаты после смены сети/ядра. Прямой обход не добавлен. Тор-маршруты не приписывают Telegram-сбой обычному VLESS-пулу.
++- Все подписки версии 1.2.67 сохранены.
++
++## Границы
++Это экспериментальное изменение, не подтверждённое исправление на телефоне пользователя. MTProto-проба проверяет unauthenticated req_pq/resPQ на выборке DC, без Telegram-аккаунта; не доказывает вход в аккаунт, работу всех DC, загрузок, видео или звонков. Периодическая проба выполняется через локальный SOCKS и не является независимым тестом пути Telegram-приложение → TUN.
++
++По просьбе владельца unit-тесты, lint, эмулятор и физический телефон не запускались. Workflow выполняет только сборку APK, подпись постоянным Beta-ключом, проверку сертификата и целостности установочных файлов. Не заявляется «все проверки зелёные» или работоспособность у операторов РФ. Стабильный релиз и старые APK не заменяются.
+--- a/app/src/main/java/com/vlesscardvpn/core/ProbeRace.kt
++++ b/app/src/main/java/com/vlesscardvpn/core/ProbeRace.kt
+@@ -9,7 +9,7 @@
+ object ProbeRace {
+     suspend fun run(indices: List<Int>, parallel: Int, stopAfter: Int,
+                     skip: (Int) -> Boolean = { false }, staggerMs: Long = 0, probe: suspend (Int) -> Probe,
+-                    onEach: (Int, Probe) -> Unit) = coroutineScope {
++                    accepted: (Probe) -> Boolean = { it.works }, onEach: (Int, Probe) -> Unit) = coroutineScope {
+         val parent = currentCoroutineContext()
+         val sem = Semaphore(parallel.coerceAtLeast(1))
+         val successes = AtomicInteger()
+@@ -22,7 +22,7 @@
+                         if (successes.get() >= stopAfter.coerceAtLeast(1) || skip(i)) onEach(i, Tester.SKIPPED)
+                         else {
+                             val result = probe(i)
+-                            val reached = result.works && successes.incrementAndGet() >= stopAfter.coerceAtLeast(1)
++                            val reached = accepted(result) && successes.incrementAndGet() >= stopAfter.coerceAtLeast(1)
+                             onEach(i, result)
+                             if (reached) {
+                                 val self = currentCoroutineContext()[Job]
+--- a/app/src/main/java/com/vlesscardvpn/core/Tester.kt
++++ b/app/src/main/java/com/vlesscardvpn/core/Tester.kt
+@@ -366,7 +366,7 @@
+         variants: List<Pair<Server, Mask?>>, testUrl: String, byeDpiPort: Int?, dpiPorts: Map<String, Int> = emptyMap(), youtube: Boolean = true,
+         batch: Int = 32, parallel: Int = 12, attempts: Int = 2, big: Boolean = true, telegram: Boolean = youtube, calls: Boolean = false, foreground: Boolean = false,
+         /** Early stop: variants for which this returns true are not probed (reported as skipped). */
+-        skip: (Int) -> Boolean = { false },
++        requireTelegram: Boolean = false, skip: (Int) -> Boolean = { false },
+         stopAfter: Int = Int.MAX_VALUE,
+         budgetMs: Long = 0,
+         onEach: (Int, Probe) -> Unit,
+@@ -374,7 +374,8 @@
+         withContext(Bg.io) {
+             val successes = java.util.concurrent.atomic.AtomicInteger()
+             fun skipped(i: Int) = successes.get() >= stopAfter.coerceAtLeast(1) || skip(i) || (variants[i].first.protocol == "wireguard" && variants[i].first.secret in Tunnel.wireguardKeys)
+-            fun report(i: Int, p: Probe) { if (p.works) successes.incrementAndGet(); onEach(i, p) }
++            fun accepted(p: Probe) = p.works && (!requireTelegram || p.tgOk == true)
++            fun report(i: Int, p: Probe) { if (accepted(p)) successes.incrementAndGet(); onEach(i, p) }
+             // Bound config/socket footprint too, not merely simultaneous HTTP calls.
+             val plan = PhonePower.state.value
+             val probeLimit = if (foreground) plan.foregroundRealParallel else plan.realParallel
+@@ -405,7 +406,7 @@
+                             skip = { i -> skipped(idx[i]) }, staggerMs = if (stopAfter == 1) 120 else 0,
+                             probe = { i -> CancellableProbe.run { bind -> probeSocks(ports[i], testUrl, big = big, youtube = youtube, telegram = telegram,
+                                 attempts = attempts, budgetMs = budgetMs, onCall = { call -> bind { call.cancel() } }, calls = calls, onCancel = bind) } },
+-                            onEach = { i, p -> report(idx[i], p) })
++                            accepted = { accepted(it) }, onEach = { i, p -> report(idx[i], p) })
+                     }
+                 } finally { core.stop() }
+             }
+--- a/app/src/main/java/com/vlesscardvpn/vpn/VpnWidget.kt
++++ b/app/src/main/java/com/vlesscardvpn/vpn/VpnWidget.kt
+@@ -30,7 +30,8 @@
+ 
+         /** Text and colour of the widget for a state (pure — tested). */
+         fun look(state: Tunnel.State, checkOk: Boolean?, route: String, message: String): Triple<Int, String, String> = when (state) {
+-            Tunnel.State.CONNECTED -> if (checkOk == false) Triple(R.drawable.widget_btn_warn, "Подключено · нет интернета", "Нажмите в приложении «Починить»")
++            Tunnel.State.CONNECTED -> if (checkOk == false) Triple(R.drawable.widget_btn_warn, "Подключено · есть проблемы", "Откройте приложение: часть проверок не прошла")
++                else if (checkOk == null) Triple(R.drawable.widget_btn_busy, "Проверяю маршрут…", route)
+                 else Triple(R.drawable.widget_btn_on, "Подключено", route.ifEmpty { "Нажмите, чтобы отключить" })
+             Tunnel.State.CONNECTING -> Triple(R.drawable.widget_btn_busy, "Подключение…", message.ifEmpty { "Подбираю сервер и маску" })
+             Tunnel.State.ERROR -> Triple(R.drawable.widget_btn_warn, "Ошибка", message.ifEmpty { "Нажмите, чтобы попробовать снова" })
+--- a/app/src/main/java/com/vlesscardvpn/ui/ChatScreen.kt
++++ b/app/src/main/java/com/vlesscardvpn/ui/ChatScreen.kt
+@@ -80,7 +80,7 @@
+                 .border(1.dp, Brush.linearGradient(listOf(Color(0x556A5CFF), Color(0x332EC2B5))), RoundedCornerShape(18.dp)).padding(12.dp),
+                 verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+-                    Tile("Связь", if (on) (if (status.checkOk == false) "Нет интернета" else "Подключено") else "Выключено",
++                    Tile("Связь", if (on) (if (status.checkOk == false) "Часть проверок не прошла" else if (status.checkOk == null) "Проверяю маршрут" else "Подключено") else "Выключено",
+                         if (on) (if (status.checkOk == false) Warn else Good) else MaterialTheme.colorScheme.onSurfaceVariant, Modifier.weight(1f))
+                     Tile("Маска", sum.mask.ifEmpty { "подберу сам" }, MaterialTheme.colorScheme.onSurface, Modifier.weight(1f))
+                     Tile("Лучший", if (sum.bestMs > 0) "${sum.bestMs} мс" + (if (sum.bestKbps > 0) " · " + Actions.mbps(sum.bestKbps) else "") else "—",
