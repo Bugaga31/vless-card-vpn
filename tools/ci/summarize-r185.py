@@ -1,6 +1,6 @@
 from pathlib import Path
 import json, os, xml.etree.ElementTree as ET
-report={"source_sha":os.environ["GITHUB_SHA"],"run_id":os.environ["GITHUB_RUN_ID"],"steps":{k:os.environ.get(k.upper()+"_OUTCOME","unknown") for k in ("host","jvm","lint")},"suites":[],"failures":[],"lint_errors":[]}
+report={"source_sha":os.environ.get("VALIDATED_SOURCE_SHA",os.environ["GITHUB_SHA"]),"run_id":os.environ["GITHUB_RUN_ID"],"steps":{k:os.environ.get(k.upper()+"_OUTCOME","unknown") for k in ("source","host","jvm","lint")},"suites":[],"failures":[],"lint_errors":[]}
 for p in sorted(Path('.').glob('*/build/test-results/test*UnitTest/TEST-*.xml')):
  root=ET.parse(p).getroot()
  report['suites'].append({"path":str(p),**{k:root.get(k) for k in ('name','tests','failures','errors','skipped')}})

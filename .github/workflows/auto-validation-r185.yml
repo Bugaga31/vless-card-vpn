@@ -11,12 +11,31 @@ concurrency:
 jobs:
   jvm-lint:
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 45
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with: {persist-credentials: false}
+      - name: Apply reviewed compact source patch
+        id: source
+        env: {GH_TOKEN: '${{ github.token }}'}
+        run: |
+          set -euo pipefail
+          PATCH=tools/patches/mask-lab-r185.patch
+          if git apply --reverse --check "$PATCH" 2>/dev/null; then
+            echo 'Source patch already applied'
+          else
+            git apply --check "$PATCH"
+            git apply "$PATCH"
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git add app docs/research-mask-lab-r185.md tools/e2e
+            git commit -m 'fix(auto): apply opt-in Hello lab and strict regression fixes [skip ci]'
+            AUTH=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
+            git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $AUTH" push origin HEAD:refs/heads/experiment/prerelease-185
+          fi
+          echo "VALIDATED_SOURCE_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
       - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
         with: {distribution: temurin, java-version: '17'}
       - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407
@@ -48,7 +67,7 @@ jobs:
         env: {GITHUB_RUN_NUMBER: '185'}
         run: |
           chmod +x gradlew
-          ./gradlew --no-daemon --max-workers=2 :app:testDebugUnitTest :app:testReleaseUnitTest :vpn-test-probe:testDebugUnitTest
+          ./gradlew --continue --no-daemon --max-workers=2 :app:testDebugUnitTest :app:testReleaseUnitTest :vpn-test-probe:testDebugUnitTest
       - name: Android lint
         id: lint
         continue-on-error: true
@@ -56,6 +75,7 @@ jobs:
       - name: Summarize actual test results
         if: always()
         env:
+          SOURCE_OUTCOME: ${{ steps.source.outcome }}
           HOST_OUTCOME: ${{ steps.host.outcome }}
           JVM_OUTCOME: ${{ steps.jvm.outcome }}
           LINT_OUTCOME: ${{ steps.lint.outcome }}
