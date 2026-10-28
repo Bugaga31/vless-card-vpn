@@ -28,9 +28,10 @@ fun ConnectionOverview(status:Tunnel.Status,hideRoute:Boolean,modeLabel:String,c
         colors=CardDefaults.cardColors(containerColor=MaterialTheme.colorScheme.surface)) {
         Column(Modifier.padding(20.dp),verticalArrangement=Arrangement.spacedBy(16.dp)) {
             Text(when {searching->"ПОИСК СОЕДИНЕНИЯ";on->"ТЕКУЩИЙ МАРШРУТ";issue->"НУЖНО ВНИМАНИЕ";else->"ЛИЧНАЯ СВЯЗЬ"},
-                color=tone,fontSize=12.sp,fontWeight=FontWeight.Bold,letterSpacing=1.sp)
+                color=tone,fontSize=14.sp,fontWeight=FontWeight.Bold,letterSpacing=1.sp)
             Text(ConnectionPresentationPolicy.heading(status.state,status.checkOk),fontSize=28.sp,
                 lineHeight=34.sp,fontWeight=FontWeight.SemiBold,color=MaterialTheme.colorScheme.onSurface)
+            control()
             Text(when {
                 searching->"Проверяем HTTPS и Telegram. Поиск можно отменить в любой момент."
                 status.state==Tunnel.State.ERROR->"Сохранённые серверы и настройки остаются на месте. Попробуйте снова или откройте диагностику."
@@ -39,7 +40,6 @@ fun ConnectionOverview(status:Tunnel.Status,hideRoute:Boolean,modeLabel:String,c
                 on->"Локальные пробы подтвердили маршрут. Доступность аккаунтов и звонков проверяется отдельно."
                 else->"Один основной маршрут. Проверенные резервы — на случай сбоя."
             },fontSize=15.sp,lineHeight=22.sp,color=MaterialTheme.colorScheme.onSurfaceVariant)
-            control()
             if(status.message.isNotBlank()) Text(status.message,fontSize=14.sp,
                 color=if(status.state==Tunnel.State.ERROR) Bad else MaterialTheme.colorScheme.onSurfaceVariant)
             HorizontalDivider(color=MaterialTheme.colorScheme.outline.copy(alpha=.3f))

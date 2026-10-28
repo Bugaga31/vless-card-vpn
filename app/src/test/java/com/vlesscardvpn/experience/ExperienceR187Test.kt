@@ -113,4 +113,13 @@ class ExperienceR187Test {
         assertTrue(TrafficAccountingPolicy.nearLimit(Long.MAX_VALUE,Long.MAX_VALUE));assertFalse(TrafficAccountingPolicy.nearLimit(0,0))
         assertTrue(TrafficAccountingPolicy.nearLimit(900,1000));assertFalse(TrafficAccountingPolicy.nearLimit(899,1000))
     }
+    @Test fun newSuccessWithoutTimingCannotRefreshAnOldSpeedEstimate() {
+        val m=MaskExperimentMemory();observe(m,"old",100,40)
+        observe(m,"old",700_000,null,true)
+        assertEquals("new",m.choose("n","h","s",listOf("old","new"),700_002,1).single())
+    }
+    @Test fun invalidPreviousCounterCannotOverflowDelta() {
+        assertEquals(0L,TrafficAccountingPolicy.delta(-1,Long.MAX_VALUE))
+        assertEquals(0L,TrafficAccountingPolicy.delta(100,-1))
+    }
 }
