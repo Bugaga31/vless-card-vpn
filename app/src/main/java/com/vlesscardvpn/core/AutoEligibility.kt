@@ -53,8 +53,10 @@ object AutoEligibility {
         if (results.any { it == false }) return 2
         return if (results.all { it == true }) 0 else 1
     }
+    fun telegramRank(s: ServerState, net: String, now: Long): Int = serviceRank(s, net, now, setOf("telegram"))
     fun <T> servicePool(list: List<T>, state: (T) -> ServerState, net: String, now: Long): List<T> {
-        val usable = list.filter { serviceRank(state(it),net,now) != 2 }
-        return usable
+        // HTTPS alone is not proof that a native Telegram connection works.
+        // Unknown, expired and different-mask samples must be revalidated before Auto selects them.
+        return list.filter { serviceRank(state(it),net,now) != 2 && telegramRank(state(it),net,now) == 0 }
     }
 }

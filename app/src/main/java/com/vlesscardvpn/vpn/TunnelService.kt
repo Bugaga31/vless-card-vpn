@@ -476,6 +476,12 @@ class TunnelService : VpnService() {
             // right after connecting the first packets may still be on their way (WireGuard/WARP handshake, a slow
             // mobile network): one calm second try before calling the route bad and starting a heal or a reconnect
             if (!p.works) { delay(3000); if (Tunnel.socks?.port == port) p = Tester.probeSocks(port, st.testUrl, big = false, youtube = checkServices, attempts = 1, budgetMs = 5000) }
+            if (p.works && checkServices && p.tgOk == false) {
+                delay(1500)
+                if (core !== sampledCore || Tunnel.socks != auth || Net.key(this@TunnelService) != sampledNet ||
+                    Net.underlying(this@TunnelService)?.toString() != sampledHandle) return@launch
+                p = Tester.probeSocks(port, st.testUrl, big = false, youtube = checkServices, attempts = 1, budgetMs = 6500L)
+            }
             // A SOCKS HTTPS success uses remote name resolution and does not prove
             // Android apps' UDP DNS path. Never show a healthy VPN on that evidence alone.
             val dnsOk = if (p.works && !st.proxyOnly) com.vlesscardvpn.core.CancellableProbe.run { bind ->
@@ -498,10 +504,16 @@ class TunnelService : VpnService() {
                 Net.key(this@TunnelService) != sampledNet || Net.underlying(this@TunnelService)?.toString() != sampledHandle) return@launch
             val text = if(chainExitRejected) "Выход Tor не подтверждён или недопустим — возвращаюсь к проверенному Auto" else if (p.realMs > 0) "HTTPS · ${p.realMs} мс · Видео YouTube: ${if(p.ytOk==true) "✓" else if(p.ytOk==false) "нет ответа" else "не проверен"} · Telegram MTProto: ${if(p.tgOk==true) "✓" else if(p.tgOk==false) "нет ответа" else "не проверен"}$warp"
                 else "Нет ответа через выбранный маршрут (${p.error}). " + if (st.mode == Mode.AUTO && st.autoHeal) "Ищу рабочий вариант сам…" else "Проверьте серверы или включите маскировку."
-            Tunnel.status.value = cur.copy(check = text, checkOk = p.works && !chainExitRejected)
+            val liveHealthy: Boolean? = when {
+                !p.works || chainExitRejected -> false
+                st.mode == Mode.AUTO && (p.tgOk == false || p.ytOk == false) -> false
+                st.mode == Mode.AUTO && p.tgOk == null -> null
+                else -> true
+            }
+            Tunnel.status.value = cur.copy(check = text, checkOk = liveHealthy)
             if (attributeServers) runCatching { val stv = Store.state.value; com.vlesscardvpn.core.Brain.lived(sampledNet, sampledServers, { stv.state(it) }, p.works); com.vlesscardvpn.core.Brain.save(this@TunnelService) }
             Log.i("E2E", "check ok=${p.works} ms=${p.realMs} big=${p.bigOk} yt=${p.ytOk} tg=${p.tgOk} err=${p.error} warp=$warp dns=$dnsOk")
-            if (attributeServers && p.works && st.mode == Mode.AUTO) Actions.rememberNet(sampledNet)
+            if (attributeServers && liveHealthy == true && st.mode == Mode.AUTO) Actions.rememberNet(sampledNet)
             // «Умный YouTube» broke YouTube here (the bypass stopped working): back to the servers for YouTube
             if (p.realMs > 0 && p.ytOk == false && Tunnel.ytViaDpi) {
                 val net = Net.key(this@TunnelService)
@@ -515,6 +527,13 @@ class TunnelService : VpnService() {
                 chainChoice=chainReserves.take(st,sampledNet,chainEpoch.get(),android.os.SystemClock.elapsedRealtime(),usedChain?.chain?.id)
                 usedChain=null; chainScanAfter=if(chainChoice == null) android.os.SystemClock.elapsedRealtime()+120_000 else 0L
                 scope.launch { lock.withLock { connect(soft=true) } }
+                return@launch
+            }
+            // HTTPS success must not suppress recovery of a broken native service.
+            if (p.works && st.mode == Mode.AUTO && p.tgOk == false && usedChain == null && !st.torAll &&
+                !(st.torRouting && "telegram" in st.services)) {
+                watchdog()
+                repairTelegramRoute()
                 return@launch
             }
             if (!p.works && lastSoft && Store.state.value.settings.autoHeal) {
@@ -886,13 +905,13 @@ class TunnelService : VpnService() {
     private fun watchdog() {
         if (watchJob?.isActive == true) return
         watchJob = scope.launch {
-            var miss = 0; var dnsMiss = 0; var stall = 0
+            var miss = 0; var dnsMiss = 0; var stall = 0; var telegramMiss = 0
             var offline = false
             var wasAsleep = false
             var stats = TProxyService.stats()
             while (Tunnel.status.value.state == Tunnel.State.CONNECTED) {
                 // wait 45 s (10 s offline), but check right away when the screen turns back on — that's when apps are opened
-                var waited = 0L; val period = if (offline) 10_000L else if (miss > 0) 3_000L else com.vlesscardvpn.core.PhonePower.refresh(this@TunnelService).healthyMs
+                var waited = 0L; val period = if (offline) 10_000L else if (miss > 0 || telegramMiss > 0) 3_000L else com.vlesscardvpn.core.PhonePower.refresh(this@TunnelService).healthyMs
                 while (waited < period) { val d = if (asleep()) maxOf(60000L, period - waited) else minOf(5000L, period - waited); delay(d); waited += d; val a = asleep(); if (wasAsleep && !a) { wasAsleep = false; delay(1500); break }; wasAsleep = a }
                 com.vlesscardvpn.core.Traffic.tick()
                 if (healJob?.isActive == true || asleep()) continue
@@ -901,7 +920,29 @@ class TunnelService : VpnService() {
                 val vpnMode = true
                 // the TUN engine stopped: nothing in the phone works, though the proxy itself is fine — rebuild like the big button
                 if (vpnMode && runCatching { !TProxyService.TProxyIsRunning() }.getOrDefault(false)) { hardRestart("движок VPN остановился"); break }
-                val ok = Tester.probeSocks(port, Store.state.value.settings.testUrl, big = false, youtube = false, attempts = 1).realMs > 0
+                val settings = Store.state.value.settings
+                val sampledCore = core
+                val network = Net.key(this@TunnelService)
+                val handle = Net.underlying(this@TunnelService)?.toString()
+                val checkTelegram = settings.mode == Mode.AUTO && !settings.torAll &&
+                    !(settings.torRouting && "telegram" in settings.services) && usedChain == null
+                val live = com.vlesscardvpn.core.CancellableProbe.run { bind ->
+                    Tester.probeSocks(port, settings.testUrl, big = false, youtube = false, telegram = checkTelegram,
+                        attempts = 1, budgetMs = 6500L, onCall = { call -> bind { call.cancel() } }, onCancel = bind)
+                }
+                if (core !== sampledCore || Tunnel.socks != auth || Net.key(this@TunnelService) != network ||
+                    Net.underlying(this@TunnelService)?.toString() != handle) { telegramMiss = 0; continue }
+                val ok = live.works
+                if (ok && checkTelegram) {
+                    val wasFailing = telegramMiss > 0
+                    telegramMiss = when (live.tgOk) { true -> 0; false -> telegramMiss + 1; null -> telegramMiss }
+                    if (live.tgOk == false) {
+                        val cur = Tunnel.status.value
+                        Tunnel.status.value = cur.copy(check = "HTTPS отвечает, Telegram MTProto — нет. Перепроверяю и подбираю маршрут…", checkOk = false)
+                    }
+                    if (telegramMiss >= 2) { repairTelegramRoute(); telegramMiss = 0 }
+                    else if (live.tgOk == true && (wasFailing || Tunnel.status.value.checkOk == null)) verifySoon(0)
+                }
                 if (!ok && !Actions.online()) {
                     miss = 0
                     val cur = Tunnel.status.value
@@ -996,6 +1037,39 @@ class TunnelService : VpnService() {
         if (cur.state == Tunnel.State.CONNECTED) Tunnel.status.value = cur.copy(check = "Сам переподключаюсь: $why", checkOk = null)
         com.vlesscardvpn.core.AppWatch.note("Связь: $why — переподключился сам, нажимать кнопку не нужно")
         scope.launch { lock.withLock { connect(soft = false) } }
+    }
+
+    private var telegramRepairAt = -60_000L
+    /** Isolate bad members instead of restarting the same aggregate pool indefinitely. */
+    private fun repairTelegramRoute() {
+        if (recoveryJob?.isActive == true || tun == null || Tunnel.socks == null) return
+        if (com.vlesscardvpn.core.PhonePower.isVoiceCallActive(this)) return
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (now - telegramRepairAt < 60_000L) return
+        telegramRepairAt = now
+        val sampledCore = core
+        val auth = Tunnel.socks
+        val network = Net.key(this); val handle = Net.underlying(this)?.toString()
+        val servers = usedServers.toList()
+        recoveryJob = scope.launch {
+            val before = Tunnel.status.value
+            Tunnel.status.value = before.copy(check = "Telegram не отвечает — проверяю серверы отдельно и ищу резерв", checkOk = false)
+            val found = try { Store.busy { Actions.repairTelegram(servers) } }
+                catch (e: kotlinx.coroutines.CancellationException) { throw e }
+                catch (e: Exception) { Log.w(TAG, "Telegram repair failed", e); 0 }
+            if (core !== sampledCore || Tunnel.socks != auth || Net.key(this@TunnelService) != network ||
+                Net.underlying(this@TunnelService)?.toString() != handle || Tunnel.status.value.state != Tunnel.State.CONNECTED) return@launch
+            if (found > 0) lock.withLock {
+                if (core === sampledCore && Tunnel.socks == auth && Net.key(this@TunnelService) == network &&
+                    Net.underlying(this@TunnelService)?.toString() == handle &&
+                    !com.vlesscardvpn.core.PhonePower.isVoiceCallActive(this@TunnelService)) connect(soft = true)
+            } else {
+                val cur = Tunnel.status.value
+                Tunnel.status.value = cur.copy(check = "HTTPS есть, Telegram пока не подтверждён. Рабочий резерв не найден; повторю поиск автоматически", checkOk = false)
+                Actions.deepPending = true
+                scheduleOptimize(5_000)
+            }
+        }
     }
 
     private var healJob: Job? = null

@@ -366,7 +366,7 @@ object Tester {
         variants: List<Pair<Server, Mask?>>, testUrl: String, byeDpiPort: Int?, dpiPorts: Map<String, Int> = emptyMap(), youtube: Boolean = true,
         batch: Int = 32, parallel: Int = 12, attempts: Int = 2, big: Boolean = true, telegram: Boolean = youtube, calls: Boolean = false, foreground: Boolean = false,
         /** Early stop: variants for which this returns true are not probed (reported as skipped). */
-        skip: (Int) -> Boolean = { false },
+        requireTelegram: Boolean = false, skip: (Int) -> Boolean = { false },
         stopAfter: Int = Int.MAX_VALUE,
         budgetMs: Long = 0,
         onEach: (Int, Probe) -> Unit,
@@ -374,7 +374,8 @@ object Tester {
         withContext(Bg.io) {
             val successes = java.util.concurrent.atomic.AtomicInteger()
             fun skipped(i: Int) = successes.get() >= stopAfter.coerceAtLeast(1) || skip(i) || (variants[i].first.protocol == "wireguard" && variants[i].first.secret in Tunnel.wireguardKeys)
-            fun report(i: Int, p: Probe) { if (p.works) successes.incrementAndGet(); onEach(i, p) }
+            fun accepted(p: Probe) = p.works && (!requireTelegram || p.tgOk == true)
+            fun report(i: Int, p: Probe) { if (accepted(p)) successes.incrementAndGet(); onEach(i, p) }
             // Bound config/socket footprint too, not merely simultaneous HTTP calls.
             val plan = PhonePower.state.value
             val probeLimit = if (foreground) plan.foregroundRealParallel else plan.realParallel
@@ -405,7 +406,7 @@ object Tester {
                             skip = { i -> skipped(idx[i]) }, staggerMs = if (stopAfter == 1) 120 else 0,
                             probe = { i -> CancellableProbe.run { bind -> probeSocks(ports[i], testUrl, big = big, youtube = youtube, telegram = telegram,
                                 attempts = attempts, budgetMs = budgetMs, onCall = { call -> bind { call.cancel() } }, calls = calls, onCancel = bind) } },
-                            onEach = { i, p -> report(idx[i], p) })
+                            accepted = { accepted(it) }, onEach = { i, p -> report(idx[i], p) })
                     }
                 } finally { core.stop() }
             }

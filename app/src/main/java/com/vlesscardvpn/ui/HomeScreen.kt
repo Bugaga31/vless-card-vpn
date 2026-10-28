@@ -118,7 +118,7 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
         fun reconnect() { if (status.state == Tunnel.State.CONNECTED) onConnect() }
         val on = status.state == Tunnel.State.CONNECTED
         val busy = status.state == Tunnel.State.CONNECTING
-        val color = when { on && status.checkOk == false -> Warn; on -> Good; busy -> Accent; else -> MaterialTheme.colorScheme.primary }
+        val color = when { on && status.checkOk == false -> Warn; on && status.checkOk == null -> Accent; on -> Good; busy -> Accent; else -> MaterialTheme.colorScheme.primary }
         PowerButton(on, busy, color) { if (on || busy) onDisconnect() else onConnect() }
         if (status.message.isNotEmpty()) Text(status.message, color = if (status.state == Tunnel.State.ERROR) Bad else MaterialTheme.colorScheme.onBackground,
             textAlign = TextAlign.Center, fontWeight = FontWeight.Medium)
@@ -129,11 +129,11 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
             Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text(if (busy) "Ищу быстрый маршрут" else if (on) "Маршрут подключён" else "Готовы к подключению",
+                        Text(if (busy) "Ищу быстрый маршрут" else if (on && status.checkOk == false) "Часть проверок не прошла" else if (on && status.checkOk == null) "Проверяю маршрут" else if (on) "Маршрут подключён" else "Готовы к подключению",
                             fontWeight = FontWeight.SemiBold, fontSize = 17.sp)
                         Text(when {
-                            busy && cfg.torAll -> "Цель — VPN-маршрут примерно за 5 секунд; Tor строит цепочку отдельно."
-                            busy -> "Цель — первый VPN-маршрут примерно за 5 секунд. Если быстрых кандидатов нет, поиск продолжится."
+                            busy && cfg.torAll -> "Проверяю HTTPS и Telegram; Tor строит цепочку отдельно."
+                            busy -> "Авто выбирает маршрут после HTTPS и ответа Telegram MTProto. Если готового нет, поиск продолжится."
                             on && cfg.torAll -> "VPN работает; первая Tor-цепочка может собираться дольше пяти секунд."
                             on -> "Сравнение скорости резервов продолжается после подключения."
                             else -> "Авто начинает с сохранённых маршрутов и памяти этой сети."

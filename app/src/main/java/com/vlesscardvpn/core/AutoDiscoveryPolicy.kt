@@ -5,7 +5,7 @@ import com.vlesscardvpn.model.Subs
 /** User-triggered discovery, not a background whole-catalog scan. Times are monotonic. */
 object AutoDiscoveryPolicy {
     const val FAST_MS = 10_000L
-    const val FIRST_CONNECT_MS = 5_000L
+    const val FIRST_CONNECT_MS = 10_000L
     const val RECOVERY_MS = 45_000L
     const val SOURCE_MS = 3000L
     const val SOURCES = 4

@@ -80,7 +80,7 @@ fun ChatScreen() {
                 .border(1.dp, Brush.linearGradient(listOf(Color(0x556A5CFF), Color(0x332EC2B5))), RoundedCornerShape(18.dp)).padding(12.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Tile("Связь", if (on) (if (status.checkOk == false) "Нет интернета" else "Подключено") else "Выключено",
+                    Tile("Связь", if (on) (if (status.checkOk == false) "Часть проверок не прошла" else if (status.checkOk == null) "Проверяю маршрут" else "Подключено") else "Выключено",
                         if (on) (if (status.checkOk == false) Warn else Good) else MaterialTheme.colorScheme.onSurfaceVariant, Modifier.weight(1f))
                     Tile("Маска", sum.mask.ifEmpty { "подберу сам" }, MaterialTheme.colorScheme.onSurface, Modifier.weight(1f))
                     Tile("Лучший", if (sum.bestMs > 0) "${sum.bestMs} мс" + (if (sum.bestKbps > 0) " · " + Actions.mbps(sum.bestKbps) else "") else "—",
