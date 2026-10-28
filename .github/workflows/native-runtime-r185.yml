@@ -12,6 +12,22 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with: {persist-credentials: false}
+      - name: Apply the same reviewed laboratory source
+        env: {GH_TOKEN: '${{ github.token }}'}
+        run: |
+          set -euo pipefail
+          base64 -d tools/patches/mask-lab-r185.patch.gz.b64 | gzip -d > "$RUNNER_TEMP/mask-lab-r185.patch"
+          echo '43e0ce8896014bfdd3ff71258945aff8e1cbefcff75acc59ea08f124a7f9d919  '"$RUNNER_TEMP/mask-lab-r185.patch" | sha256sum -c -
+          PATCH="$RUNNER_TEMP/mask-lab-r185.patch"
+          git apply --check "$PATCH"
+          git apply "$PATCH"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app docs/research-mask-lab-r185.md
+          git commit -m 'fix(auto): apply laboratory source to native test harness [skip ci]'
+          AUTH=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $AUTH" push origin HEAD:refs/heads/experiment/validation-r185-lab-device
+          echo "VALIDATED_SOURCE_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
       - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
         with: {distribution: temurin, java-version: '17'}
       - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407
