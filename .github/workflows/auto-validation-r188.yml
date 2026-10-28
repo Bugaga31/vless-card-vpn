@@ -32,7 +32,7 @@ jobs:
             git apply "$PATCH"
             git config user.name 'github-actions[bot]'
             git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-            git add app docs/research-auto-session-r188.md
+            git add app
             git commit -m 'fix(auto): bound search and account for started probes [skip ci]'
             AUTH=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
             git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $AUTH" push origin HEAD:refs/heads/integration/auto-session-r188
