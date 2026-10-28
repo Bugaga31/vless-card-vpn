@@ -480,15 +480,15 @@ class TunnelService : VpnService() {
             val sampledCore = core
             val sampledChainEpoch = chainEpoch.get()
             val checkServices = st.mode == Mode.AUTO || Tunnel.ytViaDpi
-            var p = Tester.probeSocks(port, st.testUrl, big = false, youtube = checkServices, attempts = 1, budgetMs = 5000)
+            var p = Tester.probeSocks(port, st.testUrl, big = false, youtube = Tunnel.ytViaDpi, telegram = checkServices, attempts = 1, budgetMs = 5000)
             // right after connecting the first packets may still be on their way (WireGuard/WARP handshake, a slow
             // mobile network): one calm second try before calling the route bad and starting a heal or a reconnect
-            if (!p.works) { delay(3000); if (Tunnel.socks?.port == port) p = Tester.probeSocks(port, st.testUrl, big = false, youtube = checkServices, attempts = 1, budgetMs = 5000) }
+            if (!p.works) { delay(3000); if (Tunnel.socks?.port == port) p = Tester.probeSocks(port, st.testUrl, big = false, youtube = Tunnel.ytViaDpi, telegram = checkServices, attempts = 1, budgetMs = 5000) }
             if (p.works && checkServices && p.tgOk == false) {
                 delay(1500)
                 if (core !== sampledCore || Tunnel.socks != auth || Net.key(this@TunnelService) != sampledNet ||
                     Net.underlying(this@TunnelService)?.toString() != sampledHandle) return@launch
-                p = Tester.probeSocks(port, st.testUrl, big = false, youtube = checkServices, attempts = 1, budgetMs = 6500L)
+                p = Tester.probeSocks(port, st.testUrl, big = false, youtube = Tunnel.ytViaDpi, telegram = checkServices, attempts = 1, budgetMs = 6500L)
             }
             // A SOCKS HTTPS success uses remote name resolution and does not prove
             // Android apps' UDP DNS path. Never show a healthy VPN on that evidence alone.
@@ -920,11 +920,13 @@ class TunnelService : VpnService() {
         watchJob = scope.launch {
             var miss = 0; var dnsMiss = 0; var stall = 0; var telegramMiss = 0
             var offline = false
+            var servicePending = Store.state.value.settings.mode == Mode.AUTO &&
+                com.vlesscardvpn.core.ConnectionPassport.state.value.telegram.value != true
             var wasAsleep = false
             var stats = TProxyService.stats()
             while (Tunnel.status.value.state == Tunnel.State.CONNECTED) {
                 // wait 45 s (10 s offline), but check right away when the screen turns back on — that's when apps are opened
-                var waited = 0L; val period = if (offline) 10_000L else if (miss > 0 || telegramMiss > 0) 3_000L else com.vlesscardvpn.core.PhonePower.refresh(this@TunnelService).healthyMs
+                var waited = 0L; val period = if (offline) 10_000L else if (miss > 0 || dnsMiss > 0 || telegramMiss > 0 || servicePending && Store.state.value.settings.mode == Mode.AUTO && usedChain==null && !usedTorRoute) 3_000L else com.vlesscardvpn.core.PhonePower.refresh(this@TunnelService).healthyMs
                 while (waited < period) { val d = if (asleep()) maxOf(60000L, period - waited) else minOf(5000L, period - waited); delay(d); waited += d; val a = asleep(); if (wasAsleep && !a) { wasAsleep = false; delay(1500); break }; wasAsleep = a }
                 com.vlesscardvpn.core.Traffic.tick()
                 if (healJob?.isActive == true || asleep()) continue
@@ -948,7 +950,8 @@ class TunnelService : VpnService() {
                 val ok = live.works
                 com.vlesscardvpn.core.ConnectionPassport.light(ok,live.tgOk,checkTelegram)
                 if (ok && checkTelegram) {
-                    val wasFailing = telegramMiss > 0
+                    val wasFailing = telegramMiss > 0 || servicePending
+                    servicePending = live.tgOk != true
                     telegramMiss = when (live.tgOk) { true -> 0; false -> telegramMiss + 1; null -> telegramMiss }
                     if (live.tgOk == false) {
                         val cur = Tunnel.status.value
@@ -975,8 +978,10 @@ class TunnelService : VpnService() {
                     }
                     Log.i("E2E", "watchdog: connection lost")
                     val cur = Tunnel.status.value
-                    Tunnel.status.value = cur.copy(check = "Связь пропала — пересобираю соединение…", checkOk = false)
-                    hardRestart("сервер перестал отвечать"); break
+                    Tunnel.status.value = cur.copy(check = "Связь пропала — проверяю резервный маршрут…", checkOk = false)
+                    if(settings.mode==Mode.AUTO && usedChain==null && !usedTorRoute) recoverServerRoute()
+                    else hardRestart("сервер перестал отвечать")
+                    break
                 }
                 if (ok && vpnMode) {
                     // the proxy works, but do apps? DNS the way apps ask it, and traffic through the TUN in both directions
@@ -1105,6 +1110,9 @@ class TunnelService : VpnService() {
         if (recoveryJob?.isActive == true || tun == null || Tunnel.socks == null) return
         recoveryJob = scope.launch {
             var attempt = 0
+            val attempted=mutableSetOf<String>()
+            var identity=Net.key(this@TunnelService) to Net.underlying(this@TunnelService)?.toString()
+            var resetAt=android.os.SystemClock.elapsedRealtime()
             while (tun != null && Tunnel.socks != null && Tunnel.status.value.state == Tunnel.State.CONNECTED) {
                 if (com.vlesscardvpn.core.PhonePower.isVoiceCallActive(this@TunnelService)) {
                     healStatus("Идёт звонок — не переключаю маршрут; VPN блокирует трафик до восстановления сервера")
@@ -1117,19 +1125,32 @@ class TunnelService : VpnService() {
                     continue
                 }
                 healStatus(if (attempt == 0) "Сервер не отвечает — ищу рабочий VLESS-маршрут; прямого обхода нет" else "VLESS-маршрут не найден — повторяю поиск")
+                val physical=Net.key(this@TunnelService) to Net.underlying(this@TunnelService)?.toString()
+                val elapsed=android.os.SystemClock.elapsedRealtime()
+                if(physical!=identity || elapsed<resetAt || elapsed-resetAt>=60_000L &&
+                    Store.state.value.servers.filter(com.vlesscardvpn.core.AutoEligibility::vlessServer).all {it.id in attempted}) {
+                    attempted.clear();identity=physical;resetAt=elapsed
+                }
+                val sampledCore=core;val auth=Tunnel.socks
                 val level = if (attempt == 0) 1 else 3
-                val found = runCatching { Store.busy { Actions.autoRescue(usedServers, level) } }.getOrDefault(0)
+                val found = try { Store.busy { Actions.autoRescue(usedServers, level, attempted=attempted) } }
+                    catch(e:kotlinx.coroutines.CancellationException) {throw e}
+                    catch(e:Exception) {Log.w(TAG,"Auto recovery failed",e);0}
+                kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                if(physical!=(Net.key(this@TunnelService) to Net.underlying(this@TunnelService)?.toString()) ||
+                    core!==sampledCore || Tunnel.socks!=auth) continue
                 if (found > 0) {
                     safeMasks = false
                     connectFails = 0
                     lock.withLock {
-                        if (tun != null && Tunnel.status.value.state == Tunnel.State.CONNECTED) connect(soft = true)
+                        if (tun != null && Tunnel.status.value.state == Tunnel.State.CONNECTED && core===sampledCore &&
+                            Tunnel.socks==auth && physical==(Net.key(this@TunnelService) to Net.underlying(this@TunnelService)?.toString())) connect(soft = true)
                     }
                     if (Tunnel.status.value.check == "Проверяю интернет…") break
                 }
                 attempt++
-                healStatus("Рабочего VLESS-сервера пока нет. Трафик остаётся заблокированным; повторный поиск через ${minOf(60, attempt * 5)} с")
-                delay(minOf(60_000L, 5_000L * attempt.coerceAtMost(12)))
+                healStatus("Рабочего VLESS-сервера пока нет. Трафик остаётся заблокированным; повторный поиск через ${minOf(15, attempt * 3)} с")
+                delay(minOf(15_000L, 3_000L * attempt.coerceAtMost(5)))
             }
         }
     }

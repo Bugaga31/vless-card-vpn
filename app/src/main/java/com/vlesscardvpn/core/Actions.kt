@@ -1100,37 +1100,61 @@ object Actions {
 
     /**
      * Auto mode, the connection stopped working: find something that works instead of giving up.
-     * level 1 — other servers that passed; 2 — mask search (with mask evolution) for the reachable ones;
+     * level 1 — fresh HTTPS+MTProto verification of spares; 2 — next host wave and light Hello rescue;
      * 3 — bounded subscription rescue and the next small wave. Returns the number of servers selected (0 = nothing found).
      */
-    suspend fun autoRescue(failed: Collection<Server>, level: Int, onStep: (String) -> Unit = {}): Int {
+    suspend fun autoRescue(failed: Collection<Server>, level: Int, attempted: MutableSet<String> = mutableSetOf(),
+        onStep: (String) -> Unit = {}): Int = coroutineScope {
         val now = System.currentTimeMillis()
-        val ids = failed.map { it.id }.toHashSet()
-        if (ids.isNotEmpty()) Store.setStates(failed.associate { s -> s.id to { x: com.vlesscardvpn.model.ServerState -> x.copy(realMs = 0, checkedAt = now) } })
-        fun working() = Store.state.value.let { st -> st.servers.filter { it.id !in ids && st.state(it).works } }
-        // re-check the spares first (2–4 s, outside the tunnel): old «works» marks must not send us to a dead server
-        working().let { w -> Store.state.value.let { st -> runCatching { Brain.load(app) }; Brain.order(Net.key(app), preferred(st, w)) { st.state(it) }.take(12) } }.takeIf { it.isNotEmpty() }?.let {
-            onStep("проверяю запасные серверы"); realTest(it, "Авто: проверяю запасные", big = false, attempts = 1)
+        val net=Net.key(app);val handle=Net.underlying(app)?.toString()
+        fun valid()=Net.key(app)==net && Net.underlying(app)?.toString()==handle
+        val ids=failed.mapTo(HashSet()){it.id}
+        if(ids.isNotEmpty()) Store.setStates(failed.associate {server -> server.id to {x:com.vlesscardvpn.model.ServerState ->
+            if(valid()) x.copy(realMs=0,checkedAt=now) else x } })
+        fun selectFresh():Int {
+            if(!valid()) return 0
+            val st=Store.state.value
+            val fresh=AutoEligibility.servicePool(preferred(st,st.servers.filter {
+                it.id !in ids && st.state(it).works && st.state(it).checkedAt>=now
+            }),{st.state(it)},net,System.currentTimeMillis())
+            return if(fresh.isEmpty()) 0 else selectBest(1,close=true,among=fresh)
         }
-        working().takeIf { it.isNotEmpty() }?.let { val n = selectBest(10, close = true, among = it); if (n > 0) return n }
-        if (level < 2) return 0
-        onStep("подбираю маскировку для доступных серверов")
-        val st = Store.state.value
-        val cand = (failed + st.servers.filter { st.state(it).tcpMs > 0 && it.id !in ids }.sortedBy { st.state(it).tcpMs }.take(10)).distinctBy { it.id }
-        if (cand.isNotEmpty()) doFindMasks(cand.take(2), 8, enough = 1, budgetMs = 4000)
-        Store.state.value.let { s2 -> s2.servers.filter { s2.state(it).works } }.takeIf { it.isNotEmpty() }?.let { val n = selectBest(10, close = true, among = it); if (n > 0) return n }
-        // dead servers behind Cloudflare: the same server on another (unblocked) edge address
-        (failed.filter { Revive.cdnLike(it) } + deadCdn()).distinctBy { it.id }.takeIf { it.isNotEmpty() }?.let { d ->
-            onStep("оживляю серверы за Cloudflare"); if (doRevive(d, 6) > 0) return selectBest(10, close = true)
-        }
-        if (level < 3) return 0
-        onStep("обновляю источники и проверяю следующую ограниченную волну")
-        kotlinx.coroutines.withTimeoutOrNull(AutoDiscoveryPolicy.FAST_MS) {
-            refreshAutoSources { }
-            quickTest(Store.state.value.servers, attempted = ids, firstWaveOnly = true)
-        }
-        Store.state.value.let { s3 -> s3.servers.filter { s3.state(it).works } }.takeIf { it.isNotEmpty() }?.let { val n = selectBest(10, close = true, among = it); if (n > 0) return n }
-        return 0 // No full-catalog scan, WARP setup or another two-minute mask loop on the repair path.
+        val sourceRound=attempted.size/ConnectPolicy.FIRST
+        val refresh=if(level>=3) launch(Bg.io) {
+            kotlinx.coroutines.withTimeoutOrNull(AutoDiscoveryPolicy.SOURCE_MS+1000L) {
+                refreshAutoSources(sourceRound) { }
+            }
+        } else null
+        try {
+            kotlinx.coroutines.withTimeoutOrNull(18_000L) {
+                val st=Store.state.value
+                val spares=ServerChoice.diverse(preferred(st,st.servers.filter {
+                    it.id !in ids && it.id !in attempted && st.state(it).works
+                }),4)
+                if(spares.isNotEmpty()) {
+                    onStep("проверяю резерв: HTTPS и Telegram")
+                    attempted.addAll(spares.map {it.id})
+                    realTest(spares,"Авто: проверяю резерв",big=false,youtube=false,telegram=true,
+                        attempts=1,parallel=4,budgetMs=6500L,foreground=true,stopAfter=1)
+                }
+                if(selectFresh()>0) return@withTimeoutOrNull
+                if(level>=2 && valid()) {
+                    onStep("проверяю следующую порцию доступных хостов")
+                    // Do not exclude all cloud-blocked endpoints or return to the same failed primary.
+                    attempted.addAll(ids)
+                    quickTest(Store.state.value.servers,attempted=attempted,firstWaveOnly=true,allowMaskRescue=false)
+                }
+            }
+            val selected=selectFresh()
+            if(selected>0 || level<2 || !valid()) return@coroutineScope selected
+            onStep("проверяю лёгкую маскировку без смены работающего TUN")
+            val st=Store.state.value
+            val rescue=quickMaskRescue(ServerChoice.diverse(preferred(st,st.servers).filter {
+                it.id in ids || it.id in attempted
+            },2),net,handle)
+            if(rescue!=null && valid()) return@coroutineScope selectBest(1,among=listOf(rescue),close=true)
+            0
+        } finally { refresh?.cancel(); refresh?.join() }
     }
 
     /** Recheck current routes separately, then bounded alternatives; no direct fallback or account login. */
@@ -1213,25 +1237,18 @@ object Actions {
         val passed = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
         val prev = progress.value
         try {
-            kotlinx.coroutines.withTimeoutOrNull(5000) {
-                realTest(candidates, "Новая сеть: проверяю маршруты", big = false, youtube = false,
-                    attempts = 1, parallel = 4, budgetMs = 1800, onSuccess = { passed.add(it.id) })
+            kotlinx.coroutines.withTimeoutOrNull(8500L) {
+                realTest(candidates, "Новая сеть: HTTPS и Telegram MTProto", big = false, youtube = false,
+                    telegram = true, foreground = true, stopAfter = 1,
+                    attempts = 1, parallel = 4, budgetMs = 6500L, onSuccess = { passed.add(it.id) })
             }
             if (!valid()) return false
-            val ok = candidates.filter { it.id in passed }
+            val snapshot=Store.state.value
+            val ok = AutoEligibility.servicePool(candidates.filter { it.id in passed && snapshot.state(it).works },
+                {snapshot.state(it)},net,System.currentTimeMillis())
             if (ok.isEmpty()) { deepPending = true; return false }
-            val winner = AutoSelection.compare(ok, { Store.state.value.state(it) }, net,
-                now = { System.currentTimeMillis() }, elapsed = { android.os.SystemClock.elapsedRealtime() },
-                validNetwork = { valid() }, gaming = GameSession.active(),
-                hint = { maxOf(CloudControl.speed(it),CloudSpeed.speedOf(Report.serverKey(it))) },
-                onInconclusive = { server, at -> expireUnreproducedSpeed(server,net,at) },
-                allowDownload = { PhonePower.refresh(app).let { it.allowLight && !it.deferTraffic } }) { server, budget ->
-                realTest(listOf(server), "Новая сеть: сравниваю скорость", big = true, youtube = false,
-                    attempts = 1, parallel = 1, budgetMs = budget)
-            } ?: return false
-            if (!valid()) return false
-            selectBest(10, close = false, among = ok); deepPending = true
-            return true
+            deepPending = true
+            return selectBest(1, close = false, among = ok) > 0
         } finally { progress.value = prev.copy(running = false) }
     }
 
@@ -1396,18 +1413,20 @@ object Actions {
             // one blocked subscription cannot hold the connect button for all other sources.
             kotlinx.coroutines.withTimeoutOrNull(AutoDiscoveryPolicy.FIRST_CONNECT_MS) {
                 val cached = Store.state.value.servers
-                if (cached.isNotEmpty()) notes += quickTest(cached, firstReady, attempted, firstWaveOnly = true)
+                if (cached.isNotEmpty()) notes += quickTest(cached, firstReady, attempted, firstWaveOnly = true, allowMaskRescue = false)
                 while (!started.started && sameNetwork()) {
                     val batch = batches.receiveCatching().getOrNull() ?: break
-                    notes += quickTest(batch, firstReady, attempted, firstWaveOnly = true)
+                    notes += quickTest(batch, firstReady, attempted, firstWaveOnly = true, allowMaskRescue = false)
                 }
-                if (continuous && !started.started && round % 3 == 2 && sameNetwork()) {
-                    val st = Store.state.value
-                    val candidates = ServerChoice.diverse(preferred(st, st.servers).filter {
-                        st.state(it).tcpMs > 0 && !st.state(it).works
-                    }.sortedBy { st.state(it).tcpMs }, 2)
-                    if (candidates.isNotEmpty()) notes += doFindMasks(candidates, 8, enough = 1, budgetMs = 4000)
-                }
+            }
+            // A separate small budget: a slow native wave/source cannot silently starve mask rescue.
+            // Probe reachable alternatives before costly mask evolution; no TCP-positive prerequisite.
+            if (continuous && !started.started && round % 3 == 0 && sameNetwork()) {
+                val st = Store.state.value
+                val candidates = ServerChoice.diverse(preferred(st,st.servers).filter {
+                    it.id in attempted && !st.state(it).works
+                }.sortedBy { if(st.state(it).tcpMs>0) 0 else 1 },2)
+                quickMaskRescue(candidates,net,handle)?.let(firstReady)
             }
             if (sameNetwork()) fresh().firstOrNull()?.let(firstReady)
             if (started.started) return@coroutineScope "HTTPS и Telegram подтверждены — подключаюсь; подробные проверки в фоне"
@@ -1451,13 +1470,13 @@ object Actions {
     }
 
     /** Cached cloud/network candidates first; no whole-catalog TCP scan or video downloads before first connect. */
-    suspend fun quickTest(list: List<Server>, onFirst: ((Server) -> Unit)? = null, attempted: MutableSet<String> = mutableSetOf(), firstWaveOnly: Boolean = false): String {
+    suspend fun quickTest(list: List<Server>, onFirst: ((Server) -> Unit)? = null, attempted: MutableSet<String> = mutableSetOf(), firstWaveOnly: Boolean = false, allowMaskRescue: Boolean = true): String {
         CloudSpeed.loadCached(app)
         val st = Store.state.value
         val untried = list.filter { it.id !in attempted }
-        if (untried.isEmpty()) return "Эти маршруты уже проверены в текущем поиске"
+        if (untried.isEmpty()) return "Эти маршруты уже были в очереди текущего поиска; отменённые пробы не считаются отказом"
         val net = Net.key(app); val network = Net.underlying(app)?.toString()
-        val allEligible = preferred(st, untried).filterNot { CloudSpeed.blocked(it) }.ifEmpty { preferred(st, untried) }
+        val allEligible = preferred(st, untried).sortedBy { CloudSpeed.blocked(it) }
         // Bound expensive scoring for a huge imported catalog; subsequent waves advance attempted IDs.
         val rememberedIds = (st.settings.netServers[net] ?: st.settings.netServers[Net.family(net)]).orEmpty().toSet()
         val eligible = if (firstWaveOnly) (CloudControl.ranked(allEligible, 32) +
@@ -1479,10 +1498,11 @@ object Actions {
             TelegramRouteMemory.cooling(net, server.id, st.state(server).maskFor(net), time) ||
                 probeMemory.cooling(net, server.id, st.state(server).maskFor(net), time) ||
                 (e.streak > 0 && time >= e.at && time - e.at < ProbeMemory.cooldownMs(e.streak))
-        }, serviceRank = { server -> AutoEligibility.telegramRank(st.state(server),net,time) }) { s -> learned[s.id] ?: Int.MAX_VALUE }
+        }, serviceRank = { server -> AutoEligibility.telegramRank(st.state(server),net,time) },
+            recoveryProbeLimit = if(firstWaveOnly) 3 else 1) { s -> learned[s.id] ?: Int.MAX_VALUE }
         val cachedGood = first.filter { st.state(it).evidenceFor(net).let { e -> e.successes > 0 && e.streak == 0 && time >= e.at && time - e.at < 1800000 } }.map { it.id }.toSet()
         val ping = first.filter { it.id !in cachedGood }
-        val earlyHandoff = firstWaveOnly && onFirst != null
+        val earlyHandoff = firstWaveOnly
         val plan = PhonePower.refresh(app)
         val slots = minOf(ping.size, PowerPolicy.cap(ConnectPolicy.FIRST, plan.foregroundTcpParallel))
         progress.value = progress.value.copy(
@@ -1504,14 +1524,14 @@ object Actions {
             if (firstFired.compareAndSet(false, true)) callback(server)
         } }
         val fast = ConnectPolicy.fastStart()
-        val fastOk = realTest(shortlist, "Авто: проверяю первый быстрый маршрут", big = ConnectPolicy.requiresBodyProof(earlyHandoff), youtube = false, telegram = st.settings.mode == Mode.AUTO,
-            attempts = 1, parallel = fast.parallel, foreground = firstWaveOnly, stopAfter = if (onFirst != null) fast.stopAfter else Int.MAX_VALUE,
-            budgetMs = if (st.settings.mode == Mode.AUTO) 6500L else fast.budgetMs, onFirst = firstCallback, onSuccess = { passed.add(it.id) })
         if (firstWaveOnly) attempted.addAll(shortlist.map { it.id })
+        val fastOk = realTest(shortlist, "Авто: проверяю первый быстрый маршрут", big = ConnectPolicy.requiresBodyProof(earlyHandoff), youtube = false, telegram = st.settings.mode == Mode.AUTO,
+            attempts = 1, parallel = fast.parallel, foreground = firstWaveOnly, stopAfter = if (onFirst != null || firstWaveOnly) fast.stopAfter else Int.MAX_VALUE,
+            budgetMs = if (st.settings.mode == Mode.AUTO) 6500L else fast.budgetMs, onFirst = firstCallback, onSuccess = { passed.add(it.id) })
         if (Net.key(app) != net || Net.underlying(app)?.toString() != network) return if (firstWaveOnly) "Сеть изменилась — результаты отброшены" else selectionNetworkChanged()
         if (onFirst != null && firstFired.get()) return "Первый рабочий VLESS-маршрут найден — подключаюсь; сравнение продолжится после запуска"
         if (firstWaveOnly) {
-            if(fastOk==0 && onFirst!=null) {
+            if(fastOk==0 && onFirst!=null && allowMaskRescue) {
                 val rescued=quickMaskRescue(shortlist,net,network)
                 if(rescued!=null) { firstCallback?.invoke(rescued); return "Лёгкая маскировка: HTTPS и Telegram подтверждены — подключаюсь" }
             }
@@ -1570,7 +1590,7 @@ object Actions {
         val stamp=System.currentTimeMillis()
         var committed=false
         Store.setState(server.id) {current->
-            if(current.maskFor(net)!=expected[server.id]) current else {
+            if(!MaskSamplePolicy.unchanged(current,start.state(server),net)) current else {
                 committed=true
                 current.copy(maskId=mask.id,netMasks=current.netMasks+(net to mask.id),realMs=p.realMs,bigOk=null,
                     kbps=0,speedCheckedAt=0,speedNetwork="",speedMask="",tgOk=true,ytOk=null,

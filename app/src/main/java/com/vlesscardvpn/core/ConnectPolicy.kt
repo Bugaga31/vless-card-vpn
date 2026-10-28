@@ -29,7 +29,7 @@ object ConnectPolicy {
     const val BACKGROUND = 24
     fun candidates(list: List<Server>, cloud: List<Server>, remembered: Set<String>,
                    cooling: (Server) -> Boolean = { false }, serviceRank: (Server) -> Int = { 1 },
-                   score: (Server) -> Int): List<Server> {
+                   recoveryProbeLimit: Int = 1, score: (Server) -> Int): List<Server> {
         val byId = list.associateBy { it.id }
         val uniqueList = list.distinctBy { it.id }
         val hasPossibleServiceRoute = uniqueList.any { serviceRank(it) < 2 }
@@ -39,7 +39,7 @@ object ConnectPolicy {
             .thenBy { if (it.id in remembered) 0 else 1 }.thenBy { if (it.id in cloudIds) 0 else 1 })
         val (deferred, ready) = unique.partition(cooling)
         val eligibleCloud = cloud.filter { hint -> ready.any { it.id == hint.id } }
-        if(ready.isEmpty()) return ServerChoice.diverse(deferred,1)
+        if(ready.isEmpty()) return ServerChoice.diverse(deferred,recoveryProbeLimit.coerceIn(1,3))
         // The fallback catalog is the ready pool itself, not the unfiltered import list.
         return PublicCloudQueue.merge(ready,eligibleCloud,ready,FIRST,slots=1)
     }

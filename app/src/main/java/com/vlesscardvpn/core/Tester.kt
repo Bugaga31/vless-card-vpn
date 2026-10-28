@@ -168,19 +168,19 @@ object Tester {
             if (best == Long.MAX_VALUE) return Probe(0, null, null, err)
             val deadline = if (budgetDeadline == Long.MAX_VALUE) System.nanoTime() + TimeUnit.SECONDS.toNanos(40) else budgetDeadline
             fun remaining() = TimeUnit.NANOSECONDS.toMillis((deadline - System.nanoTime()).coerceAtLeast(1)).coerceAtLeast(1)
+            val tgF = if (telegram) telegramPool.submit<Boolean?> {
+                TelegramProbe.check(port, minOf(3000, remaining()))
+            }.also { tasks += it } else null
             val bigF = if (big) pool.submit<BodyResult> { bigDownload(client,budgetDeadline,onCall) }.also { tasks += it } else null
             val ytF = if (youtube) pool.submit<YouTubeMediaProbe.Result> {
                 YouTubeMediaProbe.check { boundedCall(mediaClient, it) }
             }.also { tasks += it } else null
-            val tgF = if (telegram) pool.submit<Boolean?> {
-                TelegramProbe.check(port, minOf(3000, remaining()))
-            }.also { tasks += it } else null
             val callF = if (calls) pool.submit<Boolean?> {
                 UdpCallProbe.probe(port, user, pass, minOf(1800L, remaining()).toInt(), onCancel)
             }.also { tasks += it } else null
+            val tgOk = if (tgF != null) ProbeTasks.await(tgF, remaining(), null) else null
             val bigResult = ProbeTasks.await(bigF, remaining(), BodyResult())
             val ytResult = ProbeTasks.await(ytF, remaining(), YouTubeMediaProbe.Result(null))
-            val tgOk = if (tgF != null) ProbeTasks.await(tgF, remaining(), null) else null
             val callsOk = if (callF != null) ProbeTasks.await(callF, remaining(), null) else null
             return Probe(best.toInt().coerceAtLeast(1), if (bigF != null) bigResult.ok else null, ytResult.ok, tgOk = tgOk, kbps = bigResult.kbps, ytKbps = ytResult.kbps, bodyBytes = bigResult.bytes, bodyMs = bigResult.ms, callsOk = callsOk)
         } finally {
@@ -190,6 +190,8 @@ object Tester {
         }
     }
 
+    // Media downloads cannot occupy all workers needed to establish native Telegram evidence.
+    private val telegramPool = java.util.concurrent.Executors.newFixedThreadPool(8) { r -> Thread(r, "probe-tg").apply { isDaemon = true } }
     private val pool = java.util.concurrent.Executors.newFixedThreadPool(12) { r -> Thread(r, "probe").apply { isDaemon = true } }
 
     /** 256 KB through the server: (passed, kbit/s). A freeze (read timeout — the TSPU "16 KB" cut) fails at once, no second mirror. */
