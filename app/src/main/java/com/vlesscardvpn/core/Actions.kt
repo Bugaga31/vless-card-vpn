@@ -401,6 +401,7 @@ object Actions {
         if (Net.key(app) != net || Net.underlying(app)?.toString() != underlying) return 0
         val st = Store.state.value
         val variants = pinned.map { it to (Masks.byId(st.state(it).maskFor(net))) }
+        val sampleStartedAt=System.currentTimeMillis()
         val (own, port) = dpiForTests(variants.map { it.second })
         val done = AtomicInteger(); val ok = AtomicInteger()
         val states = StateBatch(200)
@@ -411,6 +412,7 @@ object Actions {
                 // Do not train the old profile with a result completed after Wi-Fi/cellular handoff.
                 if (Net.key(app) != net || Net.underlying(app)?.toString() != underlying) return@real
                 val s = variants[i].first
+                if(Store.state.value.state(s).maskFor(net)!=st.state(s).maskFor(net)) return@real
                 val speedSample = ServerChoice.acceptsSpeedSample(p.kbps, parallel)
                 if (telegram && p.works) TelegramRouteMemory.record(net,s.id,st.state(s).maskFor(net),p.tgOk,System.currentTimeMillis())
                 val routeReady = p.works && (st.settings.mode != Mode.AUTO || !telegram || p.tgOk == true)
@@ -421,7 +423,7 @@ object Actions {
                 probeMemory.record(net, s.id, st.state(s).maskFor(net), p.works, System.currentTimeMillis())
                 runCatching { Brain.learn(net, s, st.state(s), p.works) }
                 states.put(s.id) {
-                    if (Net.key(app) != net || Net.underlying(app)?.toString() != underlying) it else
+                    if (Net.key(app) != net || Net.underlying(app)?.toString() != underlying || it.maskFor(net)!=st.state(s).maskFor(net) || it.checkedAt>sampleStartedAt) it else
                     it.copy(netEvidence = (it.netEvidence + ((net + "|" + st.state(s).maskFor(net)) to it.evidenceFor(net).observe(p.works, p.realMs, System.currentTimeMillis()))).entries.sortedByDescending { e -> e.value.at }.take(8).associate { e -> e.toPair() }, realMs = p.realMs, bigOk = p.bigOk ?: it.bigOk?.takeIf { old -> old }, ytOk = if (youtube) p.ytOk else if (telegram) null else it.ytOk, tgOk = if (telegram) p.tgOk else if (youtube) null else it.tgOk, checkedAt = System.currentTimeMillis(), kbps = if (speedSample) p.kbps else it.kbps,
                         serviceNetwork = if ((youtube || telegram) && p.works) net else it.serviceNetwork,
                         serviceMask = if ((youtube || telegram) && p.works) st.state(s).maskFor(net) else it.serviceMask,
@@ -439,7 +441,7 @@ object Actions {
         // commit all results before starting a VPN core; do not race two core lifecycles.
         firstWinner.get()?.let { s ->
             kotlinx.coroutines.currentCoroutineContext().ensureActive()
-            val committed = Store.state.value.state(s).works
+            val committed = Store.state.value.state(s).let {it.works && it.maskFor(net)==st.state(s).maskFor(net)}
             val sameNetwork = Net.key(app) == net && Net.underlying(app)?.toString() == underlying
             if (com.vlesscardvpn.BuildConfig.DEBUG) android.util.Log.i("E2E",
                 "auto first_probe committed=$committed same_network=$sameNetwork test_cleanup=true")
@@ -475,6 +477,7 @@ object Actions {
         val pool = if (evo) MaskLab.breed(parents, (slots * 4).coerceIn(6, 40), known = kept.map { it.id }.toSet()) else emptyList()
         val untried = kept.filter { stats[it.id] == null }
         val evoCand = (0 until maxOf(untried.size, pool.size)).flatMap { i -> listOfNotNull(untried.getOrNull(i), pool.getOrNull(i)) }
+        fun maskReady(p:Probe)=p.works && (cfg.mode!=Mode.AUTO || p.tgOk==true)
         val order = { s: Server ->
             val ok = { m: Mask -> Masks.compatible(m, s) && (dpiOk || !m.viaByeDpi) }
             val fresh = evoCand.filter(ok).shuffled().take(slots)
@@ -521,16 +524,16 @@ object Actions {
             // «Жёсткий поиск»: 24 probes at once (PowerPolicy caps it on a hot/low-power phone) —
             // the whole pass takes seconds, not half a minute.
             kotlinx.coroutines.withTimeoutOrNull(if (deadline == Long.MAX_VALUE) Long.MAX_VALUE else remaining()) {
-            Tester.real(current, cfg.testUrl, port, own.ports, youtube = false, batch = 64, parallel = 24, attempts = 1, budgetMs = remaining(),
+            Tester.real(current, cfg.testUrl, port, own.ports, youtube = false, telegram=cfg.mode==Mode.AUTO, requireTelegram=cfg.mode==Mode.AUTO, batch = 64, parallel = 24, attempts = 1, budgetMs = remaining(),
                 skip = { i -> android.os.SystemClock.elapsedRealtime() >= deadline || synchronized(best) { (found[group(variants[indices[i]].first)] ?: 0) >= enough } || dead(variants[indices[i]].second) }) { i, p ->
                 if (Net.key(app) != net0 || Net.underlying(app)?.toString() != maskNetwork) return@real
                 val (s, m) = variants[indices[i]]
                 synchronized(best) {
                     val cur = best[s.id]
-                    if (m != null && p !== Tester.SKIPPED) (if (p.works) kindOk else kindFail).merge(Masks.kind(m), 1, Int::plus)
-                    if (p.works && m != null && (cur == null || eff(m, p) < eff(cur.first, cur.second))) best[s.id] = m to p
-                    if (p.works && m != null) { good.getOrPut(s.id) { mutableListOf() } += m to p.realMs; found.merge(group(s), 1, Int::plus) }
-                    if (m != null && p !== Tester.SKIPPED) tried += Triple(s.id, m.id, p.works)
+                    if (m != null && p !== Tester.SKIPPED && (cfg.mode!=Mode.AUTO || !p.works || p.tgOk!=null)) (if (maskReady(p)) kindOk else kindFail).merge(Masks.kind(m), 1, Int::plus)
+                    if (maskReady(p) && m != null && (cur == null || eff(m, p) < eff(cur.first, cur.second))) best[s.id] = m to p
+                    if (maskReady(p) && m != null) { good.getOrPut(s.id) { mutableListOf() } += m to p.realMs; found.merge(group(s), 1, Int::plus) }
+                    if (m != null && p !== Tester.SKIPPED && (cfg.mode!=Mode.AUTO || !p.works || p.tgOk!=null)) tried += Triple(s.id, m.id, maskReady(p))
                 }
                 step(done.incrementAndGet(), variants.size)
             }
@@ -553,8 +556,8 @@ object Actions {
             pinned.forEach { s ->
                 val mine = confirm.indices.filter { confirm[it].first.id == s.id }
                 // passed again (with YouTube) and the fastest in real use: ping + download speed + how heavy the mask is
-                val pick = mine.filter { res[it]?.works == true && res[it]?.ytOk == true && res[it]?.tgOk != false }.minByOrNull { eff(confirm[it].second, res.getValue(it)) }
-                    ?: mine.filter { res[it]?.let { p -> p.works && p.ytOk != false && p.tgOk != false } == true }.minByOrNull { eff(confirm[it].second, res.getValue(it)) }
+                val pick = mine.filter { res[it]?.works == true && res[it]?.ytOk == true && (cfg.mode!=Mode.AUTO && res[it]?.tgOk!=false || res[it]?.tgOk==true) }.minByOrNull { eff(confirm[it].second, res.getValue(it)) }
+                    ?: mine.filter { res[it]?.let { p -> p.works && p.ytOk != false && (cfg.mode!=Mode.AUTO && p.tgOk!=false || p.tgOk==true) } == true }.minByOrNull { eff(confirm[it].second, res.getValue(it)) }
                 if (pick != null) best[s.id] = confirm[pick].second to res.getValue(pick)
                 else if (mine.any { res[it] != null && res[it] !== Tester.SKIPPED }) best.remove(s.id)
                 mine.forEach { i -> if (res[i]?.works == false) synchronized(best) { tried += Triple(s.id, confirm[i].second.id, false) } }
@@ -571,20 +574,25 @@ object Actions {
         // Failures of a server where nothing worked say nothing about the masks (the server may be dead).
         Store.recordMasks(net, tried.filter { (sid, mid, ok) -> (ok || good.containsKey(sid)) && (!mid.startsWith(MaskLab.PREFIX) || mid in keptIds || mid in winIds) }
             .map { it.second to it.third })
+        var adoptedMasks=0
         pinned.forEach { s ->
             val b = best[s.id]
-            // A budget-expired/skipped mask is UNKNOWN, not a failed server.
-            if (b == null && tried.none { it.first == s.id }) return@forEach
-            Store.setState(s.id) {
-                if (b == null) it.copy(realMs = 0, checkedAt = System.currentTimeMillis())
-                else it.copy(maskId = b.first.id, netMasks = it.netMasks + (net to b.first.id), realMs = b.second.realMs, bigOk = b.second.bigOk,
-                    kbps = if (b.second.kbps > 0) b.second.kbps else it.kbps, speedCheckedAt = 0, ytOk = b.second.ytOk ?: it.ytOk,
-                    checkedAt = System.currentTimeMillis(),
-                    goodMasks = good[s.id].orEmpty().sortedBy { g -> g.second }.map { g -> g.first.id }.filter { g -> g != b.first.id }.take(8))
+            // Search failure proves no successful replacement, not failure of the current working route.
+            if(b==null) return@forEach
+            val initial=st0.state(s)
+            Store.setState(s.id) {current->
+                if(Net.key(app)!=net0 || Net.underlying(app)?.toString()!=maskNetwork ||
+                    !MaskSamplePolicy.unchanged(current,initial,net)) current
+                else {
+                    adoptedMasks++
+                    MaskSamplePolicy.adopt(current,net,b.first.id,System.currentTimeMillis(),b.second,
+                        telegramSampled=b.second.tgOk!=null,youtubeSampled=b.second.ytOk!=null,trustedSpeed=false)
+                        .copy(goodMasks=good[s.id].orEmpty().sortedBy{it.second}.map{it.first.id}.filter{it!=b.first.id}.take(8))
+                }
             }
         }
         val bred = if (evo) ", новых авто-масок: ${winIds.count { it !in keptIds }}" else ""
-        return "Маскировка найдена для ${best.size} из ${pinned.size} серверов (перебрано ${variants.size} вариантов$bred, сеть «$net»)"
+        return "Подтверждено маскировок для ${best.size} из ${pinned.size} серверов; применено $adoptedMasks, более свежие результаты сохранены (перебрано ${variants.size} вариантов$bred, сеть «$net»)"
     }
 
     /**
@@ -600,7 +608,7 @@ object Actions {
                 val next = ss.goodMasks.firstOrNull() ?: return@mapNotNull null
                 changed = true
                 // the failing mask goes to the end of the list: it may work again later or on another network
-                s.id to ss.copy(maskId = next, netMasks = ss.netMasks + (net to next), goodMasks = ss.goodMasks.drop(1) + ss.maskFor(net))
+                s.id to MaskSamplePolicy.invalidate(ss).copy(maskId = next, netMasks = ss.netMasks + (net to next), goodMasks = ss.goodMasks.drop(1) + ss.maskFor(net))
             })
         }
         return changed
@@ -616,7 +624,7 @@ object Actions {
                 if (pool.isEmpty()) return@mapNotNull null
                 rolled++
                 val dice = pool.random()
-                s.id to ss.copy(maskId = dice.id, netMasks = ss.netMasks + (net to dice.id),
+                s.id to MaskSamplePolicy.invalidate(ss).copy(maskId = dice.id, netMasks = ss.netMasks + (net to dice.id),
                     goodMasks = if (ss.maskId in ss.goodMasks) ss.goodMasks else ss.goodMasks + ss.maskId)
             })
         }
@@ -672,12 +680,13 @@ object Actions {
         if (servers.isEmpty()) return
         val net = Net.key(app); val network = Net.underlying(app)?.toString(); val st = Store.state.value
         val variants = pinCertificates(servers).map { it to Masks.byId(st.state(it).maskFor(net)) }
+        val speedStartedAt=System.currentTimeMillis()
         val (own, port) = dpiForTests(variants.map { it.second })
         try {
             val r = Tester.speedMany(variants, port, own.ports)
             if (Net.key(app) != net || Net.underlying(app)?.toString() != network) return
             Store.setStates(variants.indices.filter { r[it] > 0 }.associate { i -> variants[i].first.id to { x: com.vlesscardvpn.model.ServerState ->
-                if (x.maskFor(net) != st.state(variants[i].first).maskFor(net)) x
+                if (Net.key(app)!=net || Net.underlying(app)?.toString()!=network || x.speedCheckedAt>speedStartedAt || x.maskFor(net) != st.state(variants[i].first).maskFor(net)) x
                 else x.copy(kbps = r[i],speedNetwork=net,speedMask=x.maskFor(net),speedCheckedAt=System.currentTimeMillis())
             } })
         } finally { own.close() }
@@ -706,21 +715,13 @@ object Actions {
      * masks again on this network, with a download-speed test; a light one that passes wins.
      */
     private suspend fun lightenMasks(wifi: Boolean) {
-        val st = Store.state.value; val net = Net.key(app)
-        val heavy = st.selected.filter { s -> Masks.byId(st.state(s).maskFor(net))?.let { Masks.cost(it) >= 2 } == true }
-        if (heavy.isEmpty()) return
-        val variants = heavy.flatMap { s -> Masks.searchOrder(false, s).filter { Masks.cost(it) == 0 }.take(if (wifi) 10 else 5).map { s to it } }
-        val res = java.util.concurrent.ConcurrentHashMap<Int, Probe>()
-        val pinned = pinCertificates(heavy).associateBy { it.id }
-        val v2 = variants.map { (s, m) -> (pinned[s.id] ?: s) to m }
-        Tester.real(v2, st.settings.testUrl, null, emptyMap(), youtube = true, batch = 64, parallel = 24, attempts = 1, big = true) { i, p -> res[i] = p }
-        heavy.forEach { s ->
-            val cur = Store.state.value.state(s)
-            val win = v2.indices.filter { v2[it].first.id == s.id && res[it]?.works == true && res[it]?.ytOk != false }.minByOrNull { res.getValue(it).realMs } ?: return@forEach
-            val m = v2[win].second!!; val p = res.getValue(win)
-            if (cur.kbps > 0 && p.kbps in 1 until cur.kbps) return@forEach // the heavy one is still faster here: keep it
-            Store.setState(s.id) { it.copy(maskId = m.id, netMasks = it.netMasks + (net to m.id), realMs = p.realMs, bigOk = p.bigOk, kbps = p.kbps, speedNetwork = net, speedMask = m.id, speedCheckedAt = 0, checkedAt = System.currentTimeMillis()) }
-            Store.recordMasks(net, listOf(m.id to true))
+        val st=Store.state.value;val net=Net.key(app);val handle=Net.underlying(app)?.toString()
+        if(st.settings.mode!=Mode.AUTO || SessionHold.active()) return
+        val heavy=st.selected.filter {s->Masks.byId(st.state(s).maskFor(net))?.let {Masks.cost(it)>=2}==true}.take(if(wifi) 2 else 1)
+        for(server in heavy) {
+            if(SessionHold.active() || GameSession.active() || !PhonePower.refresh(app).let{it.allowLight && !it.deferTraffic}) return
+            if(Net.key(app)!=net || Net.underlying(app)?.toString()!=handle) return
+            kotlinx.coroutines.withTimeoutOrNull(6500L) {tuneAutoMask(server,net,handle)}
         }
     }
 
@@ -1649,32 +1650,51 @@ object Actions {
 
     /** Keep the working route unless an isolated HTTPS + download trial proves a faster mask here. */
     private suspend fun tuneAutoMask(server: Server, net: String, network: String?) {
-        val start = Store.state.value
-        if (start.settings.mode != Mode.AUTO) return
-        val original = start.state(server).maskFor(net)
-        val pinned = start.servers.firstOrNull { it.id == server.id } ?: server
-        val trials = AutoRoutePolicy.maskTrials(pinned,original,start.settings)
-        var expected = original
-        for (id in trials) {
-            kotlinx.coroutines.currentCoroutineContext().ensureActive()
-            if (GameSession.active() || !PhonePower.refresh(app).let { it.allowLight && !it.deferTraffic }) return
-            if (Net.key(app) != net || Net.underlying(app)?.toString() != network) return
-            var sample: Probe? = null
-            kotlinx.coroutines.withTimeoutOrNull(2000L) {
-                Tester.real(listOf(pinned to Masks.byId(id)),start.settings.testUrl,null,
-                    youtube=false,telegram=true,requireTelegram=true,batch=1,parallel=1,attempts=1,big=true,budgetMs=1900) { _,p -> sample=p }
+        var expected=Store.state.value.state(server)
+        val settings=Store.state.value.settings
+        if(settings.mode!=Mode.AUTO) return
+        val pinned=Store.state.value.servers.firstOrNull{it.id==server.id} ?: return
+        fun valid():Boolean = Net.key(app)==net && Net.underlying(app)?.toString()==network &&
+            !SessionHold.active() && !GameSession.active() && PhonePower.refresh(app).let{it.allowLight && !it.deferTraffic} &&
+            Store.state.value.settings.mode==Mode.AUTO
+        suspend fun sample(id:String):Probe? {
+            if(!valid()) return null
+            var result:Probe?=null
+            kotlinx.coroutines.withTimeoutOrNull(2100L) {
+                Tester.real(listOf(pinned to Masks.byId(id)),settings.testUrl,null,
+                    youtube=false,telegram=true,requireTelegram=true,batch=1,parallel=1,attempts=1,big=true,budgetMs=2000) {_,p->result=p}
             }
-            val p = sample ?: continue
-            if (Net.key(app) != net || Net.underlying(app)?.toString() != network) return
-            val stamp = System.currentTimeMillis()
-            var applied = false
-            Store.setState(server.id) { current ->
-                applied = current.maskFor(net) == expected && AutoRoutePolicy.improved(current,net,stamp,p)
-                if (applied) {
-                    AutoRoutePolicy.apply(current,net,id,stamp,p)
+            return result?.takeIf {valid() && it.works && it.tgOk==true && it.bigOk==true && it.kbps>0}
+        }
+        // A speed-only replacement needs a measured current baseline, not an old/global kbps hint.
+        if(ServerChoice.measuredSpeed(expected,net,System.currentTimeMillis())<=0) {
+            val baseline=sample(expected.maskFor(net)) ?: return
+            var committed=false
+            val prior=expected
+            Store.setState(server.id) {current->
+                if(valid() && MaskSamplePolicy.unchanged(current,prior,net)) {
+                    committed=true
+                    MaskSamplePolicy.adopt(current,net,prior.maskFor(net),System.currentTimeMillis(),baseline,true,false,true)
                 } else current
             }
-            if (applied) expected = id
+            if(!committed) return
+            expected=Store.state.value.state(server)
+        }
+        for(id in AutoRoutePolicy.maskTrials(pinned,expected.maskFor(net),settings)) {
+            if(!valid()) return
+            val first=sample(id) ?: continue
+            if(!AutoRoutePolicy.improved(expected,net,System.currentTimeMillis(),first)) continue
+            val second=sample(id) ?: continue
+            val confirmed=MaskSamplePolicy.confirmed(first,second) ?: continue
+            val prior=expected
+            var committed=false
+            Store.setState(server.id) {current->
+                if(valid() && MaskSamplePolicy.unchanged(current,prior,net) && AutoRoutePolicy.improved(current,net,System.currentTimeMillis(),confirmed)) {
+                    committed=true
+                    MaskSamplePolicy.adopt(current,net,id,System.currentTimeMillis(),confirmed,true,false,true)
+                } else current
+            }
+            if(committed) expected=Store.state.value.state(server)
         }
     }
 

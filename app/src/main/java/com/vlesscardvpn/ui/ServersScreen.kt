@@ -294,8 +294,8 @@ private fun ServerMenu(s: Server, st: ServerState, onDismiss: () -> Unit) {
         AlertDialog(onDismissRequest = onDismiss, title = { Text("Маскировка: ${options.size} вариантов") },
             text = {
                 LazyColumn(Modifier.heightIn(max = 420.dp)) {
-                    item { TextButton(onClick = { Store.setState(s.id) { it.copy(maskId = "", netMasks = emptyMap()) }; onDismiss() }) { Text("Без маскировки (как в ссылке)") } }
-                    items(options) { m -> TextButton(onClick = { Store.setState(s.id) { it.copy(maskId = m.id, netMasks = emptyMap()) }; onDismiss() }) {
+                    item { TextButton(onClick = { Store.setState(s.id) { com.vlesscardvpn.core.MaskSamplePolicy.invalidate(it).copy(maskId = "", netMasks = emptyMap()) }; onDismiss() }) { Text("Без маскировки (как в ссылке)") } }
+                    items(options) { m -> TextButton(onClick = { Store.setState(s.id) { com.vlesscardvpn.core.MaskSamplePolicy.invalidate(it).copy(maskId = m.id, netMasks = emptyMap()) }; onDismiss() }) {
                         Text((if (m.id == st.maskId) "● " else "") + m.title, fontSize = 13.sp) } }
                 }
             }, confirmButton = { TextButton(onClick = onDismiss) { Text("Закрыть") } })
