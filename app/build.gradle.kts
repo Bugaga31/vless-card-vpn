@@ -76,6 +76,7 @@ android {
     defaultConfig {
         applicationId = if (betaPreview) "com.vlesscardvpn.beta2" else "com.vlesscardvpn"
         manifestPlaceholders["vpnAppLabel"] = if (betaPreview) "VLESS Card · Beta" else "VLESS Card"
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         minSdk = 24
         targetSdk = 34
         versionCode = releaseNumber
@@ -140,6 +141,8 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("com.squareup.okhttp3:okhttp-dnsoverhttps:4.12.0")
     implementation("com.google.zxing:core:3.5.3") // QR codes of server links (no camera, no Play services)
+    androidTestImplementation("androidx.test:runner:1.5.2")
+    androidTestImplementation("androidx.test.ext:junit:1.1.5")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20240303")
 }
