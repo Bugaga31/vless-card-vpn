@@ -30,7 +30,7 @@ object AutoRoutePolicy {
         if (server.protocol !in setOf("vless", "vmess", "trojan")) return emptyList()
         val allowed = Masks.searchOrder(false, server, settings.maskFamilies, settings.maskFps).map { it.id }.toSet()
         val nativeChrome = server.fp.ifEmpty { "chrome" } == "chrome"
-        return listOf("", "chrome.n", "chrome.hello.fast").filter { id ->
+        return listOf("", "chrome.n", "chrome.hello.coarse", "chrome.hello.fast").filter { id ->
             id != current && (id.isEmpty() || id in allowed) &&
                 !(nativeChrome && (id == "chrome.n" || id.isEmpty() && current == "chrome.n"))
         }.take(2)
@@ -38,7 +38,7 @@ object AutoRoutePolicy {
 
     /** Only an isolated, full successful download can replace the current mask. */
     fun improved(current: ServerState, net: String, now: Long, sample: Probe): Boolean =
-        sample.works && sample.bigOk == true && sample.kbps > 0 &&
+        sample.works && sample.tgOk == true && sample.bigOk == true && sample.kbps > 0 &&
             ServerChoice.measuredSpeed(current, net, now).let { old ->
                 old <= 0 || sample.kbps.toLong() >= old.toLong() * 120 / 100 && sample.kbps.toLong() - old >= 256
             }
@@ -46,5 +46,6 @@ object AutoRoutePolicy {
     fun apply(current: ServerState, net: String, mask: String, now: Long, sample: Probe): ServerState = current.copy(
         maskId = mask, netMasks = current.netMasks + (net to mask),
         realMs = sample.realMs, bigOk = sample.bigOk, kbps = sample.kbps,
+        tgOk = sample.tgOk, ytOk = null, serviceNetwork=net, serviceMask=mask, serviceCheckedAt=now,
         speedNetwork = net, speedMask = mask, speedCheckedAt = now, checkedAt = now)
 }

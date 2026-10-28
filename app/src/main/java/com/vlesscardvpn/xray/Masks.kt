@@ -127,6 +127,9 @@ object Masks {
     private val FRAGMENTS = listOf(
         listOf("n", "без дробления", "", "", "", ""),
         listOf("hello.fast", "лёгкое Hello 100–200 байт · пауза 0–1 мс", "tlshello", "100-200", "0-1", "10"),
+        listOf("hello.balanced", "Hello 64–128 байт · пауза 0–1 мс · до 8 частей", "tlshello", "64-128", "0-1", "8"),
+        listOf("hello.coarse", "Hello 256–512 байт · без паузы · до 4 частей", "tlshello", "256-512", "0-0", "4"),
+        listOf("hello.mobile", "Hello 128–256 байт · пауза 0–2 мс · до 6 частей", "tlshello", "128-256", "0-2", "6"),
         listOf("h1", "дробление Hello 1-3 байт", "tlshello", "1-3", "1-3", "0"),
         listOf("h2", "дробление Hello 3-8", "tlshello", "3-8", "2-5", "0"),
         listOf("h3", "дробление Hello 10-30", "tlshello", "10-30", "5-10", "0"),
@@ -296,7 +299,10 @@ object Masks {
         val ranges = m.delays.ifEmpty { m.delay }.split(',')
         val pause = ranges.mapNotNull { it.trim().substringAfterLast('-').toIntOrNull() }.maxOrNull() ?: 0
         // Heuristic startup overhead only; a real full-body sample still decides the winner.
-        return when { pause > 60 -> 3; pause > 20 -> 2; pause > 1 -> 1; else -> 0 }
+        val minimum = m.lengths.ifEmpty { m.length }.split(',').mapNotNull { it.trim().substringBefore('-').toIntOrNull() }.minOrNull() ?: 0
+        val tiny = when { minimum in 1..8 -> 2; minimum in 9..32 -> 1; else -> 0 }
+        val broad = if(m.packets != "tlshello") 1 else 0
+        return tiny + broad + when { pause > 60 -> 3; pause > 20 -> 2; pause > 1 -> 1; else -> 0 }
     }
     fun cost(m: Mask): Int = fragmentCost(m) + (when { m.mss in 1..200 -> 3; m.mss in 201..400 -> 2; m.mss > 0 -> 1; else -> 0 }) + (if (m.mux) 1 else 0) + (if (m.viaByeDpi) 1 else 0)
 

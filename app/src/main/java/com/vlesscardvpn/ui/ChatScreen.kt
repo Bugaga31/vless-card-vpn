@@ -37,7 +37,7 @@ import com.vlesscardvpn.core.Store
 import com.vlesscardvpn.core.Tunnel
 
 private val Bubble = Color(0xFF1F232C)
-private val Glow = Brush.linearGradient(listOf(Color(0xFF6A5CFF), Accent, Color(0xFF2EC2B5)))
+private val Glow: Brush @Composable get() = Brush.linearGradient(listOf(Color(0xFF6A5CFF), Accent, Color(0xFF2EC2B5)))
 
 /** «Помощник»: live panel (status, autopilot switches, what it did) + chat with action buttons. */
 @OptIn(ExperimentalLayoutApi::class)

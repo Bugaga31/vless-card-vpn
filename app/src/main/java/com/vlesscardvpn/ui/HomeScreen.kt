@@ -122,7 +122,7 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
         PowerButton(on, busy, color) { if (on || busy) onDisconnect() else onConnect() }
         if (status.message.isNotEmpty()) Text(status.message, color = if (status.state == Tunnel.State.ERROR) Bad else MaterialTheme.colorScheme.onBackground,
             textAlign = TextAlign.Center, fontWeight = FontWeight.Medium)
-        if (status.route.isNotEmpty()) Text(status.route, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp, textAlign = TextAlign.Center)
+        if (status.route.isNotEmpty()) Text(if(cfg.hideServerNames) "Маршрут скрыт" else status.route, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp, textAlign = TextAlign.Center)
         val cloudStatus by com.vlesscardvpn.core.CloudSpeed.status.collectAsState()
         Card(Modifier.fillMaxWidth().padding(top = 16.dp), shape = RoundedCornerShape(24.dp),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
@@ -235,9 +235,9 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
                     }, fontWeight = FontWeight.SemiBold)
                     Text(when {
                         sum.total == 0 -> "Откройте «Серверы» → «Подписки» или вставьте свою ссылку"
-                        sum.selectedCount == 0 && sum.working > 0 -> "Рабочих по последней проверке: ${sum.working}. Подключусь к 5 самым быстрым — выбирать ничего не нужно."
+                        sum.selectedCount == 0 && sum.working > 0 -> "Рабочих по последней проверке: ${sum.working}. Выберу один подтверждённый основной маршрут; остальные — резервы."
                         sum.selectedCount == 0 -> "Всего ${sum.total}. Нажмите «Подключить» — проверю и выберу сам."
-                        else -> sum.selectedNames.joinToString() + if (sum.selectedCount > 3) " и ещё ${sum.selectedCount - 3}" else ""
+                        else -> if(cfg.hideServerNames) "Имена скрыты" else sum.selectedNames.joinToString() + if (sum.selectedCount > 3) " и ещё ${sum.selectedCount - 3}" else ""
                     }, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     if (sum.bestMs > 0) Text("Лучший: ${sum.bestMs} мс" + (if (sum.bestKbps > 0) " · ${Actions.mbps(sum.bestKbps)}" else "") +
                         when (sum.bestYt) { true -> " · YouTube ✓"; false -> " · YouTube ✗"; null -> "" },

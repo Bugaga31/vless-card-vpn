@@ -484,7 +484,9 @@ object Actions {
             // proven ones first, then one of every kind of trick (not a dozen variants of the same one)
             val proven = base.filter { bucket(it) == 0 }.take(3).ifEmpty { base.take(1) }
             val rest = Masks.diverse(base - proven.toSet())
-            proven + fresh + rest
+            // A few light native variants before new mutants; expensive exploration remains available later.
+            val light = rest.filter { Masks.cost(it)<=1 && !it.viaByeDpi && !it.hasNoise }.take(4)
+            proven + light + fresh + (rest-light.toSet())
         }
         // Interleaved (1st mask of every server, then the 2nd…): parallel probes hit different servers, and a server
         // that already has [enough] working masks stops early instead of trying all of them.
@@ -503,7 +505,8 @@ object Actions {
         progress.value = progress.value.copy(title = "Подбор маскировки")
         val phases = variants.indices.groupBy { i -> val m = variants[i].second; when {
             m == null -> 0
-            bucket(m) == 0 -> 0 // already proven here; no need to rediscover it from scratch
+            Masks.cost(m) >= 3 -> 3 // tiny fragments / tiny MSS / long pauses do not delay cheap alternatives
+            bucket(m) == 0 -> 0 // previously useful, but not assumed fastest
             m.viaByeDpi -> 2
             Masks.isWarp(variants[i].first) || m.hasNoise -> 3
             m.packets.isNotEmpty() || m.signature -> 1
@@ -1250,8 +1253,8 @@ object Actions {
         CloudSpeed.status.value = "Облако: ${CloudControl.count()} конфигураций; каталог ${eligible.size}; очередь волны ${cand.size}, остальные проверяются в фоне"
         // Check the first bounded wave; continue if fewer than eight routes passed.
         val passed = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
-        realTest(cand.take(12), "Авто: HTTPS и Telegram", big = false, attempts = 1, youtube = false, telegram = true, budgetMs = 6500L,onSuccess={ passed.add(it.id) })
-        if (cand.size > 12 && passed.size < AutoEligibility.TOP) realTest(cand.drop(12).take(12), "Авто: HTTPS и Telegram", big = false, attempts = 1, youtube = false, telegram = true, budgetMs = 6500L,onSuccess={ passed.add(it.id) })
+        realTest(cand.take(12), "Авто: HTTPS и Telegram", big = false, attempts = 1, youtube = false, telegram = true, budgetMs = 6500L, stopAfter=if(connected) Int.MAX_VALUE else 1, foreground=!connected,onSuccess={ passed.add(it.id) })
+        if (cand.size > 12 && passed.isEmpty()) realTest(cand.drop(12).take(12), "Авто: HTTPS и Telegram", big = false, attempts = 1, youtube = false, telegram = true, budgetMs = 6500L, stopAfter=if(connected) Int.MAX_VALUE else 1, foreground=!connected,onSuccess={ passed.add(it.id) })
         if (Net.key(app) != net || Net.underlying(app)?.toString() != network) return selectionNetworkChanged()
         val ok = cand.filter { it.id in passed }
         if (ok.isNotEmpty()) {
@@ -1262,7 +1265,7 @@ object Actions {
             val extra = preferred(st, st.servers.filter { server -> cand.none { it.id == server.id } })
                 .sortedWith(compareByDescending<Server> { CloudSpeed.speedOf(Report.serverKey(it)) }
                     .thenByDescending { CloudSpeed.prior(it) })
-            val compared = chooseCompared(ok,null,extra) ?: return "Сравнение прервано: повторите Авто"
+            if(connected) chooseCompared(ok,null,extra) ?: return "Сравнение прервано: повторите Авто"
             val primary = ServerChoice.automaticPrimary(st.settings.mode == Mode.AUTO,st.settings.balance == com.vlesscardvpn.model.Balance.LEAST_PING,GameSession.active())
             selectBest(10, close = true, among = ok)
             val after = Store.state.value.let { snapshot -> snapshot.selected.map {
@@ -1514,6 +1517,10 @@ object Actions {
         if (Net.key(app) != net || Net.underlying(app)?.toString() != network) return if (firstWaveOnly) "Сеть изменилась — результаты отброшены" else selectionNetworkChanged()
         if (onFirst != null && firstFired.get()) return "Первый рабочий VLESS-маршрут найден — подключаюсь; сравнение продолжится после запуска"
         if (firstWaveOnly) {
+            if(fastOk==0 && onFirst!=null) {
+                val rescued=quickMaskRescue(shortlist,net,network)
+                if(rescued!=null) { firstCallback?.invoke(rescued); return "Лёгкая маскировка: HTTPS и Telegram подтверждены — подключаюсь" }
+            }
             return "Первая волна: проверено ${shortlist.size}, HTTPS+MTProto маршрутов $fastOk"
         }
         if (fastOk > 0) {
@@ -1535,7 +1542,7 @@ object Actions {
         states.flush()
         val candidates = rest.filter { (tcp[it.id] ?: 0) > 0 }.sortedBy { tcp[it.id] }
         passed.clear()
-        val second = realTest(candidates, "Авто: запасные ${candidates.size} маршрутов", big = true, youtube = false,
+        val second = realTest(candidates, "Авто: запасные ${candidates.size} маршрутов", big = true, youtube = false, telegram = st.settings.mode == Mode.AUTO,
             attempts = 1, stopAfter = Int.MAX_VALUE, budgetMs = ConnectPolicy.QUICK_BUDGET_MS,onSuccess={ passed.add(it.id) })
         if (Net.key(app) != net || Net.underlying(app)?.toString() != network) return selectionNetworkChanged()
         if (second > 0) { chooseCompared(candidates.filter { it.id in passed },onFirst, eligible.filter { it.id !in attempted }); deepPending = true }
@@ -1544,6 +1551,42 @@ object Actions {
 
     private fun expireUnreproducedSpeed(server: Server, net: String, at: Long) {
         Store.setState(server.id) { ServerChoice.invalidateSpeed(it, net, at) }
+    }
+
+    /** Fast rescue after the first native batch failed. No download, source refresh, mutation or full mask sweep. */
+    private suspend fun quickMaskRescue(candidates:List<Server>, net:String, network:String?):Server? {
+        val start=Store.state.value
+        if(start.settings.mode!=Mode.AUTO) return null
+        val expected=candidates.associate {it.id to start.state(it).maskFor(net)}
+        val pinned=pinCertificates(candidates.take(2))
+        val variants=pinned.flatMap {s->MaskWarmStart.trials(s,expected[s.id].orEmpty(),start.settings).map{s to it}}
+        if(variants.isEmpty() || Net.key(app)!=net || Net.underlying(app)?.toString()!=network) return null
+        val winner=java.util.concurrent.atomic.AtomicReference<Pair<Int,Probe>?>(null)
+        progress.value=progress.value.copy(title="Авто: лёгкая маскировка Hello",message="До двух серверов · без тяжёлого дробления; нужны HTTPS и Telegram MTProto")
+        kotlinx.coroutines.withTimeoutOrNull(3800L) {
+            Tester.real(variants,start.settings.testUrl,null,youtube=false,telegram=true,requireTelegram=true,
+                foreground=true,batch=4,parallel=4,attempts=1,big=false,stopAfter=1,budgetMs=3500L) {i,p->
+                if(p.works && p.tgOk==true) winner.compareAndSet(null,i to p)
+            }
+        }
+        kotlinx.coroutines.currentCoroutineContext().ensureActive()
+        if(Net.key(app)!=net || Net.underlying(app)?.toString()!=network) return null
+        val (index,p)=winner.get() ?: return null
+        val (server,mask)=variants[index]
+        val stamp=System.currentTimeMillis()
+        var committed=false
+        Store.setState(server.id) {current->
+            if(current.maskFor(net)!=expected[server.id]) current else {
+                committed=true
+                current.copy(maskId=mask.id,netMasks=current.netMasks+(net to mask.id),realMs=p.realMs,bigOk=null,
+                    kbps=0,speedCheckedAt=0,speedNetwork="",speedMask="",tgOk=true,ytOk=null,
+                    serviceNetwork=net,serviceMask=mask.id,serviceCheckedAt=stamp,checkedAt=stamp,
+                    okCount=current.okCount+1)
+            }
+        }
+        if(!committed) return null
+        Store.recordMasks(net,listOf(mask.id to true))
+        return server
     }
 
     private suspend fun chooseCompared(candidates: List<Server>, onReady: ((Server) -> Unit)?,
@@ -1626,7 +1669,7 @@ object Actions {
             var sample: Probe? = null
             kotlinx.coroutines.withTimeoutOrNull(2000L) {
                 Tester.real(listOf(pinned to Masks.byId(id)),start.settings.testUrl,null,
-                    youtube=false,batch=1,parallel=1,attempts=1,big=true,budgetMs=1900) { _,p -> sample=p }
+                    youtube=false,telegram=true,requireTelegram=true,batch=1,parallel=1,attempts=1,big=true,budgetMs=1900) { _,p -> sample=p }
             }
             val p = sample ?: continue
             if (Net.key(app) != net || Net.underlying(app)?.toString() != network) return

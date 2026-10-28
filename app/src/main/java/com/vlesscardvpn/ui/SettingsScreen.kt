@@ -113,13 +113,14 @@ fun SettingsScreen() {
             }
             Toggle("Анимация волн", "Не чаще 20 кадров/с. Замирает в фоне, при экономии энергии, низком заряде, нагреве и выключенной системной анимации; фон остаётся виден", s.oceanMotion) { v -> set { it.copy(oceanMotion = v) } }
             Toggle("Заставка при открытии", "Короткая морская заставка без голоса и звука. Коснитесь, чтобы сразу перейти к приложению. При работающем VPN пропускается", s.welcomeSound) { v -> set { it.copy(welcomeSound = v) } }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf("dark" to "Тёмная", "amoled" to "AMOLED", "you" to "Material You").forEach { (id, t) ->
+            Row(Modifier.horizontalScroll(rememberScrollState()),horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf("system" to "Системная", "light" to "Светлая", "dark" to "Тёмная", "amoled" to "AMOLED", "you" to "Material You").forEach { (id, t) ->
                     if (id != "you" || Build.VERSION.SDK_INT >= 31) FilterChip(selected = s.theme == id, onClick = { set { it.copy(theme = id) } }, label = { Text(t) })
                 }
             }
             Hint("AMOLED — чистый чёрный фон, экономит батарею на OLED-экранах. Material You — цвета ваших обоев (Android 12+).")
         }
+        Group("Удобство") { ExperienceSettings() }
         Group("Почему не работает?") {
             val sc = rememberCoroutineScope(); var diag by remember { mutableStateOf("") }; var running by remember { mutableStateOf(false) }
             Hint(diag.ifEmpty { "Проверяет выбранные VLESS-серверы, DNS и передачу данных через сервер. Прямые проверки и режимы обхода без сервера отключены." })

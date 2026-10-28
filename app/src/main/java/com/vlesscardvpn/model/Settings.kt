@@ -91,6 +91,10 @@ data class Settings(
     val dpiEvoPool: List<String> = emptyList(),
     /** «Оформление»: "dark", "amoled", "you" (Material You). */
     val theme: String = "dark",
+    val reducedMotion: Boolean = false,
+    val compactServers: Boolean = false,
+    val secureScreen: Boolean = false,
+    val hideServerNames: Boolean = false,
     /** DPI strategies of each network, best first (top 5 of the last search incl. evolved "EVO#" ones): fast fallback. */
     val dpiRanking: Map<String, List<String>> = emptyMap(),
     // ---- masking beyond packets (core/Disguise)
@@ -179,7 +183,7 @@ data class Settings(
         .put("maskFamilies", JSONArray(maskFamilies)).put("maskFps", JSONArray(maskFps))
         .put("warpKeys", warpKeys).put("warpBuiltinKeys", warpBuiltinKeys).put("warpChain", warpChain).put("autoOptimize", autoOptimize)
         .put("warpKeyOff", JSONArray(warpKeyOff)).put("warpKeyStatus", JSONObject(warpKeyStatus as Map<*, *>)).put("myMasks", JSONArray(myMasks))
-        .put("maskEvolution", maskEvolution).put("autoMasks", JSONArray(autoMasks)).put("dpiEvoPool", JSONArray(dpiEvoPool)).put("theme", theme)
+        .put("maskEvolution", maskEvolution).put("autoMasks", JSONArray(autoMasks)).put("dpiEvoPool", JSONArray(dpiEvoPool)).put("theme", theme).put("reducedMotion", reducedMotion).put("compactServers", compactServers).put("secureScreen", secureScreen).put("hideServerNames", hideServerNames)
         .put("dpiRanking", JSONObject().apply { dpiRanking.forEach { (k, v) -> put(k, JSONArray(v)) } })
         .put("ruAppsDirect", ruAppsDirect).put("randomTun", randomTun).put("coverTraffic", coverTraffic).put("torRotation", torRotation).put("torRotationSeconds", torRotationSeconds.coerceIn(30, 86400)).put("torFastOnly", torFastOnly).put("torMaxLatencyMs", torMaxLatencyMs.coerceAtLeast(1)).put("torNetworkRecommendations", torNetworkRecommendations).put("autoChainSearch", autoChainSearch).put("autoChainPurpose", autoChainPurpose).put("torAll", torAll).put("torRouting", torRouting).put("torAuto", torAuto).put("torBridge", torBridge).put("torBridgeLines", torBridgeLines).put("torDirect", torDirect).put("rev", rev).put("turbo", turbo).put("autoStart", autoStart)
         .put("alwaysVpn", JSONArray(alwaysVpn)).put("alwaysDirect", JSONArray(alwaysDirect))
@@ -250,7 +254,9 @@ data class Settings(
                 warpKeyOff = list("warpKeyOff", emptyList()),
                 warpKeyStatus = o.optJSONObject("warpKeyStatus")?.let { m -> m.keys().asSequence().associateWith { m.getString(it) } } ?: emptyMap(),
                 myMasks = list("myMasks", emptyList()),
-                maskEvolution = o.optBoolean("maskEvolution", true), autoMasks = list("autoMasks", emptyList()), dpiEvoPool = list("dpiEvoPool", emptyList()), theme = o.optString("theme", "dark"),
+                maskEvolution = o.optBoolean("maskEvolution", true), autoMasks = list("autoMasks", emptyList()), dpiEvoPool = list("dpiEvoPool", emptyList()), theme = o.optString("theme", "dark").takeIf { it in setOf("dark","amoled","you","light","system") } ?: "dark",
+                reducedMotion = o.optBoolean("reducedMotion", false), compactServers = o.optBoolean("compactServers", false),
+                secureScreen = o.optBoolean("secureScreen", false), hideServerNames = o.optBoolean("hideServerNames", false),
                 dpiRanking = o.optJSONObject("dpiRanking")?.let { m -> m.keys().asSequence().associateWith { k -> m.optJSONArray(k)?.let { a -> (0 until a.length()).map { a.getString(it) } }.orEmpty() } } ?: emptyMap(),
                 ruAppsDirect = o.optBoolean("ruAppsDirect", true), randomTun = o.optBoolean("randomTun", true), coverTraffic = o.optBoolean("coverTraffic", true), torRotation = o.optBoolean("torRotation", false), torRotationSeconds = o.optInt("torRotationSeconds", 600).coerceIn(30, 86400), torFastOnly = o.optBoolean("torFastOnly", true), torMaxLatencyMs = o.optInt("torMaxLatencyMs", 2500).coerceAtLeast(1), torNetworkRecommendations = o.optBoolean("torNetworkRecommendations", false), autoChainSearch = o.optBoolean("autoChainSearch", true), autoChainPurpose = o.optString("autoChainPurpose", "balanced").takeIf { it in setOf("balanced", "download", "interactive") } ?: "balanced", torAll = o.optBoolean("torAll", false), torRouting = o.optBoolean("torRouting", false), torAuto = o.optBoolean("torAuto", false), torBridge = o.optString("torBridge", "none"), torBridgeLines = o.optString("torBridgeLines", ""), torDirect = o.optBoolean("torDirect", false), rev = o.optInt("rev", 0), turbo = o.optBoolean("turbo", true), autoStart = o.optBoolean("autoStart", false),
                 alwaysVpn = list("alwaysVpn", emptyList()), alwaysDirect = list("alwaysDirect", emptyList()),

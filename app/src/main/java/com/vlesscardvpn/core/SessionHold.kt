@@ -7,7 +7,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 object SessionHold {
     val until = MutableStateFlow(0L)
     fun active(): Boolean = until.value > SystemClock.elapsedRealtime()
-    fun start() { until.value = SystemClock.elapsedRealtime() + 30 * 60_000L }
+    fun start(minutes:Int=30) { until.value = SystemClock.elapsedRealtime() + minutes.coerceIn(1,120) * 60_000L }
     fun clear() { until.value = 0L }
     fun minutesLeft(): Long = ((until.value-SystemClock.elapsedRealtime()).coerceAtLeast(0L)+59_999L)/60_000L
 }

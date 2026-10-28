@@ -1,6 +1,10 @@
 package com.vlesscardvpn.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.animation.core.tween
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Dns
@@ -19,32 +23,46 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.text.style.TextAlign
 
-val Accent = Color(0xFF78DEEA)
-val Good = Color(0xFF7AE4BA)
-val Bad = Color(0xFFFFA4AC)
-val Warn = Color(0xFFFFCE83)
+private val DarkAccent = Color(0xFF78DEEA)
+val Accent: Color @Composable get() = MaterialTheme.colorScheme.primary
+val Good: Color @Composable get() = if(MaterialTheme.colorScheme.surface.luminance() > .5f) Color(0xFF17643E) else Color(0xFF7AE4BA)
+val Bad: Color @Composable get() = if(MaterialTheme.colorScheme.surface.luminance() > .5f) Color(0xFFAD2334) else Color(0xFFFFA4AC)
+val Warn: Color @Composable get() = if(MaterialTheme.colorScheme.surface.luminance() > .5f) Color(0xFF805000) else Color(0xFFFFCE83)
 
 @Composable
 fun AppUi(onConnect: () -> Unit, onDisconnect: () -> Unit) {
     val theme by remember { com.vlesscardvpn.core.Store.settings }.collectAsState()
     val ctx = androidx.compose.ui.platform.LocalContext.current
-    // «Оформление»: classic dark, AMOLED (true black: saves battery on OLED screens), Material You (wallpaper colors, Android 12+)
+    val systemDark = isSystemInDarkTheme()
+    val light = theme.theme == "light" || (theme.theme == "system" && !systemDark)
+    val activity = remember(ctx) { generateSequence(ctx) { (it as? android.content.ContextWrapper)?.baseContext }.filterIsInstance<android.app.Activity>().firstOrNull() }
+    DisposableEffect(activity,theme.secureScreen) {
+        val window = activity?.window
+        val flag = android.view.WindowManager.LayoutParams.FLAG_SECURE
+        val hadFlag = ((window?.attributes?.flags ?: 0) and flag) != 0
+        if(theme.secureScreen) window?.addFlags(flag) else window?.clearFlags(flag)
+        onDispose { if(hadFlag) window?.addFlags(flag) else window?.clearFlags(flag) }
+    }
     val scheme = when {
+        light -> lightColorScheme(primary=Color(0xFF006675),onPrimary=Color.White,
+            secondary=Color(0xFF585181),background=Color(0xFFF9FAFB),surface=Color.White,
+            surfaceVariant=Color(0xFFE8EEF1),onSurface=Color(0xFF202B33),onBackground=Color(0xFF202B33),
+            onSurfaceVariant=Color(0xFF47575F),outline=Color(0xFF657780))
         theme.theme == "you" && android.os.Build.VERSION.SDK_INT >= 31 -> dynamicDarkColorScheme(ctx)
-        theme.theme == "amoled" -> darkColorScheme(primary = Accent, onPrimary = Color(0xFF05212B), secondary = Color(0xFFB6AFF6),
+        theme.theme == "amoled" -> darkColorScheme(primary = DarkAccent, onPrimary = Color(0xFF05212B), secondary = Color(0xFFB6AFF6),
             onSurfaceVariant = Color(0xFFB3C6D5), outline = Color(0xFF536D80), background = Color.Black, surface = Color(0xFF0A0A0C),
             surfaceVariant = Color(0xFF16181D), onBackground = Color(0xFFF0F6FC), onSurface = Color(0xFFF0F6FC))
-        else -> darkColorScheme(primary = Accent, onPrimary = Color(0xFF05212B), secondary = Color(0xFFB6AFF6),
+        else -> darkColorScheme(primary = DarkAccent, onPrimary = Color(0xFF05212B), secondary = Color(0xFFB6AFF6),
             onSurfaceVariant = Color(0xFFB3C6D5), outline = Color(0xFF536D80), background = Color(0xFF07131F), surface = Color(0xFF102536),
             surfaceVariant = Color(0xFF183345), onBackground = Color(0xFFF0F6FC), onSurface = Color(0xFFF0F6FC))
     }
     MaterialTheme(colorScheme = scheme) {
-        var tab by remember { mutableIntStateOf(0) }
-        var intro by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(theme.welcomeSound && com.vlesscardvpn.core.Tunnel.socks == null) }
+        var tab by rememberSaveable { mutableIntStateOf(0) }
+        var intro by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(theme.welcomeSound && !theme.reducedMotion && !light && com.vlesscardvpn.core.Tunnel.socks == null) }
         LaunchedEffect(intro) { if (intro) { withFrameNanos { }; withFrameNanos { }; android.util.Log.i("VCIntro", "INTRO_VISIBLE"); kotlinx.coroutines.delay(1400); intro = false } }
         Box(Modifier.fillMaxSize()) {
-        val sea = theme.oceanBackground && theme.theme != "amoled"
-        if (sea) OceanBackground(theme.oceanMotion)
+        val sea = theme.oceanBackground && theme.theme != "amoled" && !light
+        if (sea) OceanBackground(theme.oceanMotion && !theme.reducedMotion)
         Scaffold(
             containerColor = if (sea) Color.Transparent else scheme.background,
             bottomBar = {
@@ -72,7 +90,7 @@ fun AppUi(onConnect: () -> Unit, onDisconnect: () -> Unit) {
             }
         ) { pad ->
             Box(Modifier.padding(pad).fillMaxSize()) {
-                androidx.compose.animation.Crossfade(tab, label = "tab") { t -> when (t) {
+                androidx.compose.animation.Crossfade(tab, animationSpec = tween(if(theme.reducedMotion) 0 else 200), label = "tab") { t -> when (t) {
                     0 -> HomeScreen(onConnect, onDisconnect, openServers = { tab = 1 })
                     1 -> ServersScreen()
                     3 -> ChatScreen()
