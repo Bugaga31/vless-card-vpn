@@ -1,0 +1,51 @@
+{
+  "passed": true,
+  "source_sha": "f314abf72a465b95acd69e76e35d385a18ad2570",
+  "run_id": "40762129106",
+  "method": "assistant_opened_each_png",
+  "scope": "synthetic states rendered by production Compose; not live TUN or operator validation",
+  "screenshots": [
+    {
+      "file": "connected.png",
+      "sha256": "313c7ec2138396759957eb1f3803fda9982b2676b80f444e8dafc9bc0ecc47e0"
+    },
+    {
+      "file": "error.png",
+      "sha256": "4c358ac13f348755f747e29e542bafa2233455bfb6fc04654260860e615ad3fa"
+    },
+    {
+      "file": "idle-dark.png",
+      "sha256": "efce2bbfdb6ef9a4f48dccf43c3afc9e7bd3ebf760e2b4e0d33015c647a3ff7e"
+    },
+    {
+      "file": "idle-light.png",
+      "sha256": "fc266a4434ae650e58a9252d9268812639353b5beaa016dbc216e433ab58624b"
+    },
+    {
+      "file": "large-narrow.png",
+      "sha256": "bf757716a0d329a35bbdddddeb168088bf2870c5eb74c01ed074ac9558aa6e94"
+    },
+    {
+      "file": "partial.png",
+      "sha256": "8b711c49a83929cea597374343d6fb5ecefb84b1e4e2e54092aff9b3da1f9d31"
+    },
+    {
+      "file": "searching.png",
+      "sha256": "96659823f9e27677842967a95dfec6b04fe801f746877244e2339b103b71b864"
+    },
+    {
+      "file": "services.png",
+      "sha256": "ac111b36fcffd04b09ea0f106d7255dac5f9fbb3a9c610a5bf892c7ddba2cb0d"
+    }
+  ],
+  "observations": {
+    "connected.png": "Clear disconnect action and local-probe scope, no overlap.",
+    "error.png": "Text warning and visible retry action, readable contrast.",
+    "idle-dark.png": "Primary action visible even with update banner; remaining copy scrolls normally.",
+    "idle-light.png": "Readable semantic light palette, primary action clearly differentiated.",
+    "large-narrow.png": "320dp at 150% font: complete primary action visible, text wraps without horizontal overflow.",
+    "partial.png": "Partial failure labelled in words, not falsely presented as healthy.",
+    "searching.png": "Stable visible cancel action and clear tested-services explanation.",
+    "services.png": "All four service rows and probe scope legible; slow Telegram explicit. Session totals continue below scroll viewport."
+  }
+}
