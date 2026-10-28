@@ -193,7 +193,7 @@ data class Settings(
         /** "https://www.Site.com/path" → "site.com"; null when it is not a domain. */
         fun host(input: String): String? = input.trim().lowercase().substringAfter("://").substringBefore('/').substringBefore('?')
             .substringBefore(':').removePrefix("www.").trim('.').takeIf { Regex("^[a-z0-9а-яё-]+(\\.[a-z0-9а-яё-]+)+$").matches(it) }
-        const val REV = 78
+        const val REV = 79
         /** YouTube video, pictures and player — what «Умный YouTube» sends through the DPI bypass. */
         val YT_DOMAINS = listOf("geosite:youtube", "domain:googlevideo.com", "domain:ytimg.com", "domain:ggpht.com", "domain:youtu.be", "domain:youtube.com")
         /**
@@ -211,6 +211,9 @@ data class Settings(
             if (s.rev < 74 && Subs.DIMAN !in s.subscriptions) s = s.copy(subscriptions = s.subscriptions + Subs.DIMAN)
             if (s.rev < 75 && Subs.CLOUD_WORKS !in s.subscriptions) s = s.copy(subscriptions = listOf(Subs.CLOUD_WORKS) + s.subscriptions)
             if (s.rev < 78 && s.torAll) s = com.vlesscardvpn.tor.TorConnectionPolicy.selectTor(s)
+            // Add the working requested source once, keeping manual links and later removals.
+            // Empty/unavailable sources remain opt-in in the catalog.
+            if (s.rev < 79 && Subs.OVI_FULL !in s.subscriptions) s = s.copy(subscriptions = s.subscriptions + Subs.OVI_FULL)
             return if (s.rev >= REV) s else s.copy(rev = REV)
         }
         const val DPI_AUTO = "auto"

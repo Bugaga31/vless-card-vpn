@@ -60,7 +60,7 @@ class AutoRoutePolicyTest {
     }
     @Test fun migrationAddsRequestedSourceOnceAndKeepsManualSubscriptions() {
         val migrated=Settings.migrate(Settings(rev=73,subscriptions=listOf("https://example.invalid/sub")))
-        assertEquals(listOf(Subs.CLOUD_WORKS,"https://example.invalid/sub",Subs.DIMAN),migrated.subscriptions)
+        assertEquals(listOf(Subs.CLOUD_WORKS,"https://example.invalid/sub",Subs.DIMAN,Subs.OVI_FULL),migrated.subscriptions)
         assertEquals(migrated,Settings.migrate(migrated))
     }
     @Test fun laterRemovalAndDisabledAutoUpdateArePreserved() {
