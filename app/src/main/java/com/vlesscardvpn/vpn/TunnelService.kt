@@ -492,6 +492,7 @@ class TunnelService : VpnService() {
             }
             // A SOCKS HTTPS success uses remote name resolution and does not prove
             // Android apps' UDP DNS path. Never show a healthy VPN on that evidence alone.
+            val measuredBeforeDns = p
             val httpsReachable = p.works
             val dnsOk = if (p.works && !st.proxyOnly) com.vlesscardvpn.core.CancellableProbe.run { bind ->
                 Tester.dnsViaSocks(port, auth.user, auth.pass, budgetMs = 3000, onCancel = bind)
@@ -513,14 +514,15 @@ class TunnelService : VpnService() {
                 Net.key(this@TunnelService) != sampledNet || Net.underlying(this@TunnelService)?.toString() != sampledHandle) return@launch
             val text = if(chainExitRejected) "Выход Tor не подтверждён или недопустим — возвращаюсь к проверенному Auto" else if (p.realMs > 0) "HTTPS · ${p.realMs} мс · Видео YouTube: ${if(p.ytOk==true) "✓" else if(p.ytOk==false) "нет ответа" else "не проверен"} · Telegram MTProto: ${if(p.tgOk==true) "${p.tgMs} мс" else if(p.tgOk==false) "нет ответа" else "не проверен"}$warp"
                 else "Нет ответа через выбранный маршрут (${p.error}). " + if (st.mode == Mode.AUTO && st.autoHeal) "Ищу рабочий вариант сам…" else "Проверьте серверы или включите маскировку."
-            val liveHealthy: Boolean? = when {
-                !p.works || chainExitRejected -> false
-                st.mode == Mode.AUTO && (p.tgOk == false || p.ytOk == false) -> false
-                st.mode == Mode.AUTO && p.tgOk == null -> null
-                st.mode == Mode.AUTO && usedChain==null && !usedTorRoute && !com.vlesscardvpn.core.AutoLatencyPolicy.accepts(p) -> false
-                else -> true
-            }
+            // Module supervisor owns health aggregation; this service owns lifecycle/recovery.
+            // Preserve the HTTPS measurement even if the separate DNS module fails.
+            val moduleHealth=com.vlesscardvpn.health.LiveHealthCoordinator.assess(
+                measuredBeforeDns,if(st.proxyOnly || !httpsReachable) null else dnsOk,
+                requireDns=!st.proxyOnly,requireTelegram=st.mode==Mode.AUTO,requireYouTube=Tunnel.ytViaDpi,
+                strictLatency=st.mode==Mode.AUTO && usedChain==null && !usedTorRoute,blocked=chainExitRejected)
+            val liveHealthy=moduleHealth.ready
             com.vlesscardvpn.core.ConnectionPassport.full(httpsReachable, if(st.proxyOnly || !httpsReachable) null else dnsOk, p.tgOk, p.ytOk)
+            com.vlesscardvpn.core.ConnectionPassport.fullModules(moduleHealth)
             Tunnel.status.value = cur.copy(check = text, checkOk = liveHealthy)
             if (attributeServers) runCatching { val stv = Store.state.value; com.vlesscardvpn.core.Brain.lived(sampledNet, sampledServers, { stv.state(it) }, p.works); com.vlesscardvpn.core.Brain.save(this@TunnelService) }
             Log.i("E2E", "check ok=${p.works} ms=${p.realMs} big=${p.bigOk} yt=${p.ytOk} tg=${p.tgOk} err=${p.error} warp=$warp dns=$dnsOk")
