@@ -23,12 +23,13 @@ class DashboardUiR187Test {
     }
     private fun capture(name:String,expected:String) {
         ins.waitForIdleSync();Thread.sleep(1200)
+        runCatching {ins.uiAutomation.waitForIdle(500,5000)}
         var text=labels(ins.uiAutomation.rootInActiveWindow)
         // Startup can briefly expose no accessibility window even after main-thread idle.
-        // Wait for a populated tree, never scroll or bypass the expected-action assertion.
+        // Await the expected tree update, never scroll or bypass the visibility assertion.
         val deadline=android.os.SystemClock.elapsedRealtime()+10_000
-        while(text.isEmpty() && android.os.SystemClock.elapsedRealtime()<deadline) {
-            Thread.sleep(250);ins.waitForIdleSync();text=labels(ins.uiAutomation.rootInActiveWindow)
+        while(text.none {expected in it} && android.os.SystemClock.elapsedRealtime()<deadline) {
+            Thread.sleep(250);ins.waitForIdleSync();val root=ins.uiAutomation.rootInActiveWindow;root?.refresh();text=labels(root)
         }
         val target=File(ins.targetContext.getExternalFilesDir(null),"ui187").apply {mkdirs()}
         File(target,"$name.labels.txt").writeText(text.joinToString("\n"))
