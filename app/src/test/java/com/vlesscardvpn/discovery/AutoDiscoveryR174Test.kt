@@ -31,6 +31,12 @@ class AutoDiscoveryR174Test {
         assertTrue(AutoDiscoveryPolicy.refreshDue(true,61000,1000))
         assertTrue(AutoDiscoveryPolicy.refreshDue(true,0,1000))
     }
+    @Test fun failedSourcesRetrySoonerThanSuccessfulRefreshes() {
+        assertFalse(AutoDiscoveryPolicy.refreshDue(true,19_999,0,failed=true))
+        assertTrue(AutoDiscoveryPolicy.refreshDue(true,20_000,0,failed=true))
+        assertFalse(AutoDiscoveryPolicy.refreshDue(true,59_999,0))
+        assertTrue(AutoDiscoveryPolicy.refreshDue(true,60_000,0))
+    }
     @Test fun refreshStaysBoundedToConfiguredSourcesAndPrioritizesCloudAndMobileWhitelist() {
         val mobile="https://raw.githubusercontent.com/zieng2/wl/main/vless_lite.txt"
         val sources=listOf("https://one.test/sub",mobile,Subs.CLOUD_WORKS,Subs.CLOUD_WORKS,"https://two.test/sub","https://three.test/sub")

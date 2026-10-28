@@ -11,6 +11,7 @@ object AutoDiscoveryPolicy {
     const val RANKING_WINDOW = 256
     const val MAX_BYTES = 2 * 1024 * 1024
     const val REFRESH_COOLDOWN_MS = 60_000L
+    const val FAILED_SOURCE_RETRY_MS = 20_000L
     fun sources(configured: List<String>, mobile: Boolean, round: Int = 0): List<String> {
         val unique = configured.distinct()
         val cloud = unique.filter { it == Subs.CLOUD_WORKS }
@@ -19,6 +20,8 @@ object AutoDiscoveryPolicy {
         return (cloud + other.drop(offset) + other.take(offset)).take(SOURCES)
     }
     /** Never let the global 12h full-refresh timestamp suppress rescue of a dead catalog. */
-    fun refreshDue(enabled: Boolean, now: Long, lastAttempt: Long?): Boolean = enabled &&
-        (lastAttempt == null || now < lastAttempt || now - lastAttempt >= REFRESH_COOLDOWN_MS)
+    fun refreshDue(enabled: Boolean, now: Long, lastAttempt: Long?, failed: Boolean = false): Boolean {
+        val cooldown = if (failed) FAILED_SOURCE_RETRY_MS else REFRESH_COOLDOWN_MS
+        return enabled && (lastAttempt == null || now < lastAttempt || now - lastAttempt >= cooldown)
+    }
 }

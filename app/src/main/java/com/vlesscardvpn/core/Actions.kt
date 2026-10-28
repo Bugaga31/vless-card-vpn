@@ -1281,7 +1281,8 @@ object Actions {
         }
     }
 
-    private val autoSourceAttempts = java.util.concurrent.ConcurrentHashMap<String, Long>()
+    private data class AutoSourceAttempt(val at: Long, val failed: Boolean)
+    private val autoSourceAttempts = java.util.concurrent.ConcurrentHashMap<String, AutoSourceAttempt>()
 
     /** Rescue is independent of the scheduled 12h full refresh; manual opt-out still applies. */
     private suspend fun refreshAutoSources(round: Int = 0, onBatch: (List<Server>) -> Unit) = coroutineScope {
@@ -1291,26 +1292,36 @@ object Actions {
         val now = android.os.SystemClock.elapsedRealtime()
         if (!settings.autoUpdateSubs) return@coroutineScope
         val sources = AutoDiscoveryPolicy.sources(settings.subscriptions, Net.family(net).startsWith("Моб.: "), round)
-            .filter { AutoDiscoveryPolicy.refreshDue(true, now, autoSourceAttempts[net + "|" + it]) }
-        sources.forEach { autoSourceAttempts[net + "|" + it] = now }
-        if (autoSourceAttempts.size > 256) autoSourceAttempts.entries.sortedBy { it.value }
+            .filter { url ->
+                val attempt = autoSourceAttempts[net + "|" + url]
+                AutoDiscoveryPolicy.refreshDue(true, now, attempt?.at, attempt?.failed == true)
+            }
+        sources.forEach { autoSourceAttempts[net + "|" + it] = AutoSourceAttempt(now, failed = false) }
+        if (autoSourceAttempts.size > 256) autoSourceAttempts.entries.sortedBy { it.value.at }
             .take(autoSourceAttempts.size - 256).forEach { autoSourceAttempts.remove(it.key, it.value) }
         kotlinx.coroutines.withTimeoutOrNull(AutoDiscoveryPolicy.SOURCE_MS + 1000) {
             sources.map { url -> async(Bg.io) {
-                val mirrors = Settings.mirrors(url)
-                // Two hosts in parallel; don't spend the deadline on sequential blocked mirrors.
-                val urls = listOfNotNull(mirrors.firstOrNull(), mirrors.firstOrNull { it.contains("cdn.jsdelivr.net/") }
-                    ?: mirrors.getOrNull(1)).distinct()
-                val list = AutoSubscriptionFetch.firstUseful(urls) { address ->
-                    AutoSubscriptionFetch.text(address)?.let { body ->
-                        LinkParser.parseMany(body, url).filter(AutoEligibility::vlessServer).take(MAX_PER_SUB).takeIf { it.isNotEmpty() }
+                val key = net + "|" + url
+                var useful = false
+                try {
+                    val mirrors = Settings.mirrors(url)
+                    // Two hosts in parallel; don't spend the deadline on sequential blocked mirrors.
+                    val urls = listOfNotNull(mirrors.firstOrNull(), mirrors.firstOrNull { it.contains("cdn.jsdelivr.net/") }
+                        ?: mirrors.getOrNull(1)).distinct()
+                    val list = AutoSubscriptionFetch.firstUseful(urls) { address ->
+                        AutoSubscriptionFetch.text(address)?.let { body ->
+                            LinkParser.parseMany(body, url).filter(AutoEligibility::vlessServer).take(MAX_PER_SUB).takeIf { it.isNotEmpty() }
+                        }
                     }
-                }
-                kotlinx.coroutines.currentCoroutineContext().ensureActive()
-                if (list != null && Net.key(app) == net && Net.underlying(app)?.toString() == network &&
-                    Store.state.value.settings.let { it.autoUpdateSubs && url in it.subscriptions }) {
-                    Store.replaceSource(url, list)
-                    onBatch(list)
+                    kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                    if (list != null && Net.key(app) == net && Net.underlying(app)?.toString() == network &&
+                        Store.state.value.settings.let { it.autoUpdateSubs && url in it.subscriptions }) {
+                        Store.replaceSource(url, list)
+                        onBatch(list)
+                        useful = true
+                    }
+                } finally {
+                    autoSourceAttempts[key] = AutoSourceAttempt(android.os.SystemClock.elapsedRealtime(), failed = !useful)
                 }
             } }.awaitAll()
         }
