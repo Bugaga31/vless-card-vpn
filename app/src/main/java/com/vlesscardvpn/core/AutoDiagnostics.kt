@@ -27,10 +27,23 @@ object AutoDiagnostics {
         events.put(event(status,reason,durationMs))
         p.edit().putString("family",family).putString("events",events.toString()).apply()
     }
+    fun searchEvent(stop:String,waves:Int,counts:Map<String,Int>):JSONObject {
+        require(stop in AutoSearchCampaign.Stop.values().map {it.name})
+        require(counts.keys==setOf("started","completed","ready","https_unconfirmed","telegram_unconfirmed","telegram_unknown","over_500ms","unfinished"))
+        val summary=JSONObject()
+        counts.forEach {(key,value)->summary.put(key,value.coerceIn(0,100000))}
+        return JSONObject().put("stop",stop).put("waves",waves.coerceIn(0,AutoSearchCampaign.MAX_WAVES)).put("ordinary_probes",summary)
+    }
+    @Synchronized fun recordSearch(ctx:Context,networkFamily:String,stop:String,waves:Int,counts:Map<String,Int>) {
+        ctx.getSharedPreferences("auto_diagnostics",0).edit().putString("search_family",family(networkFamily))
+            .putString("last_search",searchEvent(stop,waves,counts).toString()).apply()
+    }
     fun report(ctx: Context): String {
         val p=ctx.getSharedPreferences("auto_diagnostics",0)
-        return JSONObject().put("schema",1).put("version",com.vlesscardvpn.BuildConfig.VERSION_NAME)
+        return JSONObject().put("schema",2).put("version",com.vlesscardvpn.BuildConfig.VERSION_NAME)
             .put("family",p.getString("family","other"))
+            .put("last_search",runCatching {JSONObject(p.getString("last_search","{}"))}.getOrDefault(JSONObject()))
+            .put("search_family",p.getString("search_family","other"))
             .put("events",runCatching { JSONArray(p.getString("events","[]")) }.getOrDefault(JSONArray())).toString(2)
     }
     fun clear(ctx: Context) {ctx.getSharedPreferences("auto_diagnostics",0).edit().clear().apply()}
