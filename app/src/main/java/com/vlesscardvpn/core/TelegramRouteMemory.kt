@@ -18,6 +18,7 @@ object TelegramRouteMemory {
         val f = failures[key] ?: return false
         if (now < f.at) { failures.remove(key); return false }
         val duration = minOf(300000L,15000L * (1L shl (f.streak-1)))
-        return now-f.at < duration
+        val jitter=(key.hashCode().toLong() and 0x7fffffffL)%21L
+        return now-f.at < duration+duration*jitter/100L
     }
 }

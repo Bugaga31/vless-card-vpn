@@ -18,6 +18,7 @@ class ProbeMemory(private val ttlMs: Long = 120_000L, private val capacity: Int 
         val key = Triple(net, id, mask); val f = failed[key] ?: return false
         if (now < f.at) { failed.remove(key); return false }
         val duration = if (ttlMs == 120_000L) cooldownMs(f.streak) else ttlMs
-        return now - f.at < duration
+        val jitter=if(ttlMs==120_000L) ((key.hashCode().toLong() and 0x7fffffffL)%21L) else 0L
+        return now - f.at < duration + duration*jitter/100L
     }
 }

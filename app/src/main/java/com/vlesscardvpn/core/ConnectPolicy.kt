@@ -39,6 +39,8 @@ object ConnectPolicy {
             .thenBy { if (it.id in remembered) 0 else 1 }.thenBy { if (it.id in cloudIds) 0 else 1 })
         val (deferred, ready) = unique.partition(cooling)
         val eligibleCloud = cloud.filter { hint -> ready.any { it.id == hint.id } }
-        return PublicCloudQueue.merge(ready + deferred, eligibleCloud, list, FIRST, slots = FIRST / 2)
+        if(ready.isEmpty()) return ServerChoice.diverse(deferred,1)
+        // The fallback catalog is the ready pool itself, not the unfiltered import list.
+        return PublicCloudQueue.merge(ready,eligibleCloud,ready,FIRST,slots=1)
     }
 }

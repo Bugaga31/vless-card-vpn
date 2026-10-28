@@ -7,9 +7,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
-import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -37,7 +35,7 @@ data class Probe(val realMs: Int, val bigOk: Boolean?, val ytOk: Boolean?, val e
  */
 object Tester {
     val SKIPPED = Probe(0, null, null, "пропущено")
-    private val mutex = Mutex()
+    // All temporary core users share ProbeArbiter, including chain and throughput probes.
     private val base: OkHttpClient by lazy {
         OkHttpClient.Builder().connectTimeout(8, TimeUnit.SECONDS).readTimeout(8, TimeUnit.SECONDS)
             .callTimeout(15, TimeUnit.SECONDS).retryOnConnectionFailure(false).build()
@@ -335,17 +333,19 @@ object Tester {
     }
 
     /** Real download speed (kbit/s, 0 = failed) of several variants, one after another so they don't share the line. */
-    suspend fun speedMany(variants: List<Pair<Server, Mask?>>, byeDpiPort: Int?, dpiPorts: Map<String, Int>, seconds: Int = 3): List<Int> = mutex.withLock {
-        withContext(Bg.io) {
-            val ports = freePorts(variants.size)
-            val core = XrayCore.Instance("speed")
-            try {
-                runCatching { core.start(XrayConfigBuilder.testConfig(variants, ports, byeDpiPort, dpiPorts)) }
-                if (!core.running) return@withContext variants.map { 0 }
-                ports.map { p -> runCatching { (speed(p, seconds).mbps * 1000).toInt() }.getOrDefault(0) }
-            } finally { core.stop() }
+    suspend fun speedMany(variants: List<Pair<Server, Mask?>>, byeDpiPort: Int?, dpiPorts: Map<String, Int>, seconds: Int = 3): List<Int> =
+        variants.map { variant ->
+            ProbeArbiter.withPermit {
+                withContext(Bg.io) {
+                    val ports=freePorts(1)
+                    val core=XrayCore.Instance("speed")
+                    try {
+                        runCatching {core.start(XrayConfigBuilder.testConfig(listOf(variant),ports,byeDpiPort,dpiPorts))}
+                        if(!core.running) 0 else runCatching {(speed(ports[0],seconds).mbps*1000).toInt()}.getOrDefault(0)
+                    } finally {core.stop()}
+                }
+            }
         }
-    }
 
     private fun download(client: OkHttpClient, url: String, deadline: Long = Long.MAX_VALUE, onCall: ((okhttp3.Call) -> Unit)? = null): TransferProof.Sample =
         client.newCall(Request.Builder().url(url).header("User-Agent", UA)
@@ -359,7 +359,7 @@ object Tester {
         }
 
     /** Serialize chain downloads with ordinary server/mask tests. Waiting is cancellable. */
-    suspend fun <T> exclusiveProbe(block: suspend () -> T): T = mutex.withLock { block() }
+    suspend fun <T> exclusiveProbe(block: suspend () -> T): T = ProbeArbiter.withPermit { block() }
 
     /** Tests [variants] (server + mask) in parallel through one temporary Xray instance. */
     suspend fun real(
@@ -370,8 +370,8 @@ object Tester {
         stopAfter: Int = Int.MAX_VALUE,
         budgetMs: Long = 0,
         onEach: (Int, Probe) -> Unit,
-    ) = mutex.withLock {
-        withContext(Bg.io) {
+    ) = withContext(Bg.io) {
+        run {
             val successes = java.util.concurrent.atomic.AtomicInteger()
             fun skipped(i: Int) = successes.get() >= stopAfter.coerceAtLeast(1) || skip(i) || (variants[i].first.protocol == "wireguard" && variants[i].first.secret in Tunnel.wireguardKeys)
             fun accepted(p: Probe) = p.works && (!requireTelegram || p.tgOk == true)
@@ -379,10 +379,13 @@ object Tester {
             // Bound config/socket footprint too, not merely simultaneous HTTP calls.
             val plan = PhonePower.state.value
             val probeLimit = if (foreground) plan.foregroundRealParallel else plan.realParallel
-            val effectiveBatch = PowerPolicy.cap(batch, if (probeLimit <= 2) 4 else batch)
+            val effectiveBatch = PowerPolicy.cap(batch, if(foreground) ConnectPolicy.FIRST else minOf(6,probeLimit.coerceAtLeast(1)))
             for (all in chunks(variants, effectiveBatch)) {
                 val idx = all.filter { i -> if (skipped(i)) { onEach(i, SKIPPED); false } else true }
                 if (idx.isEmpty()) continue
+                ProbeArbiter.withPermit(foreground) {
+                // Re-evaluate skip after waiting; another successful batch may have satisfied stopAfter.
+                if(idx.all { skipped(it) }) {idx.forEach {onEach(it,SKIPPED)};return@withPermit}
                 val chunk = idx.map { variants[it] }
                 val ports = freePorts(chunk.size)
                 val core = XrayCore.Instance("test")
@@ -398,7 +401,7 @@ object Tester {
                         try { report(idx[i], if (ok) CancellableProbe.run { bind -> probeSocks(p[0], testUrl, big = big, youtube = youtube, telegram = telegram, attempts = attempts, budgetMs = budgetMs, onCall = { call -> bind { call.cancel() } }, calls = calls, onCancel = bind) } else Probe(0, null, null, "конфиг не принят ядром")) }
                         finally { one.stop() }
                     }
-                    continue
+                    return@withPermit
                 }
                 try {
                     coroutineScope {
@@ -409,6 +412,7 @@ object Tester {
                             accepted = { accepted(it) }, onEach = { i, p -> report(idx[i], p) })
                     }
                 } finally { core.stop() }
+                }
             }
         }
     }

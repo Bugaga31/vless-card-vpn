@@ -1467,19 +1467,12 @@ object Actions {
         val remembered = (st.settings.netServers[net] ?: st.settings.netServers[Net.family(net)]).orEmpty().toSet()
         val time = System.currentTimeMillis()
         val gaming = GameSession.active()
-        val speedRank = eligible.sortedWith(ServerChoice.downloadOrder({ st.state(it) },net,time))
-            .mapIndexed { index,server -> server.id to index }.toMap()
-        val learnedScores = eligible.associate { server ->
-            val state = st.state(server)
-            val score = if (gaming) -ServerChoice.latencyScore(state.evidenceFor(net), state.realMs)
-                else if (ServerChoice.measuredSpeed(state, net, time) > 0) 2.0 - (speedRank[server.id] ?: eligible.size).toDouble() / (eligible.size + 1)
-                else ServerChoice.blended(CloudSpeed.prior(server), state.evidenceFor(net), time)
-            server.id to (score to Brain.p(net, server, state))
-        }
-        val learned = eligible.sortedWith(
-            compareByDescending<Server> { learnedScores[it.id]?.first ?: 0.0 }
-                .thenByDescending { learnedScores[it.id]?.second ?: 0.0 }
-        ).mapIndexed { i, server -> server.id to i }.toMap()
+        // Score each candidate once; sorting must not repeatedly read cloud/model state.
+        val learned = (if(gaming) eligible.map {server ->
+            server to (ServerChoice.latencyScore(st.state(server).evidenceFor(net),st.state(server).realMs) to Brain.p(net,server,st.state(server)))
+        }.sortedWith(compareBy<Pair<Server,Pair<Double,Double>>>{it.second.first}.thenByDescending{it.second.second}.thenBy{it.first.id}).map{it.first}
+        else AdaptiveRouteRank.order(eligible,{st.state(it)},net,time,{CloudSpeed.prior(it)}))
+            .mapIndexed {i,server -> server.id to i}.toMap()
         val first = ConnectPolicy.candidates(eligible, cloud, remembered, cooling = { server ->
             val e = st.state(server).evidenceFor(net)
             TelegramRouteMemory.cooling(net, server.id, st.state(server).maskFor(net), time) ||
@@ -1688,11 +1681,19 @@ object Actions {
     /** Find a VERIFIED spare while the existing TUN stays up. Selection changes only after returning success. */
     suspend fun prepareStandby(used: List<Server>): Server? {
         if (job?.isActive == true) return null
+        val plan=PhonePower.refresh(app)
+        if(SessionHold.active() || GameSession.active() || !plan.allowLight || plan.deferTraffic) return null
         val st = Store.state.value; val ids = used.map { it.id }.toSet(); val net = Net.key(app)
-        val pool = preferred(st, st.servers.filter { it.id !in ids })
+        if(!ReserveBudget.take(net+"|"+Net.underlying(app)?.toString(),android.os.SystemClock.elapsedRealtime())) return null
+        val stamp=System.currentTimeMillis()
+        val pool = preferred(st, st.servers.filter { it.id !in ids }).filter {server->
+            !probeMemory.cooling(net,server.id,st.state(server).maskFor(net),stamp) &&
+            !TelegramRouteMemory.cooling(net,server.id,st.state(server).maskFor(net),stamp) &&
+            AutoEligibility.telegramRank(st.state(server),net,stamp)!=2
+        }
         val now = System.currentTimeMillis()
         val total = pool.sumOf { st.state(it).evidenceFor(net).checks.coerceIn(0, 10000) }.coerceAtMost(1_000_000)
-        val ranked = pool.sortedByDescending { ServerChoice.blended(CloudSpeed.prior(it), st.state(it).evidenceFor(net), now) }
+        val ranked = AdaptiveRouteRank.order(pool,{st.state(it)},net,now,{CloudSpeed.prior(it)})
         val exploit = ServerChoice.diverse(ranked, 5)
         // One exploration slot, only for background verification; never an unverified live switch.
         val explore = pool.filter { s -> exploit.none { it.id == s.id } }.maxByOrNull {
@@ -1702,7 +1703,7 @@ object Actions {
         val candidates = exploit + listOfNotNull(explore)
         var found: Server? = null
         val previous = progress.value
-        try { realTest(candidates,"Фоновый запасной маршрут",big=false,youtube=false,attempts=1,stopAfter=1,
+        try { realTest(candidates,"Фоновый запасной маршрут",big=false,youtube=false,telegram=st.settings.mode==Mode.AUTO,attempts=1,stopAfter=1,
             budgetMs=ConnectPolicy.QUICK_BUDGET_MS,onFirst={ found=it }) }
         finally { progress.value=previous }
         return found

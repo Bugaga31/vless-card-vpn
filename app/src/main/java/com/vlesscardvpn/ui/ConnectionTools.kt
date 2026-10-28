@@ -25,6 +25,7 @@ fun ConnectionTools() {
     val settings by Store.settings.collectAsState()
     val snapshot by ConnectionPassport.state.collectAsState()
     val events by ConnectionHistory.events.collectAsState()
+    val scheduler by ProbeArbiter.state.collectAsState()
     val hold by SessionHold.until.collectAsState()
     val running by Actions.running.collectAsState()
     var expanded by rememberSaveable { mutableStateOf(false) }
@@ -55,6 +56,7 @@ fun ConnectionTools() {
         if(paused) Text("Фоновое ускорение на паузе: ещё ${SessionHold.minutesLeft()} мин. VPN и аварийное восстановление не выключены.",style=MaterialTheme.typography.bodySmall)
         if(expanded) {
             Text("Что подтвердили локальные пробы",style=MaterialTheme.typography.titleSmall)
+            Text("Очередь проверок: ${when(scheduler.active){"foreground"->"ручная/стартовая волна";"background"->"фоновая волна";else->"свободна"}} · ожидают приоритета: ${scheduler.foregroundWaiting}. Последнее ожидание ядра: ${scheduler.lastWaitMs} мс (не задержка сети).",style=MaterialTheme.typography.bodySmall)
             Text("HTTPS: ${ConnectionPassport.label(snapshot.https)} · DNS: ${ConnectionPassport.label(snapshot.dns)}",style=MaterialTheme.typography.bodySmall)
             Text("Telegram MTProto: ${ConnectionPassport.label(snapshot.telegram)}",style=MaterialTheme.typography.bodySmall)
             Text("Видео YouTube: ${ConnectionPassport.label(snapshot.youtube)}",style=MaterialTheme.typography.bodySmall)
