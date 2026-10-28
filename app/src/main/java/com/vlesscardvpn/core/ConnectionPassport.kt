@@ -9,13 +9,13 @@ object ConnectionPassport {
     data class Check(val value: Boolean? = null, val at: Long = 0L)
     data class Snapshot(val https: Check = Check(), val dns: Check = Check(), val telegram: Check = Check(), val youtube: Check = Check())
     val state = MutableStateFlow(Snapshot())
-    private data class ModuleFrame(val assessment:com.vlesscardvpn.health.HealthAssessment,val at:Long)
-    @Volatile private var lastFullModules:ModuleFrame?=null
+    data class ModuleFrame(val assessment:com.vlesscardvpn.health.HealthAssessment,val at:Long)
+    val modules = MutableStateFlow<ModuleFrame?>(null)
     @Synchronized fun fullModules(assessment:com.vlesscardvpn.health.HealthAssessment) {
-        lastFullModules=ModuleFrame(assessment,SystemClock.elapsedRealtime())
+        modules.value=ModuleFrame(assessment,SystemClock.elapsedRealtime())
     }
     private fun check(v: Boolean?) = Check(v,SystemClock.elapsedRealtime())
-    @Synchronized fun clear() { state.value = Snapshot(); lastFullModules=null; ConnectionHistory.boundary() }
+    @Synchronized fun clear() { state.value = Snapshot(); modules.value=null; ConnectionHistory.boundary() }
     @Synchronized fun full(https: Boolean, dns: Boolean?, telegram: Boolean?, youtube: Boolean?) {
         state.value = Snapshot(check(https),check(dns),check(telegram),check(youtube))
         ConnectionHistory.record("https",https); ConnectionHistory.record("dns",dns)
@@ -37,7 +37,7 @@ object ConnectionPassport {
     fun age(c:Check): Long? = if(c.at<=0) null else ((SystemClock.elapsedRealtime()-c.at).coerceAtLeast(0)/1000)
     fun report(): String {
         val s=state.value
-        val frame=lastFullModules
+        val frame=modules.value
         val now=SystemClock.elapsedRealtime()
         val modules=frame?.takeIf {now>=it.at}?.let {com.vlesscardvpn.health.LiveHealthCoordinator.report(it.assessment)
             .put("age_seconds",(now-it.at)/1000).put("stale",now-it.at>90_000L)}

@@ -97,7 +97,7 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
         val upd by com.vlesscardvpn.core.Updater.state.collectAsState()
         if (upd.latest.isNotEmpty()) {
             val uctx = androidx.compose.ui.platform.LocalContext.current
-            Card(Modifier.fillMaxWidth().padding(top = 10.dp), shape = RoundedCornerShape(14.dp), colors = CardDefaults.cardColors(containerColor = Color(0xFF1C3A2A))) {
+            Card(Modifier.fillMaxWidth().padding(top = 10.dp), shape = RoundedCornerShape(14.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)) {
                 Row(Modifier.padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text(upd.text.ifEmpty { "Доступна версия ${upd.latest}" }, Modifier.weight(1f), fontSize = 13.sp)
                     Button(onClick = { com.vlesscardvpn.core.Updater.install(uctx) }, enabled = !upd.busy) { Text("Обновить") }
@@ -107,7 +107,7 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
         val clip by Actions.clipOffer.collectAsState()
         val hctx = androidx.compose.ui.platform.LocalContext.current
         clip?.let { (text, what) ->
-            Card(Modifier.fillMaxWidth().padding(top = 10.dp), shape = RoundedCornerShape(14.dp), colors = CardDefaults.cardColors(containerColor = Color(0xFF1C2A44))) {
+            Card(Modifier.fillMaxWidth().padding(top = 10.dp), shape = RoundedCornerShape(14.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)) {
                 Row(Modifier.padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text("В буфере обмена: $what. Добавить?", Modifier.weight(1f), fontSize = 13.sp)
                     TextButton(onClick = { Actions.clipOffer.value = null }) { Text("Нет") }
@@ -119,39 +119,14 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
         val on = status.state == Tunnel.State.CONNECTED
         val busy = status.state == Tunnel.State.CONNECTING
         val color = when { on && status.checkOk == false -> Warn; on && status.checkOk == null -> Accent; on -> Good; busy -> Accent; else -> MaterialTheme.colorScheme.primary }
-        PowerButton(on, busy, color) { if (on || busy) onDisconnect() else onConnect() }
-        if (status.message.isNotEmpty()) Text(status.message, color = if (status.state == Tunnel.State.ERROR) Bad else MaterialTheme.colorScheme.onBackground,
-            textAlign = TextAlign.Center, fontWeight = FontWeight.Medium)
-        if (status.route.isNotEmpty()) Text(if(cfg.hideServerNames) "Маршрут скрыт" else status.route, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp, textAlign = TextAlign.Center)
-        val cloudStatus by com.vlesscardvpn.core.CloudSpeed.status.collectAsState()
-        Card(Modifier.fillMaxWidth().padding(top = 16.dp), shape = RoundedCornerShape(24.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
-            Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text(if (busy) "Ищу быстрый маршрут" else if (on && status.checkOk == false) "Часть проверок не прошла" else if (on && status.checkOk == null) "Проверяю маршрут" else if (on) "Маршрут подключён" else "Готовы к подключению",
-                            fontWeight = FontWeight.SemiBold, fontSize = 17.sp)
-                        Text(when {
-                            busy && cfg.torAll -> "Проверяю HTTPS и Telegram; Tor строит цепочку отдельно."
-                            busy -> "Авто выбирает маршрут после HTTPS и ответа Telegram MTProto. Если готового нет, поиск продолжится."
-                            on && cfg.torAll -> "VPN работает; первая Tor-цепочка может собираться дольше пяти секунд."
-                            on -> "Один устойчивый маршрут; проверенные резервы — для восстановления. Мелкий выигрыш скорости не вызывает переключение."
-                            else -> "Авто начинает с сохранённых маршрутов и памяти этой сети."
-                        }, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                    Surface(shape = CircleShape, color = color.copy(alpha = .14f)) {
-                        Text(if (busy) "ПОИСК" else if (on) "АКТИВНО" else "АВТО",
-                            Modifier.padding(horizontal = 11.dp, vertical = 8.dp),
-                            style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = color)
-                    }
-                }
-                if (busy) LiveProgress(stop = false) { it.running }
-                if (cloudStatus.isNotBlank()) {
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = .35f))
-                    Text(cloudStatus, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            }
+        ConnectionOverview(status, cfg.hideServerNames, if(cfg.torAll) "Tor через VLESS" else if(cfg.mode==Mode.AUTO) "Авто" else "Выбранные серверы") {
+            PowerButton(on, busy, color) { if (on || busy) onDisconnect() else onConnect() }
         }
+        val cloudStatus by com.vlesscardvpn.core.CloudSpeed.status.collectAsState()
+        if (busy) LiveProgress(stop = false) { it.running }
+        if (cloudStatus.isNotBlank()) Text(cloudStatus,style=MaterialTheme.typography.bodySmall,
+            color=MaterialTheme.colorScheme.onSurfaceVariant,modifier=Modifier.fillMaxWidth().padding(top=8.dp))
+        if(on) ServiceHealthCard()
         val pausedUntil by Tunnel.pausedUntil.collectAsState()
         val ctx = androidx.compose.ui.platform.LocalContext.current
         if (status.state == Tunnel.State.CONNECTED) {
@@ -168,6 +143,8 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
             if (tick > 0 && (now.first > 0 || now.second > 0)) Text("Сейчас: ↓ ${Actions.mbps(now.first.toInt())} ↑ ${Actions.mbps(now.second.toInt())}",
                 fontSize = 13.sp, color = MaterialTheme.colorScheme.onBackground, textAlign = TextAlign.Center)
             SessionStats(min, rx, tx, cfg.turbo)
+            Text("Оценка счётчиков процесса приложения, не счёт оператора и не объём зарубежного трафика.",
+                style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant,modifier=Modifier.fillMaxWidth().padding(top=6.dp))
             ConnectionTools()
             val aw by com.vlesscardvpn.core.AppWatch.status.collectAsState()
             if (aw.isNotEmpty()) Text(aw, fontSize = 12.sp, color = Accent, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 4.dp))
@@ -245,7 +222,7 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
                     Text("Маскировка: авто" + (if (sum.mask.isNotEmpty()) " — ${sum.mask}" else " (подбирается сама под сеть)"), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
                     CountryPicker(onChange = { reconnect() })
-                    if (sum.heavyMask) Text("Маскировка «тяжёлая» (мелкие пакеты) — видео может тормозить. После подключения сам поищу лёгкую", fontSize = 11.sp, color = Warn)
+                    if (sum.heavyMask) Text("Маскировка «тяжёлая» (мелкие пакеты) — видео может тормозить. После подключения сам поищу лёгкую", fontSize = 14.sp, color = Warn)
                 }
             }
         }
@@ -341,7 +318,7 @@ private fun NetCard(on: Boolean, cfgKey: Int) {
                         .putExtra(android.content.Intent.EXTRA_TEXT, "Настройка VLESS Card для сети «${info.net.substringBefore(" · ")}» (вставьте в приложении: Серверы → Добавить):\n$link"), "Поделиться настройкой сети"))
                 }) { Text("Поделиться настройкой") }
             }
-            Text("Друг на том же провайдере вставит ссылку и сразу получит рабочий обход и маскировки — без серверов и ключей.", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("Друг на том же провайдере вставит ссылку и сразу получит рабочий обход и маскировки — без серверов и ключей.", fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
@@ -394,66 +371,17 @@ private fun pick(c: String, onChange: () -> Unit) {
     onChange()
 }
 
-/** Big round button: soft glow ring, power icon, gentle pulse while connecting. */
+/** Single stable action: cancellation remains available, without a continuous glow/pulse. */
 @Composable
-private fun PowerButton(on: Boolean, busy: Boolean, color: Color, onClick: () -> Unit) {
-    val c by androidx.compose.animation.animateColorAsState(color, androidx.compose.animation.core.tween(400), label = "c")
-    val owner = LocalLifecycleOwner.current
-    val power by com.vlesscardvpn.core.PhonePower.state.collectAsState()
-    var foreground by remember { mutableStateOf(owner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) }
-    DisposableEffect(owner) {
-        val observer = androidx.lifecycle.LifecycleEventObserver { _, _ -> foreground = owner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED) }
-        owner.lifecycle.addObserver(observer)
-        onDispose { owner.lifecycle.removeObserver(observer) }
+private fun PowerButton(on:Boolean,busy:Boolean,color:Color,onClick:()->Unit) {
+    val title=when {on->"Отключить";busy->"Отменить поиск";else->"Подключить"}
+    Button(onClick=onClick,modifier=Modifier.fillMaxWidth().heightIn(min=56.dp),
+        shape=RoundedCornerShape(12.dp),colors=ButtonDefaults.buttonColors(
+            containerColor=if(on || busy) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.primary,
+            contentColor=if(on || busy) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onPrimary)) {
+        Icon(Icons.Filled.PowerSettingsNew,null,modifier=Modifier.size(24.dp))
+        Spacer(Modifier.width(10.dp));Text(title,fontSize=17.sp,fontWeight=FontWeight.SemiBold)
     }
-    var pulseValue = 1f; var turn = 0f
-    if (com.vlesscardvpn.core.TransportPolicy.animateStatus(busy, foreground, power.allowLight)) {
-        val inf = androidx.compose.animation.core.rememberInfiniteTransition(label = "p")
-        val pulse by inf.animateFloat(1f, 1.07f, androidx.compose.animation.core.infiniteRepeatable(androidx.compose.animation.core.tween(800),
-            androidx.compose.animation.core.RepeatMode.Reverse), label = "s")
-        val rotation by inf.animateFloat(0f, 360f, androidx.compose.animation.core.infiniteRepeatable(androidx.compose.animation.core.tween(1400, easing = androidx.compose.animation.core.LinearEasing)), label = "r")
-        pulseValue = pulse; turn = rotation
-    }
-    val k = pulseValue
-    val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
-    Spacer(Modifier.height(18.dp))
-    BoxWithConstraints(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-        val compact = maxWidth < 280.dp || androidx.compose.ui.platform.LocalDensity.current.fontScale > 1.2f
-        val diameter = minOf(if (compact) 180.dp else 232.dp, maxWidth)
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Box(Modifier.size(diameter), contentAlignment = Alignment.Center) {
-        Box(Modifier.size(diameter).scale(k).clip(CircleShape).background(Brush.radialGradient(listOf(c.copy(alpha = .18f), Color.Transparent))))
-        androidx.compose.foundation.Canvas(Modifier.size(diameter * (206f / 232f))) {
-            val ring = androidx.compose.ui.graphics.drawscope.Stroke(width = 2.dp.toPx(), cap = androidx.compose.ui.graphics.StrokeCap.Round)
-            drawCircle(c.copy(alpha = .22f), style = ring)
-            if (busy && !on) drawArc(c, turn, 88f, false, style = androidx.compose.ui.graphics.drawscope.Stroke(4.dp.toPx(), cap = androidx.compose.ui.graphics.StrokeCap.Round))
-            else drawArc(Brush.sweepGradient(listOf(c.copy(alpha = .15f), c, c.copy(alpha = .15f))), -90f, 360f, false, style = ring)
-        }
-        Box(Modifier.size(diameter * (176f / 232f)).clip(CircleShape)
-            .background(Brush.verticalGradient(listOf(MaterialTheme.colorScheme.surfaceVariant, MaterialTheme.colorScheme.surface)))
-            .border(1.dp, c.copy(alpha = .35f), CircleShape)
-            .clickable(role = Role.Button, onClickLabel = when { on -> "Отключить VPN"; busy -> "Отменить подключение"; else -> "Подключить VPN" }) {
-                haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress); onClick()
-            }, contentAlignment = Alignment.Center) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Icon(Icons.Filled.PowerSettingsNew, null, tint = c, modifier = Modifier.size(54.dp))
-                if (!compact) Text(when { on -> "Отключить"; busy -> "Отменить поиск"; else -> "Подключить" }, color = MaterialTheme.colorScheme.onSurface,
-                    fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 2, textAlign = TextAlign.Center,
-                    modifier = Modifier.padding(horizontal = 8.dp))
-            }
-        }
-        }
-        if (compact) TextButton(onClick = onClick, modifier = Modifier.fillMaxWidth()) {
-            Text(when { on -> "Отключить"; busy -> "Отменить поиск"; else -> "Подключить" },
-                fontSize = 18.sp, textAlign = TextAlign.Center, fontWeight = FontWeight.SemiBold)
-        }
-        }
-    }
-    // what the assistant did last (switched servers, revived, fixed…) — visible without opening the chat
-    val said by com.vlesscardvpn.core.AppWatch.status.collectAsState()
-    if (on && said.isNotEmpty()) Text(said, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-        modifier = Modifier.padding(horizontal = 24.dp, vertical = 2.dp))
-    Spacer(Modifier.height(6.dp))
 }
 
 /** Session: time and traffic as three tiles. */
@@ -464,9 +392,9 @@ private fun SessionStats(min: Long, rx: Long, tx: Long, turbo: Boolean) {
             Column(Modifier.weight(1f).clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surface).padding(vertical = 8.dp),
                 horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(v, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-                Text(t, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(t, fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
     }
-    if (turbo) Text("Ускорение включено", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp))
+    if (turbo) Text("Ускорение включено", fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp))
 }

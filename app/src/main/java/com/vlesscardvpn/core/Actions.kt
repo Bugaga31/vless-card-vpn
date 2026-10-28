@@ -1576,9 +1576,9 @@ object Actions {
         val lab=start.settings.experimentalMaskLab
         val trialStarted=android.os.SystemClock.elapsedRealtime()
         val variants=pinned.flatMap {s->
-            val available=MaskWarmStart.trials(s,expected[s.id].orEmpty(),start.settings,if(lab) 5 else 2)
+            val available=MaskWarmStart.trials(s,expected[s.id].orEmpty(),start.settings,if(lab) 8 else 2)
             val ids=if(lab) MaskExperiment.memory.choose(net,network,s.id,available.map {it.id},trialStarted) else available.map {it.id}
-            available.filter {it.id in ids}.map{s to it}
+            ids.mapNotNull {id->available.firstOrNull {it.id==id}}.map{s to it}
         }
         if(variants.isEmpty() || Net.key(app)!=net || Net.underlying(app)?.toString()!=network) return null
         val winner=java.util.concurrent.atomic.AtomicReference<Pair<Int,Probe>?>(null)
@@ -1590,7 +1590,8 @@ object Actions {
                 if(lab && p!=Tester.SKIPPED && Net.key(app)==net && Net.underlying(app)?.toString()==network) {
                     val (server,mask)=variants[i]
                     MaskExperiment.memory.observe(net,network,server.id,mask.id,trialStarted,
-                        android.os.SystemClock.elapsedRealtime(),MaskExperiment.verdict(p))
+                        android.os.SystemClock.elapsedRealtime(),MaskExperiment.verdict(p),
+                        if(AutoLatencyPolicy.accepts(p)) maxOf(p.realMs,p.tgMs) else null)
                 }
                 if(AutoLatencyPolicy.accepts(p)) winner.compareAndSet(null,i to p)
             }

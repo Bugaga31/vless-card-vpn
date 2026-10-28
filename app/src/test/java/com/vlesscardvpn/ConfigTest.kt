@@ -54,7 +54,7 @@ class ConfigTest {
     }
 
     @Test fun maskCatalog() {
-        assertEquals(612, Masks.ALL.size) // 570 + 7 fingerprints × 3 additional Hello profiles × 2 engine paths.
+        assertEquals(654, Masks.ALL.size) // 612 + 7 fingerprints × 3 bounded Hello profiles × 2 engine paths.
         Masks.FINGERPRINTS.forEach { fp -> listOf("balanced","coarse","mobile").forEach { profile ->
             assertNotNull(Masks.byId("$fp.hello.$profile")); assertNotNull(Masks.byId("$fp.hello.$profile.b"))
         } }
