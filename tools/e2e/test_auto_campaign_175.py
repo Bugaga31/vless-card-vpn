@@ -18,7 +18,12 @@ class ContinuousAuto(unittest.TestCase):
   s=(ROOT/'app/src/main/java/com/vlesscardvpn/core/Actions.kt').read_text()
   self.assertIn('.take(AutoDiscoveryPolicy.RANKING_WINDOW) else allEligible',s)
   p=s.split('suspend fun quickTest',1)[1]
-  self.assertLess(p.index('if (firstWaveOnly) attempted.addAll'),p.index('val fastOk = realTest'))
+  # 1.2.66 records attempts only after realTest returns, never on cancellation.
+  probe=p.index('val fastOk = realTest')
+  recorded=p.index('if (firstWaveOnly) attempted.addAll(shortlist.map { it.id })')
+  self.assertLess(probe,recorded)
+  self.assertNotIn('attempted.addAll',p[:probe])
+  self.assertIn('ConnectPolicy.requiresBodyProof(earlyHandoff)',p)
  def test_diagnostics_are_local_fixed_schema_and_explicit_share(self):
   s=(ROOT/'app/src/main/java/com/vlesscardvpn/core/AutoDiagnostics.kt').read_text()
   self.assertNotIn('OkHttpClient',s);self.assertNotIn('http://',s);self.assertNotIn('https://',s)

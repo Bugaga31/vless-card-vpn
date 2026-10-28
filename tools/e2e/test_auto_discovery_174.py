@@ -8,7 +8,10 @@ class AutoDiscoveryWiring(unittest.TestCase):
         self.assertIn('val refresh = launch(Bg.io)',p)
         self.assertLess(p.index('val refresh = launch'),p.index('quickTest(cached'))
         self.assertNotIn('lastSubRefresh',p);self.assertNotIn('doRefresh(',p)
-        self.assertIn('withTimeoutOrNull(AutoDiscoveryPolicy.FAST_MS)',p)
+        # The latest prerelease uses a shorter bounded foreground window.
+        self.assertIn('withTimeoutOrNull(AutoDiscoveryPolicy.FIRST_CONNECT_MS)',p)
+        policy=(ROOT/'app/src/main/java/com/vlesscardvpn/core/AutoDiscoveryPolicy.kt').read_text()
+        self.assertIn('const val FIRST_CONNECT_MS = 5_000L',policy)
         self.assertIn('batches.receiveCatching()',p)
         self.assertIn('refresh.cancel()',p)
         self.assertIn('firstWaveOnly = true',p)
