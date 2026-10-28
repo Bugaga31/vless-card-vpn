@@ -26,7 +26,7 @@ class AutoRecoveryR184Test {
         assertEquals(listOf(a),ConnectPolicy.candidates(listOf(a,b),listOf(b),emptySet(),cooling={it==b},recoveryProbeLimit=3){0})
     }
     @Test fun networkResetRequiresFreshNativeTelegramProof() {
-        val old=ServerState(realMs=50,tgOk=true,serviceNetwork="old",serviceMask="",serviceCheckedAt=900)
+        val old=ServerState(realMs=50,tgOk=true,tgMs=120,serviceNetwork="old",serviceMask="",serviceCheckedAt=900)
         val reset=AutoHandoffPolicy.resetRuntime(old,"new")
         assertEquals(1,AutoEligibility.telegramRank(reset,"new",1000))
         assertTrue(AutoEligibility.servicePool(listOf(reset),{it},"new",1000).isEmpty())
@@ -36,7 +36,7 @@ class AutoRecoveryR184Test {
         assertTrue(AutoEligibility.servicePool(listOf(state),{it},"new",1001).isEmpty())
     }
     @Test fun currentNetworkTelegramProofAuthorizesNoVideoStartup() {
-        val state=ServerState(realMs=40,tgOk=true,ytOk=null,serviceNetwork="new",serviceMask="",serviceCheckedAt=1000)
+        val state=ServerState(realMs=40,tgOk=true,tgMs=120,ytOk=null,serviceNetwork="new",serviceMask="",serviceCheckedAt=1000)
         assertEquals(listOf(state),AutoEligibility.servicePool(listOf(state),{it},"new",1001))
     }
     @Test fun staleMaskRescueCannotOverwriteNewerObservation() {

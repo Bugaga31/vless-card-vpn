@@ -137,7 +137,7 @@ class R90Test {
     @org.junit.Test fun widgetLook() {
         val on = com.vlesscardvpn.vpn.VpnWidget.look(com.vlesscardvpn.core.Tunnel.State.CONNECTED, true, "NL-1", "")
         org.junit.Assert.assertEquals("Подключено", on.second); org.junit.Assert.assertEquals("NL-1", on.third)
-        org.junit.Assert.assertEquals("Подключено · нет интернета", com.vlesscardvpn.vpn.VpnWidget.look(com.vlesscardvpn.core.Tunnel.State.CONNECTED, false, "", "").second)
+        org.junit.Assert.assertEquals("Подключено · есть проблемы", com.vlesscardvpn.vpn.VpnWidget.look(com.vlesscardvpn.core.Tunnel.State.CONNECTED, false, "", "").second)
     }
 }
 

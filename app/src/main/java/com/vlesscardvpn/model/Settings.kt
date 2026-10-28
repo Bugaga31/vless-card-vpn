@@ -85,6 +85,8 @@ data class Settings(
     val myMasks: List<String> = emptyList(),
     /** «Эволюция масок»: every search also tries mutants of masks that passed (MaskLab). */
     val maskEvolution: Boolean = true,
+    /** Opt-in bounded experiments, not a new UDP transport or guaranteed DPI evasion. */
+    val experimentalMaskLab: Boolean = false,
     /** Auto masks bred by MaskLab that passed somewhere (JSON, newest first, ≤ MaskLab.CAP). */
     val autoMasks: List<String> = emptyList(),
     /** Bred ByeDPI strategies (DpiEvo ids) that won a search on any network, newest first. */
@@ -183,7 +185,7 @@ data class Settings(
         .put("maskFamilies", JSONArray(maskFamilies)).put("maskFps", JSONArray(maskFps))
         .put("warpKeys", warpKeys).put("warpBuiltinKeys", warpBuiltinKeys).put("warpChain", warpChain).put("autoOptimize", autoOptimize)
         .put("warpKeyOff", JSONArray(warpKeyOff)).put("warpKeyStatus", JSONObject(warpKeyStatus as Map<*, *>)).put("myMasks", JSONArray(myMasks))
-        .put("maskEvolution", maskEvolution).put("autoMasks", JSONArray(autoMasks)).put("dpiEvoPool", JSONArray(dpiEvoPool)).put("theme", theme).put("reducedMotion", reducedMotion).put("compactServers", compactServers).put("secureScreen", secureScreen).put("hideServerNames", hideServerNames)
+        .put("experimentalMaskLab",experimentalMaskLab).put("maskEvolution", maskEvolution).put("autoMasks", JSONArray(autoMasks)).put("dpiEvoPool", JSONArray(dpiEvoPool)).put("theme", theme).put("reducedMotion", reducedMotion).put("compactServers", compactServers).put("secureScreen", secureScreen).put("hideServerNames", hideServerNames)
         .put("dpiRanking", JSONObject().apply { dpiRanking.forEach { (k, v) -> put(k, JSONArray(v)) } })
         .put("ruAppsDirect", ruAppsDirect).put("randomTun", randomTun).put("coverTraffic", coverTraffic).put("torRotation", torRotation).put("torRotationSeconds", torRotationSeconds.coerceIn(30, 86400)).put("torFastOnly", torFastOnly).put("torMaxLatencyMs", torMaxLatencyMs.coerceAtLeast(1)).put("torNetworkRecommendations", torNetworkRecommendations).put("autoChainSearch", autoChainSearch).put("autoChainPurpose", autoChainPurpose).put("torAll", torAll).put("torRouting", torRouting).put("torAuto", torAuto).put("torBridge", torBridge).put("torBridgeLines", torBridgeLines).put("torDirect", torDirect).put("rev", rev).put("turbo", turbo).put("autoStart", autoStart)
         .put("alwaysVpn", JSONArray(alwaysVpn)).put("alwaysDirect", JSONArray(alwaysDirect))
@@ -254,7 +256,7 @@ data class Settings(
                 warpKeyOff = list("warpKeyOff", emptyList()),
                 warpKeyStatus = o.optJSONObject("warpKeyStatus")?.let { m -> m.keys().asSequence().associateWith { m.getString(it) } } ?: emptyMap(),
                 myMasks = list("myMasks", emptyList()),
-                maskEvolution = o.optBoolean("maskEvolution", true), autoMasks = list("autoMasks", emptyList()), dpiEvoPool = list("dpiEvoPool", emptyList()), theme = o.optString("theme", "dark").takeIf { it in setOf("dark","amoled","you","light","system") } ?: "dark",
+                experimentalMaskLab = o.optBoolean("experimentalMaskLab", false), maskEvolution = o.optBoolean("maskEvolution", true), autoMasks = list("autoMasks", emptyList()), dpiEvoPool = list("dpiEvoPool", emptyList()), theme = o.optString("theme", "dark").takeIf { it in setOf("dark","amoled","you","light","system") } ?: "dark",
                 reducedMotion = o.optBoolean("reducedMotion", false), compactServers = o.optBoolean("compactServers", false),
                 secureScreen = o.optBoolean("secureScreen", false), hideServerNames = o.optBoolean("hideServerNames", false),
                 dpiRanking = o.optJSONObject("dpiRanking")?.let { m -> m.keys().asSequence().associateWith { k -> m.optJSONArray(k)?.let { a -> (0 until a.length()).map { a.getString(it) } }.orEmpty() } } ?: emptyMap(),

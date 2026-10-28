@@ -10,7 +10,7 @@ class FullCloudSelectionR139Test {
     private val now=1_000_000L
     private fun server(name:String)=Server(name,"vless","$name.invalid",443,name)
     private fun state(speed:Int=1000)=ServerState(realMs=50,kbps=speed,speedNetwork="wifi",speedMask="",speedCheckedAt=now,
-        serviceNetwork="wifi",serviceMask="",serviceCheckedAt=now,ytOk=true,tgOk=true)
+        serviceNetwork="wifi",serviceMask="",serviceCheckedAt=now,ytOk=true,tgOk=true,tgMs=120)
     @Test fun russianFlagAnywhereOverridesEvenForeignFirstFlag() {
         assertFalse(AutoEligibility.allowed(server("🇳🇱 test 🇷🇺")))
         assertFalse(AutoEligibility.allowed(server("RU-1")))
@@ -41,17 +41,17 @@ class FullCloudSelectionR139Test {
         assertTrue(ServerChoice.downloadUpgrade(bad,good,"wifi",now))
         assertEquals(listOf(good),AutoEligibility.servicePool(listOf(bad,good),{it},"wifi",now))
     }
-    @Test fun eightWorkingRoutesActuallyReachTheConnectedPoolNotJustOnePrimary() {
+    @Test fun onePrimaryCarriesTrafficWhileOtherProvenRoutesRemainReserves() {
         val routes=(1..14).map { server("DE-$it") };val states=routes.mapIndexed { i,s -> s.id to state((i+1)*1000) }.toMap()
         val connected=AutoEligibility.connectedPool(routes,{states.getValue(it.id)},"wifi",now,false)
-        assertEquals(8,connected.size);assertEquals(routes.last(),connected.first())
-        assertEquals(routes.takeLast(8).reversed(),connected)
-        assertEquals(3,AutoEligibility.connectedPool(routes.take(3),{states.getValue(it.id)},"wifi",now,false).size)
+        assertEquals(1,connected.size);assertEquals(routes.last(),connected.first())
+        assertEquals(14,AutoEligibility.servicePool(routes,{states.getValue(it.id)},"wifi",now).size)
+        assertEquals(1,AutoEligibility.connectedPool(routes.take(3),{states.getValue(it.id)},"wifi",now,false).size)
         assertTrue(AutoEligibility.connectedPool(listOf(server("🇷🇺 blocked")),{state()},"wifi",now,false).isEmpty())
         val config=org.json.JSONObject(XrayConfigBuilder.vpnConfig(connected.map { it to null },Settings(mode=Mode.SERVERS),null))
         val out=config.getJSONArray("outbounds")
-        assertEquals(8,(0 until out.length()).count { out.getJSONObject(it).optString("tag").startsWith("proxy-") })
-        assertTrue(config.getJSONObject("routing").getJSONArray("balancers").length()>0)
+        assertEquals(1,(0 until out.length()).count { out.getJSONObject(it).optString("tag").startsWith("proxy-") })
+        assertEquals(0,config.getJSONObject("routing").optJSONArray("balancers")?.length() ?: 0)
     }
     @Test fun serviceProvenanceSurvivesDiskRoundTrip() {
         val s=state();val loaded=ServerState.fromJson(s.toJson())

@@ -34,7 +34,7 @@ object ConnectionPassport {
         val s=state.value
         return JSONObject().put("schema",1).put("version",com.vlesscardvpn.BuildConfig.VERSION_NAME)
             .put("scope","local_socks_chain_not_independent_app_tun_test")
-            .put("probe_scheduler",ProbeArbiter.report()).put("https",status(s.https)).put("dns_socks_udp",status(s.dns))
+            .put("mask_experiment",MaskExperiment.report()).put("probe_scheduler",ProbeArbiter.report()).put("https",status(s.https)).put("dns_socks_udp",status(s.dns))
             .put("telegram_sampled_mtproto",status(s.telegram)).put("youtube_sampled_media",status(s.youtube))
             .put("sample_age_seconds",JSONObject().put("https",age(s.https) ?: JSONObject.NULL).put("dns",age(s.dns) ?: JSONObject.NULL)
                 .put("telegram",age(s.telegram) ?: JSONObject.NULL).put("youtube",age(s.youtube) ?: JSONObject.NULL))

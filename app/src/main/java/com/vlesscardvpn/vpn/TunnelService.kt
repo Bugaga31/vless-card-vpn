@@ -511,12 +511,13 @@ class TunnelService : VpnService() {
             } else ""
             if (Tunnel.status.value.state != Tunnel.State.CONNECTED || core !== sampledCore ||
                 Net.key(this@TunnelService) != sampledNet || Net.underlying(this@TunnelService)?.toString() != sampledHandle) return@launch
-            val text = if(chainExitRejected) "Выход Tor не подтверждён или недопустим — возвращаюсь к проверенному Auto" else if (p.realMs > 0) "HTTPS · ${p.realMs} мс · Видео YouTube: ${if(p.ytOk==true) "✓" else if(p.ytOk==false) "нет ответа" else "не проверен"} · Telegram MTProto: ${if(p.tgOk==true) "✓" else if(p.tgOk==false) "нет ответа" else "не проверен"}$warp"
+            val text = if(chainExitRejected) "Выход Tor не подтверждён или недопустим — возвращаюсь к проверенному Auto" else if (p.realMs > 0) "HTTPS · ${p.realMs} мс · Видео YouTube: ${if(p.ytOk==true) "✓" else if(p.ytOk==false) "нет ответа" else "не проверен"} · Telegram MTProto: ${if(p.tgOk==true) "${p.tgMs} мс" else if(p.tgOk==false) "нет ответа" else "не проверен"}$warp"
                 else "Нет ответа через выбранный маршрут (${p.error}). " + if (st.mode == Mode.AUTO && st.autoHeal) "Ищу рабочий вариант сам…" else "Проверьте серверы или включите маскировку."
             val liveHealthy: Boolean? = when {
                 !p.works || chainExitRejected -> false
                 st.mode == Mode.AUTO && (p.tgOk == false || p.ytOk == false) -> false
                 st.mode == Mode.AUTO && p.tgOk == null -> null
+                st.mode == Mode.AUTO && usedChain==null && !usedTorRoute && !com.vlesscardvpn.core.AutoLatencyPolicy.accepts(p) -> false
                 else -> true
             }
             com.vlesscardvpn.core.ConnectionPassport.full(httpsReachable, if(st.proxyOnly || !httpsReachable) null else dnsOk, p.tgOk, p.ytOk)
@@ -918,7 +919,7 @@ class TunnelService : VpnService() {
     private fun watchdog() {
         if (watchJob?.isActive == true) return
         watchJob = scope.launch {
-            var miss = 0; var dnsMiss = 0; var stall = 0; var telegramMiss = 0
+            var miss = 0; var dnsMiss = 0; var stall = 0; var telegramMiss = 0; var telegramSlow = 0
             var offline = false
             var servicePending = Store.state.value.settings.mode == Mode.AUTO &&
                 com.vlesscardvpn.core.ConnectionPassport.state.value.telegram.value != true
@@ -926,7 +927,7 @@ class TunnelService : VpnService() {
             var stats = TProxyService.stats()
             while (Tunnel.status.value.state == Tunnel.State.CONNECTED) {
                 // wait 45 s (10 s offline), but check right away when the screen turns back on — that's when apps are opened
-                var waited = 0L; val period = if (offline) 10_000L else if (miss > 0 || dnsMiss > 0 || telegramMiss > 0 || servicePending && Store.state.value.settings.mode == Mode.AUTO && usedChain==null && !usedTorRoute) 3_000L else com.vlesscardvpn.core.PhonePower.refresh(this@TunnelService).healthyMs
+                var waited = 0L; val period = if (offline) 10_000L else if (miss > 0 || dnsMiss > 0 || telegramMiss > 0 || telegramSlow > 0 || servicePending && Store.state.value.settings.mode == Mode.AUTO && usedChain==null && !usedTorRoute) 3_000L else com.vlesscardvpn.core.PhonePower.refresh(this@TunnelService).healthyMs
                 while (waited < period) { val d = if (asleep()) maxOf(60000L, period - waited) else minOf(5000L, period - waited); delay(d); waited += d; val a = asleep(); if (wasAsleep && !a) { wasAsleep = false; delay(1500); break }; wasAsleep = a }
                 com.vlesscardvpn.core.Traffic.tick()
                 if (healJob?.isActive == true || asleep()) continue
@@ -946,10 +947,11 @@ class TunnelService : VpnService() {
                         attempts = 1, budgetMs = 6500L, onCall = { call -> bind { call.cancel() } }, onCancel = bind)
                 }
                 if (core !== sampledCore || Tunnel.socks != auth || Net.key(this@TunnelService) != network ||
-                    Net.underlying(this@TunnelService)?.toString() != handle) { telegramMiss = 0; continue }
+                    Net.underlying(this@TunnelService)?.toString() != handle) { telegramMiss = 0; telegramSlow = 0; continue }
                 val ok = live.works
                 com.vlesscardvpn.core.ConnectionPassport.light(ok,live.tgOk,checkTelegram)
                 if (ok && checkTelegram) {
+                    telegramSlow = com.vlesscardvpn.core.AutoLatencyPolicy.slowStreak(telegramSlow,live)
                     val wasFailing = telegramMiss > 0 || servicePending
                     servicePending = live.tgOk != true
                     telegramMiss = when (live.tgOk) { true -> 0; false -> telegramMiss + 1; null -> telegramMiss }
@@ -957,8 +959,15 @@ class TunnelService : VpnService() {
                         val cur = Tunnel.status.value
                         Tunnel.status.value = cur.copy(check = "HTTPS отвечает, Telegram MTProto — нет. Перепроверяю и подбираю маршрут…", checkOk = false)
                     }
+                    if(telegramSlow>0) {
+                        val cur=Tunnel.status.value
+                        Tunnel.status.value=cur.copy(check="Telegram ${live.tgMs} мс · HTTPS ${live.realMs} мс; цель ≤500 мс. Перепроверяю…",checkOk=false)
+                    }
                     if (telegramMiss >= 2) { repairTelegramRoute(); telegramMiss = 0 }
-                    else if (live.tgOk == true && (wasFailing || Tunnel.status.value.checkOk != true)) verifySoon(0)
+                    else if(telegramSlow>=3 && !com.vlesscardvpn.core.SessionHold.active() && !com.vlesscardvpn.core.PhonePower.isVoiceCallActive(this@TunnelService)) {
+                        optimizeSoon(); telegramSlow=0 // Keep TUN and working route until a strict faster candidate exists.
+                    }
+                    else if (live.tgOk == true && telegramSlow==0 && (wasFailing || Tunnel.status.value.checkOk != true)) verifySoon(0)
                 }
                 if (!ok && !Actions.online()) {
                     miss = 0

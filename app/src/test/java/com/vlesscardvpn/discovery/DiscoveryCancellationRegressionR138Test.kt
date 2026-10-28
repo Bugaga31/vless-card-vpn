@@ -24,9 +24,11 @@ class DiscoveryCancellationRegressionR138Test {
     }
     @Test fun cooldownExpiresAndSuccessClearsIt() {
         val memory = ProbeMemory(); memory.record("n", "s", "m", false, 1000)
-        assertFalse(memory.cooling("n", "s", "m", 121000))
-        memory.record("n", "s", "m", false, 122000); memory.record("n", "s", "m", true, 122001)
-        assertFalse(memory.cooling("n", "s", "m", 122002))
+        assertTrue(memory.cooling("n", "s", "m", 120999))
+        // Default cooldown includes deterministic 0–20% jitter, never beyond 144 seconds.
+        assertFalse(memory.cooling("n", "s", "m", 145001))
+        memory.record("n", "s", "m", false, 146000); memory.record("n", "s", "m", true, 146001)
+        assertFalse(memory.cooling("n", "s", "m", 146002))
     }
     @Test fun memoryIsBoundedAndBackwardsClockDoesNotExtendCooldown() {
         val memory = ProbeMemory(capacity = 2)

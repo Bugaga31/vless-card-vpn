@@ -21,7 +21,7 @@ import java.net.ServerSocket
 import java.net.Socket
 import java.util.concurrent.TimeUnit
 
-data class Probe(val realMs: Int, val bigOk: Boolean?, val ytOk: Boolean?, val error: String = "", val tgOk: Boolean? = null, val kbps: Int = 0, val ytKbps: Int = 0, val bodyBytes: Long = 0, val bodyMs: Long = 0, val callsOk: Boolean? = null) {
+data class Probe(val realMs: Int, val bigOk: Boolean?, val ytOk: Boolean?, val error: String = "", val tgOk: Boolean? = null, val kbps: Int = 0, val ytKbps: Int = 0, val bodyBytes: Long = 0, val bodyMs: Long = 0, val callsOk: Boolean? = null, val tgMs: Int = 0) {
     val works: Boolean get() = realMs > 0 && bigOk != false
 }
 
@@ -168,8 +168,8 @@ object Tester {
             if (best == Long.MAX_VALUE) return Probe(0, null, null, err)
             val deadline = if (budgetDeadline == Long.MAX_VALUE) System.nanoTime() + TimeUnit.SECONDS.toNanos(40) else budgetDeadline
             fun remaining() = TimeUnit.NANOSECONDS.toMillis((deadline - System.nanoTime()).coerceAtLeast(1)).coerceAtLeast(1)
-            val tgF = if (telegram) telegramPool.submit<Boolean?> {
-                TelegramProbe.check(port, minOf(3000, remaining()))
+            val tgF = if (telegram) telegramPool.submit<TelegramProbe.Result> {
+                TelegramProbe.measure(port, minOf(3000, remaining()))
             }.also { tasks += it } else null
             val bigF = if (big) pool.submit<BodyResult> { bigDownload(client,budgetDeadline,onCall) }.also { tasks += it } else null
             val ytF = if (youtube) pool.submit<YouTubeMediaProbe.Result> {
@@ -178,11 +178,11 @@ object Tester {
             val callF = if (calls) pool.submit<Boolean?> {
                 UdpCallProbe.probe(port, user, pass, minOf(1800L, remaining()).toInt(), onCancel)
             }.also { tasks += it } else null
-            val tgOk = if (tgF != null) ProbeTasks.await(tgF, remaining(), null) else null
+            val tgResult = ProbeTasks.await(tgF, remaining(), TelegramProbe.Result(null,0))
             val bigResult = ProbeTasks.await(bigF, remaining(), BodyResult())
             val ytResult = ProbeTasks.await(ytF, remaining(), YouTubeMediaProbe.Result(null))
             val callsOk = if (callF != null) ProbeTasks.await(callF, remaining(), null) else null
-            return Probe(best.toInt().coerceAtLeast(1), if (bigF != null) bigResult.ok else null, ytResult.ok, tgOk = tgOk, kbps = bigResult.kbps, ytKbps = ytResult.kbps, bodyBytes = bigResult.bytes, bodyMs = bigResult.ms, callsOk = callsOk)
+            return Probe(best.toInt().coerceAtLeast(1), if (bigF != null) bigResult.ok else null, ytResult.ok, tgOk = tgResult.ok, tgMs = if(tgResult.ok==true) tgResult.ms else 0, kbps = bigResult.kbps, ytKbps = ytResult.kbps, bodyBytes = bigResult.bytes, bodyMs = bigResult.ms, callsOk = callsOk)
         } finally {
             ProbeTasks.cancel(tasks)
             // Private dispatcher/pool: cancellation cannot cancel another probe or the live VPN's HTTP calls.
@@ -376,7 +376,7 @@ object Tester {
         run {
             val successes = java.util.concurrent.atomic.AtomicInteger()
             fun skipped(i: Int) = successes.get() >= stopAfter.coerceAtLeast(1) || skip(i) || (variants[i].first.protocol == "wireguard" && variants[i].first.secret in Tunnel.wireguardKeys)
-            fun accepted(p: Probe) = p.works && (!requireTelegram || p.tgOk == true)
+            fun accepted(p: Probe) = p.works && (!requireTelegram || AutoLatencyPolicy.accepts(p))
             fun report(i: Int, p: Probe) { if (accepted(p)) successes.incrementAndGet(); onEach(i, p) }
             // Bound config/socket footprint too, not merely simultaneous HTTP calls.
             val plan = PhonePower.state.value
