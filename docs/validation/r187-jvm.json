@@ -1,6 +1,6 @@
 {
-  "source_sha": "8e58057bf835807f65ed9013af193ed3c3ee5db2",
-  "run_id": "40750721607",
+  "source_sha": "a5df2d91565f6286b7768a462ab795fecc6647dc",
+  "run_id": "40752945905",
   "steps": {
     "source": "success",
     "host": "success",
@@ -851,7 +851,7 @@
     {
       "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.experience.ExperienceR187Test.xml",
       "name": "com.vlesscardvpn.experience.ExperienceR187Test",
-      "tests": "23",
+      "tests": "25",
       "failures": "0",
       "errors": "0",
       "skipped": "0"
@@ -1899,7 +1899,7 @@
     {
       "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.experience.ExperienceR187Test.xml",
       "name": "com.vlesscardvpn.experience.ExperienceR187Test",
-      "tests": "23",
+      "tests": "25",
       "failures": "0",
       "errors": "0",
       "skipped": "0"
