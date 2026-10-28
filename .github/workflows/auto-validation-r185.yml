@@ -22,7 +22,9 @@ jobs:
         env: {GH_TOKEN: '${{ github.token }}'}
         run: |
           set -euo pipefail
-          PATCH=tools/patches/mask-lab-r185.patch
+          base64 -d tools/patches/mask-lab-r185.patch.gz.b64 | gzip -d > "$RUNNER_TEMP/mask-lab-r185.patch"
+          echo '43e0ce8896014bfdd3ff71258945aff8e1cbefcff75acc59ea08f124a7f9d919  '"$RUNNER_TEMP/mask-lab-r185.patch" | sha256sum -c -
+          PATCH="$RUNNER_TEMP/mask-lab-r185.patch"
           if git apply --reverse --check "$PATCH" 2>/dev/null; then
             echo 'Source patch already applied'
           else
