@@ -15,6 +15,7 @@ object ProbeDns {
         ArrayBlockingQueue<Runnable>(32),{r->Thread({runCatching {android.os.Process.setThreadPriority(10)};r.run()},"vc-probe-dns").apply {isDaemon=true}},ThreadPoolExecutor.AbortPolicy())
     suspend fun resolve(host:String,budgetMs:Long,lookup:(String)->List<InetAddress> = {InetAddress.getAllByName(it).toList()}):List<InetAddress>? {
         if(host.isBlank() || budgetMs<=0) return null
+        NumericProbeAddress.parse(host)?.let { return listOf(it) }
         return withTimeoutOrNull(budgetMs.coerceAtMost(60000L)) {
             suspendCancellableCoroutine { continuation ->
                 val task=FutureTask<Unit> {

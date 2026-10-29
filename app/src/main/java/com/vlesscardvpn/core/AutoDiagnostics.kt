@@ -32,7 +32,7 @@ object AutoDiagnostics {
         require(counts.keys==setOf("started","completed","ready","https_unconfirmed","telegram_unconfirmed","telegram_unknown","over_500ms","unfinished"))
         val summary=JSONObject()
         counts.forEach {(key,value)->summary.put(key,value.coerceIn(0,100000))}
-        return JSONObject().put("stop",stop).put("waves",waves.coerceIn(0,AutoSearchCampaign.MAX_WAVES)).put("ordinary_probes",summary)
+        return JSONObject().put("stop",stop).put("waves",waves.coerceIn(0,100000)).put("ordinary_probes",summary)
     }
     @Synchronized fun recordSearch(ctx:Context,networkFamily:String,stop:String,waves:Int,counts:Map<String,Int>) {
         ctx.getSharedPreferences("auto_diagnostics",0).edit().putString("search_family",family(networkFamily))

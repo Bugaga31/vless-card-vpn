@@ -9,6 +9,8 @@ object AutoSearchCampaign {
     const val MAX_WAVES = 4
     const val MAX_TOTAL_MS = 45_000L
     enum class Stop { FOUND, WAVE_LIMIT, TIME_LIMIT }
+    enum class WaitReason { OFFLINE, CATALOG_RETRY, BACKOFF }
+    data class WaitState(val round:Int,val reason:WaitReason,val delayMs:Long)
     data class Outcome<T>(val value:T?,val stop:Stop,val waves:Int,val attempted:Int)
     private class Finished(val reason:Stop):RuntimeException(null,null,false,false)
 
@@ -51,11 +53,12 @@ object AutoSearchCampaign {
         network:()->String, online:()->Boolean, elapsed:()->Long,
         waiting:(Int,Boolean)->Unit, exhausted:(Set<String>)->Boolean={false},
         restMs:()->Long={0L}, pause:suspend(Long)->Unit={delay(it)},
+        onWait:(WaitState)->Unit={},
         probe:suspend(Int,MutableSet<String>)->T?,
     ):Outcome<T> {
         var waves=0; var attempted=0
         val value=run(network,online,elapsed,waiting,exhausted,pause,
-            idleOnExhaustion=true,restMs=restMs) { round,ids ->
+            idleOnExhaustion=true,restMs=restMs,onWait=onWait) { round,ids ->
             if(waves<Int.MAX_VALUE) waves++
             try {probe(round,ids)} finally {attempted=ids.size}
         }
@@ -74,6 +77,7 @@ object AutoSearchCampaign {
         pause: suspend (Long) -> Unit = { delay(it) },
         idleOnExhaustion: Boolean = false,
         restMs: () -> Long = {0L},
+        onWait: (WaitState) -> Unit = {},
         probe: suspend (round: Int, attempted: MutableSet<String>) -> T?,
     ): T {
         var identity = network()
@@ -92,6 +96,7 @@ object AutoSearchCampaign {
             }
             if (!online()) {
                 waiting(round, true)
+                onWait(WaitState(round,WaitReason.OFFLINE,2000L))
                 pause(2000L)
                 continue
             }
@@ -99,14 +104,18 @@ object AutoSearchCampaign {
             // new subscriptions and network changes can resume discovery without a busy loop.
             if (idleOnExhaustion && attempted.isNotEmpty() && exhausted(attempted)) {
                 waiting(round, false)
-                pause(maxOf(5000L, restMs().coerceIn(0L, 60000L)))
+                val wait=maxOf(5000L, restMs().coerceIn(0L, 60000L))
+                onWait(WaitState(round,WaitReason.CATALOG_RETRY,wait))
+                pause(wait)
                 continue
             }
             val result = probe(round, attempted)
             currentCoroutineContext().ensureActive()
             if (result != null && network() == identity) return result
             waiting(round, false)
-            pause(maxOf(backoff(round), restMs().coerceIn(0L, 60000L)))
+            val wait=maxOf(backoff(round), restMs().coerceIn(0L, 60000L))
+            onWait(WaitState(round,WaitReason.BACKOFF,wait))
+            pause(wait)
             round = if (round == Int.MAX_VALUE) 0 else round + 1
         }
     }
