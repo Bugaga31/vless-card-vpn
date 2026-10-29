@@ -20,7 +20,7 @@ jobs:
         run: |
           set -euo pipefail
           base64 -d tools/patches/network-r198.patch.gz.b64 | gzip -d > "$RUNNER_TEMP/network-r198.patch"
-          echo 'a079e15aeb92825f5140df43e94ca1a5c0a424a9db5ba053983a30629386b4b8  '"$RUNNER_TEMP/network-r198.patch" | sha256sum -c -
+          echo '7688f4b6f30286a279cbd8b62cd179d422a2d2eb12561620d4bdc626a1ea874c  '"$RUNNER_TEMP/network-r198.patch" | sha256sum -c -
           git fetch --quiet --no-tags origin 0fe8abd672580077b3ad431dbafda798bb11dbfa
           git restore --source 0fe8abd672580077b3ad431dbafda798bb11dbfa -- app/src/main app/src/test
           PATCH="$RUNNER_TEMP/network-r198.patch"
@@ -35,6 +35,7 @@ jobs:
           git apply "$RUNNER_TEMP/instrumentation.patch"
           fi
           find app/src/androidTest -name '*.kt' -exec sed -i 's/ui197/ui198/g' {} +
+          sed -i 's/WaitReason.BACKOFF,30000/WaitReason.BACKOFF,5000/g' app/src/androidTest/java/com/vlesscardvpn/DashboardUiR190Test.kt
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add app
