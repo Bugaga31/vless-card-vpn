@@ -66,7 +66,9 @@ object AutoSearchCampaign {
     }
 
     const val RETRY_CATALOG_MS = 60_000L
-    fun backoff(round: Int): Long = 1000L * (round.coerceIn(0, 4) + 1)
+    const val WAVE_PAUSE_MS = 5000L
+    @Suppress("UNUSED_PARAMETER")
+    fun backoff(round: Int): Long = WAVE_PAUSE_MS
 
     suspend fun <T : Any> run(
         network: () -> String,

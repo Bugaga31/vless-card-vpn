@@ -71,7 +71,7 @@ class DashboardUiR190Test {
             show("idle-dark");show("idle-light",theme="light");show("searching",state=Tunnel.State.CONNECTING)
             show("wait-offline",state=Tunnel.State.CONNECTING,wait=AutoSearchCampaign.WaitState(8,AutoSearchCampaign.WaitReason.OFFLINE,2000))
             show("wait-catalog",state=Tunnel.State.CONNECTING,wait=AutoSearchCampaign.WaitState(8,AutoSearchCampaign.WaitReason.CATALOG_RETRY,5000))
-            show("wait-backoff",state=Tunnel.State.CONNECTING,wait=AutoSearchCampaign.WaitState(8,AutoSearchCampaign.WaitReason.BACKOFF,30000))
+            show("wait-backoff",state=Tunnel.State.CONNECTING,wait=AutoSearchCampaign.WaitState(8,AutoSearchCampaign.WaitReason.BACKOFF,5000))
             show("background-running",state=Tunnel.State.CONNECTED,background=BackgroundOptimization.Stage.RUNNING)
             show("background-power",state=Tunnel.State.CONNECTED,background=BackgroundOptimization.Stage.POWER)
             show("background-deferred",state=Tunnel.State.CONNECTED,background=BackgroundOptimization.Stage.DEFERRED)
