@@ -1,0 +1,42 @@
+name: Attach reviewed desktop preview to Android prerelease
+on:
+  push:
+    branches: ['experiment/desktop-196-release']
+    paths: ['.github/workflows/desktop-196-publish.yml']
+permissions:
+  contents: write
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Fetch only reviewed successful workflow artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          gh run view 40870220193 --json conclusion --jq .conclusion | grep -x success
+          gh run download 40870220193 -n desktop-r196-win-x64 -D payload/windows
+          gh run download 40870220193 -n desktop-r196-linux-x64 -D payload/linux
+      - name: Require byte-matched UI reviews and tested production source
+        run: python tools/desktop/publish_gate.py
+      - name: Attach packages without overwriting previous assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          for n in $(seq 1 40); do
+            gh release view beta-v1.2.85-experimental --json isPrerelease --jq .isPrerelease > /tmp/desktop-release-ready && grep -x true /tmp/desktop-release-ready && break
+            sleep 15
+          done
+          grep -x true /tmp/desktop-release-ready
+          gh release upload beta-v1.2.85-experimental desktop-release/*
+          gh release view beta-v1.2.85-experimental --json body > release-body.json
+          python tools/desktop/ordered_downloads.py
+          gh release edit beta-v1.2.85-experimental --notes-file ordered-notes.md
