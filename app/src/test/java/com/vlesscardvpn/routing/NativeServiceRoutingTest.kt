@@ -30,7 +30,7 @@ class NativeServiceRoutingTest {
         val video=hybrid.first {it.optJSONArray("domain")?.toString()?.contains("googlevideo.com")==true}
         assertEquals("proxy-1",video.getString("outboundTag"))
         assertFalse(hybrid.any {it.optString("outboundTag")==XrayConfigBuilder.BYEDPI_TAG})
-        val restricted=rules(Settings(mode=Mode.SERVERS,services=listOf("telegram")),routes)
+        val restricted=rules(Settings(mode=Mode.SERVERS,services=listOf("telegram"),ruWhitelist=false),routes)
         assertFalse(restricted.any {it.optString("outboundTag")=="direct" && it.optString("network")=="tcp,udp"})
     }
     @Test fun nativePinsRejectWebOnlyPassesAndUnknowns() {

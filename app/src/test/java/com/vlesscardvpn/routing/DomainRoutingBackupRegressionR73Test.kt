@@ -25,7 +25,7 @@ class DomainRoutingBackupRegressionR73Test {
     }
 
     @Test fun siteRoutingRules() {
-        val s = Settings(alwaysVpn = listOf("rutracker.org"), alwaysDirect = listOf("sber.ru"))
+        val s = Settings(alwaysVpn = listOf("rutracker.org"), alwaysDirect = listOf("sber.ru"), ruWhitelist = false)
         val cfg = JSONObject(XrayConfigBuilder.vpnConfig(listOf(srv to null), s, null))
         val rules = cfg.getJSONObject("routing").getJSONArray("rules")
         val rendered = (0 until rules.length()).map { rules.getJSONObject(it).toString() }
