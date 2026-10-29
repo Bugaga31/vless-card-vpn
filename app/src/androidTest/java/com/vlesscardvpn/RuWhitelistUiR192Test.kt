@@ -31,7 +31,7 @@ class RuWhitelistUiR192Test {
    Thread.sleep(250);ins.waitForIdleSync();val root=ins.uiAutomation.rootInActiveWindow;root?.refresh();text=labels(root)
   }
   assertTrue("$name: $text",text.any {expected in it})
-  val dir=File(ins.targetContext.getExternalFilesDir(null),"ui197").apply {mkdirs()}
+  val dir=File(ins.targetContext.getExternalFilesDir(null),"ui198").apply {mkdirs()}
   File(dir,"$name.labels.txt").writeText(text.joinToString("\n"))
   val bitmap=ins.uiAutomation.takeScreenshot() ?: error("Missing rendered UI")
   File(dir,"$name.png").outputStream().use {assertTrue(bitmap.compress(Bitmap.CompressFormat.PNG,100,it))};bitmap.recycle()

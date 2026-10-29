@@ -853,13 +853,25 @@ class TunnelService : VpnService() {
     }
 
     private fun scheduleOptimize(firstDelay: Long = 120_000) {
-        if (Store.state.value.settings.torAll) return
+        val settings = Store.state.value.settings
+        if (!com.vlesscardvpn.core.BackgroundRunPolicy.enabled(settings.mode == Mode.AUTO,settings.autoOptimize,
+                settings.torAll || settings.mode == Mode.BYEDPI || settings.mode == Mode.HYBRID)) {
+            optJob?.cancel(); optJob = null
+            com.vlesscardvpn.core.BackgroundOptimization.clear()
+            return
+        }
         if (optJob?.isActive == true) return
         com.vlesscardvpn.core.BackgroundOptimization.show(com.vlesscardvpn.core.BackgroundOptimization.Stage.SCHEDULED)
         optJob = scope.launch {
             delay(firstDelay)
             var calm = 0
             while (Tunnel.status.value.state == Tunnel.State.CONNECTED) {
+                val currentSettings = Store.state.value.settings
+                if (!com.vlesscardvpn.core.BackgroundRunPolicy.enabled(currentSettings.mode == Mode.AUTO,currentSettings.autoOptimize,
+                        currentSettings.torAll || currentSettings.mode == Mode.BYEDPI || currentSettings.mode == Mode.HYBRID)) {
+                    com.vlesscardvpn.core.BackgroundOptimization.clear()
+                    break
+                }
                 if (com.vlesscardvpn.core.SessionHold.active()) { com.vlesscardvpn.core.BackgroundOptimization.show(com.vlesscardvpn.core.BackgroundOptimization.Stage.HOLD); delay(5000); continue }
                 while (asleep() && Tunnel.status.value.state == Tunnel.State.CONNECTED) { com.vlesscardvpn.core.BackgroundOptimization.show(com.vlesscardvpn.core.BackgroundOptimization.Stage.POWER); delay(60_000) } // no re-tests while the phone sleeps
                 // Starting test cores/downloads is itself load, even when their resulting reconnect is deferred.

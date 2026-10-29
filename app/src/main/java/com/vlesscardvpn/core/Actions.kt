@@ -395,10 +395,10 @@ object Actions {
         progress.value = progress.value.copy(title = title, done = 0, total = servers.size,
             message = if (foreground) "HTTPS: ${servers.size} в волне · одновременно до $slots" +
                 (if (slots < minOf(parallel, servers.size)) " · ${plan.reason}" else "") else progress.value.message)
-        val net = Net.key(app)
-        val underlying = Net.underlying(app)?.toString()
+        val observed = Net.observation(app) ?: return 0
+        val net = observed.profile
         val pinned = pinCertificates(servers)
-        if (Net.key(app) != net || Net.underlying(app)?.toString() != underlying) return 0
+        if (!Net.matches(app,observed)) return 0
         val st = Store.state.value
         val variants = pinned.map { it to (Masks.byId(st.state(it).maskFor(net))) }
         val sampleStartedAt=System.currentTimeMillis()
@@ -408,11 +408,11 @@ object Actions {
         val firstWinner = java.util.concurrent.atomic.AtomicReference<Server?>(null)
         try {
             Tester.real(variants, st.settings.testUrl, port, own.ports, batch = if (onFirst != null) ConnectPolicy.FIRST else batch, parallel = parallel, big = big, youtube = youtube, telegram = telegram, calls = calls, foreground = foreground, attempts = attempts, requireTelegram = st.settings.mode == Mode.AUTO && telegram, stopAfter = stopAfter, budgetMs = budgetMs, onStarted = { i ->
-                if(Net.key(app)==net && Net.underlying(app)?.toString()==underlying) onAttempt?.invoke(variants[i].first)
+                if(Net.matches(app,observed)) onAttempt?.invoke(variants[i].first)
             }) { i, p ->
                 if (p == Tester.SKIPPED) return@real
                 // Do not train the old profile with a result completed after Wi-Fi/cellular handoff.
-                if (Net.key(app) != net || Net.underlying(app)?.toString() != underlying) return@real
+                if (!Net.matches(app,observed)) return@real
                 val s = variants[i].first
                 if(Store.state.value.state(s).maskFor(net)!=st.state(s).maskFor(net)) return@real
                 onObservation?.invoke(p)
@@ -426,7 +426,7 @@ object Actions {
                 probeMemory.record(net, s.id, st.state(s).maskFor(net), p.works, System.currentTimeMillis())
                 runCatching { Brain.learn(net, s, st.state(s), p.works) }
                 states.put(s.id) {
-                    if (Net.key(app) != net || Net.underlying(app)?.toString() != underlying || it.maskFor(net)!=st.state(s).maskFor(net) || it.checkedAt>sampleStartedAt) it else
+                    if (!Net.matches(app,observed) || it.maskFor(net)!=st.state(s).maskFor(net) || it.checkedAt>sampleStartedAt) it else
                     it.copy(netEvidence = (it.netEvidence + ((net + "|" + st.state(s).maskFor(net)) to it.evidenceFor(net).observe(p.works, p.realMs, System.currentTimeMillis()))).entries.sortedByDescending { e -> e.value.at }.take(8).associate { e -> e.toPair() }, realMs = p.realMs, bigOk = p.bigOk ?: it.bigOk?.takeIf { old -> old }, ytOk = if (youtube) p.ytOk else if (telegram) null else it.ytOk, tgOk = if (telegram) p.tgOk else if (youtube) null else it.tgOk, tgMs = if(telegram) p.tgMs else if(youtube) 0 else it.tgMs, checkedAt = System.currentTimeMillis(), kbps = if (speedSample) p.kbps else it.kbps,
                         serviceNetwork = if ((youtube || telegram) && p.works) net else it.serviceNetwork,
                         serviceMask = if ((youtube || telegram) && p.works) st.state(s).maskFor(net) else it.serviceMask,
@@ -445,7 +445,7 @@ object Actions {
         firstWinner.get()?.let { s ->
             kotlinx.coroutines.currentCoroutineContext().ensureActive()
             val committed = Store.state.value.state(s).let {it.works && it.maskFor(net)==st.state(s).maskFor(net)}
-            val sameNetwork = Net.key(app) == net && Net.underlying(app)?.toString() == underlying
+            val sameNetwork = Net.matches(app,observed)
             if (com.vlesscardvpn.BuildConfig.DEBUG) android.util.Log.i("E2E",
                 "auto first_probe committed=$committed same_network=$sameNetwork test_cleanup=true")
             if (committed && sameNetwork) onFirst?.invoke(s)
@@ -795,6 +795,9 @@ object Actions {
     val reserveStatus = kotlinx.coroutines.flow.MutableStateFlow("Резервы: фоновая проверка ещё не запускалась")
     private var catalogAt = -300000L
     private suspend fun catalogWave() {
+        val observed = Net.observation(app) ?: return
+        fun valid() = Net.matches(app,observed)
+        if (!valid()) return
         val now = android.os.SystemClock.elapsedRealtime()
         val plan = PhonePower.refresh(app)
         if (!plan.allowLight) { reserveStatus.value = "Резервы отложены: ${plan.reason}"; return }
@@ -808,7 +811,10 @@ object Actions {
         val wave = PublicCloudQueue.merge(available.sortedBy { st.state(it).checkedAt },cloud,available,ConnectPolicy.BACKGROUND,slots=8)
         reserveStatus.value = "Фон: TCP-волна ${wave.size} из ${available.size} резервных кандидатов"
         val states = StateBatch(); val alive = java.util.concurrent.ConcurrentHashMap<String, Int>()
-        Tester.tcp(wave, parallel = 32, timeoutMs = 1500) { s, ms -> alive[s.id] = ms; states.put(s.id) { it.copy(tcpMs = ms, checkedAt = System.currentTimeMillis()) } }
+        Tester.tcp(wave, parallel = 32, timeoutMs = 1500) { s, ms ->
+            if (valid()) { alive[s.id] = ms; states.put(s.id) { if (valid()) it.copy(tcpMs = ms, checkedAt = System.currentTimeMillis()) else it } }
+        }
+        if (!valid()) { reserveStatus.value = "Резервы: сеть изменилась, TCP-результаты отброшены"; return }
         states.flush()
         if (!PhonePower.refresh(app).allowLight) return
         val reachable = wave.filter { (alive[it.id] ?: 0) > 0 }
@@ -816,8 +822,7 @@ object Actions {
         var checked = 0
         val prev = progress.value
         try {
-            val net=Net.key(app);val handle=Net.underlying(app)?.toString()
-            fun valid()=Net.key(app)==net && Net.underlying(app)?.toString()==handle
+            val net=observed.profile
             val checkedAfter = System.currentTimeMillis()
             realTest(test,"Фон: Telegram и YouTube, волна ${test.size} из ${available.size}",big=false,youtube=true,
                 attempts=1,parallel=4,budgetMs=ConnectPolicy.QUICK_BUDGET_MS)
@@ -898,11 +903,15 @@ object Actions {
             if (com.vlesscardvpn.BuildConfig.DEBUG) android.util.Log.i("E2E", "optimize skipped=${if(job?.isActive == true) "foreground_busy" else "disabled"}")
             return false
         }
-        val originalNet = Net.key(app)
+        val observed = Net.observation(app) ?: return false
+        fun sameNetwork() = Net.matches(app,observed)
+        if (!sameNetwork()) return false
+        val originalNet = observed.profile
         val originalSelection = st.selected.map { AutoRoutePolicy.configuration(it,st.state(it),originalNet) }.toSet()
         if (st.settings.mode == com.vlesscardvpn.model.Mode.BYEDPI || st.settings.mode == com.vlesscardvpn.model.Mode.HYBRID) return false
         val wifi = unmetered()
         catalogWave()
+        if (!sameNetwork()) return false
         st = Store.state.value
         var ytSwitch = false
         if (deepPending && PhonePower.refresh(app).allowed) {
@@ -913,12 +922,15 @@ object Actions {
             val rest = s0.servers.filter { s0.state(it).tcpMs > 0 && (s0.state(it).realMs < 0 || System.currentTimeMillis() - s0.state(it).checkedAt > 6 * 3600_000L) }
                 .sortedBy { s0.state(it).tcpMs }.take(if (wifi) 12 else 6)
             if (rest.isNotEmpty()) realTest(rest, "Фоновая проверка", big = true, attempts = 1)
+            if (!sameNetwork()) { progress.value = prev0; return false }
             if (!PhonePower.refresh(app).allowed) { deepPending = true; progress.value = prev0; return false }
             lightenMasks(wifi)
+            if (!sameNetwork()) { progress.value = prev0; return false }
             // Wi-Fi: a real 3-second download through the 5 best (≈ what YouTube gets), not a 256 KB guess
             if (wifi) Store.state.value.let { s1 -> realSpeed(automaticOrder(s1, s1.servers.filter { s1.state(it).works }).take(5)) }
             progress.value = prev0
         }
+        if (!sameNetwork()) return false
         if (!PhonePower.refresh(app).allowLight) return ytSwitch
         st = Store.state.value
         // An empty Auto selection is recovered from the best working pool.
@@ -927,8 +939,7 @@ object Actions {
         val cand = (sel + others).distinctBy { it.id }
         if (cand.isEmpty()) return ytSwitch
         val prev = progress.value
-        val sampleNet = Net.key(app); val sampleHandle = Net.underlying(app)?.toString()
-        fun sameNetwork() = Net.key(app) == sampleNet && Net.underlying(app)?.toString() == sampleHandle
+        val sampleNet = originalNet
         try {
             val throughputMode = st.settings.mode == Mode.AUTO && !GameSession.active()
             // Concurrent downloads share the line and cannot rank throughput. First check HTTPS only.
