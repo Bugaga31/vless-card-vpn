@@ -252,7 +252,7 @@ fun SettingsScreen() {
             if (g.isNotEmpty()) Text(g, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             TextButton(onClick = { com.vlesscardvpn.core.GpsMock.openDevSettings(ctx) }) { Text("Открыть параметры разработчика") }
         }
-        Toggle("Фоновое ускорение", "Само готовит серверы и маски при запуске, а при подключении раз в 20 минут проверяет и переходит на более быстрые. На мобильном — экономно", s.autoOptimize) { v -> set { it.copy(autoOptimize = v) } }
+        Toggle("Фоновое ускорение", "Готовит кандидатов и периодически сравнивает маршруты. В Авто поиск продолжается после подключения; применение требует заметного улучшения или восстановления связи. При нагрузке и ограничениях питания — пауза", s.autoOptimize) { v -> set { it.copy(autoOptimize = v) } }
         Toggle("Самовосстановление", "Если проверка после подключения не прошла: другая рабочая маскировка → новый подбор → (Авто) обход DPI без сервера", s.autoHeal) { v -> set { it.copy(autoHeal = v) } }
 
         }
