@@ -1,0 +1,51 @@
+{
+  "passed": true,
+  "source_sha": "8fc2aa618361fdbf169883ee5d8764243c43c541",
+  "run_id": "40817905739",
+  "method": "assistant_opened_each_png",
+  "scope": "Synthetic states rendered by production Compose; not live TUN, not real operator validation. Debug version 1.0.1 is a harness build, not release version.",
+  "screenshots": [
+    {
+      "file": "connected.png",
+      "sha256": "d3fe6835e2dae5f030f1e5de979a8f8869374ad34baa2ded0481020e3c82dd8b"
+    },
+    {
+      "file": "error.png",
+      "sha256": "a671984abeb448ecc2f56dd48fa2b7f74895de9c3dc164b85a773f96778778fc"
+    },
+    {
+      "file": "idle-dark.png",
+      "sha256": "d2247f314373db48d254f8a37817498d2b6c4bc6c80afbcdace8d9dc79aa724d"
+    },
+    {
+      "file": "idle-light.png",
+      "sha256": "17cab9ff413c57b2607bb58a04494cd1fbafb5d58a2c09e4dbf6ed6230ab099e"
+    },
+    {
+      "file": "large-narrow.png",
+      "sha256": "862b845617e0d7c4c426bb644156c1739be69f4879ccaf28d08c38b60d9cec43"
+    },
+    {
+      "file": "partial.png",
+      "sha256": "ac1258f4b42d1c82e2e9dfc59a53cb7ea628d72b274508a0a71e495ffe17fd53"
+    },
+    {
+      "file": "searching.png",
+      "sha256": "0d0860955ec9c65d1ad08377bc55adbd6fafd7e85f6a179483a89fe2a621a041"
+    },
+    {
+      "file": "services.png",
+      "sha256": "826c377dc0cbebb7aab33443039ac2c9adcfb422ba793107afba76843ceb34a2"
+    }
+  ],
+  "observations": {
+    "connected.png": "Disconnect visible; local-probe scope is explicit.",
+    "error.png": "Readable failure and retry action.",
+    "idle-dark.png": "Connect action remains visible with update banner; overflow copy scrolls.",
+    "idle-light.png": "Primary action and text retain readable contrast.",
+    "large-narrow.png": "At narrow width/large font primary button is fully visible; lower text scrolls.",
+    "partial.png": "Warning wording distinguishes incomplete checks from disconnected state.",
+    "searching.png": "Cancel action visible with HTTPS/Telegram explanation.",
+    "services.png": "HTTPS, DNS and slow Telegram labels readable; scope explains not account/full TUN."
+  }
+}
