@@ -9,3 +9,9 @@ with zipfile.ZipFile(io.BytesIO(data)) as z:
  (out/'Xray-LICENSE.txt').write_bytes(z.read('LICENSE'))
 (out/'digest.txt').write_text(hashlib.sha256((out/name).read_bytes()).hexdigest())
 (out/'archive-sha256.txt').write_text(digest)
+
+# Include upstream permissive-license notices inside the executable, not just URLs.
+notices=pathlib.Path('desktop/App/THIRD-PARTY-NOTICES.txt').read_text()
+for url in ['https://raw.githubusercontent.com/AvaloniaUI/Avalonia/11.3.22/licence.md','https://raw.githubusercontent.com/dotnet/runtime/v8.0.24/LICENSE.TXT','https://raw.githubusercontent.com/dotnet/runtime/v8.0.24/THIRD-PARTY-NOTICES.TXT']:
+ notices+='\n\n'+url+'\n'+urllib.request.urlopen(url,timeout=60).read().decode('utf-8-sig')
+pathlib.Path('desktop/App/THIRD-PARTY-NOTICES.txt').write_text(notices)

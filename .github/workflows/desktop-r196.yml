@@ -37,8 +37,8 @@ jobs:
           $license=(Resolve-Path 'desktop-core/Xray-LICENSE.txt').Path
           dotnet publish desktop/App/VlessCard.Desktop.csproj -c Release -r '${{ matrix.rid }}' --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true "-p:XrayBundlePath=$bundle" "-p:XrayDigestPath=$digest" "-p:XrayLicensePath=$license" -o desktop-publish
           if ($LASTEXITCODE -ne 0) { throw 'Publish failed' }
-          & './desktop-publish/${{ matrix.exe }}' --verify-bundle test-output/xray-smoke.json
-          if ($LASTEXITCODE -ne 0) { throw 'Embedded core configuration failed' }
+          $check=Start-Process -FilePath (Resolve-Path 'desktop-publish/${{ matrix.exe }}').Path -ArgumentList '--verify-bundle','test-output/xray-smoke.json' -Wait -PassThru -NoNewWindow
+          if ($check.ExitCode -ne 0) { throw 'Embedded core configuration failed' }
           New-Item -ItemType Directory desktop-dist -Force | Out-Null
           Copy-Item desktop/App/THIRD-PARTY-NOTICES.txt desktop-dist/
           Copy-Item desktop-core/Xray-LICENSE.txt desktop-dist/
@@ -83,7 +83,7 @@ jobs:
           import pathlib,hashlib,json,os,subprocess
           out=pathlib.Path('desktop-dist');rid='${{ matrix.rid }}'
           tracked=subprocess.check_output(['git','ls-files','desktop','tools/desktop'],text=True).splitlines()
-          report=dict(source_sha=os.environ['GITHUB_SHA'],run_id=os.environ['GITHUB_RUN_ID'],rid=rid,core_version='v26.9.30',core_archive_sha256=pathlib.Path('desktop-core/archive-sha256.txt').read_text(),core_tests_passed=True,embedded_core_config_passed=True,window_open_close_passed=True,scope='local_SOCKS5_not_system_TUN_not_live_operator_DPI',files={p:hashlib.sha256(pathlib.Path(p).read_bytes()).hexdigest() for p in tracked},assets={p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in out.iterdir() if p.suffix in ['.exe','.deb','.gz','.png']})
+          report=dict(source_sha=os.environ['GITHUB_SHA'],run_id=os.environ['GITHUB_RUN_ID'],rid=rid,core_version='v26.9.30',core_archive_sha256=pathlib.Path('desktop-core/archive-sha256.txt').read_text(),core_tests_passed=True,embedded_core_config_passed=True,window_open_close_passed=True,scope='local_SOCKS5_not_system_TUN_not_live_operator_DPI',files={p:hashlib.sha256(subprocess.check_output(['git','show','HEAD:'+p])).hexdigest() for p in tracked},assets={p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in out.iterdir() if p.suffix in ['.exe','.deb','.gz','.png']})
           (out/(rid+'.json')).write_text(json.dumps(report,indent=2)+'\n')
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
@@ -98,6 +98,7 @@ jobs:
           cp desktop-dist/${{ matrix.rid }}.json desktop-dist/${{ matrix.rid }}.png docs/validation/desktop-r196/
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git restore desktop/App/THIRD-PARTY-NOTICES.txt
           git add docs/validation/desktop-r196
           git commit -m 'test: desktop ${{ matrix.rid }} build and window evidence' || exit 0
           for n in 1 2 3 4; do git pull --rebase origin integration/desktop-r196 && git push origin HEAD:integration/desktop-r196 && exit 0; sleep 4; done
