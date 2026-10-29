@@ -23,7 +23,7 @@ jobs:
         run: |
           set -euo pipefail
           base64 -d tools/patches/pool-r203.patch.gz.b64 | gzip -d > "$RUNNER_TEMP/pool-r203.patch"
-          echo '232cefe24912d8db7e9e75922c1ebda127340a0dac9313a79e505ab9e46fb28d  '"$RUNNER_TEMP/pool-r203.patch" | sha256sum -c -
+          echo '8204aeaa738cf9cb1656371759c46c2b36eae8d8e73da62ebf1267891250e745  '"$RUNNER_TEMP/pool-r203.patch" | sha256sum -c -
           git fetch --quiet --no-tags origin aa380b19d45f55e1c0f69dfa666cf6d5fbaaeee6
           git restore --source aa380b19d45f55e1c0f69dfa666cf6d5fbaaeee6 -- app/src/main app/src/test app/build.gradle.kts
           PATCH="$RUNNER_TEMP/pool-r203.patch"
