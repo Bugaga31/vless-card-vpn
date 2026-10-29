@@ -1,0 +1,5 @@
+from pathlib import Path
+p=Path('app/src/androidTest/java/com/vlesscardvpn/RuNativeConfigR192Test.kt');s=p.read_text();s=s.replace('Settings(ruWhitelist=false),Settings(torAll=true)','Settings(ruWhitelist=false),Settings(ruAllDirect=true),Settings(ruAllDirect=true,alwaysVpn=listOf("example.ru")),Settings(ruAllDirect=true,torAll=true),Settings(torAll=true)');p.write_text(s)
+p=Path('app/src/androidTest/java/com/vlesscardvpn/RuWhitelistUiR192Test.kt');s=p.read_text();needle='    show(Settings());shot("ru-large","RU-сервисы напрямую")';assert needle in s
+s=s.replace(needle,needle+'\n    show(Settings(ruAllDirect=true));shell("input swipe 160 540 160 100 500");shell("input swipe 160 540 160 100 500");shot("ru-geo-large","База Karing")\n    shell("settings put system font_scale 1.0");shell("wm size reset");shell("wm density reset");Thread.sleep(1000)\n    show(Settings(ruAllDirect=true));shell("input swipe 160 540 160 100 500");shell("input swipe 160 540 160 100 500");shot("ru-geo-on","База Karing")\n    show(Settings());shell("input swipe 160 540 160 100 500");shell("input swipe 160 540 160 100 500");shot("ru-geo-off","Расширение выключено")')
+p.write_text(s)
