@@ -51,5 +51,5 @@ class NetworkR195Test {
   try {val jobs=(1..48).map {async {ProbeDns.resolve("fixture-$it",100){val n=active.incrementAndGet();peak.updateAndGet {maxOf(it,n)};try {while(release.count>0)try {release.await()}catch(_:InterruptedException){};listOf(v4(1))}finally{active.decrementAndGet()}}}};assertTrue(jobs.awaitAll().all {it==null});assertTrue(peak.get() in 1..4)}
   finally {release.countDown();withTimeout(3000){while(active.get()>0)delay(1)}}
  }
- @Test fun definiteHintFailureStillNeedsAuthenticatedValidation() {assertFalse(AutoLatencyPolicy.accepts(Probe(10,null,null,tgOk=null,tgMs=0)));assertFalse(AutoLatencyPolicy.accepts(Probe(10,null,null,tgOk=true,tgMs=700)))}
+ @Test fun definiteHintFailureStillNeedsAuthenticatedValidation() {assertFalse(AutoLatencyPolicy.accepts(Probe(10,null,null,tgOk=null,tgMs=0)));assertFalse(AutoLatencyPolicy.accepts(Probe(10,null,null,tgOk=true,tgMs=1200)))}
 }

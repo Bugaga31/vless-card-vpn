@@ -1,7 +1,7 @@
 package com.vlesscardvpn.core
 
-/** A rejected >500ms cold service probe must not occupy a fast-discovery slot for 1.8s.
- * Slack is for scheduling/cleanup only; acceptance still uses the measured <=500ms gate.
+/** A rejected >1000ms cold service probe must not occupy a fast-discovery slot for 1.8s.
+ * Slack is for scheduling/cleanup only; acceptance still uses the measured <=1000ms gate.
  * Downloads, calls, ordinary diagnostics and background comparisons keep their full budget.
  */
 object StrictProbeBudget {

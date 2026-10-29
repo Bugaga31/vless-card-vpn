@@ -20,11 +20,11 @@ class ModuleHealthR186Test {
         }
     }
     @Test fun slowHttpsSuggestsOptimizationNotBlindRestart() {
-        val a=assess(good.copy(httpsMs=501)); assertEquals(false,a.ready)
+        val a=assess(good.copy(httpsMs=1001)); assertEquals(false,a.ready)
         assertEquals(ModuleStatus.SLOW,state(a,HealthModule.HTTPS)); assertEquals(HealthAction.OPTIMIZE,a.action)
     }
     @Test fun slowTelegramCannotBeGreen() {
-        val a=assess(good.copy(telegramMs=501)); assertEquals(false,a.ready)
+        val a=assess(good.copy(telegramMs=1001)); assertEquals(false,a.ready)
         assertEquals(ModuleStatus.SLOW,state(a,HealthModule.TELEGRAM)); assertEquals(HealthAction.OPTIMIZE,a.action)
     }
     @Test fun missingAndNegativeTimingAreUnknownNotFailure() {
