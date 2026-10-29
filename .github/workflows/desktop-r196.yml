@@ -2,6 +2,7 @@ name: Desktop preview r196
 on:
   push:
     branches: ['integration/desktop-r196']
+    paths: ['desktop/**', 'tools/desktop/**', '.github/workflows/desktop-r196.yml']
 permissions:
   contents: write
 jobs:
