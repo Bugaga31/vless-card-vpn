@@ -23,7 +23,7 @@ jobs:
         run: |
           set -euo pipefail
           base64 -d tools/patches/reserve-r205.patch.gz.b64 | gzip -d > "$RUNNER_TEMP/reserve-r205.patch"
-          echo 'b5f69f809491ebee4545ed6b427f1fc4dc3d5d08ef81840898c5a14142f0967b  '"$RUNNER_TEMP/reserve-r205.patch" | sha256sum -c -
+          echo '2a86fe1767081df0a6c468e042c2ca4923b64f2cfc63499f374c14456e7fd9e4  '"$RUNNER_TEMP/reserve-r205.patch" | sha256sum -c -
           git fetch --quiet --no-tags origin 6151fec4d529d88012b2b9dc6df4994c6ec1a822
           git restore --source 6151fec4d529d88012b2b9dc6df4994c6ec1a822 -- app/src/main app/src/test app/build.gradle.kts
           git apply --check "$RUNNER_TEMP/reserve-r205.patch"
