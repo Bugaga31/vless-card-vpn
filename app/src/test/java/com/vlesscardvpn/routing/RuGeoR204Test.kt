@@ -32,7 +32,7 @@ class RuGeoR204Test {
  @Test fun ipOnDemandOnlyWhenOptedIn(){assertEquals("IPOnDemand",config().getJSONObject("routing").getString("domainStrategy"));assertEquals("AsIs",config(Settings()).getJSONObject("routing").getString("domainStrategy"))}
  @Test fun ipv6BlockStillPrecedesGeoIp(){val r=rules();val block=r.indexOfFirst{it.optString("outboundTag")=="block"&&it.optJSONArray("ip")?.toString()?.contains("::/0")==true};assertTrue(block>=0&&block<ipIndex(r))}
  @Test fun telegramIpProtectionPrecedesGeoIp(){val r=rules();val tg=r.indexOfFirst{it.optString("outboundTag")=="proxy-0"&&it.optJSONArray("ip")?.toString()?.contains("geoip:telegram")==true};assertTrue(tg>=0&&tg<ipIndex(r))}
- @Test fun quicAndStunProtectionsRetained(){val r=rules();val quic=r.indexOfFirst{it.optString("outboundTag")=="block"&&it.optString("port")=="443"&&!it.has("domain")};assertTrue(quic>=0&&quic<ipIndex(r));assertTrue(r.any{it.optString("port")=="3478,5349,19302-19309"&&it.optString("outboundTag")=="block"})}
+ @Test fun quicAndStunProtectionsRetained(){val r=rules(on.copy(blockStun=true));val quic=r.indexOfFirst{it.optString("outboundTag")=="block"&&it.optString("port")=="443"&&!it.has("domain")};assertTrue(quic>=0&&quic<ipIndex(r));assertTrue(r.any{it.optString("port")=="3478,5349,19302-19309"&&it.optString("outboundTag")=="block"})}
  @Test fun unrelatedDefaultStillServer(){assertEquals("proxy-0",rules().last().getString("outboundTag"));assertEquals(12987,rules()[ipIndex(rules())].getJSONArray("ip").length())}
  @Test fun policyChangeInvalidatesChainMeasurement(){assertNotEquals(AutoChainRunner.settingsKey(Settings()),AutoChainRunner.settingsKey(on));assertNotEquals(AutoChainRunner.settingsKey(on),AutoChainRunner.settingsKey(on.copy(ruWhitelist=false)))}
 }
