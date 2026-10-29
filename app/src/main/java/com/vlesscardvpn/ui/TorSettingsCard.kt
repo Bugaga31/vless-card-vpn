@@ -127,6 +127,7 @@ fun TorSettingsCard(settings: Settings, set: ((Settings) -> Settings) -> Unit) {
                 } else {
                     Text("В текущем режиме автоподбор сетевых цепочек не используется. Для Tor включены отдельный VLESS-маршрут и измеряемая ротация выходов.", style = MaterialTheme.typography.bodySmall)
                 }
+            TorCountryPreferences(settings,set)
             TorOption("Рекомендуемые профили Wi-Fi / мобильная сеть", "При подключении и смене сети: Wi-Fi — допуск задержки ${TorNetworkRecommendations.WIFI_LATENCY_MS} мс и ротация 600 с; мобильная — ${TorNetworkRecommendations.MOBILE_LATENCY_MS} мс и 900 с. Допуск нужен, чтобы Tor не отбрасывал медленные, но рабочие выходы; это не обещание скорости.", settings.torNetworkRecommendations) { v -> set { it.copy(torNetworkRecommendations = v) } }
             if (settings.torNetworkRecommendations) Text("Ручные интервал и порог ниже сохранены, но временно заменяются профилем Wi-Fi/мобильной сети. Выключите рекомендации, чтобы применять свои значения. На других типах сети используются ручные настройки.", style = MaterialTheme.typography.bodySmall)
             if (settings.torAll) {
@@ -135,11 +136,11 @@ fun TorSettingsCard(settings: Settings, set: ((Settings) -> Settings) -> Unit) {
             if (settings.torAll) {
                 var seconds by remember(settings.torRotationSeconds) { mutableStateOf(settings.torRotationSeconds.toString()) }
                 var latency by remember(settings.torMaxLatencyMs) { mutableStateOf(settings.torMaxLatencyMs.toString()) }
-                val validSeconds = seconds.toIntOrNull()?.takeIf { it in 30..86400 }
+                val validSeconds = seconds.toIntOrNull()?.takeIf { it in 5..86400 }
                 val validLatency = latency.toIntOrNull()?.takeIf { it > 0 }
                 OutlinedTextField(value = seconds, onValueChange = { if (it.length <= 5) seconds = it }, singleLine = true,
                     label = { Text("Запрашивать новую цепочку каждые N секунд") },
-                    supportingText = { Text("30–86400 секунд. В режиме энергосбережения ротация может откладываться.") },
+                    supportingText = { Text("5–86400 секунд — интервал запросов. Tor может ограничить частоту; текущие соединения сохраняют старые цепочки.") },
                     isError = validSeconds == null, modifier = Modifier.fillMaxWidth(),
                     keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number))
                 TorOption("Предпочитать быстрые выходы", "Выбирать выход по свежей задержке HTTPS через Tor; это не обещание скорости скачивания.", settings.torFastOnly) { v -> set { it.copy(torFastOnly = v) } }
@@ -147,7 +148,7 @@ fun TorSettingsCard(settings: Settings, set: ((Settings) -> Settings) -> Unit) {
                     label = { Text("Порог задержки HTTPS, мс") }, supportingText = { Text("Положительное целое число. Слишком низкий порог может исключить все замеры.") },
                     isError = validLatency == null, modifier = Modifier.fillMaxWidth(),
                     keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number))
-                OutlinedButton(onClick = { if (validSeconds != null && validLatency != null) set { it.copy(torRotationSeconds = validSeconds, torMaxLatencyMs = validLatency) } },
+                OutlinedButton(onClick = { if (validSeconds != null && validLatency != null) set { it.copy(torRotationSeconds = validSeconds, torMaxLatencyMs = validLatency, torNetworkRecommendations = false) } },
                     enabled = validSeconds != null && validLatency != null, modifier = Modifier.fillMaxWidth()) { Text("Сохранить интервал и порог") }
                 Text("Параметры ротации и транспорта применяются при следующем подключении. Tor работает поверх VLESS; при отсутствии сервера маршрут не переключается напрямую.", style = MaterialTheme.typography.bodyMedium)
             }
@@ -210,4 +211,19 @@ private fun TorOption(title: String, description: String, value: Boolean, onChan
         }
         Switch(checked = value, onCheckedChange = onChange, modifier = Modifier.padding(top = 2.dp))
     }
+}
+
+@Composable
+fun TorCountryPreferences(settings:Settings,set:((Settings)->Settings)->Unit) {
+ var text by remember(settings.torExitCountries) {mutableStateOf(settings.torExitCountries)}
+ val countries=runCatching {TorCountryPolicy.parse(text)}.getOrNull()
+ Column(verticalArrangement=Arrangement.spacedBy(8.dp)) {
+  Text("Страна выхода Tor",style=MaterialTheme.typography.titleMedium)
+  OutlinedTextField(value=text,onValueChange={if(it.length<=200) text=it},modifier=Modifier.fillMaxWidth(),
+   label={Text("ISO-коды: US, DE, NL")},isError=countries==null,
+   supportingText={Text("Пусто — любая страна. Несколько кодов — допустимые выходы, не порядок узлов.")})
+  Button(onClick={countries?.let {cc->set {it.copy(torExitCountries=cc.joinToString(","))}}},
+   enabled=countries!=null,modifier=Modifier.fillMaxWidth()) {Text("Сохранить страны")}
+  Text("После переподключения встроенного Tor. Без доступного выхода выбранной страны Tor может не подключиться. VPN-сервер → Tor: первый шаг выбирайте в серверах. Дополнительные VPN-шаги пока не поддерживаются.",style=MaterialTheme.typography.bodyMedium)
+ }
 }

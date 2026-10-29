@@ -57,7 +57,7 @@ class DashboardUiR190Test {
         ConnectionPassport.clear()
         if(state==Tunnel.State.CONNECTED) ConnectionPassport.fullModules(ModuleHealthPolicy.assess(
             HealthInput(true,100,true,true,true,if(ok==true) 120 else 700,null),HealthRequirements()))
-        Tunnel.status.value=Tunnel.Status(state=state,checkOk=ok,route=if(state==Tunnel.State.CONNECTED) "Стенд · тестовый маршрут" else "",since=System.currentTimeMillis())
+        Tunnel.status.value=Tunnel.Status(state=state,checkOk=ok,check=if(name=="network-recovery") NetworkRecoveryPresentation.message("Моб.: LTE") else "",route=if(state==Tunnel.State.CONNECTED) "Стенд · тестовый маршрут" else "",since=System.currentTimeMillis())
         Updater.state.value=Updater.State()
         Actions.progress.value=if(state==Tunnel.State.CONNECTING) Actions.Progress(title="Проверяем доступность",running=true,
             message="HTTPS и Telegram проверяются параллельно") else Actions.Progress()
@@ -95,13 +95,34 @@ class DashboardUiR190Test {
         Actions.progress.value=Actions.Progress()
         if(large) {shell("settings put system font_scale 1.0");shell("wm size reset");shell("wm density reset")}
     }
+    private fun torView(name:String,large:Boolean=false,preferences:Boolean=false,country:String?="DE") {
+        Store.update {it.copy(settings=it.settings.copy(theme="dark",secureScreen=false,welcomeSound=false,reducedMotion=true,oceanBackground=false))}
+        if(large) {shell("wm size 720x1600");shell("wm density 360");shell("settings put system font_scale 1.5");Thread.sleep(1000)}
+        ActivityScenario.launch(MainActivity::class.java).use {scenario ->
+            scenario.onActivity {activity -> activity.setContent {
+                MaterialTheme(colorScheme=darkColorScheme(primary=Color(0xFF8FC2FF),background=Color(0xFF10151C),surface=Color(0xFF1A222E),onSurface=Color(0xFFF0F6FC),onSurfaceVariant=Color(0xFFB3C6D5))) {
+                    Surface(Modifier.fillMaxSize(),color=MaterialTheme.colorScheme.background) {
+                        Column(Modifier.padding(20.dp).verticalScroll(rememberScrollState())) {
+                            if(preferences) com.vlesscardvpn.ui.TorCountryPreferences(com.vlesscardvpn.model.Settings(torExitCountries="US,DE")) {}
+                            else com.vlesscardvpn.ui.TorExitCountryCard(TorExitStatus.Info(true,country))
+                        }
+                    }
+                }
+            }}
+            capture(name,if(preferences) "Сохранить страны" else if(country==null) "не определена" else "Германия")
+        }
+        if(large) {shell("settings put system font_scale 1.0");shell("wm size reset");shell("wm density reset")}
+    }
     @Test fun captureRealDashboardStatesWithoutConnectingToVpn() {
         try {
+            torView("tor-country");torView("tor-country-unknown",country=null);torView("tor-country-large",large=true)
+            torView("tor-preferences",preferences=true);torView("tor-preferences-large",preferences=true,large=true)
             manualProgress("manual-progress");manualProgress("manual-progress-large",large=true)
             show("idle-dark");show("idle-light",theme="light");show("searching",state=Tunnel.State.CONNECTING)
             show("wait-offline",state=Tunnel.State.CONNECTING,wait=AutoSearchCampaign.WaitState(8,AutoSearchCampaign.WaitReason.OFFLINE,2000))
             show("wait-catalog",state=Tunnel.State.CONNECTING,wait=AutoSearchCampaign.WaitState(8,AutoSearchCampaign.WaitReason.CATALOG_RETRY,5000))
             show("wait-backoff",state=Tunnel.State.CONNECTING,wait=AutoSearchCampaign.WaitState(8,AutoSearchCampaign.WaitReason.BACKOFF,5000))
+            show("network-recovery",state=Tunnel.State.CONNECTED)
             show("background-running",state=Tunnel.State.CONNECTED,background=BackgroundOptimization.Stage.RUNNING)
             show("background-power",state=Tunnel.State.CONNECTED,background=BackgroundOptimization.Stage.POWER)
             show("background-deferred",state=Tunnel.State.CONNECTED,background=BackgroundOptimization.Stage.DEFERRED)

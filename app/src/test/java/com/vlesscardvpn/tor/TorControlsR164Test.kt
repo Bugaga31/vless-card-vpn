@@ -32,12 +32,12 @@ class TorControlsR164Test {
     @Test fun `import clamps intervals and thresholds`() {
         val lo = Settings.fromJson(JSONObject().put("torRotationSeconds",-1).put("torMaxLatencyMs",0))
         val hi = Settings.fromJson(JSONObject().put("torRotationSeconds",Int.MAX_VALUE).put("torMaxLatencyMs",Int.MAX_VALUE))
-        assertEquals(30,lo.torRotationSeconds); assertEquals(1,lo.torMaxLatencyMs)
+        assertEquals(5,lo.torRotationSeconds); assertEquals(1,lo.torMaxLatencyMs)
         assertEquals(86400,hi.torRotationSeconds); assertEquals(Int.MAX_VALUE,hi.torMaxLatencyMs)
     }
     @Test fun `export also clamps direct invalid copies`() {
         val j=Settings(torRotationSeconds=0,torMaxLatencyMs=0).toJson()
-        assertEquals(30,j.getInt("torRotationSeconds")); assertEquals(1,j.getInt("torMaxLatencyMs"))
+        assertEquals(5,j.getInt("torRotationSeconds")); assertEquals(1,j.getInt("torMaxLatencyMs"))
     }
     @Test fun `positive custom latency survives save and import without hidden clamp`() {
         listOf(1, 99, 100, 249, 250, 15000, 15001, 60000, Int.MAX_VALUE).forEach { value ->

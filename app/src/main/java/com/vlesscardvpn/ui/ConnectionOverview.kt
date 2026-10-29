@@ -34,6 +34,7 @@ fun ConnectionOverview(status:Tunnel.Status,hideRoute:Boolean,modeLabel:String,c
                 lineHeight=27.sp,fontWeight=FontWeight.SemiBold,color=MaterialTheme.colorScheme.onSurface)
             control()
             Text(when {
+                (searching || on) && status.check.isNotBlank()->status.check
                 searching->"Проверяем HTTPS и Telegram. Ищем до подключения; отмена — кнопкой выше."
                 status.state==Tunnel.State.ERROR->"Серверы и настройки сохранены. Повторите поиск или откройте диагностику."
                 on && status.checkOk==false->"Туннель подключён, но не все обязательные проверки прошли. Смотрите результаты ниже."

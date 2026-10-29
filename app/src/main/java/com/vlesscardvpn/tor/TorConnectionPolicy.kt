@@ -16,7 +16,7 @@ object TorConnectionPolicy {
     fun runtime(s: Settings): Settings = ServerOnlyPolicy.normalize(s)
     fun needsAutoSearch(s: Settings): Boolean = ServerOnlyPolicy.normalize(s).mode == Mode.AUTO
     fun rotation(s: Settings, now: () -> Long): TorRotation = TorRotation(
-        rotateEveryMs = s.torRotationSeconds.coerceIn(30, 86400) * 1000L,
+        rotateEveryMs = TorCountryPolicy.interval(s.torRotationSeconds),
         periodic = true, fastOnly = s.torFastOnly,
         ceilingMs = if (s.torFastOnly) s.torMaxLatencyMs.coerceAtLeast(1).toLong() else 7000L,
         now = now)

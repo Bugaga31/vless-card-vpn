@@ -67,10 +67,10 @@ class TorRotator(
     fun tick(nowMs: Long = System.currentTimeMillis()): Boolean {
         if (!connected) return false
         if (!rotation.shouldRotate(nowMs)) return false
-        if (lastAttemptAt?.let { nowMs < it || nowMs - it < 30_000L } == true) return false
+        if (lastAttemptAt?.let { nowMs < it || nowMs - it < 5_000L } == true) return false
         lastAttemptAt = nowMs
         return try {
-            val best = rotation.pick(nowMs)
+            val best = rotation.pick(nowMs)?.takeIf { countries.isEmpty() || it.lowercase() in countries.map {cc->cc.lowercase()} }
             if (best != null) {
                 control.setExitCountries(listOf(best))
                 pinnedByRotation = true
