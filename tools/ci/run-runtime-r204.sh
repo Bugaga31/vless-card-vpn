@@ -12,6 +12,11 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 adb install -r -t app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
 adb shell pm grant com.vlesscardvpn android.permission.POST_NOTIFICATIONS
 set +e
+# No launcher is needed by ActivityScenario. A crashing emulator launcher must not overlay the app under test.
+for pkg in com.google.android.apps.nexuslauncher com.android.launcher3; do
+  adb shell am force-stop "$pkg" || true
+  adb shell pm disable-user --user 0 "$pkg" || true
+done
 adb shell am instrument -w -r -e fixture_ca_b64 "$CA_B64" -e class com.vlesscardvpn.NativeAutoRuntimeR190Test,com.vlesscardvpn.DashboardUiR190Test,com.vlesscardvpn.FirstConnectRuntimeR190Test,com.vlesscardvpn.ProductRuntimeR190Test,com.vlesscardvpn.MaintenanceUiR190Test,com.vlesscardvpn.WarpRuntimeR191Test,com.vlesscardvpn.PowerRoutingRuntimeR192Test,com.vlesscardvpn.DiscoveryRuntimeR193Test,com.vlesscardvpn.ProductRuntimeR194Test,com.vlesscardvpn.NetworkRuntimeR195Test,com.vlesscardvpn.ExperienceRuntimeR196Test,com.vlesscardvpn.HandoffRuntimeR197Test,com.vlesscardvpn.ObservationRuntimeR198Test,com.vlesscardvpn.SubscriptionQueueRuntimeR199Test,com.vlesscardvpn.SearchPacingRuntimeR200Test,com.vlesscardvpn.HandoffLatencyRuntimeR201Test,com.vlesscardvpn.DiscoveryAdmissionRuntimeR202Test,com.vlesscardvpn.PoolLatencyRuntimeR203Test,com.vlesscardvpn.RuGeoRuntimeR204Test,com.vlesscardvpn.RuWhitelistUiR192Test,com.vlesscardvpn.RuNativeConfigR192Test   com.vlesscardvpn.test/androidx.test.runner.AndroidJUnitRunner | tee runtime-results-r204.txt
 CODE=${PIPESTATUS[0]}
 set -e
