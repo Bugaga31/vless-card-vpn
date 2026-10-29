@@ -1,0 +1,2222 @@
+{
+  "source_sha": "f81f7cd09aa76453182fd65e600a6b4ce989fb84",
+  "run_id": "40845054873",
+  "steps": {
+    "source": "success",
+    "host": "success",
+    "jvm": "success",
+    "lint": "success"
+  },
+  "suites": [
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.AdaptiveCloudSelectionTest.xml",
+      "name": "com.vlesscardvpn.AdaptiveCloudSelectionTest",
+      "tests": "10",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.AutoCampaignR175Test.xml",
+      "name": "com.vlesscardvpn.AutoCampaignR175Test",
+      "tests": "17",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.AutoDiscoveryR174Test.xml",
+      "name": "com.vlesscardvpn.AutoDiscoveryR174Test",
+      "tests": "17",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.AutoPoolRecoveryR140Test.xml",
+      "name": "com.vlesscardvpn.AutoPoolRecoveryR140Test",
+      "tests": "13",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.AutoRoutePolicyTest.xml",
+      "name": "com.vlesscardvpn.AutoRoutePolicyTest",
+      "tests": "16",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.AutoSearchR188Test.xml",
+      "name": "com.vlesscardvpn.AutoSearchR188Test",
+      "tests": "21",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.AutoSelectionTest.xml",
+      "name": "com.vlesscardvpn.AutoSelectionTest",
+      "tests": "19",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.BalancerHealthRegressionR79Test.xml",
+      "name": "com.vlesscardvpn.BalancerHealthRegressionR79Test",
+      "tests": "1",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.BrainLearningRegressionR132Test.xml",
+      "name": "com.vlesscardvpn.BrainLearningRegressionR132Test",
+      "tests": "9",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.ByeDpiArgsTest.xml",
+      "name": "com.vlesscardvpn.ByeDpiArgsTest",
+      "tests": "4",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.CloudCacheRefreshRegressionR130Test.xml",
+      "name": "com.vlesscardvpn.CloudCacheRefreshRegressionR130Test",
+      "tests": "4",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.CloudFreshSpeedTest.xml",
+      "name": "com.vlesscardvpn.CloudFreshSpeedTest",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.CloudLoadRegressionR121Test.xml",
+      "name": "com.vlesscardvpn.CloudLoadRegressionR121Test",
+      "tests": "2",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.CloudSpeedRegressionR122Test.xml",
+      "name": "com.vlesscardvpn.CloudSpeedRegressionR122Test",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.ConfigTest.xml",
+      "name": "com.vlesscardvpn.ConfigTest",
+      "tests": "11",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.CountryFavoritesRegressionR77Test.xml",
+      "name": "com.vlesscardvpn.CountryFavoritesRegressionR77Test",
+      "tests": "2",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.CryptoWarpRegressionR62Test.xml",
+      "name": "com.vlesscardvpn.CryptoWarpRegressionR62Test",
+      "tests": "6",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.CustomMasksRegressionR66Test.xml",
+      "name": "com.vlesscardvpn.CustomMasksRegressionR66Test",
+      "tests": "7",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.DiscordPrivacyR159Test.xml",
+      "name": "com.vlesscardvpn.DiscordPrivacyR159Test",
+      "tests": "2",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.DiscoveryCancellationRegressionR138Test.xml",
+      "name": "com.vlesscardvpn.DiscoveryCancellationRegressionR138Test",
+      "tests": "12",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.DiscoveryR193Test.xml",
+      "name": "com.vlesscardvpn.DiscoveryR193Test",
+      "tests": "30",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.DiverseCandidatesRegressionR131Test.xml",
+      "name": "com.vlesscardvpn.DiverseCandidatesRegressionR131Test",
+      "tests": "6",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.DomainRoutingBackupRegressionR73Test.xml",
+      "name": "com.vlesscardvpn.DomainRoutingBackupRegressionR73Test",
+      "tests": "4",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.DownloadPriorityTest.xml",
+      "name": "com.vlesscardvpn.DownloadPriorityTest",
+      "tests": "15",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.DpiEvolutionRegressionR67Test.xml",
+      "name": "com.vlesscardvpn.DpiEvolutionRegressionR67Test",
+      "tests": "2",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.ExperiencePerformanceTest.xml",
+      "name": "com.vlesscardvpn.ExperiencePerformanceTest",
+      "tests": "6",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.FirstConnectR189Test.xml",
+      "name": "com.vlesscardvpn.FirstConnectR189Test",
+      "tests": "18",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.FirstRouteHandoffTest.xml",
+      "name": "com.vlesscardvpn.FirstRouteHandoffTest",
+      "tests": "4",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.ForegroundAutoR176Test.xml",
+      "name": "com.vlesscardvpn.ForegroundAutoR176Test",
+      "tests": "10",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.FullCloudSelectionR139Test.xml",
+      "name": "com.vlesscardvpn.FullCloudSelectionR139Test",
+      "tests": "10",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.HeavyRoutingRegressionR128Test.xml",
+      "name": "com.vlesscardvpn.HeavyRoutingRegressionR128Test",
+      "tests": "2",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.MaskMigrationRegressionR71Test.xml",
+      "name": "com.vlesscardvpn.MaskMigrationRegressionR71Test",
+      "tests": "2",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.NativeServiceRoutingTest.xml",
+      "name": "com.vlesscardvpn.NativeServiceRoutingTest",
+      "tests": "5",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.NetworkAdaptationTest.xml",
+      "name": "com.vlesscardvpn.NetworkAdaptationTest",
+      "tests": "9",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.NetworkProfilesRegressionR69Test.xml",
+      "name": "com.vlesscardvpn.NetworkProfilesRegressionR69Test",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.NetworkSelectionRegressionR76Test.xml",
+      "name": "com.vlesscardvpn.NetworkSelectionRegressionR76Test",
+      "tests": "2",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.OceanEnergyRegressionR137Test.xml",
+      "name": "com.vlesscardvpn.OceanEnergyRegressionR137Test",
+      "tests": "9",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.OffersR156Test.xml",
+      "name": "com.vlesscardvpn.OffersR156Test",
+      "tests": "2",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.OperatorEvidenceRegressionR124Test.xml",
+      "name": "com.vlesscardvpn.OperatorEvidenceRegressionR124Test",
+      "tests": "2",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.PhoneLearningRegressionR135Test.xml",
+      "name": "com.vlesscardvpn.PhoneLearningRegressionR135Test",
+      "tests": "9",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.PhoneRuntimePolicyTest.xml",
+      "name": "com.vlesscardvpn.PhoneRuntimePolicyTest",
+      "tests": "15",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.PowerPolicyRegressionR134Test.xml",
+      "name": "com.vlesscardvpn.PowerPolicyRegressionR134Test",
+      "tests": "10",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.PowerRoutingR192Test.xml",
+      "name": "com.vlesscardvpn.PowerRoutingR192Test",
+      "tests": "36",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.ProbeResponsePolicyTest.xml",
+      "name": "com.vlesscardvpn.ProbeResponsePolicyTest",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.ProductR190Test.xml",
+      "name": "com.vlesscardvpn.ProductR190Test",
+      "tests": "30",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.PublicCloudQueueTest.xml",
+      "name": "com.vlesscardvpn.PublicCloudQueueTest",
+      "tests": "6",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.QuicMasksRegressionR127Test.xml",
+      "name": "com.vlesscardvpn.QuicMasksRegressionR127Test",
+      "tests": "2",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.R100Test.xml",
+      "name": "com.vlesscardvpn.R100Test",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.R101Test.xml",
+      "name": "com.vlesscardvpn.R101Test",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.R101bTest.xml",
+      "name": "com.vlesscardvpn.R101bTest",
+      "tests": "2",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.R106Test.xml",
+      "name": "com.vlesscardvpn.R106Test",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.R107Test.xml",
+      "name": "com.vlesscardvpn.R107Test",
+      "tests": "2",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.R108Test.xml",
+      "name": "com.vlesscardvpn.R108Test",
+      "tests": "1",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.R129Test.xml",
+      "name": "com.vlesscardvpn.R129Test",
+      "tests": "1",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.R84Test.xml",
+      "name": "com.vlesscardvpn.R84Test",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.R85Test.xml",
+      "name": "com.vlesscardvpn.R85Test",
+      "tests": "1",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.R86Test.xml",
+      "name": "com.vlesscardvpn.R86Test",
+      "tests": "5",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.R87Test.xml",
+      "name": "com.vlesscardvpn.R87Test",
+      "tests": "2",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.R88Test.xml",
+      "name": "com.vlesscardvpn.R88Test",
+      "tests": "1",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.R89Test.xml",
+      "name": "com.vlesscardvpn.R89Test",
+      "tests": "2",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.R90Test.xml",
+      "name": "com.vlesscardvpn.R90Test",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.R91Test.xml",
+      "name": "com.vlesscardvpn.R91Test",
+      "tests": "1",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.R92Test.xml",
+      "name": "com.vlesscardvpn.R92Test",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.R93Test.xml",
+      "name": "com.vlesscardvpn.R93Test",
+      "tests": "2",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.R94Test.xml",
+      "name": "com.vlesscardvpn.R94Test",
+      "tests": "4",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.R95Test.xml",
+      "name": "com.vlesscardvpn.R95Test",
+      "tests": "1",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.R96Test.xml",
+      "name": "com.vlesscardvpn.R96Test",
+      "tests": "2",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.R97Test.xml",
+      "name": "com.vlesscardvpn.R97Test",
+      "tests": "2",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.R97bTest.xml",
+      "name": "com.vlesscardvpn.R97bTest",
+      "tests": "1",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.ReleaseQualityR141Test.xml",
+      "name": "com.vlesscardvpn.ReleaseQualityR141Test",
+      "tests": "6",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.RequestedSubscriptionsR178Test.xml",
+      "name": "com.vlesscardvpn.RequestedSubscriptionsR178Test",
+      "tests": "4",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.ServiceRoutingRegressionR136Test.xml",
+      "name": "com.vlesscardvpn.ServiceRoutingRegressionR136Test",
+      "tests": "13",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.SpeedMaskRankingRegressionR75Test.xml",
+      "name": "com.vlesscardvpn.SpeedMaskRankingRegressionR75Test",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.SubscriptionTrafficRegressionR74Test.xml",
+      "name": "com.vlesscardvpn.SubscriptionTrafficRegressionR74Test",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.TelegramRoutingRegressionR125Test.xml",
+      "name": "com.vlesscardvpn.TelegramRoutingRegressionR125Test",
+      "tests": "2",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.ThroughputSelectionTest.xml",
+      "name": "com.vlesscardvpn.ThroughputSelectionTest",
+      "tests": "14",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.TlsSignatureConfigRegressionR70Test.xml",
+      "name": "com.vlesscardvpn.TlsSignatureConfigRegressionR70Test",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.TurboMigrationRegressionR72Test.xml",
+      "name": "com.vlesscardvpn.TurboMigrationRegressionR72Test",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.UpdateSecurityRegressionR133Test.xml",
+      "name": "com.vlesscardvpn.UpdateSecurityRegressionR133Test",
+      "tests": "6",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.VersionCodesRegressionR120Test.xml",
+      "name": "com.vlesscardvpn.VersionCodesRegressionR120Test",
+      "tests": "1",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.WarpR191Test.xml",
+      "name": "com.vlesscardvpn.WarpR191Test",
+      "tests": "30",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.YoutubePolicyRegressionR78Test.xml",
+      "name": "com.vlesscardvpn.YoutubePolicyRegressionR78Test",
+      "tests": "4",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.core.AdaptiveQueueR182Test.xml",
+      "name": "com.vlesscardvpn.core.AdaptiveQueueR182Test",
+      "tests": "6",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.core.AutoChainCooldownTest.xml",
+      "name": "com.vlesscardvpn.core.AutoChainCooldownTest",
+      "tests": "11",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.core.AutoChainLiveTest.xml",
+      "name": "com.vlesscardvpn.core.AutoChainLiveTest",
+      "tests": "40",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.core.AutoChainReservesTest.xml",
+      "name": "com.vlesscardvpn.core.AutoChainReservesTest",
+      "tests": "18",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.core.AutoChainSelectionTest.xml",
+      "name": "com.vlesscardvpn.core.AutoChainSelectionTest",
+      "tests": "49",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.core.AutoHandoffPolicyTest.xml",
+      "name": "com.vlesscardvpn.core.AutoHandoffPolicyTest",
+      "tests": "9",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.core.AutoLatencyR185Test.xml",
+      "name": "com.vlesscardvpn.core.AutoLatencyR185Test",
+      "tests": "9",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.core.AutoRecoveryR184Test.xml",
+      "name": "com.vlesscardvpn.core.AutoRecoveryR184Test",
+      "tests": "8",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.core.ChainProbeConfigTest.xml",
+      "name": "com.vlesscardvpn.core.ChainProbeConfigTest",
+      "tests": "13",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.core.ConnectDiagnosticsTest.xml",
+      "name": "com.vlesscardvpn.core.ConnectDiagnosticsTest",
+      "tests": "8",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.core.DnsPolicyTest.xml",
+      "name": "com.vlesscardvpn.core.DnsPolicyTest",
+      "tests": "30",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.core.DnsTransportTest.xml",
+      "name": "com.vlesscardvpn.core.DnsTransportTest",
+      "tests": "5",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.core.E2ECommandsTest.xml",
+      "name": "com.vlesscardvpn.core.E2ECommandsTest",
+      "tests": "5",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.core.HardSearchR161Test.xml",
+      "name": "com.vlesscardvpn.core.HardSearchR161Test",
+      "tests": "2",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.core.InstantStartR160Test.xml",
+      "name": "com.vlesscardvpn.core.InstantStartR160Test",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.core.MaintenanceReconnectPolicyTest.xml",
+      "name": "com.vlesscardvpn.core.MaintenanceReconnectPolicyTest",
+      "tests": "12",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.core.ManualPoolFilterTest.xml",
+      "name": "com.vlesscardvpn.core.ManualPoolFilterTest",
+      "tests": "6",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.core.ManualServerCheckPolicyR172Test.xml",
+      "name": "com.vlesscardvpn.core.ManualServerCheckPolicyR172Test",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.core.MaskEvidenceR183Test.xml",
+      "name": "com.vlesscardvpn.core.MaskEvidenceR183Test",
+      "tests": "6",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.core.MaskExperimentR185Test.xml",
+      "name": "com.vlesscardvpn.core.MaskExperimentR185Test",
+      "tests": "8",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.core.PowerPolicyChargeWorkR157Test.xml",
+      "name": "com.vlesscardvpn.core.PowerPolicyChargeWorkR157Test",
+      "tests": "5",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.core.RuntimeProbeAddressTest.xml",
+      "name": "com.vlesscardvpn.core.RuntimeProbeAddressTest",
+      "tests": "2",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.core.ServerOnlyPolicyR173Test.xml",
+      "name": "com.vlesscardvpn.core.ServerOnlyPolicyR173Test",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.core.ServiceMediaProbeTest.xml",
+      "name": "com.vlesscardvpn.core.ServiceMediaProbeTest",
+      "tests": "10",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.core.StrictEligibilityR163Test.xml",
+      "name": "com.vlesscardvpn.core.StrictEligibilityR163Test",
+      "tests": "6",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.core.StrictTransferR163Test.xml",
+      "name": "com.vlesscardvpn.core.StrictTransferR163Test",
+      "tests": "11",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.core.TelegramSocksProbeTest.xml",
+      "name": "com.vlesscardvpn.core.TelegramSocksProbeTest",
+      "tests": "2",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.core.UdpCallProbeR174Test.xml",
+      "name": "com.vlesscardvpn.core.UdpCallProbeR174Test",
+      "tests": "5",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.core.WarmupPowerR160Test.xml",
+      "name": "com.vlesscardvpn.core.WarmupPowerR160Test",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.experience.ExperienceR187Test.xml",
+      "name": "com.vlesscardvpn.experience.ExperienceR187Test",
+      "tests": "25",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.health.ModuleHealthR186Test.xml",
+      "name": "com.vlesscardvpn.health.ModuleHealthR186Test",
+      "tests": "22",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.model.TorDirectR155Test.xml",
+      "name": "com.vlesscardvpn.model.TorDirectR155Test",
+      "tests": "1",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.phone.VoiceCallContinuityRegressionR174Test.xml",
+      "name": "com.vlesscardvpn.phone.VoiceCallContinuityRegressionR174Test",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.phone.VoiceCallPolicyR174Test.xml",
+      "name": "com.vlesscardvpn.phone.VoiceCallPolicyR174Test",
+      "tests": "2",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.routing.DebugFixtureR163Test.xml",
+      "name": "com.vlesscardvpn.routing.DebugFixtureR163Test",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.routing.LaunchPoolR163Test.xml",
+      "name": "com.vlesscardvpn.routing.LaunchPoolR163Test",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.routing.TorAllRoutingR160Test.xml",
+      "name": "com.vlesscardvpn.routing.TorAllRoutingR160Test",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.routing.TorRoutingR152Test.xml",
+      "name": "com.vlesscardvpn.routing.TorRoutingR152Test",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.routing.TorStandaloneR163Test.xml",
+      "name": "com.vlesscardvpn.routing.TorStandaloneR163Test",
+      "tests": "8",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.routing.TorStartR165Test.xml",
+      "name": "com.vlesscardvpn.routing.TorStartR165Test",
+      "tests": "10",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.tor.TorBridgeCatalogR163Test.xml",
+      "name": "com.vlesscardvpn.tor.TorBridgeCatalogR163Test",
+      "tests": "11",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.tor.TorBridgeRefreshR163Test.xml",
+      "name": "com.vlesscardvpn.tor.TorBridgeRefreshR163Test",
+      "tests": "12",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.tor.TorBridgesR160Test.xml",
+      "name": "com.vlesscardvpn.tor.TorBridgesR160Test",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.tor.TorCardTorcR154Test.xml",
+      "name": "com.vlesscardvpn.tor.TorCardTorcR154Test",
+      "tests": "4",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.tor.TorControlTest.xml",
+      "name": "com.vlesscardvpn.tor.TorControlTest",
+      "tests": "1",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.tor.TorControlsR164Test.xml",
+      "name": "com.vlesscardvpn.tor.TorControlsR164Test",
+      "tests": "30",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.tor.TorEmbeddedR157Test.xml",
+      "name": "com.vlesscardvpn.tor.TorEmbeddedR157Test",
+      "tests": "6",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.tor.TorNetworkRecommendationsTest.xml",
+      "name": "com.vlesscardvpn.tor.TorNetworkRecommendationsTest",
+      "tests": "9",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.tor.TorRotationTest.xml",
+      "name": "com.vlesscardvpn.tor.TorRotationTest",
+      "tests": "6",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.tor.TorRotatorAlgorithmR160Test.xml",
+      "name": "com.vlesscardvpn.tor.TorRotatorAlgorithmR160Test",
+      "tests": "2",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.tor.TorRotatorTest.xml",
+      "name": "com.vlesscardvpn.tor.TorRotatorTest",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.tor.TorRoutePolicyR163Test.xml",
+      "name": "com.vlesscardvpn.tor.TorRoutePolicyR163Test",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.tor.TorSafetyR162Test.xml",
+      "name": "com.vlesscardvpn.tor.TorSafetyR162Test",
+      "tests": "14",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.xray.MaskSafetyR163Test.xml",
+      "name": "com.vlesscardvpn.xray.MaskSafetyR163Test",
+      "tests": "12",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.xray.MasksTurboR158Test.xml",
+      "name": "com.vlesscardvpn.xray.MasksTurboR158Test",
+      "tests": "2",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.AdaptiveCloudSelectionTest.xml",
+      "name": "com.vlesscardvpn.AdaptiveCloudSelectionTest",
+      "tests": "10",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.AutoCampaignR175Test.xml",
+      "name": "com.vlesscardvpn.AutoCampaignR175Test",
+      "tests": "17",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.AutoDiscoveryR174Test.xml",
+      "name": "com.vlesscardvpn.AutoDiscoveryR174Test",
+      "tests": "17",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.AutoPoolRecoveryR140Test.xml",
+      "name": "com.vlesscardvpn.AutoPoolRecoveryR140Test",
+      "tests": "13",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.AutoRoutePolicyTest.xml",
+      "name": "com.vlesscardvpn.AutoRoutePolicyTest",
+      "tests": "16",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.AutoSearchR188Test.xml",
+      "name": "com.vlesscardvpn.AutoSearchR188Test",
+      "tests": "21",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.AutoSelectionTest.xml",
+      "name": "com.vlesscardvpn.AutoSelectionTest",
+      "tests": "19",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.BalancerHealthRegressionR79Test.xml",
+      "name": "com.vlesscardvpn.BalancerHealthRegressionR79Test",
+      "tests": "1",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.BrainLearningRegressionR132Test.xml",
+      "name": "com.vlesscardvpn.BrainLearningRegressionR132Test",
+      "tests": "9",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.ByeDpiArgsTest.xml",
+      "name": "com.vlesscardvpn.ByeDpiArgsTest",
+      "tests": "4",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.CloudCacheRefreshRegressionR130Test.xml",
+      "name": "com.vlesscardvpn.CloudCacheRefreshRegressionR130Test",
+      "tests": "4",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.CloudFreshSpeedTest.xml",
+      "name": "com.vlesscardvpn.CloudFreshSpeedTest",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.CloudLoadRegressionR121Test.xml",
+      "name": "com.vlesscardvpn.CloudLoadRegressionR121Test",
+      "tests": "2",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.CloudSpeedRegressionR122Test.xml",
+      "name": "com.vlesscardvpn.CloudSpeedRegressionR122Test",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.ConfigTest.xml",
+      "name": "com.vlesscardvpn.ConfigTest",
+      "tests": "11",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.CountryFavoritesRegressionR77Test.xml",
+      "name": "com.vlesscardvpn.CountryFavoritesRegressionR77Test",
+      "tests": "2",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.CryptoWarpRegressionR62Test.xml",
+      "name": "com.vlesscardvpn.CryptoWarpRegressionR62Test",
+      "tests": "6",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.CustomMasksRegressionR66Test.xml",
+      "name": "com.vlesscardvpn.CustomMasksRegressionR66Test",
+      "tests": "7",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.DiscordPrivacyR159Test.xml",
+      "name": "com.vlesscardvpn.DiscordPrivacyR159Test",
+      "tests": "2",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.DiscoveryCancellationRegressionR138Test.xml",
+      "name": "com.vlesscardvpn.DiscoveryCancellationRegressionR138Test",
+      "tests": "12",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.DiscoveryR193Test.xml",
+      "name": "com.vlesscardvpn.DiscoveryR193Test",
+      "tests": "30",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.DiverseCandidatesRegressionR131Test.xml",
+      "name": "com.vlesscardvpn.DiverseCandidatesRegressionR131Test",
+      "tests": "6",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.DomainRoutingBackupRegressionR73Test.xml",
+      "name": "com.vlesscardvpn.DomainRoutingBackupRegressionR73Test",
+      "tests": "4",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.DownloadPriorityTest.xml",
+      "name": "com.vlesscardvpn.DownloadPriorityTest",
+      "tests": "15",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.DpiEvolutionRegressionR67Test.xml",
+      "name": "com.vlesscardvpn.DpiEvolutionRegressionR67Test",
+      "tests": "2",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.ExperiencePerformanceTest.xml",
+      "name": "com.vlesscardvpn.ExperiencePerformanceTest",
+      "tests": "6",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.FirstConnectR189Test.xml",
+      "name": "com.vlesscardvpn.FirstConnectR189Test",
+      "tests": "18",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.FirstRouteHandoffTest.xml",
+      "name": "com.vlesscardvpn.FirstRouteHandoffTest",
+      "tests": "4",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.ForegroundAutoR176Test.xml",
+      "name": "com.vlesscardvpn.ForegroundAutoR176Test",
+      "tests": "10",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.FullCloudSelectionR139Test.xml",
+      "name": "com.vlesscardvpn.FullCloudSelectionR139Test",
+      "tests": "10",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.HeavyRoutingRegressionR128Test.xml",
+      "name": "com.vlesscardvpn.HeavyRoutingRegressionR128Test",
+      "tests": "2",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.MaskMigrationRegressionR71Test.xml",
+      "name": "com.vlesscardvpn.MaskMigrationRegressionR71Test",
+      "tests": "2",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.NativeServiceRoutingTest.xml",
+      "name": "com.vlesscardvpn.NativeServiceRoutingTest",
+      "tests": "5",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.NetworkAdaptationTest.xml",
+      "name": "com.vlesscardvpn.NetworkAdaptationTest",
+      "tests": "9",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.NetworkProfilesRegressionR69Test.xml",
+      "name": "com.vlesscardvpn.NetworkProfilesRegressionR69Test",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.NetworkSelectionRegressionR76Test.xml",
+      "name": "com.vlesscardvpn.NetworkSelectionRegressionR76Test",
+      "tests": "2",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.OceanEnergyRegressionR137Test.xml",
+      "name": "com.vlesscardvpn.OceanEnergyRegressionR137Test",
+      "tests": "9",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.OffersR156Test.xml",
+      "name": "com.vlesscardvpn.OffersR156Test",
+      "tests": "2",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.OperatorEvidenceRegressionR124Test.xml",
+      "name": "com.vlesscardvpn.OperatorEvidenceRegressionR124Test",
+      "tests": "2",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.PhoneLearningRegressionR135Test.xml",
+      "name": "com.vlesscardvpn.PhoneLearningRegressionR135Test",
+      "tests": "9",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.PhoneRuntimePolicyTest.xml",
+      "name": "com.vlesscardvpn.PhoneRuntimePolicyTest",
+      "tests": "15",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.PowerPolicyRegressionR134Test.xml",
+      "name": "com.vlesscardvpn.PowerPolicyRegressionR134Test",
+      "tests": "10",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.PowerRoutingR192Test.xml",
+      "name": "com.vlesscardvpn.PowerRoutingR192Test",
+      "tests": "36",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.ProbeResponsePolicyTest.xml",
+      "name": "com.vlesscardvpn.ProbeResponsePolicyTest",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.ProductR190Test.xml",
+      "name": "com.vlesscardvpn.ProductR190Test",
+      "tests": "30",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.PublicCloudQueueTest.xml",
+      "name": "com.vlesscardvpn.PublicCloudQueueTest",
+      "tests": "6",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.QuicMasksRegressionR127Test.xml",
+      "name": "com.vlesscardvpn.QuicMasksRegressionR127Test",
+      "tests": "2",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.R100Test.xml",
+      "name": "com.vlesscardvpn.R100Test",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.R101Test.xml",
+      "name": "com.vlesscardvpn.R101Test",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.R101bTest.xml",
+      "name": "com.vlesscardvpn.R101bTest",
+      "tests": "2",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.R106Test.xml",
+      "name": "com.vlesscardvpn.R106Test",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.R107Test.xml",
+      "name": "com.vlesscardvpn.R107Test",
+      "tests": "2",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.R108Test.xml",
+      "name": "com.vlesscardvpn.R108Test",
+      "tests": "1",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.R129Test.xml",
+      "name": "com.vlesscardvpn.R129Test",
+      "tests": "1",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.R84Test.xml",
+      "name": "com.vlesscardvpn.R84Test",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.R85Test.xml",
+      "name": "com.vlesscardvpn.R85Test",
+      "tests": "1",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.R86Test.xml",
+      "name": "com.vlesscardvpn.R86Test",
+      "tests": "5",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.R87Test.xml",
+      "name": "com.vlesscardvpn.R87Test",
+      "tests": "2",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.R88Test.xml",
+      "name": "com.vlesscardvpn.R88Test",
+      "tests": "1",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.R89Test.xml",
+      "name": "com.vlesscardvpn.R89Test",
+      "tests": "2",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.R90Test.xml",
+      "name": "com.vlesscardvpn.R90Test",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.R91Test.xml",
+      "name": "com.vlesscardvpn.R91Test",
+      "tests": "1",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.R92Test.xml",
+      "name": "com.vlesscardvpn.R92Test",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.R93Test.xml",
+      "name": "com.vlesscardvpn.R93Test",
+      "tests": "2",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.R94Test.xml",
+      "name": "com.vlesscardvpn.R94Test",
+      "tests": "4",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.R95Test.xml",
+      "name": "com.vlesscardvpn.R95Test",
+      "tests": "1",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.R96Test.xml",
+      "name": "com.vlesscardvpn.R96Test",
+      "tests": "2",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.R97Test.xml",
+      "name": "com.vlesscardvpn.R97Test",
+      "tests": "2",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.R97bTest.xml",
+      "name": "com.vlesscardvpn.R97bTest",
+      "tests": "1",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.ReleaseQualityR141Test.xml",
+      "name": "com.vlesscardvpn.ReleaseQualityR141Test",
+      "tests": "6",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.RequestedSubscriptionsR178Test.xml",
+      "name": "com.vlesscardvpn.RequestedSubscriptionsR178Test",
+      "tests": "4",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.ServiceRoutingRegressionR136Test.xml",
+      "name": "com.vlesscardvpn.ServiceRoutingRegressionR136Test",
+      "tests": "13",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.SpeedMaskRankingRegressionR75Test.xml",
+      "name": "com.vlesscardvpn.SpeedMaskRankingRegressionR75Test",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.SubscriptionTrafficRegressionR74Test.xml",
+      "name": "com.vlesscardvpn.SubscriptionTrafficRegressionR74Test",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.TelegramRoutingRegressionR125Test.xml",
+      "name": "com.vlesscardvpn.TelegramRoutingRegressionR125Test",
+      "tests": "2",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.ThroughputSelectionTest.xml",
+      "name": "com.vlesscardvpn.ThroughputSelectionTest",
+      "tests": "14",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.TlsSignatureConfigRegressionR70Test.xml",
+      "name": "com.vlesscardvpn.TlsSignatureConfigRegressionR70Test",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.TurboMigrationRegressionR72Test.xml",
+      "name": "com.vlesscardvpn.TurboMigrationRegressionR72Test",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.UpdateSecurityRegressionR133Test.xml",
+      "name": "com.vlesscardvpn.UpdateSecurityRegressionR133Test",
+      "tests": "6",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.VersionCodesRegressionR120Test.xml",
+      "name": "com.vlesscardvpn.VersionCodesRegressionR120Test",
+      "tests": "1",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.WarpR191Test.xml",
+      "name": "com.vlesscardvpn.WarpR191Test",
+      "tests": "30",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.YoutubePolicyRegressionR78Test.xml",
+      "name": "com.vlesscardvpn.YoutubePolicyRegressionR78Test",
+      "tests": "4",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.core.AdaptiveQueueR182Test.xml",
+      "name": "com.vlesscardvpn.core.AdaptiveQueueR182Test",
+      "tests": "6",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.core.AutoChainCooldownTest.xml",
+      "name": "com.vlesscardvpn.core.AutoChainCooldownTest",
+      "tests": "11",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.core.AutoChainLiveTest.xml",
+      "name": "com.vlesscardvpn.core.AutoChainLiveTest",
+      "tests": "40",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.core.AutoChainReservesTest.xml",
+      "name": "com.vlesscardvpn.core.AutoChainReservesTest",
+      "tests": "18",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.core.AutoChainSelectionTest.xml",
+      "name": "com.vlesscardvpn.core.AutoChainSelectionTest",
+      "tests": "49",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.core.AutoHandoffPolicyTest.xml",
+      "name": "com.vlesscardvpn.core.AutoHandoffPolicyTest",
+      "tests": "9",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.core.AutoLatencyR185Test.xml",
+      "name": "com.vlesscardvpn.core.AutoLatencyR185Test",
+      "tests": "9",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.core.AutoRecoveryR184Test.xml",
+      "name": "com.vlesscardvpn.core.AutoRecoveryR184Test",
+      "tests": "8",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.core.ChainProbeConfigTest.xml",
+      "name": "com.vlesscardvpn.core.ChainProbeConfigTest",
+      "tests": "13",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.core.ConnectDiagnosticsTest.xml",
+      "name": "com.vlesscardvpn.core.ConnectDiagnosticsTest",
+      "tests": "8",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.core.DnsPolicyTest.xml",
+      "name": "com.vlesscardvpn.core.DnsPolicyTest",
+      "tests": "30",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.core.DnsTransportTest.xml",
+      "name": "com.vlesscardvpn.core.DnsTransportTest",
+      "tests": "5",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.core.E2ECommandsTest.xml",
+      "name": "com.vlesscardvpn.core.E2ECommandsTest",
+      "tests": "5",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.core.HardSearchR161Test.xml",
+      "name": "com.vlesscardvpn.core.HardSearchR161Test",
+      "tests": "2",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.core.InstantStartR160Test.xml",
+      "name": "com.vlesscardvpn.core.InstantStartR160Test",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.core.MaintenanceReconnectPolicyTest.xml",
+      "name": "com.vlesscardvpn.core.MaintenanceReconnectPolicyTest",
+      "tests": "12",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.core.ManualPoolFilterTest.xml",
+      "name": "com.vlesscardvpn.core.ManualPoolFilterTest",
+      "tests": "6",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.core.ManualServerCheckPolicyR172Test.xml",
+      "name": "com.vlesscardvpn.core.ManualServerCheckPolicyR172Test",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.core.MaskEvidenceR183Test.xml",
+      "name": "com.vlesscardvpn.core.MaskEvidenceR183Test",
+      "tests": "6",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.core.MaskExperimentR185Test.xml",
+      "name": "com.vlesscardvpn.core.MaskExperimentR185Test",
+      "tests": "8",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.core.PowerPolicyChargeWorkR157Test.xml",
+      "name": "com.vlesscardvpn.core.PowerPolicyChargeWorkR157Test",
+      "tests": "5",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.core.RuntimeProbeAddressReleaseTest.xml",
+      "name": "com.vlesscardvpn.core.RuntimeProbeAddressReleaseTest",
+      "tests": "1",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.core.ServerOnlyPolicyR173Test.xml",
+      "name": "com.vlesscardvpn.core.ServerOnlyPolicyR173Test",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.core.ServiceMediaProbeTest.xml",
+      "name": "com.vlesscardvpn.core.ServiceMediaProbeTest",
+      "tests": "10",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.core.StrictEligibilityR163Test.xml",
+      "name": "com.vlesscardvpn.core.StrictEligibilityR163Test",
+      "tests": "6",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.core.StrictTransferR163Test.xml",
+      "name": "com.vlesscardvpn.core.StrictTransferR163Test",
+      "tests": "11",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.core.TelegramSocksProbeTest.xml",
+      "name": "com.vlesscardvpn.core.TelegramSocksProbeTest",
+      "tests": "2",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.core.UdpCallProbeR174Test.xml",
+      "name": "com.vlesscardvpn.core.UdpCallProbeR174Test",
+      "tests": "5",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.core.WarmupPowerR160Test.xml",
+      "name": "com.vlesscardvpn.core.WarmupPowerR160Test",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.experience.ExperienceR187Test.xml",
+      "name": "com.vlesscardvpn.experience.ExperienceR187Test",
+      "tests": "25",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.health.ModuleHealthR186Test.xml",
+      "name": "com.vlesscardvpn.health.ModuleHealthR186Test",
+      "tests": "22",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.model.TorDirectR155Test.xml",
+      "name": "com.vlesscardvpn.model.TorDirectR155Test",
+      "tests": "1",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.phone.VoiceCallContinuityRegressionR174Test.xml",
+      "name": "com.vlesscardvpn.phone.VoiceCallContinuityRegressionR174Test",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.phone.VoiceCallPolicyR174Test.xml",
+      "name": "com.vlesscardvpn.phone.VoiceCallPolicyR174Test",
+      "tests": "2",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.routing.DebugFixtureR163Test.xml",
+      "name": "com.vlesscardvpn.routing.DebugFixtureR163Test",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.routing.LaunchPoolR163Test.xml",
+      "name": "com.vlesscardvpn.routing.LaunchPoolR163Test",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.routing.TorAllRoutingR160Test.xml",
+      "name": "com.vlesscardvpn.routing.TorAllRoutingR160Test",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.routing.TorRoutingR152Test.xml",
+      "name": "com.vlesscardvpn.routing.TorRoutingR152Test",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.routing.TorStandaloneR163Test.xml",
+      "name": "com.vlesscardvpn.routing.TorStandaloneR163Test",
+      "tests": "8",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.routing.TorStartR165Test.xml",
+      "name": "com.vlesscardvpn.routing.TorStartR165Test",
+      "tests": "10",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.tor.TorBridgeCatalogR163Test.xml",
+      "name": "com.vlesscardvpn.tor.TorBridgeCatalogR163Test",
+      "tests": "11",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.tor.TorBridgeRefreshR163Test.xml",
+      "name": "com.vlesscardvpn.tor.TorBridgeRefreshR163Test",
+      "tests": "12",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.tor.TorBridgesR160Test.xml",
+      "name": "com.vlesscardvpn.tor.TorBridgesR160Test",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.tor.TorCardTorcR154Test.xml",
+      "name": "com.vlesscardvpn.tor.TorCardTorcR154Test",
+      "tests": "4",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.tor.TorControlTest.xml",
+      "name": "com.vlesscardvpn.tor.TorControlTest",
+      "tests": "1",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.tor.TorControlsR164Test.xml",
+      "name": "com.vlesscardvpn.tor.TorControlsR164Test",
+      "tests": "30",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.tor.TorEmbeddedR157Test.xml",
+      "name": "com.vlesscardvpn.tor.TorEmbeddedR157Test",
+      "tests": "6",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.tor.TorNetworkRecommendationsTest.xml",
+      "name": "com.vlesscardvpn.tor.TorNetworkRecommendationsTest",
+      "tests": "9",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.tor.TorRotationTest.xml",
+      "name": "com.vlesscardvpn.tor.TorRotationTest",
+      "tests": "6",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.tor.TorRotatorAlgorithmR160Test.xml",
+      "name": "com.vlesscardvpn.tor.TorRotatorAlgorithmR160Test",
+      "tests": "2",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.tor.TorRotatorTest.xml",
+      "name": "com.vlesscardvpn.tor.TorRotatorTest",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.tor.TorRoutePolicyR163Test.xml",
+      "name": "com.vlesscardvpn.tor.TorRoutePolicyR163Test",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.tor.TorSafetyR162Test.xml",
+      "name": "com.vlesscardvpn.tor.TorSafetyR162Test",
+      "tests": "14",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.xray.MaskSafetyR163Test.xml",
+      "name": "com.vlesscardvpn.xray.MaskSafetyR163Test",
+      "tests": "12",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.xray.MasksTurboR158Test.xml",
+      "name": "com.vlesscardvpn.xray.MasksTurboR158Test",
+      "tests": "2",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "vpn-test-probe/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.netprobe.ProbeFailureTest.xml",
+      "name": "com.vlesscardvpn.netprobe.ProbeFailureTest",
+      "tests": "7",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "vpn-test-probe/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.netprobe.ProbeTimelineTest.xml",
+      "name": "com.vlesscardvpn.netprobe.ProbeTimelineTest",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    }
+  ],
+  "failures": [],
+  "lint_errors": []
+}
