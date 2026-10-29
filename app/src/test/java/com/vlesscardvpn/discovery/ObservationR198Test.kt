@@ -56,4 +56,9 @@ class ObservationR198Test {
  @Test fun callProtectionIsSeparate(){assertEquals(15000L,SearchPacingPolicy.rest(PowerPolicy.Plan(voiceCallActive=true)))}
  @Test fun mobileRecoveryCopyNamesNetwork(){assertTrue(NetworkRecoveryPresentation.message("Моб.: LTE").contains("мобильную"))}
  @Test fun wifiRecoveryDoesNotPromiseFiveSecondCompletion(){val s=NetworkRecoveryPresentation.message("Wi-Fi");assertTrue(s.contains("Wi-Fi"));assertFalse(s.contains("5"))}
+
+ @Test fun recoveryWithoutTunnelRestartsDiscovery(){assertTrue(NetworkRecoveryPolicy.restartDiscovery(true,false,true))}
+ @Test fun failedNewNetworkRecheckRestartsDiscovery(){assertTrue(NetworkRecoveryPolicy.restartDiscovery(true,true,false))}
+ @Test fun provenNewNetworkRouteReconnectsDirectly(){assertFalse(NetworkRecoveryPolicy.restartDiscovery(true,true,true))}
+ @Test fun manualRecoveryNeverStartsAuto(){for(t in listOf(false,true))for(p in listOf(false,true))assertFalse(NetworkRecoveryPolicy.restartDiscovery(false,t,p))}
 }
