@@ -1451,10 +1451,9 @@ object Actions {
             // Fetch immediately, alongside cached-catalog probes. First useful source wins;
             // one blocked subscription cannot hold the connect button for all other sources.
             kotlinx.coroutines.withTimeoutOrNull(AutoDiscoveryPolicy.FIRST_CONNECT_MS) {
-                val cached = Store.state.value.servers
-                if (cached.isNotEmpty()) notes += quickTest(cached, firstReady, attempted, firstWaveOnly = true, allowMaskRescue = false, statistics = statistics)
-                while (!started.started && sameNetwork()) {
-                    val batch = batches.receiveCatching().getOrNull() ?: break
+                ForegroundDiscoveryPump.run(batches, cached = { Store.state.value.servers },
+                    keepGoing = { !started.started && sameNetwork() },
+                    usable = { it.id !in attempted && AutoEligibility.vlessServer(it) }) { batch ->
                     notes += quickTest(batch, firstReady, attempted, firstWaveOnly = true, allowMaskRescue = false, statistics = statistics)
                 }
             }

@@ -46,6 +46,7 @@ fun SettingsScreen() {
         Text("Настройки", fontSize = 30.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 4.dp, top = 12.dp, bottom = 8.dp))
         val storageError by Store.storageError.collectAsState()
         if (storageError.isNotEmpty()) Text(storageError, color = Bad, fontSize = 13.sp)
+        RuWhitelistCard(s) { enabled -> set { it.copy(ruWhitelist = enabled) } }
         Group("Проверка через VLESS") {
             val report by com.vlesscardvpn.core.Actions.netReport.collectAsState()
             Hint(report.verdict.ifEmpty { "Проверки YouTube, Telegram, WhatsApp, Discord и UDP для звонков идут только через подключённый VLESS-сервер." })

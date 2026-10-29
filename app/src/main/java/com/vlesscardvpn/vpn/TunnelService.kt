@@ -191,23 +191,21 @@ class TunnelService : VpnService() {
         return !pm.isInteractive && Store.state.value.settings.quietScreen
     }
 
+    private val screenSignals = kotlinx.coroutines.channels.Channel<Unit>(kotlinx.coroutines.channels.Channel.CONFLATED)
     private var screenReceiver: android.content.BroadcastReceiver? = null
     /** Phone unlocked after sleeping: one light check, so a connection that died at night is fixed before the user notices. */
     private fun watchScreen() {
         if (screenReceiver != null) return
         val r = object : android.content.BroadcastReceiver() {
             override fun onReceive(c: Context?, i: Intent?) {
-                if (Tunnel.status.value.state != Tunnel.State.CONNECTED || healJob?.isActive == true) return
-                scope.launch {
-                    delay(1500)
-                    val port = Tunnel.socks?.port ?: return@launch
-                    val ok = Tester.probeSocks(port, Store.state.value.settings.testUrl, big = false, youtube = false, attempts = 1).realMs > 0
-                    Log.i("E2E", "screen on: check ok=$ok")
-                    if (!ok) verifySoon(0) else { watchdog(); coverTraffic(); torLoop() }
-                }
+                if (Tunnel.status.value.state != Tunnel.State.CONNECTED) return
+                // One watchdog owns the wake probe, rather than a second parallel HTTP probe.
+                screenSignals.trySend(Unit)
+                watchdog()
+                if (i?.action == Intent.ACTION_SCREEN_ON) { coverTraffic(); torLoop() }
             }
         }
-        runCatching { registerReceiver(r, android.content.IntentFilter(Intent.ACTION_USER_PRESENT)); screenReceiver = r }
+        runCatching { registerReceiver(r, android.content.IntentFilter(Intent.ACTION_SCREEN_ON).apply { addAction(Intent.ACTION_SCREEN_OFF) }); screenReceiver = r }
     }
 
     override fun onDestroy() {
@@ -925,12 +923,19 @@ class TunnelService : VpnService() {
             var offline = false
             var servicePending = Store.state.value.settings.mode == Mode.AUTO &&
                 com.vlesscardvpn.core.ConnectionPassport.state.value.telegram.value != true
-            var wasAsleep = false
             var stats = TProxyService.stats()
             while (Tunnel.status.value.state == Tunnel.State.CONNECTED) {
                 // wait 45 s (10 s offline), but check right away when the screen turns back on — that's when apps are opened
-                var waited = 0L; val period = if (offline) 10_000L else if (miss > 0 || dnsMiss > 0 || telegramMiss > 0 || telegramSlow > 0 || servicePending && Store.state.value.settings.mode == Mode.AUTO && usedChain==null && !usedTorRoute) 3_000L else com.vlesscardvpn.core.PhonePower.refresh(this@TunnelService).healthyMs
-                while (waited < period) { val d = if (asleep()) maxOf(60000L, period - waited) else minOf(5000L, period - waited); delay(d); waited += d; val a = asleep(); if (wasAsleep && !a) { wasAsleep = false; delay(1500); break }; wasAsleep = a }
+                val period = if (offline) 10_000L else if (miss > 0 || dnsMiss > 0 || telegramMiss > 0 || telegramSlow > 0 || servicePending && Store.state.value.settings.mode == Mode.AUTO && usedChain==null && !usedTorRoute) 3_000L else com.vlesscardvpn.core.PhonePower.refresh(this@TunnelService).healthyMs
+                if (asleep()) {
+                    // Quiet-screen mode suspends on a screen event, not a minute polling timer.
+                    do { screenSignals.receive() } while (asleep())
+                    delay(1500)
+                } else {
+                    val screenEvent = kotlinx.coroutines.withTimeoutOrNull(period) { screenSignals.receive(); true } == true
+                    if (asleep()) continue
+                    if (screenEvent) delay(1500)
+                }
                 com.vlesscardvpn.core.Traffic.tick()
                 if (healJob?.isActive == true || asleep()) continue
                 val auth = Tunnel.socks ?: break
