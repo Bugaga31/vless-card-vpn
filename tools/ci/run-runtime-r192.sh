@@ -18,7 +18,7 @@ set -e
 export CODE
 adb logcat -d > runtime-r192.log
 mkdir -p docs/validation/r192-ui
-adb pull /sdcard/Android/data/com.vlesscardvpn/files/ui191/. docs/validation/r192-ui/ || true
+adb pull /sdcard/Android/data/com.vlesscardvpn/files/ui192/. docs/validation/r192-ui/ || true
 python3 - <<'CHECK'
 from pathlib import Path
 import json,re,os
@@ -30,7 +30,7 @@ Path('docs/validation/r192-device.json').write_text(json.dumps(d,indent=2))
 if not passed: print('::error title=Controlled Android runtime::'+s[-3500:].replace('%','%25').replace('\r','%0D').replace('\n','%0A'));raise SystemExit(1)
 CHECK
 mkdir -p docs/validation/r192-ui
-adb pull /sdcard/Android/data/com.vlesscardvpn/files/ui191/. docs/validation/r192-ui/
+adb pull /sdcard/Android/data/com.vlesscardvpn/files/ui192/. docs/validation/r192-ui/
 python3 - <<'UI_CHECK'
 from pathlib import Path
 import json,hashlib,sys
