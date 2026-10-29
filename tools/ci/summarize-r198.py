@@ -18,4 +18,4 @@ Path('docs/validation').mkdir(parents=True,exist_ok=True)
 Path('docs/validation/r198-jvm.json').write_text(json.dumps(report,ensure_ascii=False,indent=2)+'\n')
 print('Executed suites:',len(report['suites']),'failed assertions:',len(report['failures']),'lint errors:',len(report['lint_errors']))
 
-p=Path('docs/validation/r198-jvm.json');d=json.loads(p.read_text());log=Path('/tmp/jvm-r198.log');d['compile_errors']=[l for l in log.read_text().splitlines() if l.startswith('e: ') or 'Compilation error' in l][-24:] if log.exists() else [];p.write_text(json.dumps(d,indent=2))
+p=Path('docs/validation/r198-jvm.json');d=json.loads(p.read_text());log=Path('/tmp/jvm-r198.log');d['compile_errors']=log.read_text().splitlines()[-100:] if log.exists() else [];p.write_text(json.dumps(d,indent=2))
