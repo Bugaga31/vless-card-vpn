@@ -1,0 +1,28 @@
+diff --git a/app/src/main/java/com/vlesscardvpn/core/RuGeoPolicy.kt b/app/src/main/java/com/vlesscardvpn/core/RuGeoPolicy.kt
+index 02a6739..5d88c1b 100644
+--- a/app/src/main/java/com/vlesscardvpn/core/RuGeoPolicy.kt
++++ b/app/src/main/java/com/vlesscardvpn/core/RuGeoPolicy.kt
+@@ -7,7 +7,9 @@ object RuGeoPolicy {
+     private fun exclusions(s: Settings) = (s.alwaysVpn + if(s.torRouting) Services.domains(s.services) else emptyList())
+         .map {it.removePrefix("domain:").removePrefix("full:").trim().trimEnd('.').lowercase()}
+     fun domains(s: Settings): List<String> {
+-        if(!enabled(s)) return emptyList()
++        // A geosite service category cannot be safely subtracted from the broad .ru DNS group.
++        // Keep those DNS queries encrypted; protected Tor routes still precede GeoIP routing.
++        if(!enabled(s) || s.torRouting && s.services.isNotEmpty()) return emptyList()
+         val excluded=exclusions(s)
+         val exact=KaringRuData.exact.filter {d -> excluded.none {v -> d==v || d.endsWith(".$v")}}
+         // Conservatively remove a whole broad suffix if a protected child is inside it.
+diff --git a/app/src/test/java/com/vlesscardvpn/routing/RuGeoR204Test.kt b/app/src/test/java/com/vlesscardvpn/routing/RuGeoR204Test.kt
+index 7135c14..0395e8c 100644
+--- a/app/src/test/java/com/vlesscardvpn/routing/RuGeoR204Test.kt
++++ b/app/src/test/java/com/vlesscardvpn/routing/RuGeoR204Test.kt
+@@ -20,7 +20,7 @@ class RuGeoR204Test {
+  @Test fun completePinnedIpDataRetained(){assertEquals(12987,KaringRuData.ipv4.size);assertEquals(12170,KaringRuData.ipv6.size)}
+  @Test fun ipFamiliesRemainSeparate(){assertTrue(KaringRuData.ipv4.none{':' in it});assertTrue(KaringRuData.ipv6.all{':' in it});assertTrue(KaringRuData.ipv4.all{'/' in it})}
+  @Test fun noUniversalIpBypass(){assertFalse("0.0.0.0/0" in RuGeoPolicy.ips(on));assertFalse("::/0" in RuGeoPolicy.ips(on))}
+- @Test fun broadTldsAreExplicitOptIn(){assertTrue("domain:ru" in RuGeoPolicy.domains(on));assertTrue(RuGeoPolicy.domains(Settings()).isEmpty())}
++ @Test fun broadTldsAreExplicitOptIn(){assertTrue("domain:ru" in RuGeoPolicy.domains(on));assertTrue(RuGeoPolicy.domains(Settings()).isEmpty());assertTrue(RuGeoPolicy.domains(on.copy(torRouting=true,services=listOf("youtube"))).isEmpty())}
+  @Test fun exactSharedCdnHostIsNotWildcard(){val d=RuGeoPolicy.domains(on);assertTrue("full:kp-config-smart-tv.akamaized.net" in d);assertFalse("domain:akamaized.net" in d)}
+  @Test fun offHasNoIpRules(){assertTrue(RuGeoPolicy.ips(Settings()).isEmpty());assertEquals(-1,ipIndex(rules(Settings())))}
+  @Test fun torAllDisablesBothLists(){val s=on.copy(torAll=true);assertTrue(RuWhitelistPolicy.rules(s).isEmpty());assertTrue(RuGeoPolicy.ips(s).isEmpty());assertEquals(-1,ipIndex(rules(s)))}

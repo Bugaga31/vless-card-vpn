@@ -28,6 +28,7 @@ jobs:
             git apply --check "$PATCH"
             git apply "$PATCH"
           fi
+          git apply tools/patches/rugeo-r204-safety.patch
           test -f app/src/androidTest/java/com/vlesscardvpn/ProductRuntimeR190Test.kt
           python3 -c "import base64;exec(base64.b64decode('ZnJvbSBwYXRobGliIGltcG9ydCBQYXRoCnA9UGF0aCgnYXBwL2J1aWxkLmdyYWRsZS5rdHMnKTtzPXAucmVhZF90ZXh0KCkucmVwbGFjZSgnICAgICAgICBtaW5TZGsgPSAyNCcsJyAgICAgICAgdGVzdEluc3RydW1lbnRhdGlvblJ1bm5lciA9ICJhbmRyb2lkeC50ZXN0LnJ1bm5lci5BbmRyb2lkSlVuaXRSdW5uZXIiXG4gICAgICAgIG1pblNkayA9IDI0JykucmVwbGFjZSgnICAgIHRlc3RJbXBsZW1lbnRhdGlvbigianVuaXQ6anVuaXQ6NC4xMy4yIiknLCcgICAgYW5kcm9pZFRlc3RJbXBsZW1lbnRhdGlvbigiYW5kcm9pZHgudGVzdDpjb3JlOjEuNS4wIilcbiAgICBhbmRyb2lkVGVzdEltcGxlbWVudGF0aW9uKCJhbmRyb2lkeC50ZXN0OnJ1bm5lcjoxLjUuMiIpXG4gICAgYW5kcm9pZFRlc3RJbXBsZW1lbnRhdGlvbigiYW5kcm9pZHgudGVzdC5leHQ6anVuaXQ6MS4xLjUiKVxuICAgIHRlc3RJbXBsZW1lbnRhdGlvbigianVuaXQ6anVuaXQ6NC4xMy4yIiknKTtwLndyaXRlX3RleHQocykK'))"
           find app/src/androidTest -name '*.kt' -exec sed -i 's/ui198/ui204/g; s/ui199/ui204/g; s/ui200/ui204/g; s/ui201/ui204/g; s/ui202/ui204/g; s/ui203/ui204/g; s/assertEquals(30000L,SearchPacingPolicy.rest/assertEquals(5000L,SearchPacingPolicy.rest/g; s/assertEquals(15000L,SearchPacingPolicy.rest/assertEquals(5000L,SearchPacingPolicy.rest/g' {} +
