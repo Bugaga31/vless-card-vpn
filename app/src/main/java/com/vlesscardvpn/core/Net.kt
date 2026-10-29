@@ -21,6 +21,10 @@ object Net {
                     NetworkCapabilities.TRANSPORT_ETHERNET).any { caps.hasTransport(it) && current.hasTransport(it) }) 1 else 0)
         }.firstOrNull()
     }.getOrNull()
+    fun observation(context:Context):NetworkHandoff.Snapshot? = underlying(context)?.let {
+        NetworkHandoff.Snapshot(it.toString(),key(context,it),pathRevision(context,it))
+    }
+    fun matches(context:Context,start:NetworkHandoff.Snapshot?) = NetworkObservation.accepts(start,observation(context))
     fun pathRevision(context:Context,network:android.net.Network):String = runCatching {
         val links=context.getSystemService(ConnectivityManager::class.java).getLinkProperties(network) ?: return@runCatching ""
         NetworkPath.revision(links.interfaceName.orEmpty(),if(android.os.Build.VERSION.SDK_INT>=29) links.mtu else 0,
