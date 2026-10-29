@@ -42,6 +42,7 @@ object ConnectPolicy {
         val eligibleCloud = cloud.filter { hint -> ready.any { it.id == hint.id } }
         if(ready.isEmpty()) return ServerChoice.diverse(deferred,recoveryProbeLimit.coerceIn(1,3))
         // The fallback catalog is the ready pool itself, not the unfiltered import list.
-        return PublicCloudQueue.merge(ready,eligibleCloud,ready,FIRST,slots=1)
+        val ranked = PublicCloudQueue.merge(ready,eligibleCloud,ready,FIRST,slots=1)
+        return TransportExploration.merge(ranked, ready, FIRST)
     }
 }

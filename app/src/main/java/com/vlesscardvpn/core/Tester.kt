@@ -378,6 +378,7 @@ object Tester {
         onEach: (Int, Probe) -> Unit,
     ) = withContext(Bg.io) {
         run {
+            val serviceBudget = StrictProbeBudget.budget(budgetMs, foreground, requireTelegram, big, youtube, calls, attempts)
             val successes = java.util.concurrent.atomic.AtomicInteger()
             fun skipped(i: Int) = successes.get() >= stopAfter.coerceAtLeast(1) || skip(i) || (variants[i].first.protocol == "wireguard" && variants[i].first.secret in Tunnel.wireguardKeys)
             fun accepted(p: Probe) = p.works && (!requireTelegram || AutoLatencyPolicy.accepts(p))
@@ -405,7 +406,7 @@ object Tester {
                         val one = XrayCore.Instance("test1")
                         val p = freePorts(1)
                         val ok = runCatching { one.start(XrayConfigBuilder.testConfig(listOf(v), p, byeDpiPort, dpiPorts)) }.isSuccess && one.running
-                        try { report(idx[i], if (ok) CancellableProbe.run { bind -> probeSocks(p[0], testUrl, big = big, youtube = youtube, telegram = telegram, attempts = attempts, budgetMs = budgetMs, onCall = { call -> bind { call.cancel() } }, calls = calls, onCancel = bind) } else Probe(0, null, null, "конфиг не принят ядром")) }
+                        try { report(idx[i], if (ok) CancellableProbe.run { bind -> probeSocks(p[0], testUrl, big = big, youtube = youtube, telegram = telegram, attempts = attempts, budgetMs = serviceBudget, onCall = { call -> bind { call.cancel() } }, calls = calls, onCancel = bind) } else Probe(0, null, null, "конфиг не принят ядром")) }
                         finally { one.stop() }
                     }
                     return@withPermit
@@ -415,7 +416,7 @@ object Tester {
                         ProbeRace.run(chunk.indices.toList(), PowerPolicy.cap(parallel, probeLimit), stopAfter,
                             skip = { i -> skipped(idx[i]) }, staggerMs = if (stopAfter == 1) 120 else 0,
                             probe = { i -> onStarted?.invoke(idx[i]); CancellableProbe.run { bind -> probeSocks(ports[i], testUrl, big = big, youtube = youtube, telegram = telegram,
-                                attempts = attempts, budgetMs = budgetMs, onCall = { call -> bind { call.cancel() } }, calls = calls, onCancel = bind) } },
+                                attempts = attempts, budgetMs = serviceBudget, onCall = { call -> bind { call.cancel() } }, calls = calls, onCancel = bind) } },
                             accepted = { accepted(it) }, onEach = { i, p -> report(idx[i], p) })
                     }
                 } finally { core.stop() }
