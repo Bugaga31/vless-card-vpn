@@ -16,7 +16,8 @@ class ObservationR198Test {
  @Test fun missingCurrentPathRejected(){assertFalse(NetworkObservation.accepts(snap(),snap(p="")))}
  @Test fun blankHandleRejected(){assertFalse(NetworkObservation.accepts(snap(h=""),snap(h="")))}
  @Test fun snapshotComparisonDoesNotMutateHandoff(){val gate=NetworkHandoff();gate.seed(snap());val ticket=gate.update(snap(p="path-b"))!!;assertFalse(NetworkObservation.accepts(snap(),snap(p="path-b")));assertTrue(gate.valid(ticket.revision))}
- @Test fun canonicalPathReorderAccepted(){fun rev(a:List<String>)=NetworkPath.revision("wlan0",1500,a,listOf("default"),listOf("dns"));assertTrue(NetworkObservation.accepts(snap(p=rev(listOf("a","b"))),snap(p=rev(listOf("b","a","a")))))}
+ @Test fun canonicalPathReorderAccepted(){fun rev(a:List<String>)=NetworkPath.revision("wlan0",1500,a,listOf("default"),listOf("dns"))
+ assertTrue(NetworkObservation.accepts(snap(p=rev(listOf("a","b"))),snap(p=rev(listOf("b","a","a")))))}
  @Test fun mandatoryAutoRunsWhenOptionalToggleOff(){assertTrue(BackgroundRunPolicy.enabled(true,false,false))}
  @Test fun requestedManualModeRuns(){assertTrue(BackgroundRunPolicy.enabled(false,true,false))}
  @Test fun disabledManualModeDoesNotWake(){assertFalse(BackgroundRunPolicy.enabled(false,false,false))}

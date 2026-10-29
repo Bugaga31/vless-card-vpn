@@ -70,6 +70,27 @@ val fetchTor by tasks.registering {
     }
 }
 
+// GeoIP country selectors are ineffective without a loaded database. Pinned upstream data,
+// bundled at build time: the phone never downloads a country database during connection.
+val fetchTorGeo by tasks.registering {
+    val target=layout.buildDirectory.dir("generated/tor-geo-assets")
+    outputs.dir(target)
+    doLast {
+        val root=target.get().asFile;root.mkdirs()
+        val hashes=mapOf("geoip" to "5f0ebc505ad5a5b219f9c053ce6228c837669364349a1a70c236192dd99a1c3d",
+            "geoip6" to "d6bc775efb8f970afacbb702ea0c80dbf9e2add32232afcfe3f376a972503b56")
+        for((name,want) in hashes) {
+            val file=File(root,name)
+            fun valid()=file.isFile && MessageDigest.getInstance("SHA-256").digest(file.readBytes()).joinToString("") {"%02x".format(it)}==want
+            if(valid()) continue
+            val tmp=File(root,"$name.part")
+            uri("https://gitlab.torproject.org/tpo/core/tor/-/raw/a0062a3e3e623c4e81af96b2d744de635356b565/src/config/$name").toURL().openStream().use {input->tmp.outputStream().use {input.copyTo(it)}}
+            check(tmp.renameTo(file)) {"Cannot install Tor GeoIP asset"}
+            check(valid()) {"Tor GeoIP checksum mismatch"}
+        }
+    }
+}
+
 android {
     namespace = "com.vlesscardvpn"
     compileSdk = 34
@@ -118,6 +139,7 @@ android {
     sourceSets["main"].jniLibs.srcDir(layout.buildDirectory.dir("generated/byedpi"))
     sourceSets["main"].jniLibs.srcDir(layout.buildDirectory.dir("generated/hev"))
     sourceSets["main"].jniLibs.srcDir(layout.buildDirectory.dir("generated/tor"))
+    sourceSets["main"].assets.srcDir(layout.buildDirectory.dir("generated/tor-geo-assets"))
 }
 
 
@@ -175,7 +197,7 @@ val buildHev by tasks.registering(Exec::class) {
         "${sdkDir()}/ndk/27.2.12479018", layout.buildDirectory.dir("generated/hev").get().asFile.absolutePath,
         if (armOnly) "arm" else "all")
 }
-tasks.named("preBuild").configure { dependsOn(buildByeDpi, buildHev, fetchXray, fetchTor) }
+tasks.named("preBuild").configure { dependsOn(buildByeDpi, buildHev, fetchXray, fetchTor, fetchTorGeo) }
 
 tasks.withType<org.gradle.api.tasks.testing.Test>().configureEach {
     if (System.getenv("GITHUB_ACTIONS") == "true") {

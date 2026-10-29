@@ -90,9 +90,19 @@ object TorCard {
                       socksPort: Int = DEFAULT_SOCKS_PORT, bridge: String = "none", bridgeLines: List<String> = emptyList(),
                       upstreamHttpPort: Int = DEFAULT_UPSTREAM_PORT, ptProxyPort: Int = DEFAULT_PT_UPSTREAM_PORT): String {
         val dir = java.io.File(ctx.filesDir, "tor")
+        val geoDir=java.io.File(dir,"geo198").apply {mkdirs()}
+        for(name in listOf("geoip","geoip6")) {
+            val file=java.io.File(geoDir,name)
+            if(!file.isFile || file.length()==0L) {
+                val tmp=java.io.File(geoDir,"$name.part")
+                ctx.assets.open(name).use {input->tmp.outputStream().use {input.copyTo(it)}}
+                check(tmp.renameTo(file)) {"Cannot install Tor GeoIP"}
+            }
+        }
         return torrcEmbedded(java.io.File(dir, "data").absolutePath, java.io.File(dir, "cookie").absolutePath,
             nativeDir(ctx), controlPort, socksPort, bridge, bridgeLines, upstreamHttpPort, ptProxyPort) +
-            TorCountryPolicy.config(com.vlesscardvpn.core.Store.state.value.settings.torExitCountries)
+            TorCountryPolicy.config(com.vlesscardvpn.core.Store.state.value.settings.torExitCountries) +
+            "GeoIPFile ${java.io.File(geoDir, "geoip").absolutePath}\nGeoIPv6File ${java.io.File(geoDir, "geoip6").absolutePath}\n"
     }
 
     /** Pure overload — testable on the JVM without an Android context. */
