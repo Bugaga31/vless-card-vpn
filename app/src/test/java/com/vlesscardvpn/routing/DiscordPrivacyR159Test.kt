@@ -15,7 +15,7 @@ class DiscordPrivacyR159Test {
         .getJSONObject("routing").getJSONArray("rules").let { a -> (0 until a.length()).map { a.getJSONObject(it) } }
 
     @Test fun discordVoiceUdpGoesThroughVpnNotDirect() {
-        val r = rules(Settings(mode=Mode.SERVERS,services=listOf("discord")))
+        val r = rules(Settings(mode=Mode.SERVERS,services=listOf("discord"),ruWhitelist=false))
         val catchAll=r.last {it.optString("network")=="tcp,udp"}
         assertEquals("balancer",catchAll.getString("balancerTag"))
         assertFalse(r.any {it.optString("outboundTag")=="direct" && !it.optJSONArray("ip").toString().contains("geoip:private")})
