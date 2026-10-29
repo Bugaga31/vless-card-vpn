@@ -14,7 +14,7 @@ class PowerRoutingR192Test {
  private fun config(s:Settings=Settings(), many:Boolean=false)=JSONObject(XrayConfigBuilder.vpnConfig(
   if(many) listOf(server to null,server.copy(address="192.0.2.2") to null) else listOf(server to null),s,null))
  private fun rules(s:Settings=Settings()):List<JSONObject> = config(s).getJSONObject("routing").getJSONArray("rules").let {a->(0 until a.length()).map {a.getJSONObject(it)}}
- private fun direct(s:Settings=Settings())=rules(s).filter {it.optString("outboundTag")=="direct" && it.has("domain")}
+ private fun direct(s:Settings=Settings())=rules(s).filter {it.optString("outboundTag")=="direct" && it.has("domain") && it.optString("network")=="tcp,udp"}
  private fun scopedDns(s:Settings=Settings())=config(s).getJSONObject("dns").getJSONArray("servers").let {a->(0 until a.length()).mapNotNull {a.optJSONObject(it)}.filter {it.optString("address")==RuWhitelistPolicy.DNS}}
  @Test fun whitelistDefaultsOnForRequestedWorkflow() {assertTrue(Settings().ruWhitelist);assertTrue(Settings.fromJson(JSONObject()).ruWhitelist)}
  @Test fun persistedOptOutIsPreserved() {assertFalse(Settings.fromJson(Settings(ruWhitelist=false).toJson()).ruWhitelist)}
