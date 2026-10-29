@@ -20,7 +20,7 @@ jobs:
         run: |
           set -euo pipefail
           base64 -d tools/patches/network-r197.patch.gz.b64 | gzip -d > "$RUNNER_TEMP/network-r197.patch"
-          echo '32ea49bfaf79d12d8fadce33906844e63b49626e513387047a733c254dbe6207  '"$RUNNER_TEMP/network-r197.patch" | sha256sum -c -
+          echo '572f56c192afe1ff0ebd983273d87fd04919ecf8b8ba3aa6cb2b80ca29a34a9a  '"$RUNNER_TEMP/network-r197.patch" | sha256sum -c -
           git fetch --quiet --no-tags origin 99cd55912c6c95623dd4cb0669ba187014e59c8b
           git restore --source 99cd55912c6c95623dd4cb0669ba187014e59c8b -- app/src/main app/src/test
           PATCH="$RUNNER_TEMP/network-r197.patch"
