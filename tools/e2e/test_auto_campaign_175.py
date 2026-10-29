@@ -13,7 +13,9 @@ class ContinuousAuto(unittest.TestCase):
   self.assertLess(p.index('if (continuous) return@coroutineScope'),p.index('Tunnel.State.ERROR'))
  def test_source_cooldown_is_per_source_and_wave_rotates(self):
   s=(ROOT/'app/src/main/java/com/vlesscardvpn/core/Actions.kt').read_text()
-  self.assertIn('autoSourceAttempts[net + "|" + it]',s);self.assertIn('startsWith("Моб.: "), round)',s)
+  self.assertIn('autoSourceAttempts[net + "|" + it]',s);self.assertIn('SubscriptionQueue.fetchOrder(due,round)',s)
+  refresh=s.split('private suspend fun refreshAutoSources',1)[1].split('private suspend fun doAutoPrepare',1)[0]
+  self.assertLess(refresh.index('AutoDiscoveryPolicy.refreshDue'),refresh.index('SubscriptionQueue.fetchOrder(due,round)'))
  def test_expensive_ranking_window_and_probe_cancellation_remain_bounded(self):
   s=(ROOT/'app/src/main/java/com/vlesscardvpn/core/Actions.kt').read_text()
   self.assertIn('.take(AutoDiscoveryPolicy.RANKING_WINDOW) else readyCatalog',s)
