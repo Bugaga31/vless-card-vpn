@@ -114,4 +114,4 @@ jobs:
           git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $AUTH" push origin HEAD:refs/heads/integration/rugeo-device-r204
       - name: Require runtime assertions
         if: always()
-        run: python3 -c 'import json;d=json.load(open("docs/validation/r204-device.json"));assert d.get("passed") is True and d.get("ui_captures_executed") is True and len(d.get("screenshots",[]))==31,d'
+        run: python3 -c 'import json;d=json.load(open("docs/validation/r204-device.json"));assert d.get("passed") is True and d.get("ui_captures_executed") is True and len(d.get("screenshots",[]))==34,d'
