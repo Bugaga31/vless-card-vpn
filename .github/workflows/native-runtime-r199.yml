@@ -30,7 +30,7 @@ jobs:
           fi
           test -f app/src/androidTest/java/com/vlesscardvpn/ProductRuntimeR190Test.kt
           python3 -c "import base64;exec(base64.b64decode('ZnJvbSBwYXRobGliIGltcG9ydCBQYXRoCnA9UGF0aCgnYXBwL2J1aWxkLmdyYWRsZS5rdHMnKTtzPXAucmVhZF90ZXh0KCkucmVwbGFjZSgnICAgICAgICBtaW5TZGsgPSAyNCcsJyAgICAgICAgdGVzdEluc3RydW1lbnRhdGlvblJ1bm5lciA9ICJhbmRyb2lkeC50ZXN0LnJ1bm5lci5BbmRyb2lkSlVuaXRSdW5uZXIiXG4gICAgICAgIG1pblNkayA9IDI0JykucmVwbGFjZSgnICAgIHRlc3RJbXBsZW1lbnRhdGlvbigianVuaXQ6anVuaXQ6NC4xMy4yIiknLCcgICAgYW5kcm9pZFRlc3RJbXBsZW1lbnRhdGlvbigiYW5kcm9pZHgudGVzdDpjb3JlOjEuNS4wIilcbiAgICBhbmRyb2lkVGVzdEltcGxlbWVudGF0aW9uKCJhbmRyb2lkeC50ZXN0OnJ1bm5lcjoxLjUuMiIpXG4gICAgYW5kcm9pZFRlc3RJbXBsZW1lbnRhdGlvbigiYW5kcm9pZHgudGVzdC5leHQ6anVuaXQ6MS4xLjUiKVxuICAgIHRlc3RJbXBsZW1lbnRhdGlvbigianVuaXQ6anVuaXQ6NC4xMy4yIiknKTtwLndyaXRlX3RleHQocykK'))"
-          find app/src/androidTest -name '*.kt' -exec sed -i 's/ui197/ui199/g' {} +
+          find app/src/androidTest -name '*.kt' -exec sed -i 's/ui198/ui199/g' {} +
           sed -i 's/WaitReason.BACKOFF,30000/WaitReason.BACKOFF,5000/g' app/src/androidTest/java/com/vlesscardvpn/DashboardUiR190Test.kt
           python3 -c "import base64,gzip,json,pathlib;[(pathlib.Path(x['path']).write_text(x['content'])) for x in json.loads(gzip.decompress(base64.b64decode(pathlib.Path('tools/patches/harness-r199.json.gz.b64').read_text())))]"
           git config user.name 'github-actions[bot]'
