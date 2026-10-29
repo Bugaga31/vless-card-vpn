@@ -20,7 +20,7 @@ class RuGeoR204Test {
  @Test fun completePinnedIpDataRetained(){assertEquals(12987,KaringRuData.ipv4.size);assertEquals(12170,KaringRuData.ipv6.size)}
  @Test fun ipFamiliesRemainSeparate(){assertTrue(KaringRuData.ipv4.none{':' in it});assertTrue(KaringRuData.ipv6.all{':' in it});assertTrue(KaringRuData.ipv4.all{'/' in it})}
  @Test fun noUniversalIpBypass(){assertFalse("0.0.0.0/0" in RuGeoPolicy.ips(on));assertFalse("::/0" in RuGeoPolicy.ips(on))}
- @Test fun broadTldsAreExplicitOptIn(){assertTrue("domain:ru" in RuGeoPolicy.domains(on));assertTrue(RuGeoPolicy.domains(Settings()).isEmpty())}
+ @Test fun broadTldsAreExplicitOptIn(){assertTrue("domain:ru" in RuGeoPolicy.domains(on));assertTrue(RuGeoPolicy.domains(Settings()).isEmpty());assertTrue(RuGeoPolicy.domains(on.copy(torRouting=true,services=listOf("youtube"))).isEmpty())}
  @Test fun exactSharedCdnHostIsNotWildcard(){val d=RuGeoPolicy.domains(on);assertTrue("full:kp-config-smart-tv.akamaized.net" in d);assertFalse("domain:akamaized.net" in d)}
  @Test fun offHasNoIpRules(){assertTrue(RuGeoPolicy.ips(Settings()).isEmpty());assertEquals(-1,ipIndex(rules(Settings())))}
  @Test fun torAllDisablesBothLists(){val s=on.copy(torAll=true);assertTrue(RuWhitelistPolicy.rules(s).isEmpty());assertTrue(RuGeoPolicy.ips(s).isEmpty());assertEquals(-1,ipIndex(rules(s)))}

@@ -7,7 +7,9 @@ object RuGeoPolicy {
     private fun exclusions(s: Settings) = (s.alwaysVpn + if(s.torRouting) Services.domains(s.services) else emptyList())
         .map {it.removePrefix("domain:").removePrefix("full:").trim().trimEnd('.').lowercase()}
     fun domains(s: Settings): List<String> {
-        if(!enabled(s)) return emptyList()
+        // A geosite service category cannot be safely subtracted from the broad .ru DNS group.
+        // Keep those DNS queries encrypted; protected Tor routes still precede GeoIP routing.
+        if(!enabled(s) || s.torRouting && s.services.isNotEmpty()) return emptyList()
         val excluded=exclusions(s)
         val exact=KaringRuData.exact.filter {d -> excluded.none {v -> d==v || d.endsWith(".$v")}}
         // Conservatively remove a whole broad suffix if a protected child is inside it.
