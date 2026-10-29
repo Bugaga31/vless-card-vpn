@@ -1,6 +1,6 @@
 {
-  "source_sha": "39d80fb5cc42731bf2337fd41919126a037d6854",
-  "run_id": "40905014616",
+  "source_sha": "4a8b70150bf6301b5c76524606866a3367ea846d",
+  "run_id": "40906770355",
   "steps": {
     "source": "success",
     "host": "success",
@@ -2342,12 +2342,12 @@
     "w: file:///home/runner/work/vless-card-vpn/vless-card-vpn/app/src/main/java/com/vlesscardvpn/xray/XrayConfigBuilder.kt:218:90 Parameter 'httpPort' is never used",
     "w: file:///home/runner/work/vless-card-vpn/vless-card-vpn/app/src/main/java/com/vlesscardvpn/xray/XrayConfigBuilder.kt:367:13 Variable 'only' is never used",
     "",
-    "> Task :app:javaPreCompileRelease",
-    "> Task :app:compileReleaseJavaWithJavac",
     "> Task :app:compileDebugJavaWithJavac",
     "> Task :app:bundleDebugClassesToCompileJar",
     "> Task :app:bundleDebugClassesToRuntimeJar",
     "> Task :app:processDebugJavaRes",
+    "> Task :app:javaPreCompileRelease",
+    "> Task :app:compileReleaseJavaWithJavac",
     "> Task :app:bundleReleaseClassesToRuntimeJar",
     "> Task :app:bundleReleaseClassesToCompileJar",
     "> Task :app:compileDebugUnitTestKotlin",
@@ -2391,8 +2391,8 @@
     "> Task :vpn-test-probe:preBuild UP-TO-DATE",
     "> Task :vpn-test-probe:preDebugBuild UP-TO-DATE",
     "> Task :vpn-test-probe:javaPreCompileDebug",
-    "> Task :vpn-test-probe:checkDebugAarMetadata",
     "> Task :vpn-test-probe:generateDebugResValues",
+    "> Task :vpn-test-probe:checkDebugAarMetadata",
     "> Task :vpn-test-probe:mapDebugSourceSetPaths",
     "> Task :vpn-test-probe:generateDebugResources",
     "> Task :vpn-test-probe:mergeDebugResources",
@@ -2402,8 +2402,8 @@
     "> Task :vpn-test-probe:extractDeepLinksDebug",
     "> Task :vpn-test-probe:processDebugMainManifest",
     "> Task :vpn-test-probe:processDebugManifest",
-    "> Task :vpn-test-probe:preDebugUnitTestBuild UP-TO-DATE",
     "> Task :vpn-test-probe:processDebugManifestForPackage",
+    "> Task :vpn-test-probe:preDebugUnitTestBuild UP-TO-DATE",
     "> Task :vpn-test-probe:javaPreCompileDebugUnitTest",
     "> Task :vpn-test-probe:processDebugJavaRes NO-SOURCE",
     "> Task :vpn-test-probe:processDebugUnitTestJavaRes NO-SOURCE",
@@ -2414,7 +2414,7 @@
     "> Task :vpn-test-probe:compileDebugUnitTestJavaWithJavac",
     "> Task :vpn-test-probe:testDebugUnitTest",
     "",
-    "BUILD SUCCESSFUL in 4m 51s",
+    "BUILD SUCCESSFUL in 6m 26s",
     "75 actionable tasks: 75 executed"
   ]
 }
