@@ -24,7 +24,7 @@ class AutoHandoffPolicyTest {
     @Test fun maximumEightCandidatesAndNoExtraNetworkScan() {
         val list=(1..40).map {server("s$it")}
         assertEquals(8,AutoHandoffPolicy.candidates(list,list,list).size)
-        assertEquals(15000L,AutoHandoffPolicy.TOTAL_MS)
+        assertEquals(6500L,AutoHandoffPolicy.TOTAL_MS)
     }
     @Test fun oldPoolCannotStarveNewNetworkChallengers() {
         val old=(1..8).map {server("old$it")};val fresh=server("fresh")

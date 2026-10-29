@@ -1277,22 +1277,23 @@ object Actions {
     }
 
     private suspend fun quickRecheckWithinDeadline(previousCandidates: List<Server>): Boolean {
-        val net = Net.key(app); val handle = Net.underlying(app)?.toString()
+        val observed = Net.observation(app) ?: return false
+        val net = observed.profile
         Store.update { state -> state.copy(states = state.states.mapValues { (_, value) -> AutoHandoffPolicy.resetRuntime(value,net) }) }
-        fun valid() = Net.key(app) == net && Net.underlying(app)?.toString() == handle
+        fun valid() = Net.matches(app,observed)
         val st = Store.state.value
         val local = st.settings.netServers[net].orEmpty().toSet()
         val remembered = st.servers.filter { it.id in local }
         val ranked = preferred(st, st.servers).sortedWith(compareByDescending<Server> {
             Brain.p(net, it, st.state(it))
         }.thenByDescending { CloudSpeed.prior(it) ?: .5 })
-        val candidates = AutoHandoffPolicy.candidates(preferred(st,previousCandidates),st.servers,
-            remembered + st.selected + CloudSpeed.pick(ranked, emptyList(), n = 2) + ranked)
+        val candidates = AutoHandoffPolicy.prioritize(AutoHandoffPolicy.candidates(preferred(st,previousCandidates),st.servers,
+            remembered + st.selected + CloudSpeed.pick(ranked, emptyList(), n = 2) + ranked),local)
         if (candidates.isEmpty()) return false
         val passed = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
         val prev = progress.value
         try {
-            kotlinx.coroutines.withTimeoutOrNull(8500L) {
+            kotlinx.coroutines.withTimeoutOrNull(AutoHandoffPolicy.PROBE_WINDOW_MS) {
                 realTest(candidates, "Новая сеть: HTTPS и Telegram MTProto", big = false, youtube = false,
                     telegram = true, foreground = true, stopAfter = 1,
                     attempts = 1, parallel = 4, budgetMs = 6500L, onSuccess = { passed.add(it.id) })
@@ -1304,7 +1305,7 @@ object Actions {
             if (ok.isEmpty()) { deepPending = true; return false }
             deepPending = true
             return selectBest(1, close = false, among = ok) > 0
-        } finally { progress.value = prev.copy(running = false) }
+        } finally { if (valid()) progress.value = prev.copy(running = false) }
     }
 
     private fun selectionNetworkChanged(): String {

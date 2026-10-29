@@ -5,8 +5,12 @@ import com.vlesscardvpn.model.ServerState
 
 /** Prior endpoints and per-network history are hints. Handoff requires new body probes. */
 object AutoHandoffPolicy {
-    const val TOTAL_MS = 15_000L
+    const val TOTAL_MS = 6500L
+    const val PROBE_WINDOW_MS = 4500L
     const val MAX_CANDIDATES = 8
+    /** Exact-network remembered routes get first probe slots, never automatic success. */
+    fun prioritize(candidates:List<Server>,remembered:Set<String>):List<Server> =
+        candidates.distinctBy {it.id}.sortedBy {if(it.id in remembered) 0 else 1}.take(MAX_CANDIDATES)
     fun resetRuntime(state: ServerState, network: String): ServerState = state.forAutomaticNetwork(network).copy(
         tcpMs = -1, realMs = -1, checkedAt = 0, bigOk = null, ytOk = null, tgOk = null, tgMs = 0, kbps = 0,
         serviceNetwork = "", serviceMask = "", serviceCheckedAt = 0, speedCheckedAt = 0)
