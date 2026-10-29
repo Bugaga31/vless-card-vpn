@@ -35,9 +35,11 @@ jobs:
             git config user.name 'github-actions[bot]'
             git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
             git add app
+            if ! git diff --cached --quiet; then
             git commit -m 'fix(auto): bound search and account for started probes [skip ci]'
             AUTH=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
             git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $AUTH" push origin HEAD:refs/heads/integration/subscription-r199
+            fi
           fi
           echo "VALIDATED_SOURCE_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
       - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
@@ -107,6 +109,7 @@ jobs:
             git commit -m 'docs: record executed r199 regression results [skip ci]'
             AUTH=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
             git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $AUTH" push origin HEAD:refs/heads/integration/subscription-r199
+            fi
           fi
       - name: Require passing checks
         if: always()
