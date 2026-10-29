@@ -12,7 +12,7 @@ class DnsPolicyTest {
     private fun answer(query: ByteArray = q): ByteArray = query.copyOf().apply {
         this[2] = 0x81.toByte(); this[3] = 0x80.toByte(); this[7] = 1
     } + byteArrayOf(0xc0.toByte(), 12, 0, 1, 0, 1, 0, 0, 0, 60, 0, 4, 8, 8, 8, 8)
-    private fun dns(settings: Settings = Settings()) = JSONObject(XrayConfigBuilder.vpnConfig(listOf(com.vlesscardvpn.model.Server("fixture", "vless", "192.0.2.1", 443, "fixture") to null), settings.copy(mode = Mode.SERVERS), null)).getJSONObject("dns")
+    private fun dns(settings: Settings = Settings()) = JSONObject(XrayConfigBuilder.vpnConfig(listOf(com.vlesscardvpn.model.Server("fixture", "vless", "192.0.2.1", 443, "fixture") to null), settings.copy(mode = Mode.SERVERS, ruWhitelist = false), null)).getJSONObject("dns")
 
     @Test fun validCompressedAnswer() { assertTrue(DnsWire.hasAnswer(answer(), q)) }
     @Test fun wrongIdRejected() { assertFalse(DnsWire.hasAnswer(answer().apply { this[0] = 0 }, q)) }

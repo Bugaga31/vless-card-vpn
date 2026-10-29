@@ -276,6 +276,7 @@ object XrayConfigBuilder {
         fun toTor(rule: JSONObject): JSONObject = rule.put("network", "tcp").put("outboundTag", TOR_TAG)
         fun toTorUpstream(rule: JSONObject): JSONObject = rule.put("network", "tcp").put("outboundTag", if (hopIdx >= 0) WARP_CHAIN else "$PROXY_PREFIX$torUpstreamIndex")
         fun toMain(rule: JSONObject): JSONObject = if (settings.torAll && torOn) toTor(rule) else toServer(rule)
+        val ruRules = com.vlesscardvpn.core.RuWhitelistPolicy.rules(settings)
         val dnsServers = JSONArray()
         val ruDns = settings.ruDns && settings.ruDirect && (useServers || settings.torAll)
         if (ruDns) dnsServers.put(JSONObject().put("address", RU_DNS).put("port", 53)
@@ -288,6 +289,9 @@ object XrayConfigBuilder {
             dnsServers.put(if (settings.dnsAuto) JSONObject().put("address", it)
                 .put("timeoutMs", com.vlesscardvpn.core.DnsPolicy.TIMEOUT_MS) else it)
         }
+        if (ruRules.isNotEmpty()) dnsServers.put(JSONObject()
+            .put("address", com.vlesscardvpn.core.RuWhitelistPolicy.DNS).put("port", 53)
+            .put("domains", JSONArray(ruRules)).put("skipFallback", true))
         c.put("dns", JSONObject().put("servers", dnsServers).put("queryStrategy", "UseIPv4").put("tag", "dns-module")
             .put("hosts", JSONObject(DNS_HOSTS as Map<*, *>))
             .put("enableParallelQuery", settings.dnsAuto)
@@ -297,14 +301,15 @@ object XrayConfigBuilder {
         val rules = JSONArray()
         rules.put(JSONObject().put("inboundTag", arr("socks")).put("port", "53").put("outboundTag", "dns-out"))
         if (torOn) rules.put(toTorUpstream(JSONObject().put("inboundTag", arr(TOR_UPLINK_INBOUND, TOR_PT_UPLINK_INBOUND))))
+        if (ruRules.isNotEmpty()) rules.put(JSONObject().put("inboundTag", arr("dns-module"))
+            .put("ip", arr(com.vlesscardvpn.core.RuWhitelistPolicy.DNS + "/32")).put("port", "53")
+            .put("network", "tcp,udp").put("outboundTag", "direct"))
         rules.put(toMain(JSONObject().put("inboundTag", arr("dns-module"))))
         rules.put(JSONObject().put("ip", arr("geoip:private")).put("outboundTag", "direct"))
         rules.put(JSONObject().put("ip", arr("::/0")).put("outboundTag", "block"))
         // WebRTC/STUN would reveal the real address to websites; QUIC can't be desynced, so TCP+TLS is forced.
         if (settings.blockStun) rules.put(JSONObject().put("network", "udp").put("port", "3478,5349,19302-19309").put("outboundTag", "block"))
-        if (settings.blockQuic || !useServers) rules.put(JSONObject().put("network", "udp").put("port", "443").put("outboundTag", "block"))
-        else if (settings.mode == Mode.HYBRID && hybridDomains(settings).isNotEmpty())
-            rules.put(JSONObject().put("network", "udp").put("port", "443").put("domain", JSONArray(hybridDomains(settings))).put("outboundTag", "block"))
+
         // «Сайт не открывается?» — the user's own choice wins over everything below (RU direct, services, hybrid)
         if (settings.alwaysDirect.isNotEmpty()) rules.put(JSONObject().put("domain", JSONArray(settings.alwaysDirect.map { "domain:$it" })).put("outboundTag", "direct"))
         if (settings.alwaysVpn.isNotEmpty()) rules.put(toMain(JSONObject().put("domain", JSONArray(settings.alwaysVpn.map { "domain:$it" }))))
@@ -330,6 +335,11 @@ object XrayConfigBuilder {
             rules.put(JSONObject().put("domain", JSONArray(TRACKERS)).put("outboundTag", "block"))
             rules.put(JSONObject().put("network", "tcp,udp").put("port", "853").put("outboundTag", "block"))
         }
+        if (ruRules.isNotEmpty()) rules.put(JSONObject().put("domain", JSONArray(ruRules))
+            .put("network", "tcp,udp").put("outboundTag", "direct"))
+        if (settings.blockQuic || !useServers) rules.put(JSONObject().put("network", "udp").put("port", "443").put("outboundTag", "block"))
+        else if (settings.mode == Mode.HYBRID && hybridDomains(settings).isNotEmpty())
+            rules.put(JSONObject().put("network", "udp").put("port", "443").put("domain", JSONArray(hybridDomains(settings))).put("outboundTag", "block"))
         // Explicit Tor service routing must not depend on a learned VLESS service pool.
         // Only TCP is supported by Tor; arbitrary UDP is not promoted to a Tor success.
         if (torOn && settings.torRouting && !settings.torAll) {
@@ -372,10 +382,10 @@ object XrayConfigBuilder {
             val probe = settings.testUrl
             if (settings.balance == Balance.LEAST_LOAD && !speedAware) {
                 c.put("burstObservatory", JSONObject().put("subjectSelector", arr(PROXY_PREFIX)).put("pingConfig", JSONObject()
-                    .put("destination", probe).put("interval", "30s").put("connectivity", "").put("timeout", "10s").put("sampling", 3)))
+                    .put("destination", probe).put("interval", com.vlesscardvpn.core.BatteryProbePolicy.interval(settings.powerProfile)).put("connectivity", "").put("timeout", "10s").put("sampling", 3)))
             } else {
                 c.put("observatory", JSONObject().put("subjectSelector", arr(PROXY_PREFIX)).put("probeUrl", probe)
-                    .put("probeInterval", "10s").put("enableConcurrency", true))
+                    .put("probeInterval", com.vlesscardvpn.core.BatteryProbePolicy.interval(settings.powerProfile)).put("enableConcurrency", true))
             }
         }
         c.put("routing", routing)
