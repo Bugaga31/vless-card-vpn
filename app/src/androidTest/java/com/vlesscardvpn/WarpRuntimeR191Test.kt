@@ -43,7 +43,7 @@ class WarpRuntimeR191Test {
  @Test fun malformedIpv4Rejected() {invalid("999.1.2.3");invalid("localhost");invalid("1.2.3")}
  @Test fun repeatedPrefixRejected() {invalid("172.16.0.2/32/32")}
  @Test fun unexpectedPrefixRejected() {invalid("172.16.0.2/24")}
- @Test fun maskConfirmationRejectsSlowSecond() {assertNull(MaskSamplePolicy.confirmed(probe(),probe().copy(tgMs=501)))}
+ @Test fun maskConfirmationRejectsSlowSecond() {assertTrue(MaskSamplePolicy.needsConfirmation(1,12,true));assertFalse(MaskSamplePolicy.needsConfirmation(0,12,true));assertFalse(MaskSamplePolicy.needsConfirmation(1,12,false));assertNull(MaskSamplePolicy.confirmed(probe(),probe().copy(tgMs=501)))}
  @Test fun maskConfirmationRejectsSlowFirst() {assertNull(MaskSamplePolicy.confirmed(probe().copy(realMs=501),probe()))}
  @Test fun maskConfirmationKeepsConservativeSpeed() {assertEquals(4000,MaskSamplePolicy.confirmed(probe(),probe().copy(kbps=4000))!!.kbps)}
  @Test fun latestUnknownCannotExploitPreviousSuccess() {

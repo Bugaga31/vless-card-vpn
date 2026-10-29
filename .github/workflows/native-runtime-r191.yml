@@ -17,15 +17,17 @@ jobs:
         run: |
           set -euo pipefail
           base64 -d tools/patches/warp-r191.patch.gz.b64 | gzip -d > "$RUNNER_TEMP/warp-r191.patch"
-          echo '759a8257fbce675a3909f84f8eb9517552eba169c0aafa60717defd198a9ad6a  '"$RUNNER_TEMP/warp-r191.patch" | sha256sum -c -
+          echo 'ce1b93e257250a072d9318cfe85663db944ad273a0c57f635149c378a513c80c  '"$RUNNER_TEMP/warp-r191.patch" | sha256sum -c -
+          git fetch --quiet --no-tags origin dd4452cbb0422530c1c4758897c92e37851fb8be
+          git restore --source dd4452cbb0422530c1c4758897c92e37851fb8be -- app/src/main app/src/test
           PATCH="$RUNNER_TEMP/warp-r191.patch"
           if ! git apply --reverse --check "$PATCH" 2>/dev/null; then
             git apply --check "$PATCH"
             git apply "$PATCH"
           fi
-          if ! test -f app/src/androidTest/java/com/vlesscardvpn/WarpRuntimeR191Test.kt; then
+          if ! test -f app/src/androidTest/java/com/vlesscardvpn/ProductRuntimeR190Test.kt; then
           base64 -d tools/patches/warp-device-r191.patch.gz.b64 | gzip -d > "$RUNNER_TEMP/instrumentation.patch"
-          echo '1c8ef2c975e4393bd8db0a0fa58919879e4125de1f66e032d2d39decad04f743  '"$RUNNER_TEMP/instrumentation.patch" | sha256sum -c -
+          echo '0b59bb4d986b353f0278b18d0c5f19b35c708fe43c0b635ab9d56a9d5e5b5f8f  '"$RUNNER_TEMP/instrumentation.patch" | sha256sum -c -
           git apply --check "$RUNNER_TEMP/instrumentation.patch"
           git apply "$RUNNER_TEMP/instrumentation.patch"
           fi
