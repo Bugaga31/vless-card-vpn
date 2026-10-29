@@ -1307,11 +1307,21 @@ class TunnelService : VpnService() {
                 if (state != Tunnel.State.CONNECTED && state != Tunnel.State.CONNECTING) return@reconnect
                 healStep = 0; dpiHeals = 0; connectFails = 0; safeMasks = false
                 healStatus(recoveryText)
-                if (com.vlesscardvpn.tor.TorConnectionPolicy.needsAutoSearch(Store.state.value.settings)) {
+                val automatic=com.vlesscardvpn.tor.TorConnectionPolicy.needsAutoSearch(Store.state.value.settings)
+                var recheckPassed=false
+                if (automatic) {
                     Actions.recallNet(profile!!)
-                    runCatching { Actions.quickRecheck(previousCandidates) }.onFailure { if (it is kotlinx.coroutines.CancellationException) throw it }
+                    recheckPassed=runCatching { Actions.quickRecheck(previousCandidates) }.onFailure { if (it is kotlinx.coroutines.CancellationException) throw it }.getOrDefault(false)
                 }
                 if (!handoff.valid(change.revision)) return@reconnect
+                if (com.vlesscardvpn.core.NetworkRecoveryPolicy.restartDiscovery(automatic,tun != null,recheckPassed)) {
+                    Actions.autoConnect {
+                        val current=Tunnel.status.value.state
+                        if (handoff.valid(change.revision) && (current == Tunnel.State.CONNECTING || current == Tunnel.State.CONNECTED))
+                            start(this@TunnelService)
+                    }
+                    return@reconnect
+                }
                 lock.withLock {
                     if (handoff.valid(change.revision)) {
                         Log.i("E2E", "physical network changed → applying new profile")
