@@ -53,37 +53,69 @@ object TelegramProbe {
     /** null = not enough budget/cancelled; false = neither sampled DC answered valid MTProto. */
     fun check(port: Int, budgetMs: Long = 3000): Boolean? = measure(port, budgetMs).ok
 
-    fun measure(port: Int, budgetMs: Long = 3000): Result {
-        val started = System.nanoTime()
-        if (port !in 1..65535 || budgetMs < 200 || Thread.currentThread().isInterrupted) return Result(null, 0)
-        val deadline = started + TimeUnit.MILLISECONDS.toNanos(budgetMs.coerceAtMost(3000))
-        var tried = 0
-        for (host in dc) {
-            val left = TimeUnit.NANOSECONDS.toMillis(deadline - System.nanoTime())
-            if (left < 100 || Thread.currentThread().isInterrupted) return Result(null, elapsedMs(started))
-            val allowance = minOf(1500, left).coerceAtLeast(1)
-            val socket = Socket(Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", port)))
-            // A Future interrupt alone does not unblock java.net reads. Always close at a hard deadline.
-            val timeout = timer.schedule({ runCatching { socket.close() } }, allowance, TimeUnit.MILLISECONDS)
-            val ok = try {
-                socket.use { s ->
-                    s.soTimeout = allowance.toInt()
-                    s.connect(InetSocketAddress(host, 443), allowance.toInt())
-                    val nonce = ByteArray(16).also(random::nextBytes)
-                    s.getOutputStream().write(request(nonce, System.currentTimeMillis()))
-                    val input = java.io.DataInputStream(s.getInputStream())
-                    val first = input.readUnsignedByte()
-                    val words = if (first == 127) input.readUnsignedByte() or (input.readUnsignedByte() shl 8) or (input.readUnsignedByte() shl 16) else first
-                    if (words !in 19..1024) false else {
-                        val frame = ByteArray(words * 4); input.readFully(frame); validResponse(frame, nonce)
-                    }
-                }
-            } catch (_: Exception) { false } finally { timeout.cancel(false); runCatching { socket.close() } }
-            tried++
-            if (ok) return Result(true, elapsedMs(started))
-        }
-        val result = if (Thread.currentThread().isInterrupted || tried != dc.size) null else false
-        return Result(result, elapsedMs(started))
+    // Two sampled DCs per route; finite shared workers/queue, never a thread per catalogue item.
+    private val workers=java.util.concurrent.ThreadPoolExecutor(16,16,0L,TimeUnit.MILLISECONDS,
+        java.util.concurrent.ArrayBlockingQueue<Runnable>(64),
+        java.util.concurrent.ThreadFactory {r->Thread(r,"tg-dc-race").apply {isDaemon=true}},
+        java.util.concurrent.ThreadPoolExecutor.AbortPolicy())
+
+    fun measure(port: Int, budgetMs: Long = 3000, onCancel:((()->Unit)->Unit)?=null): Result {
+        val started=System.nanoTime()
+        if(port !in 1..65535 || budgetMs<200 || Thread.currentThread().isInterrupted) return Result(null,0)
+        val deadline=started+TimeUnit.MILLISECONDS.toNanos(budgetMs.coerceAtMost(3000))
+        val resources=ProbeCancellation()
+        onCancel?.invoke {resources.close()}
+        val completed=java.util.concurrent.ExecutorCompletionService<Boolean?>(workers)
+        var received=0;var unknown=false
+        try {
+            for(host in dc) {
+                val future=completed.submit(java.util.concurrent.Callable<Boolean?> {
+                    if(resources.isClosed() || Thread.currentThread().isInterrupted) return@Callable null
+                    val left=TimeUnit.NANOSECONDS.toMillis(deadline-System.nanoTime())
+                    if(left<100) return@Callable null
+                    val allowance=minOf(1500L,left).coerceAtLeast(1)
+                    val socket=Socket(Proxy(Proxy.Type.SOCKS,InetSocketAddress("127.0.0.1",port)))
+                    resources.add {socket.close()}
+                    val attemptStarted=System.nanoTime()
+                    val timeout=timer.schedule({runCatching {socket.close()}},allowance,TimeUnit.MILLISECONDS)
+                    try {
+                        socket.use {s->
+                            s.soTimeout=allowance.toInt()
+                            s.connect(InetSocketAddress(host,443),allowance.toInt())
+                            val nonce=ByteArray(16).also(random::nextBytes)
+                            s.getOutputStream().write(request(nonce,System.currentTimeMillis()))
+                            val input=java.io.DataInputStream(s.getInputStream())
+                            val first=input.readUnsignedByte()
+                            val words=if(first==127) input.readUnsignedByte() or (input.readUnsignedByte() shl 8) or (input.readUnsignedByte() shl 16) else first
+                            if(words !in 19..1024) false else {
+                                val frame=ByteArray(words*4);input.readFully(frame);validResponse(frame,nonce)
+                            }
+                        }
+                    } catch(e:Exception) {
+                        if(e is java.io.InterruptedIOException || resources.isClosed() || Thread.currentThread().isInterrupted ||
+                            System.nanoTime()-attemptStarted>=TimeUnit.MILLISECONDS.toNanos(allowance) ||
+                            System.nanoTime()>=deadline) null else false
+                    } finally {timeout.cancel(false);runCatching {socket.close()}}
+                })
+                resources.add {future.cancel(true)}
+            }
+            while(received<dc.size) {
+                if(resources.isClosed() || Thread.currentThread().isInterrupted) return Result(null,elapsedMs(started))
+                val left=deadline-System.nanoTime()
+                if(left<=0) return Result(null,elapsedMs(started))
+                val f=completed.poll(left,TimeUnit.NANOSECONDS) ?: return Result(null,elapsedMs(started))
+                val result=try {f.get()} catch(_:java.util.concurrent.CancellationException) {null}
+                    catch(_:java.util.concurrent.ExecutionException) {null}
+                received++
+                if(result==true) return Result(true,elapsedMs(started))
+                if(result==null) unknown=true
+            }
+            return Result(if(unknown) null else false,elapsedMs(started))
+        } catch(_:InterruptedException) {
+            Thread.currentThread().interrupt();return Result(null,elapsedMs(started))
+        } catch(_:java.util.concurrent.RejectedExecutionException) {
+            return Result(null,elapsedMs(started))
+        } finally {resources.close()}
     }
 
     private fun elapsedMs(started: Long) = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started).toInt().coerceAtLeast(1)

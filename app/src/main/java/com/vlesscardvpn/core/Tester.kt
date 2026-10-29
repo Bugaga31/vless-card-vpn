@@ -153,6 +153,12 @@ object Tester {
         val mediaClient = client.newBuilder().followRedirects(false).followSslRedirects(false).build()
         val tasks = mutableListOf<java.util.concurrent.Future<*>>()
         try {
+            // Independent service evidence starts with HTTPS, not after it. The same route/SOCKS only.
+            val tgF = if (telegram) telegramPool.submit<TelegramProbe.Result> {
+                val left=if(budgetDeadline==Long.MAX_VALUE) 3000L else
+                    TimeUnit.NANOSECONDS.toMillis((budgetDeadline-System.nanoTime()).coerceAtLeast(1)).coerceAtLeast(1)
+                TelegramProbe.measure(port,minOf(3000L,left),onCancel)
+            }.also {tasks+=it} else null
             var best = Long.MAX_VALUE; var err = ""
             repeat(attempts.coerceIn(1, 3)) {
                 if (Thread.currentThread().isInterrupted) throw java.io.InterruptedIOException("Проверка отменена")
@@ -168,9 +174,6 @@ object Tester {
             if (best == Long.MAX_VALUE) return Probe(0, null, null, err)
             val deadline = if (budgetDeadline == Long.MAX_VALUE) System.nanoTime() + TimeUnit.SECONDS.toNanos(40) else budgetDeadline
             fun remaining() = TimeUnit.NANOSECONDS.toMillis((deadline - System.nanoTime()).coerceAtLeast(1)).coerceAtLeast(1)
-            val tgF = if (telegram) telegramPool.submit<TelegramProbe.Result> {
-                TelegramProbe.measure(port, minOf(3000, remaining()))
-            }.also { tasks += it } else null
             val bigF = if (big) pool.submit<BodyResult> { bigDownload(client,budgetDeadline,onCall) }.also { tasks += it } else null
             val ytF = if (youtube) pool.submit<YouTubeMediaProbe.Result> {
                 YouTubeMediaProbe.check { boundedCall(mediaClient, it) }
