@@ -423,7 +423,7 @@ object Tester {
                 try {
                     coroutineScope {
                         ProbeRace.run(chunk.indices.toList(), PowerPolicy.cap(parallel, probeLimit), stopAfter,
-                            skip = { i -> skipped(idx[i]) }, staggerMs = if (stopAfter == 1) 120 else 0,
+                            skip = { i -> skipped(idx[i]) }, staggerMs = ForegroundProbePlan.staggerMs(foreground,stopAfter),
                             probe = { i -> onStarted?.invoke(idx[i]); CancellableProbe.run { bind -> probeSocks(ports[i], testUrl, big = big, youtube = youtube, telegram = telegram,
                                 attempts = attempts, budgetMs = serviceBudget, onCall = { call -> bind { call.cancel() } }, calls = calls, onCancel = bind) } },
                             accepted = { accepted(it) }, onEach = { i, p -> report(idx[i], p) })
