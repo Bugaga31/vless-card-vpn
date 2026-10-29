@@ -71,7 +71,7 @@ class CryptoWarpRegressionR62Test {
     }
 
     @Test fun wgMasksAndWarpDump() {
-        val warp = Warp.servers(Warp.Account("@WPRIV@", "bmXOC+F1FxEMF9dyiK2H5/1SUtzH0JuVo51h2wPfgyo=", "@WV4@", "", "11,22,33", "x"), listOf("162.159.192.1:2408"))[0]
+        val warp = Warp.servers(Warp.Account("@WPRIV@", "bmXOC+F1FxEMF9dyiK2H5/1SUtzH0JuVo51h2wPfgyo=", "172.16.0.2", "", "11,22,33", "x"), listOf("162.159.192.1:2408"))[0]
         val wg = Server("wg", "wireguard", "1.2.3.4", 51820, "k", pbk = "p")
         val wm = Masks.searchOrder(true, warp)
         assertTrue(wm.any { it.hop == Masks.HOP_WARP } && wm.any { it.noise == "z6" })

@@ -8,7 +8,7 @@ class MaskEvidenceR183Test {
     private val before=ServerState(realMs=50,bigOk=true,ytOk=true,tgOk=true,kbps=5000,checkedAt=100,
         maskId="old",serviceNetwork="wifi",serviceMask="old",serviceCheckedAt=100,
         speedNetwork="wifi",speedMask="old",speedCheckedAt=100)
-    private fun good(speed:Int=8000)=Probe(60,true,null,tgOk=true,kbps=speed)
+    private fun good(speed:Int=8000)=Probe(60,true,null,tgOk=true,tgMs=60,kbps=speed)
     @Test fun unknownYoutubeIsNotInheritedByNewMask() {
         val next=MaskSamplePolicy.adopt(before,"wifi","new",200,good(),true,false,true)
         assertNull(next.ytOk);assertEquals(true,next.tgOk);assertEquals("new",next.serviceMask)

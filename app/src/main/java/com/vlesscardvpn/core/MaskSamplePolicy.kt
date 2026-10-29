@@ -22,7 +22,7 @@ object MaskSamplePolicy {
         checkedAt=0,serviceNetwork="",serviceMask="",serviceCheckedAt=0,speedNetwork="",speedMask="",speedCheckedAt=0)
 
     /** Both isolated samples must complete; the more conservative measured throughput is used. */
-    fun confirmed(first:Probe,second:Probe):Probe? = if(first.works && second.works && first.bigOk==true && second.bigOk==true &&
+    fun confirmed(first:Probe,second:Probe):Probe? = if(AutoLatencyPolicy.accepts(first) && AutoLatencyPolicy.accepts(second) && first.works && second.works && first.bigOk==true && second.bigOk==true &&
         first.tgOk==true && second.tgOk==true && first.kbps>0 && second.kbps>0)
         second.copy(kbps=minOf(first.kbps,second.kbps)) else null
 }

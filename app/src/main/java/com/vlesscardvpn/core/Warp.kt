@@ -6,6 +6,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
+import kotlinx.coroutines.ensureActive
 import java.math.BigInteger
 import java.net.InetSocketAddress
 import java.net.Proxy
@@ -19,19 +20,19 @@ import java.util.concurrent.TimeUnit
 /**
  * Built-in Cloudflare WARP: own key pair (Curve25519), free account registration through the official client API,
  * then a WireGuard server per endpoint. The endpoints differ by IP range and port: operators often block only
- * the default 162.159.192.1:2408, and UDP noise masks hide the WireGuard handshake.
+ * the default 162.159.192.1:2408, and compatible UDP experiments can be tested without claiming to hide WireGuard from every DPI.
  */
 object Warp {
     const val SOURCE = "warp"
     private const val API = "https://api.cloudflareclient.com/v0a2158/reg"
-    /** Official WARP endpoints: IP ranges 162.159.192-195.x / 188.114.96-99.x, any of the client ports. */
+    /** Candidate WARP endpoints: IP ranges 162.159.192-195.x / 188.114.96-99.x, any of the client ports. */
     val ENDPOINTS = listOf(
         "162.159.192.1:2408", "188.114.97.1:4500", "162.159.193.10:500", "188.114.98.224:1701",
         "162.159.195.1:894", "188.114.96.1:878", "162.159.192.7:4500", "188.114.99.10:2408",
         "162.159.193.5:1002", "188.114.97.6:955", "162.159.195.9:7103", "188.114.98.11:3854",
     )
 
-    /** 4 endpoints per account: the main 162.159.192.x range first (most reliable), then other ranges and ports. */
+    /** 4 candidate endpoints per account: the main 162.159.192.x range first, then other ranges and ports. */
     fun endpointsFor(i: Int): List<String> = listOf(
         listOf("162.159.192.1:2408", "162.159.192.5:500", "162.159.192.9:4500")[i % 3],
         ENDPOINTS[(1 + i * 3) % ENDPOINTS.size], ENDPOINTS[(2 + i * 3) % ENDPOINTS.size], ENDPOINTS[(3 + i * 3) % ENDPOINTS.size],
@@ -83,25 +84,25 @@ object Warp {
     private fun b64(b: ByteArray) = com.vlesscardvpn.model.Base64.encode(b)
 
     // ---------------- registration
-    private val http by lazy { OkHttpClient.Builder().connectTimeout(10, TimeUnit.SECONDS).readTimeout(15, TimeUnit.SECONDS).build() }
+    private val http by lazy { OkHttpClient.Builder().connectTimeout(4, TimeUnit.SECONDS).readTimeout(4, TimeUnit.SECONDS).callTimeout(6, TimeUnit.SECONDS).followRedirects(false).followSslRedirects(false).build() }
 
     /** Registers a free WARP account. Tries directly, then through the running VPN (if the API is blocked). */
-    fun register(): Account {
+    suspend fun register(): Account {
         val priv = newPrivateKey()
         val tos = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).apply { timeZone = TimeZone.getTimeZone("UTC") }.format(Date())
         val body = JSONObject().put("key", b64(publicKey(priv))).put("install_id", "").put("fcm_token", "").put("tos", tos)
             .put("type", "Android").put("locale", "en_US").toString()
+        val request = Request.Builder().url(API).header("User-Agent", "okhttp/3.12.1").header("CF-Client-Version", "a-6.30-3596")
+            .post(body.toRequestBody("application/json; charset=UTF-8".toMediaType())).build()
         var err: Throwable? = null
         for (c in clients()) {
-            val r = runCatching {
-                c.newCall(Request.Builder().url(API).header("User-Agent", "okhttp/3.12.1").header("CF-Client-Version", "a-6.30-3596")
-                    .post(body.toRequestBody("application/json; charset=UTF-8".toMediaType())).build()).execute().use { r ->
-                    val text = r.body?.string().orEmpty()
-                    check(r.isSuccessful) { "WARP: HTTP ${r.code}" }
-                    parse(JSONObject(text), b64(priv))
-                }
-            }
-            r.onSuccess { return it }.onFailure { err = it }
+            kotlinx.coroutines.currentCoroutineContext().ensureActive()
+            try {
+                val reply = WarpApi.request(c, request)
+                check(reply.code in 200..299) { "WARP: HTTP ${reply.code}" }
+                return parse(JSONObject(reply.text), b64(priv))
+            } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+              catch (e: Exception) { err = e }
         }
         throw err ?: IllegalStateException("WARP: нет ответа")
     }
@@ -114,28 +115,29 @@ object Warp {
     /** Direct, then through the running VPN (login via the app's Authenticator), then through DPI-bypass engines. */
     private fun clients(): List<OkHttpClient> = buildList {
         add(http)
-        Tunnel.socks?.let { add(socks(it.port)) }
-        extraSocks.forEach { add(socks(it)) }
+        (listOfNotNull(Tunnel.socks?.port) + extraSocks).filter { it in 1..65535 }.distinct().take(3).forEach { add(socks(it)) }
     }
 
     /**
      * Binds a WARP+ key to the account (PUT /reg/{id}/account). Returns null on success, else the API's error
      * (e.g. "Too many connected devices." — the key is used up, try another one).
      */
-    fun applyLicense(a: Account, license: String): String? {
+    suspend fun applyLicense(a: Account, license: String): String? {
+        if (a.id.isBlank() || a.token.isBlank()) return "Нет идентификатора или токена WARP"
         val body = JSONObject().put("license", license).toString()
         var err = "нет ответа"
         for (c in clients()) {
-            val r = runCatching {
-                c.newCall(Request.Builder().url("$API/${a.id}/account").header("Authorization", "Bearer ${a.token}")
+            kotlinx.coroutines.currentCoroutineContext().ensureActive()
+            try {
+                val reply = WarpApi.request(c, Request.Builder().url("$API/${a.id}/account").header("Authorization", "Bearer ${a.token}")
                     .header("User-Agent", "okhttp/3.12.1").header("CF-Client-Version", "a-6.30-3596")
-                    .put(body.toRequestBody("application/json; charset=UTF-8".toMediaType())).build()).execute().use { r ->
-                    val o = runCatching { JSONObject(r.body?.string().orEmpty()) }.getOrDefault(JSONObject())
-                    if (r.isSuccessful && o.optBoolean("warp_plus", false)) null
-                    else o.optJSONArray("errors")?.optJSONObject(0)?.optString("message") ?: "HTTP ${r.code}"
-                }
-            }
-            r.onSuccess { if (it == null) return null; err = it; if (!it.startsWith("HTTP")) return it }
+                    .put(body.toRequestBody("application/json; charset=UTF-8".toMediaType())).build())
+                val o = runCatching { JSONObject(reply.text) }.getOrDefault(JSONObject())
+                if (reply.code in 200..299 && o.optBoolean("warp_plus", false)) return null
+                err = o.optJSONArray("errors")?.optJSONObject(0)?.optString("message")?.takeIf { it.isNotBlank() } ?: "HTTP ${reply.code}"
+                if (!err.startsWith("HTTP")) return err
+            } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+              catch (_: Exception) { err = "WARP API: нет подтверждённого ответа" }
         }
         return err
     }
@@ -144,9 +146,10 @@ object Warp {
      * Tries keys in the given order ([WarpKeys.order]); stops at the first that binds. [onResult] gets every
      * answer (to remember used-up / invalid keys). Returns the key used (or null) and the last error.
      */
-    fun upgrade(a: Account, order: List<String>, maxTries: Int = 12, onResult: (String, String?) -> Unit = { _, _ -> }): Pair<String?, String> {
+    suspend fun upgrade(a: Account, order: List<String>, maxTries: Int = 12, onResult: (String, String?) -> Unit = { _, _ -> }): Pair<String?, String> {
         var last = ""
-        for (k in order.take(maxTries)) {
+        for (k in order.distinct().take(maxTries.coerceIn(0, 2))) {
+            kotlinx.coroutines.currentCoroutineContext().ensureActive()
             val e = applyLicense(a, k)
             onResult(k, e)
             if (e == null) return k to ""
@@ -160,7 +163,11 @@ object Warp {
         val peer = cfg.getJSONArray("peers").getJSONObject(0)
         val addr = cfg.getJSONObject("interface").getJSONObject("addresses")
         val clientId = cfg.optString("client_id")
-        val reserved = runCatching { com.vlesscardvpn.model.Base64.decode(clientId)!!.take(3).joinToString(",") { (it.toInt() and 255).toString() } }.getOrDefault("")
+        require(clientId.length in 4..8) { "Invalid WARP client id" }
+        val bytes = com.vlesscardvpn.model.Base64.decode(clientId) ?: error("Invalid WARP client id")
+        require(bytes.size == 3) { "Invalid WARP reserved bytes" }
+        val reserved = bytes.joinToString(",") { (it.toInt() and 255).toString() }
+        WarpSetupPolicy.v4Address(addr.getString("v4"))
         return Account(privateKey, peer.getString("public_key"), addr.getString("v4"), addr.optString("v6"), reserved, o.optString("id"), o.optString("token"))
     }
 
@@ -168,6 +175,6 @@ object Warp {
     fun servers(a: Account, endpoints: List<String>): List<Server> = endpoints.map { ep ->
         val host = ep.substringBeforeLast(':'); val port = ep.substringAfterLast(':').toInt()
         Server(name = (if (a.plus) "WARP+ " else "WARP ") + ep, protocol = "wireguard", address = host, port = port, secret = a.privateKey, pbk = a.peerKey,
-            localAddress = "${a.v4}/32", reserved = a.reserved, mtu = 1280, source = SOURCE)
+            localAddress = WarpSetupPolicy.v4Address(a.v4), reserved = a.reserved, mtu = 1280, source = SOURCE)
     }
 }
