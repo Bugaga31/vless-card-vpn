@@ -1,5 +1,13 @@
 package com.vlesscardvpn
 
+import androidx.activity.compose.setContent
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.material3.*
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.dp
 import android.graphics.Bitmap
 import android.view.accessibility.AccessibilityNodeInfo
 import androidx.test.core.app.ActivityScenario
@@ -66,8 +74,29 @@ class DashboardUiR190Test {
         }
         if(large) {shell("settings put system font_scale 1.0");shell("wm size reset");shell("wm density reset")}
     }
+    private fun manualProgress(name:String,large:Boolean=false) {
+        if(large) {shell("wm size 720x1600");shell("wm density 360");shell("settings put system font_scale 1.5");Thread.sleep(1000)}
+        Actions.progress.value=Actions.Progress(title="Ручная проверка серверов",running=true,done=3,total=12,
+            message="Проверяем HTTPS и Telegram. Текущий маршрут остаётся подключён.")
+        ActivityScenario.launch(MainActivity::class.java).use {scenario ->
+            scenario.onActivity {activity -> activity.setContent {
+                MaterialTheme(colorScheme=darkColorScheme(primary=Color(0xFF8FC2FF),background=Color(0xFF10151C),
+                    surface=Color(0xFF1A222E),onSurface=Color(0xFFF0F6FC),onSurfaceVariant=Color(0xFFB3C6D5))) {
+                    Surface(Modifier.fillMaxSize(),color=MaterialTheme.colorScheme.background) {
+                        Column(Modifier.padding(20.dp).verticalScroll(rememberScrollState())) {
+                            com.vlesscardvpn.ui.LiveProgress(stop=true)
+                        }
+                    }
+                }
+            }}
+            capture(name,"Остановить проверку")
+        }
+        Actions.progress.value=Actions.Progress()
+        if(large) {shell("settings put system font_scale 1.0");shell("wm size reset");shell("wm density reset")}
+    }
     @Test fun captureRealDashboardStatesWithoutConnectingToVpn() {
         try {
+            manualProgress("manual-progress");manualProgress("manual-progress-large",large=true)
             show("idle-dark");show("idle-light",theme="light");show("searching",state=Tunnel.State.CONNECTING)
             show("wait-offline",state=Tunnel.State.CONNECTING,wait=AutoSearchCampaign.WaitState(8,AutoSearchCampaign.WaitReason.OFFLINE,2000))
             show("wait-catalog",state=Tunnel.State.CONNECTING,wait=AutoSearchCampaign.WaitState(8,AutoSearchCampaign.WaitReason.CATALOG_RETRY,5000))
