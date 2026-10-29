@@ -1,0 +1,34 @@
+{
+  "source_sha": "79b250d84f0cdda84be441002f99de85655ca9da",
+  "run_id": "40870220193",
+  "rid": "win-x64",
+  "core_version": "v26.9.30",
+  "core_archive_sha256": "b17a619343c11b89d8faf36278298856749b15c52277d875d32051b33dcda617",
+  "core_tests_passed": true,
+  "embedded_core_config_passed": true,
+  "window_open_close_passed": true,
+  "scope": "local_SOCKS5_not_system_TUN_not_live_operator_DPI",
+  "files": {
+    "desktop/App/Program.cs": "92c0523233c0b5d2da38116d6947c5a63e48d5d5979ac6000c4921ca3f85a2fb",
+    "desktop/App/THIRD-PARTY-NOTICES.txt": "3889e630b4925ae822707995cf65c610c43d92656b71f3c3dd4e29c0f9b2bdee",
+    "desktop/App/VlessCard.Desktop.csproj": "8773c4d8b4887aac13ffdefa6d04d1e6b9cafd52010de55851fab5380ab352f2",
+    "desktop/Core/AutoSelector.cs": "63d99291680f1d89f61b392005598b3127569b75ecdbb14cee2bfbff25c6dcf2",
+    "desktop/Core/BundledCore.cs": "625fef5d24218a996367154b1a1693c1f3fc6664cf05d3fc3824f3cfdb508f57",
+    "desktop/Core/Route.cs": "b7c68a225b63ecd14091bbb70dcf918dbc9cb28ecd40c6bd960d6a3a80bebd0a",
+    "desktop/Core/VlessCard.Core.csproj": "353809367201f4c18664096c4fb5666e8b4a765363ff4102b242028d4730cd9c",
+    "desktop/README-0.3.md": "27711c109fa84189b39f8336754e84eb8221b2c95b45ccddb0f636197256c89c",
+    "desktop/README.md": "ed150f78d40743fec31b2f21385d6cc27d81be0804fc206e90f3efae5a4dd233",
+    "desktop/Tests/Program.cs": "ca1b569bccb4e77a02a8cd3c584509237e76e5c3db7a98dbb710099069d48329",
+    "desktop/Tests/VlessCard.Tests.csproj": "488ec4303b9a73240d8fcc12d905d22f16840ab57a9a8db5e7318b66de408f53",
+    "desktop/Windows/ChildProcessJob.cs": "75f87e4f938072f00c8aeae52360a0d8f05ba276a7bb57ca480eb5cb7c21793c",
+    "desktop/Windows/Program.cs": "1647c659dfdd3eb7a8724e7576b785b898be4e0bac36ccab94984a7868fac3f1",
+    "desktop/Windows/VlessCard.Windows.csproj": "3f20150278d899e32e757398c1bcb0bbfd806d53282fb30a05d29b7da48d83d6",
+    "desktop/Windows/XraySession.cs": "8fda5647ab979d8b445a3987845eadf349007b4a5202eba9f9d1b0f391c136af",
+    "tools/desktop/package_linux.py": "f26b153f8b7bbdf4771460ced1fc3ea31c90f9713542666a2f4395bb97de0ce1",
+    "tools/desktop/prepare_core.py": "8d64b0715672ba4e5bb168e558ae3933dbe9d18bc13f1b2fe2dbb849c42015aa"
+  },
+  "assets": {
+    "VLESS-Card-Desktop-0.3.0-windows-x64.exe": "b369c5f3e310a5d95c99b4a25b06169d3ebb8c4eb8bef2488c197e68a5de2f77",
+    "win-x64.png": "9cf64e0c7cde94bfbfbb1029254a263a16b7bd6894b29e351a62de8b9c233534"
+  }
+}
