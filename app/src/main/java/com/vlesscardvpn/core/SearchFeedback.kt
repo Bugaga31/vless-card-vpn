@@ -14,7 +14,7 @@ object SearchFeedback {
         val state=when(wait.reason) {
             AutoSearchCampaign.WaitReason.OFFLINE -> "Нет сети. Ждём восстановления, серверы сейчас не проверяются."
             AutoSearchCampaign.WaitReason.CATALOG_RETRY -> "Маршруты текущего каталога уже были в очереди. Ждём новые серверы или повторную попытку; перепроверим очередь через $seconds с."
-            AutoSearchCampaign.WaitReason.BACKOFF -> "Волна ${wait.round.toLong().coerceAtLeast(0)+1} завершена. Пауза $seconds с перед следующей порцией."
+            AutoSearchCampaign.WaitReason.BACKOFF -> "Волна ${wait.round.toLong().coerceAtLeast(0)+1} завершена. Следующая волна через $seconds с."
         }
         return "$state Завершено обычных проб: $done; незавершённых: $active. Поиск можно отменить кнопкой выше."
     }

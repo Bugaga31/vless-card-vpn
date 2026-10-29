@@ -335,9 +335,10 @@ private fun NetCard(on: Boolean, cfgKey: Int) {
 fun LiveProgress(stop: Boolean = false, show: (Actions.Progress) -> Boolean = { true }) {
     val p by Actions.progress.collectAsState()
     if (!(p.running || p.message.isNotEmpty()) || !show(p)) return
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.weight(1f)) { ProgressBlock(p) }
-        if (stop && p.running) TextButton(onClick = { Actions.cancel() }) { Text("Стоп") }
+    Column(Modifier.fillMaxWidth()) {
+        ProgressBlock(p)
+        if (stop && p.running) TextButton(onClick = { Actions.cancel() },
+            modifier=Modifier.align(Alignment.End).heightIn(min=48.dp)) { Text("Остановить проверку") }
     }
 }
 
@@ -346,14 +347,14 @@ fun ProgressBlock(p: Actions.Progress) {
     Card(Modifier.fillMaxWidth().padding(top=12.dp),shape=RoundedCornerShape(12.dp),
         colors=CardDefaults.cardColors(containerColor=MaterialTheme.colorScheme.surface)) {
         Column(Modifier.padding(16.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
-            Text(if(p.running) p.title else "Результат проверки",modifier=Modifier.semantics { liveRegion=LiveRegionMode.Polite },fontSize=15.sp,fontWeight=FontWeight.SemiBold)
+            Text(if(p.running) p.title else "Результат проверки",modifier=Modifier.semantics { liveRegion=LiveRegionMode.Polite },fontSize=16.sp,fontWeight=FontWeight.SemiBold)
             if(p.running) {
                 com.vlesscardvpn.core.SearchFeedback.counter(p.done,p.total,p.message)?.let { counter ->
                     Text(counter,fontSize=14.sp,color=MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 if(p.total>0) LinearProgressIndicator(progress={com.vlesscardvpn.core.ExperiencePolicy.progress(p.done,p.total) ?: 0f},modifier=Modifier.fillMaxWidth())
             }
-            if(p.message.isNotBlank()) Text(p.message,fontSize=14.sp,lineHeight=20.sp,color=MaterialTheme.colorScheme.onSurfaceVariant)
+            if(p.message.isNotBlank()) Text(p.message,fontSize=15.sp,lineHeight=22.sp,color=MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
