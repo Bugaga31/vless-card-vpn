@@ -548,7 +548,8 @@ object Actions {
         // The 2 fastest of every server are probed again, now with YouTube; the one that passes again wins.
         val confirm = pinned.flatMap { s -> good[s.id].orEmpty().let { g -> (g.sortedBy { it.second }.take(2) + g.sortedWith(compareBy({ Masks.cost(it.first) }, { it.second })).take(1)) }
             .distinctBy { it.first.id }.map { s to it.first } }
-        if (confirm.size > pinned.size / 2 && android.os.SystemClock.elapsedRealtime() < deadline) {
+        val confirmedServers = HashSet<String>()
+        if (MaskSamplePolicy.needsConfirmation(confirm.size,pinned.size,strict) && android.os.SystemClock.elapsedRealtime() < deadline) {
             val res = java.util.concurrent.ConcurrentHashMap<Int, Probe>()
             progress.value = progress.value.copy(title = "Двойная проверка маскировок")
             val (own2, port2) = dpiForTests(confirm.map { it.second })
@@ -562,12 +563,14 @@ object Actions {
                 // passed again (with YouTube) and the fastest in real use: ping + download speed + how heavy the mask is
                 val pick = mine.filter { res[it]?.works == true && res[it]?.ytOk == true && (!strict && res[it]?.tgOk!=false || res[it]?.let(AutoLatencyPolicy::accepts)==true) }.minByOrNull { eff(confirm[it].second, res.getValue(it)) }
                     ?: mine.filter { res[it]?.let { p -> p.works && p.ytOk != false && (!strict && p.tgOk!=false || AutoLatencyPolicy.accepts(p)) } == true }.minByOrNull { eff(confirm[it].second, res.getValue(it)) }
-                if (pick != null) best[s.id] = confirm[pick].second to res.getValue(pick)
+                if (pick != null) { best[s.id] = confirm[pick].second to res.getValue(pick); confirmedServers += s.id }
                 else if (mine.any { res[it] != null && res[it] !== Tester.SKIPPED }) best.remove(s.id)
                 mine.forEach { i -> if (res[i]?.works == false) synchronized(best) { tried += Triple(s.id, confirm[i].second.id, false) } }
             }
         }
         if (Net.key(app) != net0 || Net.underlying(app)?.toString() != maskNetwork) return "Сеть изменилась — результаты старой маскировки отброшены"
+        // A strict search may not adopt first-pass evidence when confirmation timed out or was skipped.
+        if (strict) best.keys.retainAll(confirmedServers)
         val net = net0
         // Passed mutants join the auto masks (before any server points at them); failed fresh ones are forgotten.
         val keptIds = kept.map { it.id }.toSet()

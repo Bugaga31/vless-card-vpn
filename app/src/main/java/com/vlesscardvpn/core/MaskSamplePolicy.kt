@@ -21,6 +21,8 @@ object MaskSamplePolicy {
     fun invalidate(current:ServerState):ServerState = current.copy(realMs=-1,bigOk=null,ytOk=null,tgOk=null,tgMs=0,kbps=0,
         checkedAt=0,serviceNetwork="",serviceMask="",serviceCheckedAt=0,speedNetwork="",speedMask="",speedCheckedAt=0)
 
+    fun needsConfirmation(candidates:Int,pinned:Int,strict:Boolean):Boolean = candidates>0 && (strict || candidates>pinned/2)
+
     /** Both isolated samples must complete; the more conservative measured throughput is used. */
     fun confirmed(first:Probe,second:Probe):Probe? = if(AutoLatencyPolicy.accepts(first) && AutoLatencyPolicy.accepts(second) && first.works && second.works && first.bigOk==true && second.bigOk==true &&
         first.tgOk==true && second.tgOk==true && first.kbps>0 && second.kbps>0)
