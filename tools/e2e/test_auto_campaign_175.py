@@ -21,7 +21,7 @@ class ContinuousAuto(unittest.TestCase):
   self.assertIn('.take(AutoDiscoveryPolicy.RANKING_WINDOW) else readyCatalog',s)
   p=s.split('suspend fun quickTest',1)[1]
   # r188 records only admitted probes; merely queued IDs must survive a deadline.
-  probe=p.index('val fastOk = realTest')
+  probe=p.index('val fastOk = ForegroundProbePlan.run')
   self.assertNotIn('attempted.addAll(shortlist.map',p)
   recorded=p.index('onAttempt = {server->if(firstWaveOnly) attempted.add(server.id)')
   self.assertGreater(recorded,probe)
