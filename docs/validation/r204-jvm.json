@@ -1,6 +1,6 @@
 {
-  "source_sha": "e7fa365c43baa432b704cd8bafdb06bc334586e4",
-  "run_id": "40950578873",
+  "source_sha": "6dd3cd62ca6a4d0f0175eac19271ecf0a56c6175",
+  "run_id": "40952995807",
   "steps": {
     "source": "success",
     "host": "success",
@@ -2423,8 +2423,8 @@
     "w: file:///home/runner/work/vless-card-vpn/vless-card-vpn/app/src/main/java/com/vlesscardvpn/xray/XrayConfigBuilder.kt:371:13 Variable 'only' is never used",
     "",
     "> Task :app:compileDebugJavaWithJavac",
-    "> Task :app:bundleDebugClassesToRuntimeJar",
     "> Task :app:bundleDebugClassesToCompileJar",
+    "> Task :app:bundleDebugClassesToRuntimeJar",
     "> Task :app:processDebugJavaRes",
     "> Task :app:javaPreCompileRelease",
     "> Task :app:compileReleaseJavaWithJavac",
@@ -2477,8 +2477,8 @@
     "> Task :vpn-test-probe:generateDebugResources",
     "> Task :vpn-test-probe:mergeDebugResources",
     "> Task :vpn-test-probe:packageDebugResources",
-    "> Task :vpn-test-probe:parseDebugLocalResources",
     "> Task :vpn-test-probe:createDebugCompatibleScreenManifests",
+    "> Task :vpn-test-probe:parseDebugLocalResources",
     "> Task :vpn-test-probe:extractDeepLinksDebug",
     "> Task :vpn-test-probe:processDebugMainManifest",
     "> Task :vpn-test-probe:processDebugManifest",
@@ -2494,7 +2494,7 @@
     "> Task :vpn-test-probe:compileDebugUnitTestJavaWithJavac",
     "> Task :vpn-test-probe:testDebugUnitTest",
     "",
-    "BUILD SUCCESSFUL in 5m 32s",
+    "BUILD SUCCESSFUL in 6m 24s",
     "75 actionable tasks: 75 executed"
   ]
 }
