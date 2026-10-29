@@ -54,6 +54,7 @@ class DashboardUiR190Test {
         if(large) {shell("wm size 720x1600");shell("wm density 360");shell("settings put system font_scale 1.5");Thread.sleep(1000)}
         Store.update {it.copy(settings=it.settings.copy(theme=theme,welcomeSound=false,reducedMotion=true,
             oceanBackground=false,oceanMotion=false,secureScreen=false,hideServerNames=true))}
+        TorExitStatus.clear()
         ConnectionPassport.clear()
         if(state==Tunnel.State.CONNECTED) ConnectionPassport.fullModules(ModuleHealthPolicy.assess(
             HealthInput(true,100,true,true,true,if(ok==true) 120 else 700,null),HealthRequirements()))
