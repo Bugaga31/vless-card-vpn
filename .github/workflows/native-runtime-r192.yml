@@ -3,6 +3,9 @@ on:
   push:
     branches: ['integration/power-device-r192']
     paths-ignore: ['docs/validation/**']
+concurrency:
+  group: native-power-r192
+  cancel-in-progress: true
 permissions: {contents: read}
 jobs:
   android:
@@ -17,7 +20,7 @@ jobs:
         run: |
           set -euo pipefail
           base64 -d tools/patches/power-r192.patch.gz.b64 | gzip -d > "$RUNNER_TEMP/power-r192.patch"
-          echo '7c6468cae6b2ae80a29f6a63b858662e94c74ac1c36af9647088b3b80632960c  '"$RUNNER_TEMP/power-r192.patch" | sha256sum -c -
+          echo 'f3173f93b296b2bc2f8b3b05a36a4d801953dde7f629eb3b9bb9469d36626926  '"$RUNNER_TEMP/power-r192.patch" | sha256sum -c -
           git fetch --quiet --no-tags origin 758681a349e08d1a7c1f16da6d36a0672bddf79a
           git restore --source 758681a349e08d1a7c1f16da6d36a0672bddf79a -- app/src/main app/src/test
           PATCH="$RUNNER_TEMP/power-r192.patch"
