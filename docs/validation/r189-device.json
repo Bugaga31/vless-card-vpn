@@ -1,0 +1,45 @@
+{
+  "source_sha": "8fc2aa618361fdbf169883ee5d8764243c43c541",
+  "run_id": "40817905739",
+  "passed": true,
+  "runtime_tests_executed": true,
+  "count": 25,
+  "scope": "android33_native_vless_tls_not_full_app_tun_not_operator_dpi",
+  "result_tail": "TUS: stream=\nINSTRUMENTATION_STATUS: test=fastSecondDcWinsWhileFirstIsStillStalled\nINSTRUMENTATION_STATUS_CODE: 1\nINSTRUMENTATION_STATUS: class=com.vlesscardvpn.FirstConnectRuntimeR189Test\nINSTRUMENTATION_STATUS: current=15\nINSTRUMENTATION_STATUS: id=AndroidJUnitRunner\nINSTRUMENTATION_STATUS: numtests=25\nINSTRUMENTATION_STATUS: stream=.\nINSTRUMENTATION_STATUS: test=fastSecondDcWinsWhileFirstIsStillStalled\nINSTRUMENTATION_STATUS_CODE: 0\nINSTRUMENTATION_STATUS: class=com.vlesscardvpn.FirstConnectRuntimeR189Test\nINSTRUMENTATION_STATUS: current=16\nINSTRUMENTATION_STATUS: id=AndroidJUnitRunner\nINSTRUMENTATION_STATUS: numtests=25\nINSTRUMENTATION_STATUS: stream=\nINSTRUMENTATION_STATUS: test=firstProbeIsShortButLatencyThresholdUnchanged\nINSTRUMENTATION_STATUS_CODE: 1\nINSTRUMENTATION_STATUS: class=com.vlesscardvpn.FirstConnectRuntimeR189Test\nINSTRUMENTATION_STATUS: current=16\nINSTRUMENTATION_STATUS: id=AndroidJUnitRunner\nINSTRUMENTATION_STATUS: numtests=25\nINSTRUMENTATION_STATUS: stream=.\nINSTRUMENTATION_STATUS: test=firstProbeIsShortButLatencyThresholdUnchanged\nINSTRUMENTATION_STATUS_CODE: 0\nINSTRUMENTATION_STATUS: class=com.vlesscardvpn.FirstConnectRuntimeR189Test\nINSTRUMENTATION_STATUS: current=17\nINSTRUMENTATION_STATUS: id=AndroidJUnitRunner\nINSTRUMENTATION_STATUS: numtests=25\nINSTRUMENTATION_STATUS: stream=\nINSTRUMENTATION_STATUS: test=parallelRegistrationAndCloseNeverLoseHooks\nINSTRUMENTATION_STATUS_CODE: 1\nINSTRUMENTATION_STATUS: class=com.vlesscardvpn.FirstConnectRuntimeR189Test\nINSTRUMENTATION_STATUS: current=17\nINSTRUMENTATION_STATUS: id=AndroidJUnitRunner\nINSTRUMENTATION_STATUS: numtests=25\nINSTRUMENTATION_STATUS: stream=.\nINSTRUMENTATION_STATUS: test=parallelRegistrationAndCloseNeverLoseHooks\nINSTRUMENTATION_STATUS_CODE: 0\nINSTRUMENTATION_STATUS: class=com.vlesscardvpn.FirstConnectRuntimeR189Test\nINSTRUMENTATION_STATUS: current=18\nINSTRUMENTATION_STATUS: id=AndroidJUnitRunner\nINSTRUMENTATION_STATUS: numtests=25\nINSTRUMENTATION_STATUS: stream=\nINSTRUMENTATION_STATUS: test=hookRegisteredAfterCloseIsClosedImmediately\nINSTRUMENTATION_STATUS_CODE: 1\nINSTRUMENTATION_STATUS: class=com.vlesscardvpn.FirstConnectRuntimeR189Test\nINSTRUMENTATION_STATUS: current=18\nINSTRUMENTATION_STATUS: id=AndroidJUnitRunner\nINSTRUMENTATION_STATUS: numtests=25\nINSTRUMENTATION_STATUS: stream=.\nINSTRUMENTATION_STATUS: test=hookRegisteredAfterCloseIsClosedImmediately\nINSTRUMENTATION_STATUS_CODE: 0\nINSTRUMENTATION_STATUS: class=com.vlesscardvpn.FirstConnectRuntimeR189Test\nINSTRUMENTATION_STATUS: current=19\nINSTRUMENTATION_STATUS: id=AndroidJUnitRunner\nINSTRUMENTATION_STATUS: numtests=25\nINSTRUMENTATION_STATUS: stream=\nINSTRUMENTATION_STATUS: test=invalidNonceOnBothDcsCannotPass\nINSTRUMENTATION_STATUS_CODE: 1\nINSTRUMENTATION_STATUS: class=com.vlesscardvpn.FirstConnectRuntimeR189Test\nINSTRUMENTATION_STATUS: current=19\nINSTRUMENTATION_STATUS: id=AndroidJUnitRunner\nINSTRUMENTATION_STATUS: numtests=25\nINSTRUMENTATION_STATUS: stream=.\nINSTRUMENTATION_STATUS: test=invalidNonceOnBothDcsCannotPass\nINSTRUMENTATION_STATUS_CODE: 0\nINSTRUMENTATION_STATUS: class=com.vlesscardvpn.FirstConnectRuntimeR189Test\nINSTRUMENTATION_STATUS: current=20\nINSTRUMENTATION_STATUS: id=AndroidJUnitRunner\nINSTRUMENTATION_STATUS: numtests=25\nINSTRUMENTATION_STATUS: stream=\nINSTRUMENTATION_STATUS: test=offlinePollingKeepsTwoSecondPause\nINSTRUMENTATION_STATUS_CODE: 1\nINSTRUMENTATION_STATUS: class=com.vlesscardvpn.FirstConnectRuntimeR189Test\nINSTRUMENTATION_STATUS: current=20\nINSTRUMENTATION_STATUS: id=AndroidJUnitRunner\nINSTRUMENTATION_STATUS: numtests=25\nINSTRUMENTATION_STATUS: stream=.\nINSTRUMENTATION_STATUS: test=offlinePollingKeepsTwoSecondPause\nINSTRUMENTATION_STATUS_CODE: 0\nINSTRUMENTATION_STATUS: class=com.vlesscardvpn.FirstConnectRuntimeR189Test\nINSTRUMENTATION_STATUS: current=21\nINSTRUMENTATION_STATUS: id=AndroidJUnitRunner\nINSTRUMENTATION_STATUS: numtests=25\nINSTRUMENTATION_STATUS: stream=\nINSTRUMENTATION_STATUS: test=bothStalledDcsAreUnknownNotPositive\nINSTRUMENTATION_STATUS_CODE: 1\nINSTRUMENTATION_STATUS: class=com.vlesscardvpn.FirstConnectRuntimeR189Test\nINSTRUMENTATION_STATUS: current=21\nINSTRUMENTATION_STATUS: id=AndroidJUnitRunner\nINSTRUMENTATION_STATUS: numtests=25\nINSTRUMENTATION_STATUS: stream=.\nINSTRUMENTATION_STATUS: test=bothStalledDcsAreUnknownNotPositive\nINSTRUMENTATION_STATUS_CODE: 0\nINSTRUMENTATION_STATUS: class=com.vlesscardvpn.FirstConnectRuntimeR189Test\nINSTRUMENTATION_STATUS: current=22\nINSTRUMENTATION_STATUS: id=AndroidJUnitRunner\nINSTRUMENTATION_STATUS: numtests=25\nINSTRUMENTATION_STATUS: stream=\nINSTRUMENTATION_STATUS: test=onlineRetryDoesNotSleepSecondsBetweenWaves\nINSTRUMENTATION_STATUS_CODE: 1\nINSTRUMENTATION_STATUS: class=com.vlesscardvpn.FirstConnectRuntimeR189Test\nINSTRUMENTATION_STATUS: current=22\nINSTRUMENTATION_STATUS: id=AndroidJUnitRunner\nINSTRUMENTATION_STATUS: numtests=25\nINSTRUMENTATION_STATUS: stream=.\nINSTRUMENTATION_STATUS: test=onlineRetryDoesNotSleepSecondsBetweenWaves\nINSTRUMENTATION_STATUS_CODE: 0\nINSTRUMENTATION_STATUS: class=com.vlesscardvpn.FirstConnectRuntimeR189Test\nINSTRUMENTATION_STATUS: current=23\nINSTRUMENTATION_STATUS: id=AndroidJUnitRunner\nINSTRUMENTATION_STATUS: numtests=25\nINSTRUMENTATION_STATUS: stream=\nINSTRUMENTATION_STATUS: test=invalidLocalPortIsUnknown\nINSTRUMENTATION_STATUS_CODE: 1\nINSTRUMENTATION_STATUS: class=com.vlesscardvpn.FirstConnectRuntimeR189Test\nINSTRUMENTATION_STATUS: current=23\nINSTRUMENTATION_STATUS: id=AndroidJUnitRunner\nINSTRUMENTATION_STATUS: numtests=25\nINSTRUMENTATION_STATUS: stream=.\nINSTRUMENTATION_STATUS: test=invalidLocalPortIsUnknown\nINSTRUMENTATION_STATUS_CODE: 0\nINSTRUMENTATION_STATUS: class=com.vlesscardvpn.FirstConnectRuntimeR189Test\nINSTRUMENTATION_STATUS: current=24\nINSTRUMENTATION_STATUS: id=AndroidJUnitRunner\nINSTRUMENTATION_STATUS: numtests=25\nINSTRUMENTATION_STATUS: stream=\nINSTRUMENTATION_STATUS: test=normalProbeCompletionAlsoReleasesOwnedResources\nINSTRUMENTATION_STATUS_CODE: 1\nINSTRUMENTATION_STATUS: class=com.vlesscardvpn.FirstConnectRuntimeR189Test\nINSTRUMENTATION_STATUS: current=24\nINSTRUMENTATION_STATUS: id=AndroidJUnitRunner\nINSTRUMENTATION_STATUS: numtests=25\nINSTRUMENTATION_STATUS: stream=.\nINSTRUMENTATION_STATUS: test=normalProbeCompletionAlsoReleasesOwnedResources\nINSTRUMENTATION_STATUS_CODE: 0\nINSTRUMENTATION_STATUS: class=com.vlesscardvpn.FirstConnectRuntimeR189Test\nINSTRUMENTATION_STATUS: current=25\nINSTRUMENTATION_STATUS: id=AndroidJUnitRunner\nINSTRUMENTATION_STATUS: numtests=25\nINSTRUMENTATION_STATUS: stream=\nINSTRUMENTATION_STATUS: test=oneBrokenCleanupCannotHideOtherSockets\nINSTRUMENTATION_STATUS_CODE: 1\nINSTRUMENTATION_STATUS: class=com.vlesscardvpn.FirstConnectRuntimeR189Test\nINSTRUMENTATION_STATUS: current=25\nINSTRUMENTATION_STATUS: id=AndroidJUnitRunner\nINSTRUMENTATION_STATUS: numtests=25\nINSTRUMENTATION_STATUS: stream=.\nINSTRUMENTATION_STATUS: test=oneBrokenCleanupCannotHideOtherSockets\nINSTRUMENTATION_STATUS_CODE: 0\nINSTRUMENTATION_RESULT: stream=\n\nTime: 31.418\n\nOK (25 tests)\n\n\nINSTRUMENTATION_CODE: -1\n",
+  "ui_captures_executed": true,
+  "ui_scope": "synthetic_states_real_production_compose_not_live_vpn",
+  "screenshots": [
+    {
+      "file": "connected.png",
+      "sha256": "d3fe6835e2dae5f030f1e5de979a8f8869374ad34baa2ded0481020e3c82dd8b"
+    },
+    {
+      "file": "error.png",
+      "sha256": "a671984abeb448ecc2f56dd48fa2b7f74895de9c3dc164b85a773f96778778fc"
+    },
+    {
+      "file": "idle-dark.png",
+      "sha256": "d2247f314373db48d254f8a37817498d2b6c4bc6c80afbcdace8d9dc79aa724d"
+    },
+    {
+      "file": "idle-light.png",
+      "sha256": "17cab9ff413c57b2607bb58a04494cd1fbafb5d58a2c09e4dbf6ed6230ab099e"
+    },
+    {
+      "file": "large-narrow.png",
+      "sha256": "862b845617e0d7c4c426bb644156c1739be69f4879ccaf28d08c38b60d9cec43"
+    },
+    {
+      "file": "partial.png",
+      "sha256": "ac1258f4b42d1c82e2e9dfc59a53cb7ea628d72b274508a0a71e495ffe17fd53"
+    },
+    {
+      "file": "searching.png",
+      "sha256": "0d0860955ec9c65d1ad08377bc55adbd6fafd7e85f6a179483a89fe2a621a041"
+    },
+    {
+      "file": "services.png",
+      "sha256": "826c377dc0cbebb7aab33443039ac2c9adcfb422ba793107afba76843ceb34a2"
+    }
+  ]
+}
