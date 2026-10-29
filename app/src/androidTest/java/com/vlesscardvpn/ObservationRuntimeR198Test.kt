@@ -52,8 +52,8 @@ class ObservationRuntimeR198Test {
  @Test fun torRotationClampsOverflow(){assertEquals(86400000L,com.vlesscardvpn.tor.TorCountryPolicy.interval(Int.MAX_VALUE))}
  @Test fun torCountriesPersist(){val s=com.vlesscardvpn.model.Settings(torExitCountries="US",torRotationSeconds=5);assertEquals("US",com.vlesscardvpn.model.Settings.fromJson(s.toJson()).torExitCountries)}
  @Test fun torFiveSecondsPersist(){val s=com.vlesscardvpn.model.Settings(torRotationSeconds=5);assertEquals(5,com.vlesscardvpn.model.Settings.fromJson(s.toJson()).torRotationSeconds)}
- @Test fun heatProtectionIsSeparate(){assertEquals(30000L,SearchPacingPolicy.rest(PowerPolicy.Plan(memory=PowerPolicy.Memory(hot=true))))}
- @Test fun callProtectionIsSeparate(){assertEquals(15000L,SearchPacingPolicy.rest(PowerPolicy.Plan(voiceCallActive=true)))}
+ @Test fun heatProtectionIsSeparate(){assertEquals(5000L,SearchPacingPolicy.rest(PowerPolicy.Plan(memory=PowerPolicy.Memory(hot=true))))}
+ @Test fun callProtectionIsSeparate(){assertEquals(5000L,SearchPacingPolicy.rest(PowerPolicy.Plan(voiceCallActive=true)))}
  @Test fun mobileRecoveryCopyNamesNetwork(){assertTrue(NetworkRecoveryPresentation.message("Моб.: LTE").contains("мобильную"))}
  @Test fun wifiRecoveryDoesNotPromiseFiveSecondCompletion(){val s=NetworkRecoveryPresentation.message("Wi-Fi");assertTrue(s.contains("Wi-Fi"));assertFalse(s.contains("5"))}
 

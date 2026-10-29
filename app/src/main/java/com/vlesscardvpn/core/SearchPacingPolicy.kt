@@ -2,11 +2,12 @@ package com.vlesscardvpn.core
 
 /** Only discovery pacing; never drops a live VPN or weakens service acceptance. */
 object SearchPacingPolicy {
-    fun rest(plan:PowerPolicy.Plan):Long = when {
-        plan.memory.hot -> 30000L // thermal protection, not ordinary inter-wave backoff
-        plan.voiceCallActive -> 15000L
-        else -> AutoSearchCampaign.WAVE_PAUSE_MS
-    }
+    /** Explicit connect search keeps a five-second inter-wave pause in every power profile.
+     * Heat/call/battery protection still caps foreground probe concurrency in PowerPolicy;
+     * optional background work retains its own independent deferral rules.
+     */
+    @Suppress("UNUSED_PARAMETER")
+    fun rest(plan:PowerPolicy.Plan):Long = AutoSearchCampaign.WAVE_PAUSE_MS
 
 }
 

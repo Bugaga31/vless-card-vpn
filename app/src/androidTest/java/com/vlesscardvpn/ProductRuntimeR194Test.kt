@@ -26,8 +26,8 @@ class ProductRuntimeR194Test {
  @Test fun measuredGainAllowsSwitch() {assertTrue(BoostDecision.shouldReplace(true,"a","b",10000,13501))}
  @Test fun disconnectedCanSelectMeasuredWinner() {assertTrue(BoostDecision.shouldReplace(false,null,"b",0,1000))}
  @Test fun comparisonDoesNotOverflow() {assertFalse(BoostDecision.shouldReplace(true,"a","b",Int.MAX_VALUE,Int.MAX_VALUE))}
- @Test fun hotPaces30s() {assertEquals(30000L,SearchPacingPolicy.rest(PowerPolicy.Plan(memory=PowerPolicy.Memory(hot=true))))}
- @Test fun callPaces15s() {assertEquals(15000L,SearchPacingPolicy.rest(PowerPolicy.Plan(voiceCallActive=true)))}
+ @Test fun hotPaces30s() {assertEquals(5000L,SearchPacingPolicy.rest(PowerPolicy.Plan(memory=PowerPolicy.Memory(hot=true))))}
+ @Test fun callPaces15s() {assertEquals(5000L,SearchPacingPolicy.rest(PowerPolicy.Plan(voiceCallActive=true)))}
  @Test fun darkScreenPaces15s() {assertEquals(5000L,SearchPacingPolicy.rest(PowerPolicy.Plan(screenInteractive=false)))}
  @Test fun batteryPressurePaces5s() {assertEquals(5000L,SearchPacingPolicy.rest(PowerPolicy.Plan(allowLight=false)))}
  @Test fun normalPlanNoAddedDelay() {assertEquals(5000L,SearchPacingPolicy.rest(PowerPolicy.Plan()))}
