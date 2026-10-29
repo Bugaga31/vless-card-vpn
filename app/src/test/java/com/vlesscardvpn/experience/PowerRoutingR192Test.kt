@@ -40,7 +40,7 @@ class PowerRoutingR192Test {
  @Test fun probeCadenceRespectsProfile() {assertEquals("90s",BatteryProbePolicy.interval("eco"));assertEquals("45s",BatteryProbePolicy.interval("balanced"));assertEquals("20s",BatteryProbePolicy.interval("fast"))}
  @Test fun unknownProfileUsesConservativeDefault() {assertEquals("45s",BatteryProbePolicy.interval("unknown"))}
  @Test fun nativeObservatoryNoLongerEveryTenSeconds() {val c=config(Settings(powerProfile="eco",balance=Balance.LEAST_PING),true);assertEquals("90s",c.getJSONObject("observatory").getString("probeInterval"))}
- @Test fun foregroundStillAvailableOnMeteredSaver() {val p=PowerPolicy.evaluate(PowerPolicy.Input(0,saver=true,metered=true),PowerPolicy.Options());assertFalse(p.allowed);assertEquals(8,p.foregroundRealParallel)}
+ @Test fun foregroundStillAvailableWithFourSlotsOnMeteredSaver() {val p=PowerPolicy.evaluate(PowerPolicy.Input(0,saver=true,metered=true),PowerPolicy.Options());assertFalse(p.allowed);assertEquals(4,p.foregroundRealParallel)}
  @Test fun hotForegroundRemainsBounded() {assertEquals(2,PowerPolicy.evaluate(PowerPolicy.Input(0,temp=46.0),PowerPolicy.Options()).foregroundRealParallel)}
  @Test fun callForegroundSingleSlot() {assertEquals(1,PowerPolicy.evaluate(PowerPolicy.Input(0,voiceCall=true),PowerPolicy.Options()).foregroundRealParallel)}
  private fun closed()=Channel<List<Int>>(4).apply {close()}

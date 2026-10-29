@@ -750,7 +750,7 @@ object Actions {
         if (fresh.isNotEmpty()) realTest(fresh, "Проверяю быстрые VLESS-серверы", big = false, youtube = true, telegram = false, attempts = 1)
         val state = Store.state.value
         if(!sameNetwork()) return@launch "Сеть изменилась — выбор маршрута оставлен без изменений."
-        val top = (state.selected.filter(AutoEligibility::vlessServer) + state.servers.filter { state.state(it).works && AutoEligibility.vlessServer(it) }
+        val top = (state.selected.filter(AutoEligibility::vlessServer).take(1) + state.servers.filter { state.state(it).works && AutoEligibility.vlessServer(it) }
             .sortedWith(ServerChoice.downloadOrder({ state.state(it) }, Net.key(app), System.currentTimeMillis())).take(6) +
             fresh.filter { state.state(it).works }).distinctBy { it.id }
         if (top.isEmpty()) return@launch "Рабочий VLESS-сервер не найден — прямое подключение не включено. Проверьте серверы и повторите."
