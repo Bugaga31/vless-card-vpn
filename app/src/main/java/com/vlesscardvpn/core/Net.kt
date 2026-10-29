@@ -23,7 +23,7 @@ object Net {
     }.getOrNull()
     fun pathRevision(context:Context,network:android.net.Network):String = runCatching {
         val links=context.getSystemService(ConnectivityManager::class.java).getLinkProperties(network) ?: return@runCatching ""
-        NetworkPath.revision(links.interfaceName.orEmpty(),links.mtu,
+        NetworkPath.revision(links.interfaceName.orEmpty(),if(android.os.Build.VERSION.SDK_INT>=29) links.mtu else 0,
             links.linkAddresses.map { it.toString() },links.routes.map { it.toString() },
             links.dnsServers.mapNotNull { it.hostAddress })
     }.getOrDefault("")
