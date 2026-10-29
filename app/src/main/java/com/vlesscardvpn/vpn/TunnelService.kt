@@ -876,7 +876,7 @@ class TunnelService : VpnService() {
         }
     }
 
-    private fun scheduleOptimize(firstDelay: Long = 120_000) {
+    private fun scheduleOptimize(firstDelay: Long = 30_000) {
         val settings = Store.state.value.settings
         if (!com.vlesscardvpn.core.BackgroundRunPolicy.enabled(settings.mode == Mode.AUTO,settings.autoOptimize,
                 settings.torAll || settings.mode == Mode.BYEDPI || settings.mode == Mode.HYBRID)) {
@@ -897,15 +897,15 @@ class TunnelService : VpnService() {
                     break
                 }
                 if (com.vlesscardvpn.core.SessionHold.active()) { com.vlesscardvpn.core.BackgroundOptimization.show(com.vlesscardvpn.core.BackgroundOptimization.Stage.HOLD); delay(5000); continue }
-                while (asleep() && Tunnel.status.value.state == Tunnel.State.CONNECTED) { com.vlesscardvpn.core.BackgroundOptimization.show(com.vlesscardvpn.core.BackgroundOptimization.Stage.POWER); delay(60_000) } // no re-tests while the phone sleeps
+                while (asleep() && Tunnel.status.value.state == Tunnel.State.CONNECTED) { com.vlesscardvpn.core.BackgroundOptimization.show(com.vlesscardvpn.core.BackgroundOptimization.Stage.POWER); delay(com.vlesscardvpn.core.BackgroundReservePolicy.RETRY_MS) } // no re-tests while the phone sleeps
                 // Starting test cores/downloads is itself load, even when their resulting reconnect is deferred.
                 val startupRemaining = com.vlesscardvpn.core.MaintenanceReconnectPolicy.remaining(
                     android.os.SystemClock.elapsedRealtime(), connectedElapsed)
                 if (startupRemaining > 0) { com.vlesscardvpn.core.BackgroundOptimization.show(com.vlesscardvpn.core.BackgroundOptimization.Stage.SCHEDULED); delay(startupRemaining); continue }
-                if (!com.vlesscardvpn.core.PhonePower.refresh(this@TunnelService).allowLight) { com.vlesscardvpn.core.BackgroundOptimization.show(com.vlesscardvpn.core.BackgroundOptimization.Stage.POWER); delay(60_000); continue }
+                if (!com.vlesscardvpn.core.BackgroundReservePolicy.mayProbe(currentSettings.mode == Mode.AUTO,com.vlesscardvpn.core.PhonePower.refresh(this@TunnelService))) { com.vlesscardvpn.core.BackgroundOptimization.show(com.vlesscardvpn.core.BackgroundOptimization.Stage.POWER); delay(com.vlesscardvpn.core.BackgroundReservePolicy.RETRY_MS); continue }
                 if (Store.state.value.settings.protectActiveTraffic && userActive() &&
-                    !(Store.state.value.settings.mode == Mode.AUTO && usedServers.size < com.vlesscardvpn.core.AutoEligibility.ACTIVE)) { com.vlesscardvpn.core.BackgroundOptimization.show(com.vlesscardvpn.core.BackgroundOptimization.Stage.TRAFFIC); delay(60_000); continue } // hot phone: no background re-tests
-                if (chainMeasuring || usedChain != null) { com.vlesscardvpn.core.BackgroundOptimization.show(com.vlesscardvpn.core.BackgroundOptimization.Stage.CHAIN); delay(60_000);continue }
+                    !(Store.state.value.settings.mode == Mode.AUTO && usedServers.size < com.vlesscardvpn.core.AutoEligibility.ACTIVE)) { com.vlesscardvpn.core.BackgroundOptimization.show(com.vlesscardvpn.core.BackgroundOptimization.Stage.TRAFFIC); delay(com.vlesscardvpn.core.BackgroundReservePolicy.RETRY_MS); continue } // hot phone: no background re-tests
+                if (chainMeasuring || usedChain != null) { com.vlesscardvpn.core.BackgroundOptimization.show(com.vlesscardvpn.core.BackgroundOptimization.Stage.CHAIN); delay(com.vlesscardvpn.core.BackgroundReservePolicy.RETRY_MS);continue }
                 if (Actions.progress.value.running) { com.vlesscardvpn.core.BackgroundOptimization.show(com.vlesscardvpn.core.BackgroundOptimization.Stage.SCHEDULED); delay(5000); continue }
                 com.vlesscardvpn.core.BackgroundOptimization.show(com.vlesscardvpn.core.BackgroundOptimization.Stage.RUNNING)
                 val result = runCatching { Store.busy { Actions.optimize() } }.getOrElse {
@@ -921,8 +921,14 @@ class TunnelService : VpnService() {
                             com.vlesscardvpn.core.ServerChoice.measuredSpeed(s.state(it),Net.key(this@TunnelService),System.currentTimeMillis()) } else emptyList(),
                         usedServers.map { s.state(it).realMs }))) }
                 val reconnect = result || pending
-                // the user is in a call / watching video: wait a minute; still busy → skip, the next pass decides again
-                val busyNow = reconnect && userActive() && run { com.vlesscardvpn.core.BackgroundOptimization.show(com.vlesscardvpn.core.BackgroundOptimization.Stage.DEFERRED); Log.i("E2E", "optimize: user is busy — switch postponed"); delay(60_000); userActive() }
+                // Respect traffic protection; re-check deferred application in five seconds, not a minute.
+                val applySettings = Store.state.value.settings
+                val applyPower = com.vlesscardvpn.core.PhonePower.refresh(this@TunnelService)
+                val busyNow = reconnect && !com.vlesscardvpn.core.BackgroundReservePolicy.mayApply(
+                    applySettings.protectActiveTraffic,
+                    if (applySettings.protectActiveTraffic) userActive() else false,
+                    applyPower.voiceCallActive)
+                if (busyNow) com.vlesscardvpn.core.BackgroundOptimization.show(com.vlesscardvpn.core.BackgroundOptimization.Stage.DEFERRED)
                 if (reconnect && !busyNow && !com.vlesscardvpn.core.SessionHold.active() && Tunnel.status.value.state == Tunnel.State.CONNECTED) {
                     Log.i("E2E", "optimize: switching to faster servers")
                     com.vlesscardvpn.core.BackgroundOptimization.show(com.vlesscardvpn.core.BackgroundOptimization.Stage.APPLYING)
@@ -931,8 +937,7 @@ class TunnelService : VpnService() {
                 if (!busyNow) com.vlesscardvpn.core.BackgroundOptimization.show(com.vlesscardvpn.core.BackgroundOptimization.Stage.FINISHED)
                 calm = if (Actions.lastOptimizeSwitched) 0 else minOf(calm + 1, 3)
                 // sleep until the next pass, or wake early (45 s) when the network changes
-                val incomplete = Store.state.value.settings.mode == Mode.AUTO && usedServers.size < com.vlesscardvpn.core.AutoEligibility.ACTIVE
-                val next = if (incomplete) 30_000L else longArrayOf(60_000L,120_000L,180_000L,300_000L)[calm]
+                val next = if (busyNow) com.vlesscardvpn.core.BackgroundReservePolicy.RETRY_MS else com.vlesscardvpn.core.BackgroundReservePolicy.next(currentSettings.mode == Mode.AUTO,calm)
                 if (kotlinx.coroutines.withTimeoutOrNull(next) { optKick.receive() } != null) { calm = 0; delay(5_000) }
             }
         }

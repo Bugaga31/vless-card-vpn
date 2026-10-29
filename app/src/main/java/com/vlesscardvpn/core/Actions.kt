@@ -800,7 +800,7 @@ object Actions {
         if (!valid()) return
         val now = android.os.SystemClock.elapsedRealtime()
         val plan = PhonePower.refresh(app)
-        if (!plan.allowLight) { reserveStatus.value = "Резервы отложены: ${plan.reason}"; return }
+        if (!BackgroundReservePolicy.mayProbe(Store.state.value.settings.mode == Mode.AUTO,plan)) { reserveStatus.value = "Резервы отложены: ${plan.reason}"; return }
         if (progress.value.running) { reserveStatus.value = "Резервы ждут завершения проверки по нажатию"; return }
         if (now - catalogAt < 30000) return
         catalogAt = now
@@ -808,7 +808,7 @@ object Actions {
         val available = preferred(st,st.servers.filter { !st.state(it).selected })
         val affinity = SourceAffinity.order(available,st.servers,{st.state(it)},Net.key(app),System.currentTimeMillis()) { CloudControl.sources(it) }
         val cloud = (CloudSpeed.pick(available,emptyList(),n=4) + affinity.take(4) + CloudControl.ranked(available,8)).distinctBy { it.id }.take(16)
-        val wave = PublicCloudQueue.merge(available.sortedBy { st.state(it).checkedAt },cloud,available,ConnectPolicy.BACKGROUND,slots=8)
+        val wave = PublicCloudQueue.merge(available.sortedBy { st.state(it).checkedAt },cloud,available,BackgroundReservePolicy.candidates(plan),slots=8)
         reserveStatus.value = "Фон: TCP-волна ${wave.size} из ${available.size} резервных кандидатов"
         val states = StateBatch(); val alive = java.util.concurrent.ConcurrentHashMap<String, Int>()
         Tester.tcp(wave, parallel = 32, timeoutMs = 1500) { s, ms ->
@@ -816,15 +816,15 @@ object Actions {
         }
         if (!valid()) { reserveStatus.value = "Резервы: сеть изменилась, TCP-результаты отброшены"; return }
         states.flush()
-        if (!PhonePower.refresh(app).allowLight) return
+        if (!BackgroundReservePolicy.mayProbe(Store.state.value.settings.mode == Mode.AUTO,PhonePower.refresh(app))) return
         val reachable = wave.filter { (alive[it.id] ?: 0) > 0 }
-        val test = PublicCloudQueue.merge(reachable.sortedBy { alive[it.id] },cloud,reachable,ConnectPolicy.BACKGROUND,slots=8)
+        val test = PublicCloudQueue.merge(reachable.sortedBy { alive[it.id] },cloud,reachable,BackgroundReservePolicy.candidates(plan),slots=8)
         var checked = 0
         val prev = progress.value
         try {
             val net=observed.profile
             val checkedAfter = System.currentTimeMillis()
-            realTest(test,"Фон: Telegram и YouTube, волна ${test.size} из ${available.size}",big=false,youtube=true,
+            realTest(test,"Фон: HTTPS и Telegram, волна ${test.size} из ${available.size}",big=false,youtube=plan.allowLight,telegram=true,
                 attempts=1,parallel=4,budgetMs=ConnectPolicy.QUICK_BUDGET_MS)
             checked=Store.state.value.let { snapshot -> test.count { snapshot.state(it).checkedAt >= checkedAfter } }
             reserveStatus.value = if (valid()) "Резервы: HTTPS-проверок $checked, рабочих ${Store.state.value.let { snapshot -> test.count { snapshot.state(it).works && snapshot.state(it).checkedAt >= checkedAfter } }} · результаты сервисов отдельно"
@@ -894,7 +894,7 @@ object Actions {
     suspend fun optimize(): Boolean {
         lastOptimizeSwitched = false
         val lightPlan = PhonePower.refresh(app)
-        if (!lightPlan.allowLight) {
+        if (!BackgroundReservePolicy.mayProbe(Store.state.value.settings.mode == Mode.AUTO,lightPlan)) {
             if (com.vlesscardvpn.BuildConfig.DEBUG) android.util.Log.i("E2E", "optimize skipped=power")
             return false
         }
@@ -920,7 +920,7 @@ object Actions {
             val prev0 = progress.value
             val s0 = Store.state.value
             val rest = s0.servers.filter { s0.state(it).tcpMs > 0 && (s0.state(it).realMs < 0 || System.currentTimeMillis() - s0.state(it).checkedAt > 6 * 3600_000L) }
-                .sortedBy { s0.state(it).tcpMs }.take(if (wifi) 12 else 6)
+                .sortedBy { s0.state(it).tcpMs }.take(if (!lightPlan.allowLight) 2 else if (wifi) 12 else 6)
             if (rest.isNotEmpty()) realTest(rest, "Фоновая проверка", big = true, attempts = 1)
             if (!sameNetwork()) { progress.value = prev0; return false }
             if (!PhonePower.refresh(app).allowed) { deepPending = true; progress.value = prev0; return false }
@@ -931,11 +931,11 @@ object Actions {
             progress.value = prev0
         }
         if (!sameNetwork()) return false
-        if (!PhonePower.refresh(app).allowLight) return ytSwitch
+        if (!BackgroundReservePolicy.mayProbe(Store.state.value.settings.mode == Mode.AUTO,PhonePower.refresh(app))) return ytSwitch
         st = Store.state.value
         // An empty Auto selection is recovered from the best working pool.
         val sel = st.selected.ifEmpty { automaticOrder(st, st.servers.filter { st.state(it).works }).take(AutoEligibility.TOP) }
-        val others = automaticOrder(st, st.servers.filter { it !in sel && st.state(it).works }).take(if (wifi) 12 else 6)
+        val others = automaticOrder(st, st.servers.filter { it !in sel && st.state(it).works }).take(if (!lightPlan.allowLight) 2 else if (wifi) 12 else 6)
         val cand = (sel + others).distinctBy { it.id }
         if (cand.isEmpty()) return ytSwitch
         val prev = progress.value
@@ -943,7 +943,7 @@ object Actions {
         try {
             val throughputMode = st.settings.mode == Mode.AUTO && !GameSession.active()
             // Concurrent downloads share the line and cannot rank throughput. First check HTTPS only.
-            realTest(cand, "Фоновая проверка", big = wifi && !throughputMode && PhonePower.refresh(app).allowed, youtube = throughputMode,
+            realTest(cand, "Фоновая проверка", big = wifi && !throughputMode && PhonePower.refresh(app).allowed, youtube = throughputMode && lightPlan.allowLight, telegram = throughputMode,
                 attempts = 1, parallel = 4, budgetMs = ConnectPolicy.QUICK_BUDGET_MS)
             if (!sameNetwork()) return false
             if (throughputMode) AutoSelection.compare(cand, { Store.state.value.state(it) }, sampleNet,
