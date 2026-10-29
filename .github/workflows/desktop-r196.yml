@@ -95,12 +95,19 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p docs/validation/desktop-r196
-          cp desktop-dist/${{ matrix.rid }}.json desktop-dist/${{ matrix.rid }}.png docs/validation/desktop-r196/
+          mkdir -p "$RUNNER_TEMP/desktop-evidence"
+          cp desktop-dist/${{ matrix.rid }}.json desktop-dist/${{ matrix.rid }}.png "$RUNNER_TEMP/desktop-evidence/"
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git restore desktop/App/THIRD-PARTY-NOTICES.txt
-          git add docs/validation/desktop-r196
-          git commit -m 'test: desktop ${{ matrix.rid }} build and window evidence' || exit 0
-          for n in 1 2 3 4; do git pull --rebase origin integration/desktop-r196 && git push origin HEAD:integration/desktop-r196 && exit 0; sleep 4; done
+          for n in 1 2 3 4; do
+            git fetch origin integration/desktop-r196
+            git reset --hard FETCH_HEAD
+            dest="docs/validation/desktop-r196/$GITHUB_RUN_ID"
+            mkdir -p "$dest"
+            cp "$RUNNER_TEMP/desktop-evidence/"* "$dest/"
+            git add "$dest"
+            git commit -m 'test: desktop ${{ matrix.rid }} run-scoped build evidence' || exit 0
+            git push origin HEAD:integration/desktop-r196 && exit 0
+            sleep 4
+          done
           exit 1
