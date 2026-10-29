@@ -325,7 +325,7 @@ object Actions {
     suspend fun pinCertificates(servers: List<Server>): List<Server> = withContext(Bg.io) {
         val sem = Semaphore(16) // in parallel: subscriptions have many self-signed servers, 3 s each one by one was slow
         servers.map { s -> async { sem.withPermit {
-            if (!s.insecure || s.pcs.isNotEmpty() || s.security != "tls" && s.protocol != "hysteria2") return@withPermit s
+            if (!ForegroundProbePlan.needsCertificate(s)) return@withPermit s
             val req = JSONObject().put("address", s.address).put("port", s.port).put("serverName", s.sni.ifEmpty { s.host.ifEmpty { s.address } }).put("timeoutMs", 3000)
             val res = runCatching {
                 JSONObject(if (s.protocol == "hysteria2") Libv2ray.fetchQuicCertSha256(req.toString()) else Libv2ray.fetchTlsCertSha256(req.toString()))
@@ -1615,11 +1615,16 @@ object Actions {
             if (firstFired.compareAndSet(false, true)) callback(server)
         } }
         val fast = ConnectPolicy.fastStart()
-        val fastOk = realTest(shortlist, "Авто: проверяю первый быстрый маршрут", big = ConnectPolicy.requiresBodyProof(earlyHandoff), youtube = false, telegram = st.settings.mode == Mode.AUTO,
+        // A certificate fetch for one self-signed endpoint must not block every ready route.
+        // Keep the same eight admitted candidates and source quotas; only split their preparation.
+        val fastOk = ForegroundProbePlan.run(shortlist, firstWaveOnly,
+            valid = { Net.key(app) == net && Net.underlying(app)?.toString() == network }) { cohort ->
+        realTest(cohort, "Авто: проверяю первый быстрый маршрут", big = ConnectPolicy.requiresBodyProof(earlyHandoff), youtube = false, telegram = st.settings.mode == Mode.AUTO,
             attempts = 1, parallel = fast.parallel, foreground = firstWaveOnly, stopAfter = if (onFirst != null || firstWaveOnly) fast.stopAfter else Int.MAX_VALUE,
             budgetMs = if (st.settings.mode == Mode.AUTO && firstWaveOnly) ConnectPolicy.FIRST_PROBE_MS else if (st.settings.mode == Mode.AUTO) 6500L else fast.budgetMs, onFirst = firstCallback, onSuccess = { passed.add(it.id) },
             onAttempt = {server->if(firstWaveOnly) attempted.add(server.id);statistics?.start()},
             onObservation = {p->statistics?.observe(p.works,p.realMs,p.tgOk,p.tgMs)})
+        }
         if (Net.key(app) != net || Net.underlying(app)?.toString() != network) return if (firstWaveOnly) "Сеть изменилась — результаты отброшены" else selectionNetworkChanged()
         if (onFirst != null && firstFired.get()) return "Первый рабочий VLESS-маршрут найден — подключаюсь; сравнение продолжится после запуска"
         if (firstWaveOnly) {

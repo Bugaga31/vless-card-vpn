@@ -39,7 +39,7 @@ class DashboardUiR190Test {
         while(text.none {expected in it} && android.os.SystemClock.elapsedRealtime()<deadline) {
             Thread.sleep(250);ins.waitForIdleSync();val root=ins.uiAutomation.rootInActiveWindow;root?.refresh();text=labels(root)
         }
-        val target=File(ins.targetContext.getExternalFilesDir(null),"ui201").apply {mkdirs()}
+        val target=File(ins.targetContext.getExternalFilesDir(null),"ui202").apply {mkdirs()}
         File(target,"$name.labels.txt").writeText(text.joinToString("\n"))
         val bitmap=ins.uiAutomation.takeScreenshot() ?: error("Real rendered screenshot is required")
         File(target,"$name.png").outputStream().use {assertTrue(bitmap.compress(Bitmap.CompressFormat.PNG,100,it))};bitmap.recycle()
