@@ -16,7 +16,8 @@ class ObservationRuntimeR198Test {
  @Test fun missingCurrentPathRejected(){assertFalse(NetworkObservation.accepts(snap(),snap(p="")))}
  @Test fun blankHandleRejected(){assertFalse(NetworkObservation.accepts(snap(h=""),snap(h="")))}
  @Test fun snapshotComparisonDoesNotMutateHandoff(){val gate=NetworkHandoff();gate.seed(snap());val ticket=gate.update(snap(p="path-b"))!!;assertFalse(NetworkObservation.accepts(snap(),snap(p="path-b")));assertTrue(gate.valid(ticket.revision))}
- @Test fun canonicalPathReorderAccepted(){fun rev(a:List<String>)=NetworkPath.revision("wlan0",1500,a,listOf("default"),listOf("dns"));assertTrue(NetworkObservation.accepts(snap(p=rev(listOf("a","b"))),snap(p=rev(listOf("b","a","a")))))}
+ @Test fun canonicalPathReorderAccepted(){fun rev(a:List<String>)=NetworkPath.revision("wlan0",1500,a,listOf("default"),listOf("dns"))
+ assertTrue(NetworkObservation.accepts(snap(p=rev(listOf("a","b"))),snap(p=rev(listOf("b","a","a")))))}
  @Test fun mandatoryAutoRunsWhenOptionalToggleOff(){assertTrue(BackgroundRunPolicy.enabled(true,false,false))}
  @Test fun requestedManualModeRuns(){assertTrue(BackgroundRunPolicy.enabled(false,true,false))}
  @Test fun disabledManualModeDoesNotWake(){assertFalse(BackgroundRunPolicy.enabled(false,false,false))}
@@ -55,4 +56,18 @@ class ObservationRuntimeR198Test {
  @Test fun callProtectionIsSeparate(){assertEquals(15000L,SearchPacingPolicy.rest(PowerPolicy.Plan(voiceCallActive=true)))}
  @Test fun mobileRecoveryCopyNamesNetwork(){assertTrue(NetworkRecoveryPresentation.message("Моб.: LTE").contains("мобильную"))}
  @Test fun wifiRecoveryDoesNotPromiseFiveSecondCompletion(){val s=NetworkRecoveryPresentation.message("Wi-Fi");assertTrue(s.contains("Wi-Fi"));assertFalse(s.contains("5"))}
+
+ @Test fun bundledTorGeoDataIsPresent(){val c=androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().targetContext;for(n in listOf("geoip","geoip6")) c.assets.open(n).bufferedReader().use {assertTrue(it.readLine().startsWith("#"))}}
+ @Test fun nativeTorAcceptsSelectedCountryWithGeoData(){
+  val c=androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().targetContext
+  val old=Store.state.value.settings
+  try { Store.update {it.copy(settings=old.copy(torExitCountries="US"))}
+   val config=com.vlesscardvpn.tor.TorCard.torrcEmbedded(c)
+   assertTrue(config.contains("GeoIPFile "));assertTrue(config.contains("ExitNodes {us}"))
+   val f=java.io.File(c.cacheDir,"tor-country-verify198");f.writeText(config)
+   val log=java.io.File(c.cacheDir,"tor-country-verify198.log")
+   val process=ProcessBuilder(java.io.File(c.applicationInfo.nativeLibraryDir,"libTor.so").absolutePath,"--verify-config","-f",f.absolutePath).redirectErrorStream(true).redirectOutput(log).start()
+   try {assertTrue(process.waitFor(20,java.util.concurrent.TimeUnit.SECONDS));assertEquals(log.readText().takeLast(2000),0,process.exitValue())} finally {process.destroy();f.delete();log.delete()}
+  } finally {Store.update {it.copy(settings=old)}}
+ }
 }
