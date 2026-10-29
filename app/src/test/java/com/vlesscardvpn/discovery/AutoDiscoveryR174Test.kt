@@ -51,7 +51,7 @@ class AutoDiscoveryR174Test {
         assertTrue(AutoDiscoveryPolicy.SOURCE_MS<=3500)
         assertTrue(AutoDiscoveryPolicy.RECOVERY_MS<=45000)
         assertTrue(ConnectPolicy.fastStart().budgetMs<=AutoDiscoveryPolicy.FIRST_CONNECT_MS)
-        assertEquals(8,ConnectPolicy.FIRST)
+        assertEquals(20,ConnectPolicy.FIRST)
     }
     @Test fun mirrorsMatchRealRawGithubHostname() {
         val url="https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/main/BLACK_VLESS_RUS.txt"
