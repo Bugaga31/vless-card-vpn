@@ -84,7 +84,7 @@ val fetchTorGeo by tasks.registering {
             fun valid()=file.isFile && MessageDigest.getInstance("SHA-256").digest(file.readBytes()).joinToString("") {"%02x".format(it)}==want
             if(valid()) continue
             val tmp=File(root,"$name.part")
-            uri("https://gitlab.torproject.org/tpo/core/tor/-/raw/a0062a3e3e623c4e81af96b2d744de635356b565/src/config/$name").toURL().openStream().use {input->tmp.outputStream().use {input.copyTo(it)}}
+            uri("https://gitlab.torproject.org/api/v4/projects/tpo%2Fcore%2Ftor/repository/files/src%2Fconfig%2F$name/raw?ref=a0062a3e3e623c4e81af96b2d744de635356b565").toURL().openStream().use {input->tmp.outputStream().use {input.copyTo(it)}}
             check(tmp.renameTo(file)) {"Cannot install Tor GeoIP asset"}
             check(valid()) {"Tor GeoIP checksum mismatch"}
         }
