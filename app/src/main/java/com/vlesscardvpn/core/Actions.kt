@@ -1538,7 +1538,7 @@ object Actions {
             val message = if (Store.state.value.settings.autoUpdateSubs)
                 "Авто попытался обновить подписки и проверил ограниченный набор маршрутов. Рабочий маршрут пока не подтверждён; прямого обхода нет. Повторите поиск после смены сети или проверьте доступ к источникам."
                 else "Рабочий маршрут не подтверждён. Автообновление подписок выключено в настройках; прямого обхода нет."
-            Tunnel.status.value = Tunnel.Status(Tunnel.State.ERROR, "Пока нет подтверждённого маршрута ≤500 мс", check = message, checkOk = false)
+            Tunnel.status.value = Tunnel.Status(Tunnel.State.ERROR, "Пока нет подтверждённого маршрута ≤${AutoLatencyPolicy.MAX_MS} мс", check = message, checkOk = false)
             message
         } finally {
             refresh.cancel()
@@ -1608,7 +1608,7 @@ object Actions {
         val available = first.filter { (reachable[it.id] ?: -1) != 0 }.ifEmpty { first }
         val ordered = available.sortedBy { if (it.id in cachedGood || (reachable[it.id] ?: -1) > 0) 0 else 1 }
         // First connect as soon as one real HTTPS route passes; compare the remaining candidates after the tunnel is up.
-        val shortlist = ServerChoice.diverse(ordered, AutoEligibility.TOP)
+        val shortlist = ServerChoice.diverse(ordered, ConnectPolicy.shortlistLimit(firstWaveOnly))
         val passed = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
         val firstFired = java.util.concurrent.atomic.AtomicBoolean(false)
         val firstCallback: ((Server) -> Unit)? = onFirst?.let { callback -> { server ->
@@ -1679,7 +1679,7 @@ object Actions {
         }
         if(variants.isEmpty() || Net.key(app)!=net || Net.underlying(app)?.toString()!=network) return null
         val winner=java.util.concurrent.atomic.AtomicReference<Pair<Int,Probe>?>(null)
-        progress.value=progress.value.copy(title="Авто: лёгкая маскировка Hello",message="До двух серверов · лёгкий Hello; HTTPS и Telegram MTProto ≤500 мс")
+        progress.value=progress.value.copy(title="Авто: лёгкая маскировка Hello",message="До двух серверов · лёгкий Hello; HTTPS и Telegram MTProto ≤${AutoLatencyPolicy.MAX_MS} мс")
         if(lab) variants.forEach {(server,mask)->MaskExperiment.memory.schedule(net,network,server.id,mask.id,trialStarted)}
         kotlinx.coroutines.withTimeoutOrNull(3800L) {
             Tester.real(variants,start.settings.testUrl,null,youtube=false,telegram=true,requireTelegram=true,

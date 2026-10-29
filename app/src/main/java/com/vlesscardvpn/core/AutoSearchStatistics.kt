@@ -18,10 +18,10 @@ class AutoSearchStatistics {
     @Synchronized fun snapshot():Map<String,Int> = linkedMapOf(
         "started" to started,"completed" to completed,"ready" to ready,
         "https_unconfirmed" to https,"telegram_unconfirmed" to telegram,
-        "telegram_unknown" to unknown,"over_500ms" to slow,
+        "telegram_unknown" to unknown,"over_1000ms" to slow,
         "unfinished" to (started-completed).coerceAtLeast(0))
     @Synchronized fun explanation():String = "Обычные пробы: запущено $started, завершено $completed. " +
         "HTTPS не подтверждён: $https; Telegram не подтверждён: $telegram; " +
-        "Telegram без замера: $unknown; выше 500 мс: $slow. " +
+        "Telegram без замера: $unknown; выше ${AutoLatencyPolicy.MAX_MS} мс: $slow. " +
         "Незавершённые пробы: ${(started-completed).coerceAtLeast(0)} — это не отказ сервера."
 }

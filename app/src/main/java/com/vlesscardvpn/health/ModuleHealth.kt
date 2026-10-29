@@ -34,7 +34,7 @@ data class HealthAssessment(val observations:List<ModuleObservation>,val blocked
     private fun failed(module:HealthModule)=observations.any {it.module==module && it.status==ModuleStatus.FAIL}
 }
 object ModuleHealthPolicy {
-    const val MAX_LATENCY_MS=500
+    const val MAX_LATENCY_MS=1000
     fun status(value:Boolean?,latencyMs:Int=0,strict:Boolean=false):ModuleStatus = when {
         value==null -> ModuleStatus.UNKNOWN
         !value -> ModuleStatus.FAIL

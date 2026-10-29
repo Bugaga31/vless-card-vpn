@@ -39,7 +39,7 @@ class DashboardUiR190Test {
         while(text.none {expected in it} && android.os.SystemClock.elapsedRealtime()<deadline) {
             Thread.sleep(250);ins.waitForIdleSync();val root=ins.uiAutomation.rootInActiveWindow;root?.refresh();text=labels(root)
         }
-        val target=File(ins.targetContext.getExternalFilesDir(null),"ui202").apply {mkdirs()}
+        val target=File(ins.targetContext.getExternalFilesDir(null),"ui203").apply {mkdirs()}
         File(target,"$name.labels.txt").writeText(text.joinToString("\n"))
         val bitmap=ins.uiAutomation.takeScreenshot() ?: error("Real rendered screenshot is required")
         File(target,"$name.png").outputStream().use {assertTrue(bitmap.compress(Bitmap.CompressFormat.PNG,100,it))};bitmap.recycle()
@@ -57,7 +57,7 @@ class DashboardUiR190Test {
         TorExitStatus.clear()
         ConnectionPassport.clear()
         if(state==Tunnel.State.CONNECTED) ConnectionPassport.fullModules(ModuleHealthPolicy.assess(
-            HealthInput(true,100,true,true,true,if(ok==true) 120 else 700,null),HealthRequirements()))
+            HealthInput(true,100,true,true,true,if(ok==true) 120 else 1200,null),HealthRequirements()))
         Tunnel.status.value=Tunnel.Status(state=state,checkOk=ok,check=if(name=="network-recovery") NetworkRecoveryPresentation.message("Моб.: LTE") else "",route=if(state==Tunnel.State.CONNECTED) "Стенд · тестовый маршрут" else "",since=System.currentTimeMillis())
         Updater.state.value=Updater.State()
         Actions.progress.value=if(state==Tunnel.State.CONNECTING) Actions.Progress(title="Проверяем доступность",running=true,

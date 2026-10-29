@@ -12,7 +12,7 @@ class ServiceRoutingRegressionR136Test {
     @Test fun foregroundBudgetDoesNotGrowWithThousandsOfServers() {
         val list = (0..2000).map(::server)
         val selected = ConnectPolicy.candidates(list, emptyList(), emptySet()) { 1 }
-        assertEquals(8, selected.size); assertEquals(16, ConnectPolicy.NEXT); assertEquals(24, ConnectPolicy.BACKGROUND)
+        assertEquals(20, selected.size); assertEquals(20, ConnectPolicy.NEXT); assertEquals(24, ConnectPolicy.BACKGROUND)
     }
     @Test fun rememberedAndCloudHintsAreTriedBeforeUnmeasuredCatalog() {
         val list = (0..20).map(::server)

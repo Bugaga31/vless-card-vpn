@@ -140,8 +140,8 @@ class FirstConnectR189Test {
   assertEquals(listOf(2000L),waits)
  }
  @Test fun firstProbeIsShortButLatencyThresholdUnchanged() {
-  assertEquals(1800L,ConnectPolicy.FIRST_PROBE_MS);assertEquals(500,AutoLatencyPolicy.MAX_MS)
-  assertFalse(AutoLatencyPolicy.accepts(Probe(501,true,null,tgOk=true,tgMs=100)))
+  assertEquals(1800L,ConnectPolicy.FIRST_PROBE_MS);assertEquals(1000,AutoLatencyPolicy.MAX_MS)
+  assertFalse(AutoLatencyPolicy.accepts(Probe(1001,true,null,tgOk=true,tgMs=100)))
   assertFalse(AutoLatencyPolicy.accepts(Probe(100,true,null,tgOk=null,tgMs=0)))
  }
  @Test fun cancelledRaceDoesNotProduceTelegramSuccess()=runBlocking<Unit> {

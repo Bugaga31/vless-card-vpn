@@ -8,16 +8,16 @@ import org.junit.Test
 class DiscoveryR193Test {
  private fun node(i:Int,network:String="tcp",security:String="reality") = Server("fixture$i","vless","192.0.2.$i",443,"fixture",network=network,security=security)
  private fun budget(ms:Long=1800,fg:Boolean=true,tg:Boolean=true,big:Boolean=false,yt:Boolean=false,calls:Boolean=false,attempts:Int=1)=StrictProbeBudget.budget(ms,fg,tg,big,yt,calls,attempts)
- @Test fun strictSlotHas600msBudget() {assertEquals(600L,budget())}
+ @Test fun strictSlotHas1100msBudget() {assertEquals(1100L,budget())}
  @Test fun smallerCallerBudgetNotExtended() {assertEquals(200L,budget(200))}
- @Test fun noUnboundedFastServiceProbe() {assertEquals(600L,budget(0))}
+ @Test fun noUnboundedFastServiceProbe() {assertEquals(1100L,budget(0))}
  @Test fun backgroundBudgetPreserved() {assertEquals(1800L,budget(fg=false))}
  @Test fun httpsOnlyBudgetPreserved() {assertEquals(1800L,budget(tg=false))}
  @Test fun bodyProofBudgetPreserved() {assertEquals(1800L,budget(big=true))}
  @Test fun mediaBudgetPreserved() {assertEquals(1800L,budget(yt=true))}
  @Test fun callsBudgetPreserved() {assertEquals(1800L,budget(calls=true))}
  @Test fun repeatedDiagnosticBudgetPreserved() {assertEquals(1800L,budget(attempts=2))}
- @Test fun measuredGateNotExtendedBySlack() {assertFalse(AutoLatencyPolicy.accepts(Probe(501,null,null,tgOk=true,tgMs=100)));assertFalse(AutoLatencyPolicy.accepts(Probe(100,null,null,tgOk=true,tgMs=501)))}
+ @Test fun measuredGateNotExtendedBySlack() {assertFalse(AutoLatencyPolicy.accepts(Probe(1001,null,null,tgOk=true,tgMs=100)));assertFalse(AutoLatencyPolicy.accepts(Probe(100,null,null,tgOk=true,tgMs=1001)))}
  @Test fun exact500msStillAccepted() {assertTrue(AutoLatencyPolicy.accepts(Probe(500,null,null,tgOk=true,tgMs=500)))}
  @Test fun unknownTelegramNeverAccepted() {assertFalse(AutoLatencyPolicy.accepts(Probe(100,null,null,tgOk=null,tgMs=0)))}
  @Test fun monochromeTransportKeepsOrder() {val list=(1..8).map {node(it)};assertEquals(list,TransportExploration.merge(list,list,8))}

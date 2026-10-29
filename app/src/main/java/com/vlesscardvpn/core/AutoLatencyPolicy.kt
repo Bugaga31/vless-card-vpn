@@ -3,7 +3,7 @@ package com.vlesscardvpn.core
 import com.vlesscardvpn.model.ServerState
 
 /** End-to-end cold HTTPS and MTProto response times, not ICMP ping or promised app latency.
- * Faster than 50ms is welcome. Unknown historical timing cannot satisfy the 500ms gate.
+ * Faster than 50ms is welcome. Unknown historical timing cannot satisfy the 1000ms gate.
  */
 object AutoLatencyPolicy {
     const val MAX_MS=com.vlesscardvpn.health.ModuleHealthPolicy.MAX_LATENCY_MS

@@ -29,7 +29,7 @@ object AutoDiagnostics {
     }
     fun searchEvent(stop:String,waves:Int,counts:Map<String,Int>):JSONObject {
         require(stop in AutoSearchCampaign.Stop.values().map {it.name})
-        require(counts.keys==setOf("started","completed","ready","https_unconfirmed","telegram_unconfirmed","telegram_unknown","over_500ms","unfinished"))
+        require(counts.keys==setOf("started","completed","ready","https_unconfirmed","telegram_unconfirmed","telegram_unknown","over_1000ms","unfinished"))
         val summary=JSONObject()
         counts.forEach {(key,value)->summary.put(key,value.coerceIn(0,100000))}
         return JSONObject().put("stop",stop).put("waves",waves.coerceIn(0,100000)).put("ordinary_probes",summary)
@@ -38,11 +38,14 @@ object AutoDiagnostics {
         ctx.getSharedPreferences("auto_diagnostics",0).edit().putString("search_family",family(networkFamily))
             .putString("last_search",searchEvent(stop,waves,counts).toString()).apply()
     }
+    /** Old 500ms counters cannot be relabelled as a 1000ms observation. */
+    fun compatibleSearch(raw: String?): JSONObject = runCatching { JSONObject(raw ?: "{}") }
+        .getOrDefault(JSONObject()).let { if (it.optJSONObject("ordinary_probes")?.has("over_500ms") == true) JSONObject() else it }
     fun report(ctx: Context): String {
         val p=ctx.getSharedPreferences("auto_diagnostics",0)
-        return JSONObject().put("schema",2).put("version",com.vlesscardvpn.BuildConfig.VERSION_NAME)
+        return JSONObject().put("schema",3).put("version",com.vlesscardvpn.BuildConfig.VERSION_NAME)
             .put("family",p.getString("family","other"))
-            .put("last_search",runCatching {JSONObject(p.getString("last_search","{}"))}.getOrDefault(JSONObject()))
+            .put("last_search",compatibleSearch(p.getString("last_search","{}")))
             .put("search_family",p.getString("search_family","other"))
             .put("events",runCatching { JSONArray(p.getString("events","[]")) }.getOrDefault(JSONArray())).toString(2)
     }

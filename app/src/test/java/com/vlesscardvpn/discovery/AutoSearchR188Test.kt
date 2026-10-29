@@ -63,8 +63,8 @@ class AutoSearchR188Test {
  @Test fun statisticsSeparateEveryReason() {
   val s=AutoSearchStatistics();repeat(6){s.start()}
   s.observe(false,0,null,0);s.observe(true,100,false,0);s.observe(true,100,null,0)
-  s.observe(true,501,true,100);s.observe(true,100,true,501);s.observe(true,100,true,100)
-  val c=s.snapshot();assertEquals(6,c["completed"]);assertEquals(1,c["https_unconfirmed"]);assertEquals(1,c["telegram_unconfirmed"]);assertEquals(1,c["telegram_unknown"]);assertEquals(2,c["over_500ms"]);assertEquals(1,c["ready"])
+  s.observe(true,1001,true,100);s.observe(true,100,true,1001);s.observe(true,100,true,100)
+  val c=s.snapshot();assertEquals(6,c["completed"]);assertEquals(1,c["https_unconfirmed"]);assertEquals(1,c["telegram_unconfirmed"]);assertEquals(1,c["telegram_unknown"]);assertEquals(2,c["over_1000ms"]);assertEquals(1,c["ready"])
  }
  @Test fun cancelledStartedProbeIsUnfinishedNotFailed() {
   val s=AutoSearchStatistics();s.start();val c=s.snapshot();assertEquals(1,c["unfinished"]);assertEquals(0,c["completed"]);assertEquals(0,c["https_unconfirmed"])
@@ -73,7 +73,7 @@ class AutoSearchR188Test {
   val s=AutoSearchStatistics();repeat(2){s.start()};s.observe(true,1,true,49);s.observe(true,500,true,500);assertEquals(2,s.snapshot()["ready"])
  }
  @Test fun telegramFailureIsNotMislabelledAsLatency() {
-  val s=AutoSearchStatistics();s.start();s.observe(true,800,false,0);assertEquals(1,s.snapshot()["telegram_unconfirmed"]);assertEquals(0,s.snapshot()["over_500ms"])
+  val s=AutoSearchStatistics();s.start();s.observe(true,800,false,0);assertEquals(1,s.snapshot()["telegram_unconfirmed"]);assertEquals(0,s.snapshot()["over_1000ms"])
  }
  @Test fun unknownTelegramIsNotReadyEvenWhenHttpsFast() {
   val s=AutoSearchStatistics();s.start();s.observe(true,30,true,0);assertEquals(1,s.snapshot()["telegram_unknown"]);assertEquals(0,s.snapshot()["ready"])
@@ -82,8 +82,8 @@ class AutoSearchR188Test {
   val s=AutoSearchStatistics();val ts=(0..3).map {Thread {repeat(100){s.start();s.observe(true,100,true,100)}}};ts.forEach{it.start()};ts.forEach{it.join()};assertEquals(400,s.snapshot()["ready"]);assertEquals(0,s.snapshot()["unfinished"])
  }
  @Test fun diagnosticsAreFixedSchemaWithoutEndpointNames() {
-  val s=AutoSearchStatistics();s.start();s.observe(true,900,true,900)
-  val d=AutoDiagnostics.searchEvent("WAVE_LIMIT",4,s.snapshot());assertEquals(setOf("stop","waves","ordinary_probes"),d.keys().asSequence().toSet());assertEquals(1,d.getJSONObject("ordinary_probes").getInt("over_500ms"))
+  val s=AutoSearchStatistics();s.start();s.observe(true,1200,true,1200)
+  val d=AutoDiagnostics.searchEvent("WAVE_LIMIT",4,s.snapshot());assertEquals(setOf("stop","waves","ordinary_probes"),d.keys().asSequence().toSet());assertEquals(1,d.getJSONObject("ordinary_probes").getInt("over_1000ms"))
  }
  @Test fun diagnosticsRejectFreeTextAndUnknownCounters() {
   try {AutoDiagnostics.searchEvent("https://private.test",1,AutoSearchStatistics().snapshot());fail("free text")} catch(_:IllegalArgumentException) {}
@@ -95,6 +95,6 @@ class AutoSearchR188Test {
  }
  @Test fun defaultLimitsAreBoundedAndLatencyPolicyUnchanged() {
   assertEquals(4,AutoSearchCampaign.MAX_WAVES);assertEquals(45000L,AutoSearchCampaign.MAX_TOTAL_MS)
-  assertEquals(500,AutoLatencyPolicy.MAX_MS);assertFalse(AutoLatencyPolicy.accepts(Probe(501,true,null,tgOk=true,tgMs=200)))
+  assertEquals(1000,AutoLatencyPolicy.MAX_MS);assertFalse(AutoLatencyPolicy.accepts(Probe(1001,true,null,tgOk=true,tgMs=200)))
  }
 }

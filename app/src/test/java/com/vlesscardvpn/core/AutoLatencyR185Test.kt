@@ -9,8 +9,8 @@ class AutoLatencyR185Test {
         assertTrue(AutoLatencyPolicy.accepts(sample(1,1)))
     }
     @Test fun slowHttpsAndSlowTelegramAreBothRejected() {
-        assertFalse(AutoLatencyPolicy.accepts(sample(501,50)))
-        assertFalse(AutoLatencyPolicy.accepts(sample(50,501)))
+        assertFalse(AutoLatencyPolicy.accepts(sample(1001,50)))
+        assertFalse(AutoLatencyPolicy.accepts(sample(50,1001)))
     }
     @Test fun unknownTimingAndUnknownServiceNeverSatisfyStrictAuto() {
         assertFalse(AutoLatencyPolicy.accepts(sample(tg=0)))
@@ -43,9 +43,9 @@ class AutoLatencyR185Test {
         assertEquals(0,AutoHandoffPolicy.resetRuntime(old,"cell").tgMs)
     }
     @Test fun threeConfirmedSlowSamplesAreNeededAndUnknownBreaksStreak() {
-        assertEquals(1,AutoLatencyPolicy.slowStreak(0,sample(tg=900)))
-        assertEquals(2,AutoLatencyPolicy.slowStreak(1,sample(tg=900)))
-        assertEquals(3,AutoLatencyPolicy.slowStreak(2,sample(tg=900)))
+        assertEquals(1,AutoLatencyPolicy.slowStreak(0,sample(tg=1200)))
+        assertEquals(2,AutoLatencyPolicy.slowStreak(1,sample(tg=1200)))
+        assertEquals(3,AutoLatencyPolicy.slowStreak(2,sample(tg=1200)))
         assertEquals(0,AutoLatencyPolicy.slowStreak(2,sample()))
         assertEquals(0,AutoLatencyPolicy.slowStreak(2,sample().copy(tgOk=null)))
     }
