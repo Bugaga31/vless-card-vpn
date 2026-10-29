@@ -20,7 +20,7 @@ jobs:
         run: |
           set -euo pipefail
           base64 -d tools/patches/network-r198.patch.gz.b64 | gzip -d > "$RUNNER_TEMP/network-r198.patch"
-          echo '7688f4b6f30286a279cbd8b62cd179d422a2d2eb12561620d4bdc626a1ea874c  '"$RUNNER_TEMP/network-r198.patch" | sha256sum -c -
+          echo '6a91532ab83e5324ba9fb65aef1b5b792f6989116caa613dbd9f99753b86f1d5  '"$RUNNER_TEMP/network-r198.patch" | sha256sum -c -
           git fetch --quiet --no-tags origin 0fe8abd672580077b3ad431dbafda798bb11dbfa
           git restore --source 0fe8abd672580077b3ad431dbafda798bb11dbfa -- app/src/main app/src/test
           PATCH="$RUNNER_TEMP/network-r198.patch"
@@ -36,6 +36,7 @@ jobs:
           fi
           find app/src/androidTest -name '*.kt' -exec sed -i 's/ui197/ui198/g' {} +
           sed -i 's/WaitReason.BACKOFF,30000/WaitReason.BACKOFF,5000/g' app/src/androidTest/java/com/vlesscardvpn/DashboardUiR190Test.kt
+          python3 -c "import base64,gzip,json,pathlib;[(pathlib.Path(x['path']).write_text(x['content'])) for x in json.loads(gzip.decompress(base64.b64decode(pathlib.Path('tools/patches/harness-r198.json.gz.b64').read_text())))]"
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add app
@@ -114,4 +115,4 @@ jobs:
           git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $AUTH" push origin HEAD:refs/heads/integration/network-device-r198
       - name: Require runtime assertions
         if: always()
-        run: python3 -c 'import json;d=json.load(open("docs/validation/r198-device.json"));assert d.get("passed") is True and d.get("ui_captures_executed") is True and len(d.get("screenshots",[]))==25,d'
+        run: python3 -c 'import json;d=json.load(open("docs/validation/r198-device.json"));assert d.get("passed") is True and d.get("ui_captures_executed") is True and len(d.get("screenshots",[]))==31,d'
