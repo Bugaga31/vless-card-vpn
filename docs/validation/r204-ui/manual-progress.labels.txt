@@ -1,3 +1,4 @@
-Pixel Launcher keeps stopping
-App info
-Close app
+Ручная проверка серверов
+3 из 12
+Проверяем HTTPS и Telegram. Текущий маршрут остаётся подключён.
+Остановить проверку
