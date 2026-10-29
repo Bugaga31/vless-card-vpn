@@ -1,6 +1,6 @@
 {
-  "source_sha": "cec54f7da43335dbb9cfe1a35ba17968c519a28b",
-  "run_id": "40879193315",
+  "source_sha": "516bfd30813c2d5191064195bd4053d5fbbc2eb0",
+  "run_id": "40881775443",
   "steps": {
     "source": "success",
     "host": "success",
@@ -26,5 +26,11 @@
     }
   ],
   "failures": [],
-  "lint_errors": []
+  "lint_errors": [],
+  "compile_errors": [
+    "e: file:///home/runner/work/vless-card-vpn/vless-card-vpn/app/src/test/java/com/vlesscardvpn/discovery/ObservationR198Test.kt:19:136 Unexpected tokens (use ';' to separate expressions on the same line)",
+    "e: file:///home/runner/work/vless-card-vpn/vless-card-vpn/app/src/test/java/com/vlesscardvpn/discovery/ObservationR198Test.kt:19:136 Unexpected tokens (use ';' to separate expressions on the same line)",
+    "   > Compilation error. See log for more details",
+    "   > Compilation error. See log for more details"
+  ]
 }
