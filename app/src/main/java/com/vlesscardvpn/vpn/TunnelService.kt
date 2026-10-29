@@ -923,11 +923,11 @@ class TunnelService : VpnService() {
                 val reconnect = result || pending
                 // Respect traffic protection; re-check deferred application in five seconds, not a minute.
                 val applySettings = Store.state.value.settings
-                val applyPower = com.vlesscardvpn.core.PhonePower.refresh(this@TunnelService)
+                val trafficBusy = reconnect && applySettings.protectActiveTraffic && userActive()
+                // Calls can start while the traffic sample is suspended: read power after it.
                 val busyNow = reconnect && !com.vlesscardvpn.core.BackgroundReservePolicy.mayApply(
-                    applySettings.protectActiveTraffic,
-                    if (applySettings.protectActiveTraffic) userActive() else false,
-                    applyPower.voiceCallActive)
+                    applySettings.protectActiveTraffic, trafficBusy,
+                    com.vlesscardvpn.core.PhonePower.refresh(this@TunnelService).voiceCallActive)
                 if (busyNow) com.vlesscardvpn.core.BackgroundOptimization.show(com.vlesscardvpn.core.BackgroundOptimization.Stage.DEFERRED)
                 if (reconnect && !busyNow && !com.vlesscardvpn.core.SessionHold.active() && Tunnel.status.value.state == Tunnel.State.CONNECTED) {
                     Log.i("E2E", "optimize: switching to faster servers")
