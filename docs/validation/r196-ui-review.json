@@ -1,0 +1,84 @@
+{
+  "passed": true,
+  "source_sha": "22b2edb20e00b28c40c34d041c1629bf28e53c1f",
+  "screenshots": [
+    {
+      "file": "connected.png",
+      "sha256": "bd8815345a58a3f2110c41335fe1a55997fad85259e9f111dbac5b9871e13cce"
+    },
+    {
+      "file": "error.png",
+      "sha256": "2878f786a3ca42bdfd17e66e2fd50c830c56d76d0b90bbe90455a64eceadd912"
+    },
+    {
+      "file": "idle-dark.png",
+      "sha256": "3b7829ba5859557ac1aeb4768237acd0ad07f2d0b8ff93ae1e688970dde49a33"
+    },
+    {
+      "file": "idle-light.png",
+      "sha256": "e5ffcce4bc3b138ceefbeea80c44d8c34b0f609bb1b66aeb9f02c96b44c53477"
+    },
+    {
+      "file": "large-narrow.png",
+      "sha256": "86d5c68cccfc79289aa0d279ff4934d30d53e807bdc7c6f10111201f4cec2f72"
+    },
+    {
+      "file": "maintenance-confirm.png",
+      "sha256": "16e4f91737e8526d04bf9d2eeb6b0ce4169f8ad83e294255bf6c60ce5377d0c5"
+    },
+    {
+      "file": "maintenance-preview.png",
+      "sha256": "cd51c15a77b89d0ab62d24db1f866f87758bd164b62bf4c985715b54df70d91e"
+    },
+    {
+      "file": "maintenance-result.png",
+      "sha256": "6cee9f5edac6a64a65ab74d5c519494df1f7bcd4ba28d11285e76969d51e147e"
+    },
+    {
+      "file": "partial.png",
+      "sha256": "840f5f6f9883356e608452aaca63b6e59af78e5af065a805d092a55e170baa58"
+    },
+    {
+      "file": "ru-large.png",
+      "sha256": "019795d3651a50bf813d0c9cdbe63101296ffa7e2634bd73398f2a76c3c59c0a"
+    },
+    {
+      "file": "ru-off.png",
+      "sha256": "72fb468b39d80b3403f08b390e7cfbcc32badefeac234b7346861f44ab386e98"
+    },
+    {
+      "file": "ru-on.png",
+      "sha256": "221e64b0518858a48710ce4bbc08197a6719aa1306e6a98176a24b54a7e2733f"
+    },
+    {
+      "file": "ru-tor.png",
+      "sha256": "e46909fdcd377294e75c756a64505038dd352fa831735435a323f5148dfe2b85"
+    },
+    {
+      "file": "search-progress.png",
+      "sha256": "7f90abcba8ef274b2cb8dacd1ca51533c04276e5ac0fc4c50327bdd8fe0832bb"
+    },
+    {
+      "file": "searching.png",
+      "sha256": "53a95e542903a0d015f2c48f5274b3b8c687e7f7fc46899e4e484244089e6175"
+    },
+    {
+      "file": "services.png",
+      "sha256": "746dc0eb13f1d1f8b5a7146bdb1f1cc58643569f5656f30d730a881dc3b347ce"
+    },
+    {
+      "file": "wait-backoff.png",
+      "sha256": "22ece44ba61957aa9a2d192ecd7b6e31500fa27f52c599b7b3167b426ec4fdc7"
+    },
+    {
+      "file": "wait-catalog.png",
+      "sha256": "395cf9bd3decb8f1df3e1bd3a2f2a817591006812f154789d266da79c9ed7008"
+    },
+    {
+      "file": "wait-offline.png",
+      "sha256": "f555e1c1a57b77783a6a6d6272a13e3e9887375a0f5d36e295b92dd64c8b2d6b"
+    }
+  ],
+  "method": "All 19 captures opened individually and visually reviewed; layout, copy, cancellation, large font, waits, RU and maintenance states checked",
+  "scope": "synthetic production Compose states, not physical operator testing"
+}
