@@ -20,7 +20,7 @@ jobs:
         run: |
           set -euo pipefail
           base64 -d tools/patches/network-r198.patch.gz.b64 | gzip -d > "$RUNNER_TEMP/network-r198.patch"
-          echo 'e84faa0378ca9535c36057aaff4b9570f1c57971275ce593b1ea76f2dbb21141  '"$RUNNER_TEMP/network-r198.patch" | sha256sum -c -
+          echo '2ad511087655029798efbc962b9bf14cd21bec3891d5beecae5ca6f4694a0596  '"$RUNNER_TEMP/network-r198.patch" | sha256sum -c -
           git fetch --quiet --no-tags origin 0fe8abd672580077b3ad431dbafda798bb11dbfa
           git restore --source 0fe8abd672580077b3ad431dbafda798bb11dbfa -- app/src/main app/src/test app/build.gradle.kts
           PATCH="$RUNNER_TEMP/network-r198.patch"
