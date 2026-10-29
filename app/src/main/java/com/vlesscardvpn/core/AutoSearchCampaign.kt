@@ -4,7 +4,7 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 
-/** Finite foreground sessions built from cancellable bounded waves. */
+/** Cancellable campaigns; per-wave limits do not limit an explicit persistent search. */
 object AutoSearchCampaign {
     const val MAX_WAVES = 4
     const val MAX_TOTAL_MS = 45_000L
@@ -14,7 +14,7 @@ object AutoSearchCampaign {
 
     /** A connect-button session is finite, even offline or while the network keeps changing.
      * Cancellation belongs to the caller; only this scope's own timeout becomes TIME_LIMIT.
-     * The legacy wave runner stays reusable, but foreground Actions uses this bounded entry.
+     * Retained for bounded diagnostics; the connect button uses runPersistent.
      */
     suspend fun <T:Any> runBounded(
         network:()->String,online:()->Boolean,elapsed:()->Long,
@@ -46,6 +46,22 @@ object AutoSearchCampaign {
         } catch(e:Finished) {Outcome(null,e.reason,waves,attempted)}
     }
 
+    /** No wall-clock or wave limit. The caller owns cancellation and every probe stays bounded. */
+    suspend fun <T:Any> runPersistent(
+        network:()->String, online:()->Boolean, elapsed:()->Long,
+        waiting:(Int,Boolean)->Unit, exhausted:(Set<String>)->Boolean={false},
+        restMs:()->Long={0L}, pause:suspend(Long)->Unit={delay(it)},
+        probe:suspend(Int,MutableSet<String>)->T?,
+    ):Outcome<T> {
+        var waves=0; var attempted=0
+        val value=run(network,online,elapsed,waiting,exhausted,pause,
+            idleOnExhaustion=true,restMs=restMs) { round,ids ->
+            if(waves<Int.MAX_VALUE) waves++
+            try {probe(round,ids)} finally {attempted=ids.size}
+        }
+        return Outcome(value,Stop.FOUND,waves,attempted)
+    }
+
     const val RETRY_CATALOG_MS = 60_000L
     fun backoff(round: Int): Long = 1000L * (round.coerceIn(0, 4) + 1)
 
@@ -56,6 +72,8 @@ object AutoSearchCampaign {
         waiting: (round: Int, offline: Boolean) -> Unit,
         exhausted: (Set<String>) -> Boolean = { false },
         pause: suspend (Long) -> Unit = { delay(it) },
+        idleOnExhaustion: Boolean = false,
+        restMs: () -> Long = {0L},
         probe: suspend (round: Int, attempted: MutableSet<String>) -> T?,
     ): T {
         var identity = network()
@@ -77,11 +95,18 @@ object AutoSearchCampaign {
                 pause(2000L)
                 continue
             }
+            // Retest exhausted catalogs at most once per minute. Re-evaluate every 5s so
+            // new subscriptions and network changes can resume discovery without a busy loop.
+            if (idleOnExhaustion && attempted.isNotEmpty() && exhausted(attempted)) {
+                waiting(round, false)
+                pause(maxOf(5000L, restMs().coerceIn(0L, 60000L)))
+                continue
+            }
             val result = probe(round, attempted)
             currentCoroutineContext().ensureActive()
             if (result != null && network() == identity) return result
             waiting(round, false)
-            pause(backoff(round))
+            pause(maxOf(backoff(round), restMs().coerceIn(0L, 60000L)))
             round = if (round == Int.MAX_VALUE) 0 else round + 1
         }
     }
