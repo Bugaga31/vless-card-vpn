@@ -1,11 +1,11 @@
 {
-  "source_sha": "1a64d377cf48f08fd3cb03bb52ccef2119fae0c3",
-  "run_id": "40870468771",
+  "source_sha": "520ac49dd00d461bd0fc4324342845976c0a2217",
+  "run_id": "40872167307",
   "steps": {
     "source": "success",
     "host": "success",
     "jvm": "success",
-    "lint": "failure"
+    "lint": "success"
   },
   "suites": [
     {
@@ -2282,17 +2282,5 @@
     }
   ],
   "failures": [],
-  "lint_errors": [
-    {
-      "id": "NewApi",
-      "message": "Call requires API level 29 (current min is 24): `android.net.LinkProperties#getMtu`",
-      "locations": [
-        {
-          "file": "/home/runner/work/vless-card-vpn/vless-card-vpn/app/src/main/java/com/vlesscardvpn/core/Net.kt",
-          "line": "26",
-          "column": "66"
-        }
-      ]
-    }
-  ]
+  "lint_errors": []
 }
