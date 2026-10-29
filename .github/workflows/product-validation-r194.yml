@@ -23,7 +23,7 @@ jobs:
         run: |
           set -euo pipefail
           base64 -d tools/patches/product-r194.patch.gz.b64 | gzip -d > "$RUNNER_TEMP/product-r194.patch"
-          echo 'e893d91cb2eb53a875be0a543d742a512c98cb5aabf4e88a727042435239b888  '"$RUNNER_TEMP/product-r194.patch" | sha256sum -c -
+          echo '16fbc1181ed6eaa8f50689e945cad1590907d73b09066ee3c387742663d92256  '"$RUNNER_TEMP/product-r194.patch" | sha256sum -c -
           git fetch --quiet --no-tags origin cd1afb5a9910c96f24855ab4252bd36d66e249f5
           git restore --source cd1afb5a9910c96f24855ab4252bd36d66e249f5 -- app/src/main app/src/test
           PATCH="$RUNNER_TEMP/product-r194.patch"
