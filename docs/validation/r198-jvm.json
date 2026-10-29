@@ -1,0 +1,30 @@
+{
+  "source_sha": "cec54f7da43335dbb9cfe1a35ba17968c519a28b",
+  "run_id": "40879193315",
+  "steps": {
+    "source": "success",
+    "host": "success",
+    "jvm": "failure",
+    "lint": "success"
+  },
+  "suites": [
+    {
+      "path": "vpn-test-probe/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.netprobe.ProbeFailureTest.xml",
+      "name": "com.vlesscardvpn.netprobe.ProbeFailureTest",
+      "tests": "7",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "vpn-test-probe/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.netprobe.ProbeTimelineTest.xml",
+      "name": "com.vlesscardvpn.netprobe.ProbeTimelineTest",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    }
+  ],
+  "failures": [],
+  "lint_errors": []
+}
