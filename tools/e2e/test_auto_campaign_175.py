@@ -2,10 +2,10 @@ from pathlib import Path
 import unittest
 ROOT=Path(__file__).resolve().parents[2]
 class ContinuousAuto(unittest.TestCase):
- def test_foreground_uses_bounded_campaign(self):
+ def test_foreground_uses_cancellable_persistent_campaign(self):
   s=(ROOT/'app/src/main/java/com/vlesscardvpn/core/Actions.kt').read_text()
   p=s.split('private fun autoPrepare',1)[1].split('private val autoSourceAttempts',1)[0]
-  self.assertIn('AutoSearchCampaign.runBounded',p);self.assertIn('continuous = true',p);self.assertIn('if (selected && !stale)',p)
+  self.assertIn('AutoSearchCampaign.runPersistent',p);self.assertNotIn('MAX_WAVES',p);self.assertNotIn('MAX_TOTAL_MS',p);self.assertIn('SearchPacingPolicy.rest',p);self.assertIn('continuous = true',p);self.assertIn('if (selected && !stale)',p)
  def test_no_error_or_long_recovery_after_failed_continuous_wave(self):
   s=(ROOT/'app/src/main/java/com/vlesscardvpn/core/Actions.kt').read_text()
   p=s.split('private suspend fun doAutoPrepare',1)[1].split('/** Cached cloud/network',1)[0]
