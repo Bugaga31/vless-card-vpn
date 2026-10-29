@@ -234,7 +234,7 @@ object XrayConfigBuilder {
         val inSettings = JSONObject().put("udp", true).put("ip", "127.0.0.1")
         if (socks.auth) inSettings.put("auth", "password").put("accounts", arr(JSONObject().put("user", socks.user).put("pass", socks.pass)))
         else inSettings.put("auth", "noauth")
-        fun sniff() = JSONObject().put("enabled", true).put("destOverride", JSONArray(com.vlesscardvpn.core.TransportPolicy.sniff(!settings.blockQuic))).put("routeOnly", true)
+        fun sniff() = JSONObject().put("enabled", true).put("destOverride", JSONArray(com.vlesscardvpn.core.TransportPolicy.sniff(!settings.blockQuic || com.vlesscardvpn.core.RuWhitelistPolicy.domains(settings).isNotEmpty()))).put("routeOnly", true)
         val inbounds = arr(JSONObject().put("tag", "socks").put("listen", "127.0.0.1").put("port", socks.port)
             .put("protocol", "socks").put("settings", inSettings).put("sniffing", sniff()))
         if (torOn) {

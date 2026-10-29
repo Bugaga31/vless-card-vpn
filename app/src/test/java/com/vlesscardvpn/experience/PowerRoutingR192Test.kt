@@ -31,7 +31,7 @@ class PowerRoutingR192Test {
  @Test fun forceVpnCaseAndTrailingDotNormalized() {assertFalse(RuWhitelistPolicy.domains(Settings(alwaysVpn=listOf("YaNdEx.Ru."))).contains("yandex.ru"))}
  @Test fun unrelatedForceVpnKeepsWhitelist() {assertTrue(RuWhitelistPolicy.domains(Settings(alwaysVpn=listOf("example.org"))).contains("yandex.ru"))}
  @Test fun directRuleHasOnlyCuratedDomains() {assertEquals(RuWhitelistPolicy.rules(Settings()),direct().single().getJSONArray("domain").let {a->(0 until a.length()).map {a.getString(it)}})}
- @Test fun ruUdpAndTcpAreDirect() {assertEquals("tcp,udp",direct().single().getString("network"))}
+ @Test fun ruUdpAndTcpAreDirect() {assertEquals("tcp,udp",direct().single().getString("network"));assertTrue(config().getJSONArray("inbounds").getJSONObject(0).getJSONObject("sniffing").getJSONArray("destOverride").toString().contains("quic"))}
  @Test fun ruRulePrecedesGlobalQuicBlock() {val r=rules();assertTrue(r.indexOfFirst {it.has("domain")&&it.optString("outboundTag")=="direct"}<r.indexOfFirst {it.optString("network")=="udp"&&it.optString("port")=="443"&&it.optString("outboundTag")=="block"})}
  @Test fun foreignCatchAllStillUsesServer() {assertEquals("proxy-0",rules().last().getString("outboundTag"))}
  @Test fun dnsBypassNeverGlobalFallback() {val d=scopedDns().single();assertTrue(d.getBoolean("skipFallback"));assertEquals(53,d.getInt("port"));assertEquals(RuWhitelistPolicy.rules(Settings()).size,d.getJSONArray("domains").length())}
