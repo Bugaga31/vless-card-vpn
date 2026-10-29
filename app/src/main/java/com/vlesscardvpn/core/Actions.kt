@@ -1523,16 +1523,25 @@ object Actions {
         if (untried.isEmpty()) return "Эти маршруты уже были в очереди текущего поиска; отменённые пробы не считаются отказом"
         val net = Net.key(app); val network = Net.underlying(app)?.toString()
         val allEligible = preferred(st, untried).sortedBy { CloudSpeed.blocked(it) }
-        // Bound expensive scoring for a huge imported catalog; subsequent waves advance attempted IDs.
+        // Apply cheap cooldown/service eligibility across the catalog BEFORE truncating ranking.
+        // Otherwise 256 cooled/failed leaders can hide every fresh route behind them forever.
+        val time = System.currentTimeMillis()
+        val serviceRanks=allEligible.associate { it.id to AutoEligibility.telegramRank(st.state(it),net,time) }
+        val coolingIds=allEligible.filter { server ->
+            val e=st.state(server).evidenceFor(net)
+            TelegramRouteMemory.cooling(net,server.id,st.state(server).maskFor(net),time) ||
+                probeMemory.cooling(net,server.id,st.state(server).maskFor(net),time) ||
+                (e.streak>0 && time>=e.at && time-e.at<ProbeMemory.cooldownMs(e.streak))
+        }.mapTo(HashSet()) {it.id}
+        val readyCatalog=DiscoveryWindow.pool(allEligible,{it.id in coolingIds},{serviceRanks.getValue(it.id)})
         val rememberedIds = (st.settings.netServers[net] ?: st.settings.netServers[Net.family(net)]).orEmpty().toSet()
-        val eligible = if (firstWaveOnly) (CloudControl.ranked(allEligible, 32) +
-            allEligible.filter { it.id in rememberedIds }.take(32) + TransportExploration.representatives(allEligible) +
-            ServerChoice.diverse(allEligible, AutoDiscoveryPolicy.RANKING_WINDOW))
-            .distinctBy { it.id }.take(AutoDiscoveryPolicy.RANKING_WINDOW) else allEligible
+        val eligible = if (firstWaveOnly) (CloudControl.ranked(readyCatalog, 32) +
+            readyCatalog.filter { it.id in rememberedIds }.take(32) + TransportExploration.representatives(readyCatalog) +
+            ServerChoice.diverse(readyCatalog, AutoDiscoveryPolicy.RANKING_WINDOW))
+            .distinctBy { it.id }.take(AutoDiscoveryPolicy.RANKING_WINDOW) else readyCatalog
         val affinity = SourceAffinity.order(eligible,Store.state.value.servers,{Store.state.value.state(it)},net,System.currentTimeMillis()) { CloudControl.sources(it) }
         val cloud = (CloudSpeed.pick(eligible, emptyList(), n = 4) + affinity.take(4) + CloudControl.ranked(eligible,8)).distinctBy { it.id }.take(ConnectPolicy.FIRST)
         val remembered = (st.settings.netServers[net] ?: st.settings.netServers[Net.family(net)]).orEmpty().toSet()
-        val time = System.currentTimeMillis()
         val gaming = GameSession.active()
         // Score each candidate once; sorting must not repeatedly read cloud/model state.
         val learned = (if(gaming) eligible.map {server ->
@@ -1540,12 +1549,8 @@ object Actions {
         }.sortedWith(compareBy<Pair<Server,Pair<Double,Double>>>{it.second.first}.thenByDescending{it.second.second}.thenBy{it.first.id}).map{it.first}
         else AdaptiveRouteRank.order(eligible,{st.state(it)},net,time,{CloudSpeed.prior(it)}))
             .mapIndexed {i,server -> server.id to i}.toMap()
-        val first = ConnectPolicy.candidates(eligible, cloud, remembered, cooling = { server ->
-            val e = st.state(server).evidenceFor(net)
-            TelegramRouteMemory.cooling(net, server.id, st.state(server).maskFor(net), time) ||
-                probeMemory.cooling(net, server.id, st.state(server).maskFor(net), time) ||
-                (e.streak > 0 && time >= e.at && time - e.at < ProbeMemory.cooldownMs(e.streak))
-        }, serviceRank = { server -> AutoEligibility.telegramRank(st.state(server),net,time) },
+        val first = ConnectPolicy.candidates(eligible, cloud, remembered,
+            cooling = {it.id in coolingIds}, serviceRank = {serviceRanks.getValue(it.id)},
             recoveryProbeLimit = if(firstWaveOnly) 3 else 1) { s -> learned[s.id] ?: Int.MAX_VALUE }
         val cachedGood = first.filter { st.state(it).evidenceFor(net).let { e -> e.successes > 0 && e.streak == 0 && time >= e.at && time - e.at < 1800000 } }.map { it.id }.toSet()
         val ping = first.filter { it.id !in cachedGood }

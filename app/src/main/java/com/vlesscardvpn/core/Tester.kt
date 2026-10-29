@@ -73,18 +73,27 @@ object Tester {
     suspend fun fastFilter(servers: List<Server>, budgetMs: Long = 600, foreground: Boolean = false): Map<String, Int> = coroutineScope {
         val plan = PhonePower.state.value
         val sem = Semaphore(PowerPolicy.cap(if (foreground) ConnectPolicy.FIRST else 6, if (foreground) plan.foregroundTcpParallel else plan.tcpParallel))
-        servers.map { server -> async(Bg.io) { sem.withPermit {
-            val result = if (!server.isTcpBased) -1 else try {
-                kotlinx.coroutines.withTimeoutOrNull(budgetMs) {
-                    CancellableProbe.run { bind ->
-                        val socket = Socket(); bind { socket.close() }; val t = System.nanoTime()
-                        socket.use { it.connect(InetSocketAddress(InetAddress.getByName(RuntimeProbeAddress.host(server.address)), server.port), budgetMs.toInt()) }
-                        ((System.nanoTime() - t) / 1_000_000).toInt().coerceAtLeast(1)
+        // Shared only inside this call: no stale DNS cache crosses a network change.
+        val names=servers.filter {it.isTcpBased}.map {RuntimeProbeAddress.host(it.address)}.distinct()
+            .associateWith {host->async(start=kotlinx.coroutines.CoroutineStart.LAZY) {ProbeDns.resolve(host,budgetMs)}}
+        servers.map { server -> async { sem.withPermit {
+            val result = if (!server.isTcpBased) -1 else {
+                val began=System.nanoTime()
+                kotlinx.coroutines.withTimeoutOrNull(budgetMs.coerceIn(1L,60000L)) {
+                    val addresses=names.getValue(RuntimeProbeAddress.host(server.address)).await()
+                        ?: return@withTimeoutOrNull -1
+                    val remaining=budgetMs-(System.nanoTime()-began)/1000000L
+                    StaggeredConnect.hint(DualStackOrder.order(addresses),remaining) {address,left->
+                        try {CancellableProbe.run {bind->
+                            val socket=Socket();bind {socket.close()}
+                            socket.use {it.connect(InetSocketAddress(address,server.port),left.coerceIn(1L,60000L).toInt())}
+                            true
+                        }} catch(e:kotlinx.coroutines.CancellationException) {throw e}
+                        catch(_:java.net.SocketTimeoutException) {null}
+                        catch(_:Exception) {false}
                     }
                 } ?: -1
-            } catch (e: kotlinx.coroutines.CancellationException) { throw e }
-              catch (e: java.net.SocketTimeoutException) { -1 }
-              catch (e: Exception) { 0 }
+            }
             server.id to result
         } } }.awaitAll().toMap()
     }
