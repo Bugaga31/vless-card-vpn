@@ -12,7 +12,7 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 adb install -r -t app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
 adb shell pm grant com.vlesscardvpn android.permission.POST_NOTIFICATIONS
 set +e
-adb shell am instrument -w -r -e fixture_ca_b64 "$CA_B64" -e class com.vlesscardvpn.NativeAutoRuntimeR190Test,com.vlesscardvpn.DashboardUiR190Test,com.vlesscardvpn.FirstConnectRuntimeR190Test,com.vlesscardvpn.ProductRuntimeR190Test,com.vlesscardvpn.MaintenanceUiR190Test,com.vlesscardvpn.WarpRuntimeR191Test,com.vlesscardvpn.PowerRoutingRuntimeR192Test,com.vlesscardvpn.RuWhitelistUiR192Test   com.vlesscardvpn.test/androidx.test.runner.AndroidJUnitRunner | tee runtime-results-r192.txt
+adb shell am instrument -w -r -e fixture_ca_b64 "$CA_B64" -e class com.vlesscardvpn.NativeAutoRuntimeR190Test,com.vlesscardvpn.DashboardUiR190Test,com.vlesscardvpn.FirstConnectRuntimeR190Test,com.vlesscardvpn.ProductRuntimeR190Test,com.vlesscardvpn.MaintenanceUiR190Test,com.vlesscardvpn.WarpRuntimeR191Test,com.vlesscardvpn.PowerRoutingRuntimeR192Test,com.vlesscardvpn.RuWhitelistUiR192Test,com.vlesscardvpn.RuNativeConfigR192Test   com.vlesscardvpn.test/androidx.test.runner.AndroidJUnitRunner | tee runtime-results-r192.txt
 CODE=${PIPESTATUS[0]}
 set -e
 export CODE
@@ -23,7 +23,7 @@ python3 - <<'CHECK'
 from pathlib import Path
 import json,re,os
 s=Path('runtime-results-r192.txt').read_text();m=re.search(r'OK \((\d+) tests?\)',s)
-passed=os.environ['CODE']=='0' and m is not None and int(m[1])==163 and not re.search(r'FAILURES!!!|INSTRUMENTATION_FAILED|Process crashed|INSTRUMENTATION_STATUS_CODE: -[1-4]|INSTRUMENTATION_STATUS_CODE: -[34]',s)
+passed=os.environ['CODE']=='0' and m is not None and int(m[1])==164 and not re.search(r'FAILURES!!!|INSTRUMENTATION_FAILED|Process crashed|INSTRUMENTATION_STATUS_CODE: -[1-4]|INSTRUMENTATION_STATUS_CODE: -[34]',s)
 Path('docs/validation').mkdir(parents=True,exist_ok=True)
 d={"source_sha":os.environ.get('VALIDATED_SOURCE_SHA',os.environ['GITHUB_SHA']),"run_id":os.environ['GITHUB_RUN_ID'],"passed":passed,"runtime_tests_executed":m is not None,"count":int(m[1]) if m else 0,"scope":"android33_native_vless_tls_not_full_app_tun_not_operator_dpi","result_tail":s[-7000:]}
 Path('docs/validation/r192-device.json').write_text(json.dumps(d,indent=2))
