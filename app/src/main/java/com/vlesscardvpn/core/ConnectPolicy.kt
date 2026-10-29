@@ -5,6 +5,7 @@ import com.vlesscardvpn.model.Server
 /** Bounded foreground discovery. Cloud is a hint; only a phone-side HTTPS success can start the tunnel. */
 object ConnectPolicy {
     const val QUICK_BUDGET_MS = 4500L
+    const val FIRST_PROBE_MS = 1800L
     data class FastStart(val candidates: Int, val parallel: Int, val stopAfter: Int, val budgetMs: Long)
     fun fastStart(background: Boolean = false) = FastStart(
         candidates = if (background) 3 else FIRST,

@@ -24,7 +24,7 @@ object AutoSearchCampaign {
         probe:suspend (Int,MutableSet<String>)->T?,
     ):Outcome<T> {
         require(maxDurationMs in 1..MAX_TOTAL_MS)
-        val start=elapsed();var waves=0;var attempted=0
+        val start=elapsed();var waves=0;var attempted=0;var offlineWait=false
         fun checkClock() {
             val now=elapsed()
             if(now<start || now-start>=maxDurationMs) throw Finished(Stop.TIME_LIMIT)
@@ -32,10 +32,10 @@ object AutoSearchCampaign {
         return try {
             val found=kotlinx.coroutines.withTimeoutOrNull(maxDurationMs) {
                 run(network,online,elapsed,waiting={round,offline->
-                    checkClock()
+                    checkClock();offlineWait=offline
                     if(!offline && waves>=MAX_WAVES) throw Finished(Stop.WAVE_LIMIT)
                     waiting(round,offline)
-                },exhausted=exhausted,pause=pause) {round,ids->
+                },exhausted=exhausted,pause={ms->pause(if(offlineWait) ms else minOf(ms,200L))}) {round,ids->
                     checkClock()
                     if(waves>=MAX_WAVES) throw Finished(Stop.WAVE_LIMIT)
                     waves++

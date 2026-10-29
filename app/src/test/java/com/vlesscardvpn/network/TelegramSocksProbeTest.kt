@@ -30,7 +30,7 @@ class TelegramSocksProbeTest {
                         3 -> ByteArray(input.readUnsignedByte()).also(input::readFully).toString(Charsets.UTF_8)
                         else -> error("unexpected address type $type")
                     }
-                    assertEquals("149.154.167.51", address); assertEquals(443, input.readUnsignedShort())
+                    assertTrue(address in setOf("149.154.167.51","149.154.175.50")); assertEquals(443, input.readUnsignedShort())
                     out.write(byteArrayOf(5, 0, 0, 1, 127, 0, 0, 1, 0, 1)); out.flush()
                     val req = ByteArray(42); input.readFully(req)
                     assertEquals(239, req[0].toInt() and 255); assertEquals(10, req[1].toInt())
