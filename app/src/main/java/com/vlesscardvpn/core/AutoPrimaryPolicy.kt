@@ -14,11 +14,11 @@ object AutoPrimaryPolicy {
             val next = state(leader).realMs
             return listOf(if (old > 0 && next > 0 && next <= old * 0.8 && old - next >= 15) leader else current)
         }
-        val old = ServerChoice.measuredSpeed(state(current),net,now).toLong()
-        val next = ServerChoice.measuredSpeed(state(leader),net,now).toLong()
+        // Match the background decision exactly: a 20–25% gain must not be
+        // accepted there and silently rejected here during selectBest().
         // No proof of an improvement means no speed-only reconnect. Failed/expired service
         // routes are removed before this policy, so stability never preserves a known failure.
-        val worthwhile = next > 0 && (old <= 0 || next >= old * 125 / 100 && next - old >= 256)
+        val worthwhile = ServerChoice.downloadUpgrade(state(current),state(leader),net,now)
         return listOf(if (worthwhile) leader else current)
     }
 }

@@ -27,7 +27,7 @@ class MaintenanceUiR190Test {
   val deadline=android.os.SystemClock.elapsedRealtime()+8000
   while(nodes(ins.uiAutomation.rootInActiveWindow).none {expected in text(it)} && android.os.SystemClock.elapsedRealtime()<deadline) Thread.sleep(200)
   assertTrue(nodes(ins.uiAutomation.rootInActiveWindow).any {expected in text(it)})
-  val root=File(ins.targetContext.getExternalFilesDir(null),"ui204").apply {mkdirs()}
+  val root=File(ins.targetContext.getExternalFilesDir(null),"ui205").apply {mkdirs()}
   val image=ins.uiAutomation.takeScreenshot() ?: error("Screenshot unavailable")
   File(root,"$name.png").outputStream().use {assertTrue(image.compress(Bitmap.CompressFormat.PNG,100,it))};image.recycle()
  }
