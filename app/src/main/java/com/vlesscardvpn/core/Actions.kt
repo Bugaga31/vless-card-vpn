@@ -1478,7 +1478,8 @@ object Actions {
                     (e.streak>0 && stamp>=e.at && stamp-e.at<ProbeMemory.cooldownMs(e.streak))
             },{AutoEligibility.telegramRank(st.state(it),net,stamp)})
             val queue=SubscriptionQueue.quality(st.settings.subscriptions,st.servers,{st.state(it)},net,stamp)
-            return SubscriptionQueue.window(usable,queue.map {it.source})
+            val rankedCandidates=AdaptiveRouteRank.order(usable,{st.state(it)},net,stamp,{CloudSpeed.prior(it)})
+            return SubscriptionQueue.window(rankedCandidates,queue.map {it.source})
         }
         val batches = kotlinx.coroutines.channels.Channel<List<Server>>(AutoDiscoveryPolicy.SOURCES)
         val refresh = launch(Bg.io) {
