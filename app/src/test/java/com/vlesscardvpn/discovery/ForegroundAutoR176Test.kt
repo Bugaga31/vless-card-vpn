@@ -9,7 +9,7 @@ class ForegroundAutoR176Test {
  @Test fun firstUsableHttpsRouteIsNotHeldForBulkTransfer() {assertFalse(ConnectPolicy.requiresBodyProof(true));assertTrue(ConnectPolicy.requiresBodyProof(false))}
  @Test fun firstHandoffSkipsRedundantTcpPrecheck() {assertFalse(ConnectPolicy.requiresTcpFilter(true));assertTrue(ConnectPolicy.requiresTcpFilter(false))}
  @Test fun balancedForegroundIsEight() {val p=PowerPolicy.evaluate(PowerPolicy.Input(0),PowerPolicy.Options());assertEquals(8,p.foregroundTcpParallel);assertEquals(8,p.foregroundRealParallel)}
- @Test fun ecoDoesNotTurnUserTcpSearchIntoBackgroundTwo() {val p=PowerPolicy.evaluate(PowerPolicy.Input(0),PowerPolicy.Options(profile="eco"));assertEquals(8,p.foregroundTcpParallel)}
+ @Test fun ecoKeepsFourUserSearchSlotsInsteadOfBackgroundTwo() {val p=PowerPolicy.evaluate(PowerPolicy.Input(0),PowerPolicy.Options(profile="eco"));assertEquals(4,p.foregroundTcpParallel)}
  @Test fun mobileForegroundNotLimitedByBackgroundWifiPreference() {val p=PowerPolicy.evaluate(PowerPolicy.Input(0,metered=true),PowerPolicy.Options());assertFalse(p.allowLight);assertEquals(8,p.foregroundTcpParallel);assertEquals(8,p.foregroundRealParallel)}
  @Test fun hotPhoneStillProtected() {val p=PowerPolicy.evaluate(PowerPolicy.Input(0,thermal=3),PowerPolicy.Options());assertEquals(2,p.foregroundTcpParallel);assertEquals(2,p.foregroundRealParallel)}
  @Test fun lowMemoryStillProtected() {val p=PowerPolicy.evaluate(PowerPolicy.Input(0,lowMemory=true),PowerPolicy.Options());assertEquals(2,p.foregroundTcpParallel);assertEquals(2,p.foregroundRealParallel)}
