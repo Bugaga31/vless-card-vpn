@@ -93,6 +93,7 @@ class TunnelService : VpnService() {
     private val handoff = NetworkHandoff()
     private var networkRefreshJob: Job? = null
     private val networkSignal = java.util.concurrent.atomic.AtomicLong()
+    private val networkRefreshWindow = com.vlesscardvpn.core.NetworkRefreshWindow()
 
     /** Self-healing step after failed checks (0 = healthy); reset by a successful check or a user (re)connect. */
     private var healStep = 0
@@ -1268,10 +1269,12 @@ class TunnelService : VpnService() {
 
     private fun queueNetworkRefresh() {
         val signal = networkSignal.incrementAndGet()
+        val waitMs = networkRefreshWindow.delayMs(android.os.SystemClock.elapsedRealtime())
         networkRefreshJob?.cancel()
         networkRefreshJob = scope.launch {
-            delay(500) // wait for DHCP/capabilities, coalesce a burst of Android callbacks
+            delay(waitMs) // 100ms quiet period, bounded to 250ms from the first callback
             if (networkSignal.get() != signal || netCallback == null) return@launch
+            networkRefreshWindow.reset()
             val network = Net.underlying(this@TunnelService)
             val profile = network?.let { Net.key(this@TunnelService, it) }
             val snapshot = network?.let { NetworkHandoff.Snapshot(it.toString(), profile!!, Net.pathRevision(this@TunnelService,it)) }
@@ -1301,7 +1304,7 @@ class TunnelService : VpnService() {
             runCatching { foreground(recoveryText) }
             netChangedAt = System.currentTimeMillis(); netHardDone = false
             netJob = scope.launch reconnect@ {
-                delay(700)
+                // The callback window already coalesced link setup; no second fixed sleep.
                 if (!handoff.valid(change.revision)) return@reconnect
                 val state = Tunnel.status.value.state
                 if (state != Tunnel.State.CONNECTED && state != Tunnel.State.CONNECTING) return@reconnect
@@ -1354,7 +1357,7 @@ class TunnelService : VpnService() {
         if (error != null) {
             netCallback?.let { cb -> runCatching { getSystemService(ConnectivityManager::class.java)?.unregisterNetworkCallback(cb) } }
             netCallback = null; curNet = null
-            networkRefreshJob?.cancel(); networkSignal.incrementAndGet(); handoff.reset()
+            networkRefreshJob?.cancel(); networkSignal.incrementAndGet(); networkRefreshWindow.reset(); handoff.reset()
         }
         if (!keepTun) TProxyService.stop()
         core?.stop(); core = null; Tunnel.wireguardKeys = emptySet()
