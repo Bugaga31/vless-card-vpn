@@ -39,3 +39,16 @@ index 0395e8c..d971a64 100644
   @Test fun unrelatedDefaultStillServer(){assertEquals("proxy-0",rules().last().getString("outboundTag"));assertEquals(12987,rules()[ipIndex(rules())].getJSONArray("ip").length())}
   @Test fun policyChangeInvalidatesChainMeasurement(){assertNotEquals(AutoChainRunner.settingsKey(Settings()),AutoChainRunner.settingsKey(on));assertNotEquals(AutoChainRunner.settingsKey(on),AutoChainRunner.settingsKey(on.copy(ruWhitelist=false)))}
  }
+diff --git a/app/src/test/java/com/vlesscardvpn/routing/RuGeoR204Test.kt b/app/src/test/java/com/vlesscardvpn/routing/RuGeoR204Test.kt
+index d971a64..1223f05 100644
+--- a/app/src/test/java/com/vlesscardvpn/routing/RuGeoR204Test.kt
++++ b/app/src/test/java/com/vlesscardvpn/routing/RuGeoR204Test.kt
+@@ -30,7 +30,7 @@ class RuGeoR204Test {
+  @Test fun forceVpnNormalizedForDns(){val d=RuGeoPolicy.domains(on.copy(alwaysVpn=listOf("Private.Example.Ru.")));assertFalse("domain:ru" in d)}
+  @Test fun ipRuleFollowsForceVpn(){val r=rules(on.copy(alwaysVpn=listOf("example.ru")));val forced=r.indexOfFirst{it.optString("outboundTag")=="proxy-0"&&it.optJSONArray("domain")?.toString()?.contains("domain:example.ru")==true};assertTrue(forced>=0);assertTrue(forced<ipIndex(r))}
+  @Test fun ipOnDemandOnlyWhenOptedIn(){assertEquals("IPOnDemand",config().getJSONObject("routing").getString("domainStrategy"));assertEquals("AsIs",config(Settings()).getJSONObject("routing").getString("domainStrategy"))}
+- @Test fun ipv6BlockStillPrecedesGeoIp(){val r=rules();val block=r.indexOfFirst{it.optString("outboundTag")=="block"&&it.optJSONArray("ip")?.toString()?.contains("::/0")==true};assertTrue(block>=0&&block<ipIndex(r))}
++ @Test fun ipv6BlockStillPrecedesGeoIp(){val r=rules();val block=r.indexOfFirst{it.optString("outboundTag")=="block"&&it.optJSONArray("ip")?.let {a -> (0 until a.length()).any {n -> a.optString(n)=="::/0"}}==true};assertTrue(block>=0&&block<ipIndex(r))}
+  @Test fun telegramIpProtectionPrecedesGeoIp(){val r=rules();val tg=r.indexOfFirst{it.optString("outboundTag")=="proxy-0"&&it.optJSONArray("ip")?.toString()?.contains("geoip:telegram")==true};assertTrue(tg>=0&&tg<ipIndex(r))}
+  @Test fun quicAndStunProtectionsRetained(){val r=rules(on.copy(blockStun=true));val quic=r.indexOfFirst{it.optString("outboundTag")=="block"&&it.optString("port")=="443"&&!it.has("domain")};assertTrue(quic>=0&&quic<ipIndex(r));assertTrue(r.any{it.optString("port")=="3478,5349,19302-19309"&&it.optString("outboundTag")=="block"})}
+  @Test fun unrelatedDefaultStillServer(){assertEquals("proxy-0",rules().last().getString("outboundTag"));assertEquals(12987,rules()[ipIndex(rules())].getJSONArray("ip").length())}
