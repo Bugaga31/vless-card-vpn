@@ -1,0 +1,6 @@
+VLESS Card Desktop preview 0.3.0
+Xray-core v26.9.30: Mozilla Public License 2.0. Source and corresponding tagged version: https://github.com/XTLS/Xray-core/tree/v26.9.30
+Xray LICENSE is included in this application and distribution.
+Avalonia 11.3.22: MIT; https://github.com/AvaloniaUI/Avalonia/tree/11.3.22
+.NET 8: MIT; https://github.com/dotnet/runtime
+Third-party dependencies retain their respective licenses. See dependency source repositories and .NET bundled notices.

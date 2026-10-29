@@ -1,0 +1,104 @@
+name: Desktop preview r196
+on:
+  push:
+    branches: ['integration/desktop-r196']
+permissions:
+  contents: write
+jobs:
+  desktop:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            rid: win-x64
+            core: xray.exe
+            exe: VLESS-Card-Desktop.exe
+          - os: ubuntu-22.04
+            rid: linux-x64
+            core: xray
+            exe: VLESS-Card-Desktop
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Core regressions and verified embedded core
+        shell: pwsh
+        run: |
+          dotnet run --project desktop/Tests/VlessCard.Tests.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'Core tests failed' }
+          python tools/desktop/prepare_core.py '${{ matrix.rid }}'
+          if ($LASTEXITCODE -ne 0) { throw 'Core digest failed' }
+          $bundle=(Resolve-Path 'desktop-core/${{ matrix.core }}').Path
+          $digest=(Resolve-Path 'desktop-core/digest.txt').Path
+          $license=(Resolve-Path 'desktop-core/Xray-LICENSE.txt').Path
+          dotnet publish desktop/App/VlessCard.Desktop.csproj -c Release -r '${{ matrix.rid }}' --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true "-p:XrayBundlePath=$bundle" "-p:XrayDigestPath=$digest" "-p:XrayLicensePath=$license" -o desktop-publish
+          if ($LASTEXITCODE -ne 0) { throw 'Publish failed' }
+          & './desktop-publish/${{ matrix.exe }}' --verify-bundle test-output/xray-smoke.json
+          if ($LASTEXITCODE -ne 0) { throw 'Embedded core configuration failed' }
+          New-Item -ItemType Directory desktop-dist -Force | Out-Null
+          Copy-Item desktop/App/THIRD-PARTY-NOTICES.txt desktop-dist/
+          Copy-Item desktop-core/Xray-LICENSE.txt desktop-dist/
+      - name: Windows window smoke
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $p=Start-Process desktop-publish/VLESS-Card-Desktop.exe -PassThru
+          Start-Sleep 8
+          $p.Refresh()
+          if ($p.HasExited -or $p.MainWindowHandle -eq 0) { throw 'No desktop window' }
+          ./tools/capture-windows-preview.ps1 -WindowProcessId $p.Id -OutputPath desktop-dist/win-x64.png
+          $p.CloseMainWindow() | Out-Null
+          if (!$p.WaitForExit(5000)) { $p.Kill(); throw 'Did not close cleanly' }
+          Copy-Item desktop-publish/VLESS-Card-Desktop.exe desktop-dist/VLESS-Card-Desktop-0.3.0-windows-x64.exe
+      - name: Linux window smoke and Mint package
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq xvfb xdotool imagemagick libice6 libsm6 libfontconfig1
+          Xvfb :99 -screen 0 1280x900x24 > /tmp/xvfb.log 2>&1 &
+          export DISPLAY=:99
+          sleep 2
+          ./desktop-publish/VLESS-Card-Desktop > /tmp/desktop.log 2>&1 &
+          pid=$!
+          sleep 8
+          kill -0 "$pid"
+          window=$(xdotool search --name 'VLESS Card.*Desktop preview' | head -1)
+          test -n "$window"
+          import -window "$window" desktop-dist/linux-x64.png
+          xdotool windowclose "$window"
+          for n in $(seq 1 20); do kill -0 "$pid" 2>/dev/null || break; sleep .25; done
+          if kill -0 "$pid" 2>/dev/null; then kill "$pid"; exit 1; fi
+          python tools/desktop/package_linux.py
+          dpkg-deb --info desktop-dist/*.deb
+      - name: Record tested source and package hashes
+        shell: python
+        run: |
+          import pathlib,hashlib,json,os,subprocess
+          out=pathlib.Path('desktop-dist');rid='${{ matrix.rid }}'
+          tracked=subprocess.check_output(['git','ls-files','desktop','tools/desktop'],text=True).splitlines()
+          report=dict(source_sha=os.environ['GITHUB_SHA'],run_id=os.environ['GITHUB_RUN_ID'],rid=rid,core_version='v26.9.30',core_archive_sha256=pathlib.Path('desktop-core/archive-sha256.txt').read_text(),core_tests_passed=True,embedded_core_config_passed=True,window_open_close_passed=True,scope='local_SOCKS5_not_system_TUN_not_live_operator_DPI',files={p:hashlib.sha256(pathlib.Path(p).read_bytes()).hexdigest() for p in tracked},assets={p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in out.iterdir() if p.suffix in ['.exe','.deb','.gz','.png']})
+          (out/(rid+'.json')).write_text(json.dumps(report,indent=2)+'\n')
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: desktop-r196-${{ matrix.rid }}
+          path: desktop-dist/
+          if-no-files-found: error
+      - name: Store reviewable evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p docs/validation/desktop-r196
+          cp desktop-dist/${{ matrix.rid }}.json desktop-dist/${{ matrix.rid }}.png docs/validation/desktop-r196/
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add docs/validation/desktop-r196
+          git commit -m 'test: desktop ${{ matrix.rid }} build and window evidence' || exit 0
+          for n in 1 2 3 4; do git pull --rebase origin integration/desktop-r196 && git push origin HEAD:integration/desktop-r196 && exit 0; sleep 4; done
+          exit 1

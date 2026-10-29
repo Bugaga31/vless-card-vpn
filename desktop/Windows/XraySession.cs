@@ -12,16 +12,18 @@ sealed class XraySession:IDisposable
     public string Password {get;}=RandomNumberGenerator.GetHexString(32);
     XraySession(int port){Port=port;client=new(new HttpClientHandler{Proxy=new WebProxy($"socks5://127.0.0.1:{Port}"){Credentials=new NetworkCredential(User,Password)},UseProxy=true,AllowAutoRedirect=false,AutomaticDecompression=DecompressionMethods.None}){Timeout=Timeout.InfiniteTimeSpan};}
     public static async Task<XraySession> OpenAsync(Route route,CancellationToken ct){
-        var exe=Path.Combine(AppContext.BaseDirectory,"xray.exe");
-        var expected=File.ReadAllText(Path.Combine(AppContext.BaseDirectory,"xray.exe.sha256")).Trim();
-        await using(var file=File.OpenRead(exe))if(!Convert.ToHexString(await SHA256.HashDataAsync(file,ct)).Equals(expected,StringComparison.OrdinalIgnoreCase))throw new IOException("Core verification failed");
+        var exe=await BundledCore.ResolveAsync(ct);
         var listener=new TcpListener(IPAddress.Loopback,0);listener.Start();var port=((IPEndPoint)listener.LocalEndpoint).Port;listener.Stop();
         var s=new XraySession(port);
         try{
             var folder=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"VlessCard","sessions");Directory.CreateDirectory(folder);
-            s.config=Path.Combine(folder,Guid.NewGuid()+".json");await File.WriteAllTextAsync(s.config,route.Config(port,s.User,s.Password),ct);
+            if(!OperatingSystem.IsWindows())File.SetUnixFileMode(folder,UnixFileMode.UserRead|UnixFileMode.UserWrite|UnixFileMode.UserExecute);
+            s.config=Path.Combine(folder,Guid.NewGuid()+".json");
+            var options=new FileStreamOptions{Mode=FileMode.CreateNew,Access=FileAccess.Write,Share=FileShare.None};
+            if(!OperatingSystem.IsWindows())options.UnixCreateMode=UnixFileMode.UserRead|UnixFileMode.UserWrite;
+            await using(var file=new FileStream(s.config,options))await file.WriteAsync(System.Text.Encoding.UTF8.GetBytes(route.Config(port,s.User,s.Password)),ct);
             s.process=Process.Start(new ProcessStartInfo(exe){UseShellExecute=false,CreateNoWindow=true,ArgumentList={"run","-c",s.config}})??throw new IOException();
-            ChildProcessJob.Attach(s.process);
+            if(OperatingSystem.IsWindows())ChildProcessJob.Attach(s.process);
             for(int i=0;i<30;i++){
                 ct.ThrowIfCancellationRequested();if(s.process.HasExited)throw new IOException();
                 try{using var socket=new TcpClient();await socket.ConnectAsync(IPAddress.Loopback,port,ct);return s;}

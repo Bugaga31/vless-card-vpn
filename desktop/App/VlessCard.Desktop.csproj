@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+ <PropertyGroup><OutputType>WinExe</OutputType><TargetFramework>net8.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable><AssemblyName>VLESS-Card-Desktop</AssemblyName><Version>0.3.0</Version><BuiltInComInteropSupport>true</BuiltInComInteropSupport></PropertyGroup>
+ <ItemGroup>
+  <EmbeddedResource Include="THIRD-PARTY-NOTICES.txt" LogicalName="VlessCard.Notices" />
+  <EmbeddedResource Include="$(XrayLicensePath)" LogicalName="VlessCard.XrayLicense" Condition="'$(XrayLicensePath)' != ''" />
+  <ProjectReference Include="../Core/VlessCard.Core.csproj" />
+  <PackageReference Include="Avalonia" Version="11.3.22" />
+  <PackageReference Include="Avalonia.Desktop" Version="11.3.22" />
+  <PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.22" />
+  <Compile Include="../Windows/XraySession.cs" Link="XraySession.cs" />
+  <Compile Include="../Windows/ChildProcessJob.cs" Link="ChildProcessJob.cs" />
+  <EmbeddedResource Include="$(XrayBundlePath)" LogicalName="VlessCard.BundledXray" Condition="'$(XrayBundlePath)' != ''" />
+  <EmbeddedResource Include="$(XrayDigestPath)" LogicalName="VlessCard.CoreDigest" Condition="'$(XrayDigestPath)' != ''" />
+ </ItemGroup>
+</Project>
