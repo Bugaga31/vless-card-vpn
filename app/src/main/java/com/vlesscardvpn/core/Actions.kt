@@ -1369,7 +1369,7 @@ object Actions {
             }) { round, attempted ->
             setNetwork()
             progress.value = progress.value.copy(title="Авто: проверяю маршруты",done=0,total=0,
-                message="Источники и сохранённые серверы проверяются параллельно. Рабочий маршрут ещё не подтверждён.")
+                message="Сначала подписки с хорошей историей в этой сети, затем новые источники. Проверяем небольшими порциями; рабочий маршрут ещё не подтверждён.")
             refreshPublicCloud(foreground = true)
             var selected = false
             val startedAt = android.os.SystemClock.elapsedRealtime()
@@ -1399,11 +1399,13 @@ object Actions {
         val net = Net.key(app)
         val now = android.os.SystemClock.elapsedRealtime()
         if (!settings.autoUpdateSubs) return@coroutineScope
-        val sources = AutoDiscoveryPolicy.sources(settings.subscriptions, Net.family(net).startsWith("Моб.: "), round)
-            .filter { url ->
-                val attempt = autoSourceAttempts[net + "|" + url]
-                AutoDiscoveryPolicy.refreshDue(true, now, attempt?.at, attempt?.failed == true)
-            }
+        val snapshot=Store.state.value
+        val ranked=SubscriptionQueue.quality(settings.subscriptions,snapshot.servers,{snapshot.state(it)},net,System.currentTimeMillis()).map {it.source}
+        val due=ranked.filter {it in settings.subscriptions}.filter {url ->
+            val attempt=autoSourceAttempts[net+"|"+url]
+            AutoDiscoveryPolicy.refreshDue(true,now,attempt?.at,attempt?.failed==true)
+        }
+        val sources=SubscriptionQueue.fetchOrder(due,round)
         sources.forEach { autoSourceAttempts[net + "|" + it] = AutoSourceAttempt(now, failed = false) }
         if (autoSourceAttempts.size > 256) autoSourceAttempts.entries.sortedBy { it.value.at }
             .take(autoSourceAttempts.size - 256).forEach { autoSourceAttempts.remove(it.key, it.value) }
@@ -1465,6 +1467,19 @@ object Actions {
                 st.state(it).works && st.state(it).checkedAt >= now
             }), { st.state(it) }, net, System.currentTimeMillis())
         }
+        fun sourceWindow(extra:List<Server> = emptyList()):List<Server> {
+            val st=Store.state.value
+            val candidates=preferred(st,(extra+st.servers).distinctBy {it.id}).filter {it.id !in attempted}
+            val stamp=System.currentTimeMillis()
+            val usable=DiscoveryWindow.pool(candidates,{server ->
+                val ss=st.state(server);val e=ss.evidenceFor(net)
+                TelegramRouteMemory.cooling(net,server.id,ss.maskFor(net),stamp) ||
+                    probeMemory.cooling(net,server.id,ss.maskFor(net),stamp) ||
+                    (e.streak>0 && stamp>=e.at && stamp-e.at<ProbeMemory.cooldownMs(e.streak))
+            },{AutoEligibility.telegramRank(st.state(it),net,stamp)})
+            val queue=SubscriptionQueue.quality(st.settings.subscriptions,st.servers,{st.state(it)},net,stamp)
+            return SubscriptionQueue.window(usable,queue.map {it.source})
+        }
         val batches = kotlinx.coroutines.channels.Channel<List<Server>>(AutoDiscoveryPolicy.SOURCES)
         val refresh = launch(Bg.io) {
             try { refreshAutoSources(round) { batches.trySend(it) } }
@@ -1474,10 +1489,10 @@ object Actions {
             // Fetch immediately, alongside cached-catalog probes. First useful source wins;
             // one blocked subscription cannot hold the connect button for all other sources.
             kotlinx.coroutines.withTimeoutOrNull(AutoDiscoveryPolicy.FIRST_CONNECT_MS) {
-                ForegroundDiscoveryPump.run(batches, cached = { Store.state.value.servers },
+                ForegroundDiscoveryPump.run(batches, cached = { sourceWindow() },
                     keepGoing = { !started.started && sameNetwork() },
                     usable = { it.id !in attempted && AutoEligibility.vlessServer(it) }) { batch ->
-                    notes += quickTest(batch, firstReady, attempted, firstWaveOnly = true, allowMaskRescue = false, statistics = statistics)
+                    notes += quickTest(sourceWindow(batch), firstReady, attempted, firstWaveOnly = true, allowMaskRescue = false, statistics = statistics)
                 }
             }
             // A separate small budget: a slow native wave/source cannot silently starve mask rescue.
@@ -1564,19 +1579,26 @@ object Actions {
         }.sortedWith(compareBy<Pair<Server,Pair<Double,Double>>>{it.second.first}.thenByDescending{it.second.second}.thenBy{it.first.id}).map{it.first}
         else AdaptiveRouteRank.order(eligible,{st.state(it)},net,time,{CloudSpeed.prior(it)}))
             .mapIndexed {i,server -> server.id to i}.toMap()
-        val first = ConnectPolicy.candidates(eligible, cloud, remembered,
+        val proposed = ConnectPolicy.candidates(eligible, cloud, remembered,
             cooling = {it.id in coolingIds}, serviceRank = {serviceRanks.getValue(it.id)},
             recoveryProbeLimit = if(firstWaveOnly) 3 else 1) { s -> learned[s.id] ?: Int.MAX_VALUE }
+        val sourceQuality=SubscriptionQueue.quality(st.settings.subscriptions,st.servers,{st.state(it)},net,time)
+        val readySources=eligible.filter {it.id !in coolingIds && serviceRanks.getValue(it.id)<2}
+        val provenLeader=proposed.firstOrNull {server -> st.state(server).evidenceFor(net).let {e ->
+            e.successes>0 && e.streak==0 && time>=e.at && time-e.at<1800000} && serviceRanks.getValue(server.id)==0 }?.id
+        val first=if(firstWaveOnly && readySources.isNotEmpty()) SubscriptionQueue.window(
+            (proposed+readySources.sortedBy {learned[it.id] ?: Int.MAX_VALUE}).distinctBy {it.id},
+            sourceQuality.map {it.source},ConnectPolicy.FIRST,provenLeader) else proposed
         val cachedGood = first.filter { st.state(it).evidenceFor(net).let { e -> e.successes > 0 && e.streak == 0 && time >= e.at && time - e.at < 1800000 } }.map { it.id }.toSet()
         val ping = first.filter { it.id !in cachedGood }
         val earlyHandoff = firstWaveOnly
         val plan = PhonePower.refresh(app)
         val slots = minOf(ping.size, PowerPolicy.cap(ConnectPolicy.FIRST, plan.foregroundTcpParallel))
         progress.value = progress.value.copy(
-            title = if (earlyHandoff) "Авто: HTTPS и Telegram MTProto" else "Авто: TCP-проверка ${ping.size} кандидатов",
+            title = if (earlyHandoff) "Авто: очередь подписок" else "Авто: TCP-проверка ${ping.size} кандидатов",
             done = 0,
             total = ping.size,
-            message = if (earlyHandoff) "До $slots параллельно · подключаю после HTTPS и ответа Telegram MTProto" else
+            message = if (earlyHandoff) "${first.map {it.source}.distinct().size} источников в порции · до $slots параллельно. Приоритет — местная история; каждый маршрут подтверждаем HTTPS и Telegram." else
                 "Одновременно до $slots · ${cachedGood.size} с недавним подтверждением" +
                     (if (slots < minOf(ConnectPolicy.FIRST, ping.size)) " · ${plan.reason}" else ""))
         val reachable = if (ConnectPolicy.requiresTcpFilter(earlyHandoff)) Tester.fastFilter(ping, foreground = true) else emptyMap()
