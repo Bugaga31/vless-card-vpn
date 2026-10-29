@@ -23,7 +23,7 @@ jobs:
         run: |
           set -euo pipefail
           base64 -d tools/patches/subscription-r199.patch.gz.b64 | gzip -d > "$RUNNER_TEMP/subscription-r199.patch"
-          echo 'edb948f499cda82fab57566118f64401309a32c56fee378290d8edab08d4677b  '"$RUNNER_TEMP/subscription-r199.patch" | sha256sum -c -
+          echo '3fe0f364d2766eb87190f9d320249542c1e74ab12c631c0d915c461f40d25ad3  '"$RUNNER_TEMP/subscription-r199.patch" | sha256sum -c -
           git fetch --quiet --no-tags origin b7c2313697d31030ebe692d1b582df7af09907c8
           git restore --source b7c2313697d31030ebe692d1b582df7af09907c8 -- app/src/main app/src/test app/build.gradle.kts
           PATCH="$RUNNER_TEMP/subscription-r199.patch"
