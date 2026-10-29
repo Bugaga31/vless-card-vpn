@@ -1,0 +1,91 @@
+{
+  "passed": true,
+  "source_sha": "153abac0d2f8ef47d6ffeb4134a5db8747f254c3",
+  "run_id": "40858775780",
+  "method": "assistant_opened_each_png_individually",
+  "screenshots": [
+    {
+      "file": "connected.png",
+      "sha256": "3319daaa76480a186e153b3b59f63dcac3ffefd7972f5f7eb7bccbe1abcdd815"
+    },
+    {
+      "file": "error.png",
+      "sha256": "20910d8aa5f69902dd1267b33106428085bccd3afcc95a52b7d0cd5998653f5e"
+    },
+    {
+      "file": "idle-dark.png",
+      "sha256": "98502a0ec3ff026fda651dd29a6f7137afb6943ba46009bee37a808cb414d8fb"
+    },
+    {
+      "file": "idle-light.png",
+      "sha256": "bb0bd60a2858eeb5a2fb2bd7901a74a8287c029c82adc6275b1e25fc9eb1bf7e"
+    },
+    {
+      "file": "large-narrow.png",
+      "sha256": "f62b2189ddb520b7215c7accc55fcf2abab26a6e2a1a3ebb17c6aa412c24e918"
+    },
+    {
+      "file": "maintenance-confirm.png",
+      "sha256": "3bc109bc12bb7f26ded923323f32516b72e6dc4b77e3e9274cfd77fe4bedb4f7"
+    },
+    {
+      "file": "maintenance-preview.png",
+      "sha256": "cad99c4e29896af4e1b268e5c05013faf29aa68b35003dad25a2563ef939a464"
+    },
+    {
+      "file": "maintenance-result.png",
+      "sha256": "19e83008216ae46418404443a7f10515e3f698a964a9af2375b0295aa3a85788"
+    },
+    {
+      "file": "partial.png",
+      "sha256": "51ee8d737ef135d7c18aaaca1452123a689932f82f0bb3a831b9d2aa86a17183"
+    },
+    {
+      "file": "ru-large.png",
+      "sha256": "9168f9742999a1b2f0a20172f0a915269bd84f8701be01031bc77512ac2e512b"
+    },
+    {
+      "file": "ru-off.png",
+      "sha256": "00a358a9185cf3e84e37ad73e9235ef4173c68b23f056a5b60ce3003e9add48e"
+    },
+    {
+      "file": "ru-on.png",
+      "sha256": "27b2f33665db23728832732fa4fab1065c24b145b241629b4488a17260469281"
+    },
+    {
+      "file": "ru-tor.png",
+      "sha256": "ea0fbf94e414e84f78f54b0dc721ced9e2bb4e18401f5e19f35e130ef454ff4f"
+    },
+    {
+      "file": "search-progress.png",
+      "sha256": "15dcd4accaabff773ce0de0bb727b080834b42d858cf672c429cb39aa408f7db"
+    },
+    {
+      "file": "searching.png",
+      "sha256": "2d872f27efdbef928e4a70976518f11a99352607ee1cfdb37523d0d3405b44c2"
+    },
+    {
+      "file": "services.png",
+      "sha256": "22390808d4f475749c5f043532a38e92a23da966fd0a3e33e5367ae23a96fc90"
+    }
+  ],
+  "observations": [
+    "Connected: status, disconnect and scoped explanation fit the card.",
+    "Error: wrapped heading, retry and repair actions remain visible.",
+    "Idle dark: primary action and 500ms explanation fit without overlap.",
+    "Idle light: blue action and text remain readable on white cards.",
+    "Large narrow: enlarged text wraps without horizontal overflow; action remains visible; content scrolls.",
+    "Maintenance confirm: delete and cancel are separate; cache-only scope is readable.",
+    "Maintenance preview: both actions and 18-byte preview fit the card.",
+    "Maintenance result: deletion result wraps cleanly with protected-data explanation.",
+    "Partial: amber warning is distinct from connected success; disconnect visible.",
+    "RU large: heading does not overlap switch; provider visibility warning wraps.",
+    "RU off: disabled state is explained in text, domain list stays inside card.",
+    "RU on: direct routing and reconnection scope readable, domains contained.",
+    "RU Tor: text explicitly states exclusions are disabled despite saved toggle.",
+    "Search progress: scroll state has separate cards and visible Stop action.",
+    "Searching: cancel action prominent; ongoing search explanation fits.",
+    "Services: 700ms Telegram is amber and local-probe limitation readable; metrics contained."
+  ],
+  "scope": "Synthetic states of production Compose on Android emulator; not live VPN, operator DPI or release version-label verification."
+}
