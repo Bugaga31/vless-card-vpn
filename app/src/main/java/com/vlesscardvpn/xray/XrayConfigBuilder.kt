@@ -310,6 +310,18 @@ object XrayConfigBuilder {
         // WebRTC/STUN would reveal the real address to websites; QUIC can't be desynced, so TCP+TLS is forced.
         if (settings.blockStun) rules.put(JSONObject().put("network", "udp").put("port", "3478,5349,19302-19309").put("outboundTag", "block"))
 
+        // RU QUIC exception is scoped before the existing global QUIC block. Preserve
+        // ad/tracker blocking for this exception; foreign/pinned QUIC stays blocked as before.
+        if (ruRules.isNotEmpty() && settings.blockQuic) {
+            fun quicRule(domains: List<String>, tag: String) = JSONObject().put("network", "udp")
+                .put("port", "443").put("domain", JSONArray(domains)).put("outboundTag", tag)
+            if (settings.blockAds) rules.put(quicRule(listOf("geosite:category-ads-all") + YT_ADS, "block"))
+            if (settings.blockTrackers) rules.put(quicRule(TRACKERS, "block"))
+            rules.put(quicRule(ruRules, "direct"))
+        }
+        if (settings.blockQuic || !useServers) rules.put(JSONObject().put("network", "udp").put("port", "443").put("outboundTag", "block"))
+        else if (settings.mode == Mode.HYBRID && hybridDomains(settings).isNotEmpty())
+            rules.put(JSONObject().put("network", "udp").put("port", "443").put("domain", JSONArray(hybridDomains(settings))).put("outboundTag", "block"))
         // «Сайт не открывается?» — the user's own choice wins over everything below (RU direct, services, hybrid)
         if (settings.alwaysDirect.isNotEmpty()) rules.put(JSONObject().put("domain", JSONArray(settings.alwaysDirect.map { "domain:$it" })).put("outboundTag", "direct"))
         if (settings.alwaysVpn.isNotEmpty()) rules.put(toMain(JSONObject().put("domain", JSONArray(settings.alwaysVpn.map { "domain:$it" }))))
@@ -337,9 +349,7 @@ object XrayConfigBuilder {
         }
         if (ruRules.isNotEmpty()) rules.put(JSONObject().put("domain", JSONArray(ruRules))
             .put("network", "tcp,udp").put("outboundTag", "direct"))
-        if (settings.blockQuic || !useServers) rules.put(JSONObject().put("network", "udp").put("port", "443").put("outboundTag", "block"))
-        else if (settings.mode == Mode.HYBRID && hybridDomains(settings).isNotEmpty())
-            rules.put(JSONObject().put("network", "udp").put("port", "443").put("domain", JSONArray(hybridDomains(settings))).put("outboundTag", "block"))
+
         // Explicit Tor service routing must not depend on a learned VLESS service pool.
         // Only TCP is supported by Tor; arbitrary UDP is not promoted to a Tor success.
         if (torOn && settings.torRouting && !settings.torAll) {
