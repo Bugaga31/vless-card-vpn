@@ -16,7 +16,7 @@ class ContinuousAuto(unittest.TestCase):
   self.assertIn('autoSourceAttempts[net + "|" + it]',s);self.assertIn('startsWith("Моб.: "), round)',s)
  def test_expensive_ranking_window_and_probe_cancellation_remain_bounded(self):
   s=(ROOT/'app/src/main/java/com/vlesscardvpn/core/Actions.kt').read_text()
-  self.assertIn('.take(AutoDiscoveryPolicy.RANKING_WINDOW) else allEligible',s)
+  self.assertIn('.take(AutoDiscoveryPolicy.RANKING_WINDOW) else readyCatalog',s)
   p=s.split('suspend fun quickTest',1)[1]
   # r188 records only admitted probes; merely queued IDs must survive a deadline.
   probe=p.index('val fastOk = realTest')
