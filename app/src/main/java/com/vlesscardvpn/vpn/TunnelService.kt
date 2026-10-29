@@ -1010,7 +1010,7 @@ class TunnelService : VpnService() {
                     }
                     if(telegramSlow>0) {
                         val cur=Tunnel.status.value
-                        Tunnel.status.value=cur.copy(check="Telegram ${live.tgMs} мс · HTTPS ${live.realMs} мс; цель ≤500 мс. Перепроверяю…",checkOk=false)
+                        Tunnel.status.value=cur.copy(check="Telegram ${live.tgMs} мс · HTTPS ${live.realMs} мс; цель ≤${com.vlesscardvpn.core.AutoLatencyPolicy.MAX_MS} мс. Перепроверяю…",checkOk=false)
                     }
                     if (telegramMiss >= 2) { repairTelegramRoute(); telegramMiss = 0 }
                     else if(telegramSlow>=3 && !com.vlesscardvpn.core.SessionHold.active() && !com.vlesscardvpn.core.PhonePower.isVoiceCallActive(this@TunnelService)) {

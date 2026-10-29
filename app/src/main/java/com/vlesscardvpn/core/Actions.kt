@@ -1616,7 +1616,7 @@ object Actions {
         } }
         val fast = ConnectPolicy.fastStart()
         // A certificate fetch for one self-signed endpoint must not block every ready route.
-        // Keep the same eight admitted candidates and source quotas; only split their preparation.
+        // Keep every admitted candidate and the source quotas; only split preparation.
         val fastOk = ForegroundProbePlan.run(shortlist, firstWaveOnly,
             valid = { Net.key(app) == net && Net.underlying(app)?.toString() == network }) { cohort ->
         realTest(cohort, "Авто: проверяю первый быстрый маршрут", big = ConnectPolicy.requiresBodyProof(earlyHandoff), youtube = false, telegram = st.settings.mode == Mode.AUTO,
