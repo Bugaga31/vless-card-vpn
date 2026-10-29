@@ -7,14 +7,19 @@ class AutoDiscoveryWiring(unittest.TestCase):
         s=(ROOT/'app/src/main/java/com/vlesscardvpn/core/Actions.kt').read_text()
         p=s.split('private suspend fun doAutoPrepare',1)[1].split('/** Cached cloud/network',1)[0]
         self.assertIn('val refresh = launch(Bg.io)',p)
-        self.assertLess(p.index('val refresh = launch'),p.index('quickTest(cached'))
+        self.assertLess(p.index('val refresh = launch'),p.index('ForegroundDiscoveryPump.run'))
         self.assertNotIn('lastSubRefresh',p);self.assertNotIn('doRefresh(',p)
         # The latest prerelease uses a shorter bounded foreground window.
         self.assertIn('withTimeoutOrNull(AutoDiscoveryPolicy.FIRST_CONNECT_MS)',p)
         policy=(ROOT/'app/src/main/java/com/vlesscardvpn/core/AutoDiscoveryPolicy.kt').read_text()
         budget=int(re.search(r'FIRST_CONNECT_MS = ([0-9_]+)L',policy).group(1).replace('_',''))
         self.assertGreaterEqual(budget,6500);self.assertLessEqual(budget,15000)
-        self.assertIn('batches.receiveCatching()',p)
+        self.assertIn('cached = { Store.state.value.servers }',p)
+        self.assertIn('quickTest(batch',p)
+        pump=(ROOT/'app/src/main/java/com/vlesscardvpn/core/ForegroundDiscoveryPump.kt').read_text()
+        self.assertIn('sources.tryReceive()',pump)
+        self.assertIn('sources.receiveCatching()',pump)
+        self.assertIn('count < MAX_BATCHES',pump)
         self.assertIn('refresh.cancel()',p)
         self.assertIn('firstWaveOnly = true',p)
     def test_explicit_foreground_cloud_refresh_respects_opt_out(self):
