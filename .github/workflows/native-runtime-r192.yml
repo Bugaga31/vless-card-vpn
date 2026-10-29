@@ -20,7 +20,7 @@ jobs:
         run: |
           set -euo pipefail
           base64 -d tools/patches/power-r192.patch.gz.b64 | gzip -d > "$RUNNER_TEMP/power-r192.patch"
-          echo 'f3173f93b296b2bc2f8b3b05a36a4d801953dde7f629eb3b9bb9469d36626926  '"$RUNNER_TEMP/power-r192.patch" | sha256sum -c -
+          echo '0d2dd2be169fa4568f15d644a8821baa9ee22c49f944c805979790d278f8b8c9  '"$RUNNER_TEMP/power-r192.patch" | sha256sum -c -
           git fetch --quiet --no-tags origin 758681a349e08d1a7c1f16da6d36a0672bddf79a
           git restore --source 758681a349e08d1a7c1f16da6d36a0672bddf79a -- app/src/main app/src/test
           PATCH="$RUNNER_TEMP/power-r192.patch"

@@ -25,7 +25,11 @@ class RuWhitelistUiR192Test {
  private fun labels(n:AccessibilityNodeInfo?):List<String> = if(n==null) emptyList() else listOfNotNull(n.text?.toString())+(0 until n.childCount).flatMap {labels(n.getChild(it))}
  private fun shot(name:String,expected:String) {
   ins.waitForIdleSync();Thread.sleep(1200)
-  val text=labels(ins.uiAutomation.rootInActiveWindow)
+  var text=labels(ins.uiAutomation.rootInActiveWindow)
+  val deadline=android.os.SystemClock.elapsedRealtime()+10_000
+  while(text.none {expected in it} && android.os.SystemClock.elapsedRealtime()<deadline) {
+   Thread.sleep(250);ins.waitForIdleSync();val root=ins.uiAutomation.rootInActiveWindow;root?.refresh();text=labels(root)
+  }
   assertTrue("$name: $text",text.any {expected in it})
   val dir=File(ins.targetContext.getExternalFilesDir(null),"ui192").apply {mkdirs()}
   File(dir,"$name.labels.txt").writeText(text.joinToString("\n"))
@@ -35,7 +39,9 @@ class RuWhitelistUiR192Test {
  @Test fun actualProductionWhitelistCardOnOffTorAndLargeFont() {
   Store.update {it.copy(settings=it.settings.copy(welcomeSound=false,secureScreen=false))}
   ActivityScenario.launch(MainActivity::class.java).use {scenario->
-   fun show(s:Settings) {scenario.onActivity {a->a.setContent {MaterialTheme {Surface {Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp)) {RuWhitelistCard(s) {}}}}}};ins.waitForIdleSync()}
+   var current by mutableStateOf(Settings())
+   scenario.onActivity {a->a.setContent {MaterialTheme {Surface {Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp)) {RuWhitelistCard(current) {}}}}}}
+   fun show(s:Settings) {scenario.onActivity {a->current=s;a.setContent {MaterialTheme {Surface {Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp)) {RuWhitelistCard(current) {}}}}}};ins.waitForIdleSync()}
    try {
     show(Settings());shot("ru-on","Банки, Госуслуги")
     show(Settings(ruWhitelist=false));shot("ru-off","Список выключен")
