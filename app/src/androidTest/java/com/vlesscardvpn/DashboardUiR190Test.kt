@@ -75,6 +75,7 @@ class DashboardUiR190Test {
         if(large) {shell("settings put system font_scale 1.0");shell("wm size reset");shell("wm density reset")}
     }
     private fun manualProgress(name:String,large:Boolean=false) {
+        Store.update {it.copy(settings=it.settings.copy(theme="dark",secureScreen=false,welcomeSound=false,reducedMotion=true,oceanBackground=false))}
         if(large) {shell("wm size 720x1600");shell("wm density 360");shell("settings put system font_scale 1.5");Thread.sleep(1000)}
         Actions.progress.value=Actions.Progress(title="Ручная проверка серверов",running=true,done=3,total=12,
             message="Проверяем HTTPS и Telegram. Текущий маршрут остаётся подключён.")
