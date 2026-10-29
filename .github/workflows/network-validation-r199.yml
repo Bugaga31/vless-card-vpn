@@ -109,7 +109,6 @@ jobs:
             git commit -m 'docs: record executed r199 regression results [skip ci]'
             AUTH=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
             git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $AUTH" push origin HEAD:refs/heads/integration/subscription-r199
-            fi
           fi
       - name: Require passing checks
         if: always()
