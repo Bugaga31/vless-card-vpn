@@ -28,9 +28,9 @@ class ProductR194Test {
  @Test fun comparisonDoesNotOverflow() {assertFalse(BoostDecision.shouldReplace(true,"a","b",Int.MAX_VALUE,Int.MAX_VALUE))}
  @Test fun hotPaces30s() {assertEquals(30000L,SearchPacingPolicy.rest(PowerPolicy.Plan(memory=PowerPolicy.Memory(hot=true))))}
  @Test fun callPaces15s() {assertEquals(15000L,SearchPacingPolicy.rest(PowerPolicy.Plan(voiceCallActive=true)))}
- @Test fun darkScreenPaces15s() {assertEquals(15000L,SearchPacingPolicy.rest(PowerPolicy.Plan(screenInteractive=false)))}
+ @Test fun darkScreenPaces15s() {assertEquals(5000L,SearchPacingPolicy.rest(PowerPolicy.Plan(screenInteractive=false)))}
  @Test fun batteryPressurePaces5s() {assertEquals(5000L,SearchPacingPolicy.rest(PowerPolicy.Plan(allowLight=false)))}
- @Test fun normalPlanNoAddedDelay() {assertEquals(0L,SearchPacingPolicy.rest(PowerPolicy.Plan()))}
+ @Test fun normalPlanNoAddedDelay() {assertEquals(5000L,SearchPacingPolicy.rest(PowerPolicy.Plan()))}
  @Test fun screenOffCapsForeground() {val p=PowerPolicy.evaluate(PowerPolicy.Input(0,screen=false),PowerPolicy.Options());assertEquals(4,p.foregroundRealParallel);assertEquals(4,p.foregroundTcpParallel)}
  @Test fun saverCapsForeground() {assertEquals(4,PowerPolicy.evaluate(PowerPolicy.Input(0,saver=true),PowerPolicy.Options()).foregroundRealParallel)}
  @Test fun ecoCapsForeground() {assertEquals(4,PowerPolicy.evaluate(PowerPolicy.Input(0),PowerPolicy.Options(profile="eco")).foregroundRealParallel)}

@@ -655,6 +655,28 @@ class TunnelService : VpnService() {
         }
     }
 
+    private var torCountryJob: Job? = null
+    private fun clearTorCountry() {
+        torCountryJob?.cancel();torCountryJob=null
+        com.vlesscardvpn.core.TorExitStatus.clear()
+    }
+    private fun observeTorCountry() {
+        if(torCountryJob?.isActive==true) return
+        val ticket=com.vlesscardvpn.core.TorExitStatus.begin()
+        torCountryJob=scope.launch(Dispatchers.IO) {
+            try {
+                while(Tunnel.status.value.state==Tunnel.State.CONNECTED) {
+                    val observation=Net.observation(this@TunnelService)
+                    val result=if(com.vlesscardvpn.core.PhonePower.refresh(this@TunnelService).allowLight)
+                        com.vlesscardvpn.tor.TorProbes.exitInfo() else null
+                    kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                    com.vlesscardvpn.core.TorExitStatus.publish(ticket,
+                        if(Net.matches(this@TunnelService,observation)) result?.second else null)
+                    delay(60_000L)
+                }
+            } finally { com.vlesscardvpn.core.TorExitStatus.publish(ticket,null) }
+        }
+    }
     private var torJob: Job? = null
     private var torBridgeRefreshJob: Job? = null
     /**
@@ -679,6 +701,7 @@ class TunnelService : VpnService() {
                 if (active.torBridge != st.torBridge || (!active.torRotation && !active.torRouting && !active.torAll && !(active.mode==Mode.AUTO && active.autoChainSearch && active.torAuto))) return@launch
                 com.vlesscardvpn.tor.TorCard.ensureStarted(this@TunnelService, active.torBridge,
                     bridgeLines = com.vlesscardvpn.tor.TorBridgeCatalog.selected(active.torBridgeLines, active.torBridge))
+                observeTorCountry()
                 if (torBridgeRefreshJob?.isActive != true) {
                     torBridgeRefreshJob = scope.launch(Dispatchers.IO) {
                         while (true) {
@@ -717,9 +740,9 @@ class TunnelService : VpnService() {
             val rotator = com.vlesscardvpn.tor.TorRotator(
                 com.vlesscardvpn.tor.TorControl("127.0.0.1", endpoint.port),
                 rotation = com.vlesscardvpn.tor.TorConnectionPolicy.rotation(st, android.os.SystemClock::elapsedRealtime),
-                countries = emptyList(),
+                countries = com.vlesscardvpn.tor.TorCountryPolicy.parse(st.torExitCountries).map {it.lowercase()},
                 cookieHex = endpoint.cookieHex,
-                clearInheritedCountries = true,
+                clearInheritedCountries = st.torExitCountries.isBlank(),
             )
             try {
                 val ready = kotlinx.coroutines.withTimeoutOrNull(30_000L) {
@@ -747,7 +770,7 @@ class TunnelService : VpnService() {
                         }?.let { (ms, cc) -> rotator.recordExit(ms, cc) }
                     }
                     kotlinx.coroutines.currentCoroutineContext().ensureActive()
-                    if(rotator.tick(android.os.SystemClock.elapsedRealtime())) { chainReserves.clear();chainEpoch.incrementAndGet();chainChoice=null }
+                    if(rotator.tick(android.os.SystemClock.elapsedRealtime())) { clearTorCountry();observeTorCountry();chainReserves.clear();chainEpoch.incrementAndGet();chainChoice=null }
                 }
             } catch (e: Exception) {
                 Log.i("TOR", "rotator stopped: ${e.message}")
@@ -1183,8 +1206,8 @@ class TunnelService : VpnService() {
                     if (Tunnel.status.value.check == "Проверяю интернет…") break
                 }
                 attempt++
-                healStatus("Рабочего VLESS-сервера пока нет. Трафик остаётся заблокированным; повторный поиск через ${minOf(15, attempt * 3)} с")
-                delay(minOf(15_000L, 3_000L * attempt.coerceAtMost(5)))
+                healStatus("Рабочего VLESS-сервера пока нет. Трафик остаётся заблокированным; повторный поиск через 5 с")
+                delay(com.vlesscardvpn.core.AutoSearchCampaign.WAVE_PAUSE_MS)
             }
         }
     }
@@ -1261,6 +1284,7 @@ class TunnelService : VpnService() {
             netJob?.cancel(); checkJob?.cancel(); healJob?.cancel(); recoveryJob?.cancel(); optJob?.cancel(); scoutJob?.cancel()
             watchJob?.cancel(); coverJob?.cancel(); serviceJob?.cancel(); liveJob?.cancel(); torJob?.cancel(); torJob = null
             torBridgeRefreshJob?.cancel(); torBridgeRefreshJob = null
+            clearTorCountry()
             com.vlesscardvpn.tor.TorCard.invalidateStartup()
             Actions.cancelForNetworkChange()
             if (!change.online) {
@@ -1270,6 +1294,11 @@ class TunnelService : VpnService() {
                     check = "Сеть пропала — жду новую, её отсутствие не портит обучение серверов", checkOk = null)
                 return@launch
             }
+            val family=Net.family(profile.orEmpty())
+            val recoveryText=com.vlesscardvpn.core.NetworkRecoveryPresentation.message(family)
+            healStatus(recoveryText)
+            com.vlesscardvpn.core.BackgroundOptimization.show(com.vlesscardvpn.core.BackgroundOptimization.Stage.NETWORK)
+            runCatching { foreground(recoveryText) }
             netChangedAt = System.currentTimeMillis(); netHardDone = false
             netJob = scope.launch reconnect@ {
                 delay(700)
@@ -1277,7 +1306,7 @@ class TunnelService : VpnService() {
                 val state = Tunnel.status.value.state
                 if (state != Tunnel.State.CONNECTED && state != Tunnel.State.CONNECTING) return@reconnect
                 healStep = 0; dpiHeals = 0; connectFails = 0; safeMasks = false
-                healStatus("Новая сеть — подстраиваю сервер, маскировку и локальный профиль…")
+                healStatus(recoveryText)
                 if (com.vlesscardvpn.tor.TorConnectionPolicy.needsAutoSearch(Store.state.value.settings)) {
                     Actions.recallNet(profile!!)
                     runCatching { Actions.quickRecheck(previousCandidates) }.onFailure { if (it is kotlinx.coroutines.CancellationException) throw it }
@@ -1303,6 +1332,7 @@ class TunnelService : VpnService() {
         if(error != null || !keepTun) { chainReserves.clear();chainChoice=null;chainEpoch.incrementAndGet() }
         torJob?.cancel(); torJob = null
         torBridgeRefreshJob?.cancel(); torBridgeRefreshJob = null
+        clearTorCountry()
         com.vlesscardvpn.tor.TorCard.invalidateStartup()
         if (error != null) com.vlesscardvpn.tor.TorCard.stopEmbedded()
         if (!keepTun) runCatching { com.vlesscardvpn.core.Traffic.tick() }

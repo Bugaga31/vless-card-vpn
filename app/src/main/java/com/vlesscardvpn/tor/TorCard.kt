@@ -91,7 +91,8 @@ object TorCard {
                       upstreamHttpPort: Int = DEFAULT_UPSTREAM_PORT, ptProxyPort: Int = DEFAULT_PT_UPSTREAM_PORT): String {
         val dir = java.io.File(ctx.filesDir, "tor")
         return torrcEmbedded(java.io.File(dir, "data").absolutePath, java.io.File(dir, "cookie").absolutePath,
-            nativeDir(ctx), controlPort, socksPort, bridge, bridgeLines, upstreamHttpPort, ptProxyPort)
+            nativeDir(ctx), controlPort, socksPort, bridge, bridgeLines, upstreamHttpPort, ptProxyPort) +
+            TorCountryPolicy.config(com.vlesscardvpn.core.Store.state.value.settings.torExitCountries)
     }
 
     /** Pure overload — testable on the JVM without an Android context. */
@@ -164,6 +165,9 @@ object TorCard {
             embedded = null
         }
         if (portUp(socksPort)) {
+            check(com.vlesscardvpn.core.Store.state.value.settings.torExitCountries.isBlank()) {
+                "Выбор страны поддерживается для встроенного Tor; остановите внешний Tor"
+            }
             val endpoints = controlEndpoints(ctx, controlPort)
             check(endpoints.isNotEmpty()) { "Tor port occupied without control authentication" }
             val accepted = endpoints.any { endpoint ->
@@ -171,7 +175,7 @@ object TorCard {
                 try {
                     control.connect(endpoint.cookieHex)
                     val upstream = control.getConf("HTTPSProxy")?.trim('"')
-                    bridge == "none" && upstream == "127.0.0.1:$upstreamHttpPort"
+                    bridge == "none" && upstream == "127.0.0.1:$upstreamHttpPort" && control.getConf("ExitNodes").isNullOrBlank()
                 } catch (_: Exception) { false } finally { control.close() }
             }
             check(accepted) { "Tor is already running without the VLESS upstream proxy" }

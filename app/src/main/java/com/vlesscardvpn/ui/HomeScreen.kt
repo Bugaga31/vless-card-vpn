@@ -126,6 +126,8 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
         ConnectionOverview(status, cfg.hideServerNames, if(cfg.torAll) "Tor через VLESS" else if(cfg.mode==Mode.AUTO) "Авто" else "Выбранные серверы") {
             PowerButton(on, busy, color) { if (on || busy) onDisconnect() else onConnect() }
         }
+        val torExit by com.vlesscardvpn.core.TorExitStatus.state.collectAsState()
+        if(on && torExit.active) TorExitCountryCard(torExit)
         val backgroundStatus by com.vlesscardvpn.core.BackgroundOptimization.status.collectAsState()
         if (on && backgroundStatus.isNotBlank()) Text(backgroundStatus,style=MaterialTheme.typography.bodyMedium,
             color=MaterialTheme.colorScheme.onSurfaceVariant,modifier=Modifier.fillMaxWidth().padding(top=8.dp))
@@ -409,4 +411,16 @@ private fun SessionStats(min: Long, rx: Long, tx: Long, turbo: Boolean) {
         }
     }
     if (turbo) Text("Ускорение включено", fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp))
+}
+
+@Composable
+fun TorExitCountryCard(info:com.vlesscardvpn.core.TorExitStatus.Info) {
+    if(!info.active) return
+    OutlinedCard(Modifier.fillMaxWidth().padding(top=12.dp)) {
+        Column(Modifier.padding(16.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
+            Text(com.vlesscardvpn.core.TorExitStatus.label(info),style=MaterialTheme.typography.titleMedium)
+            Text("По проверке через Tor. У разных сайтов выходные узлы могут отличаться.",
+                style=MaterialTheme.typography.bodyMedium,color=MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
 }
