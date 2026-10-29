@@ -23,9 +23,9 @@ jobs:
         run: |
           set -euo pipefail
           base64 -d tools/patches/network-r198.patch.gz.b64 | gzip -d > "$RUNNER_TEMP/network-r198.patch"
-          echo '6a91532ab83e5324ba9fb65aef1b5b792f6989116caa613dbd9f99753b86f1d5  '"$RUNNER_TEMP/network-r198.patch" | sha256sum -c -
+          echo 'f692e915c054bc13a374ea1a938a371ab4734953e654b4231a8202f7a1170bde  '"$RUNNER_TEMP/network-r198.patch" | sha256sum -c -
           git fetch --quiet --no-tags origin 0fe8abd672580077b3ad431dbafda798bb11dbfa
-          git restore --source 0fe8abd672580077b3ad431dbafda798bb11dbfa -- app/src/main app/src/test
+          git restore --source 0fe8abd672580077b3ad431dbafda798bb11dbfa -- app/src/main app/src/test app/build.gradle.kts
           PATCH="$RUNNER_TEMP/network-r198.patch"
           if git apply --reverse --check "$PATCH" 2>/dev/null; then
             echo 'Source patch already applied'
