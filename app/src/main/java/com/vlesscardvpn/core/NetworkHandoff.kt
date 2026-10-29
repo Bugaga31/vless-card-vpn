@@ -2,7 +2,7 @@ package com.vlesscardvpn.core
 
 /** Pure, bounded network revision gate. Duplicate capability events never cause restart loops. */
 class NetworkHandoff {
-    data class Snapshot(val handle: String, val profile: String)
+    data class Snapshot(val handle: String, val profile: String, val path: String = "")
     data class Change(val revision: Long, val online: Boolean)
     private var current: Snapshot? = null
     private var revision = 0L

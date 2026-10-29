@@ -126,6 +126,9 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
         ConnectionOverview(status, cfg.hideServerNames, if(cfg.torAll) "Tor через VLESS" else if(cfg.mode==Mode.AUTO) "Авто" else "Выбранные серверы") {
             PowerButton(on, busy, color) { if (on || busy) onDisconnect() else onConnect() }
         }
+        val backgroundStatus by com.vlesscardvpn.core.BackgroundOptimization.status.collectAsState()
+        if (on && backgroundStatus.isNotBlank()) Text(backgroundStatus,style=MaterialTheme.typography.bodyMedium,
+            color=MaterialTheme.colorScheme.onSurfaceVariant,modifier=Modifier.fillMaxWidth().padding(top=8.dp))
         val cloudStatus by com.vlesscardvpn.core.CloudSpeed.status.collectAsState()
         if (busy) LiveProgress(stop = false) { it.running }
         if (cloudStatus.isNotBlank()) Text(cloudStatus,style=MaterialTheme.typography.bodySmall,

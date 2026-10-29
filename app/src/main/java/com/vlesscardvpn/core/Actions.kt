@@ -965,9 +965,10 @@ object Actions {
         val currentFastest = selOk.minWithOrNull(ServerChoice.downloadOrder({ now.state(it) },net,stamp))
         val fasterDownload = ServerChoice.downloadUpgrade(currentFastest?.let { now.state(it) },now.state(best.first()),net,stamp)
         val qualityGain = if (speedMode) fasterDownload else median > bestMs * 1.6 && median - bestMs > 150
-        val switch = selOk.size < sel.size || selOk.size < (if (ServerChoice.automaticPrimary(st.settings.mode == Mode.AUTO,st.settings.balance == com.vlesscardvpn.model.Balance.LEAST_PING,GameSession.active())) 1 else minOf(3,best.size)) || selBroken || qualityGain
+        val repairRequired = selOk.size < sel.size || selOk.size < (if (ServerChoice.automaticPrimary(st.settings.mode == Mode.AUTO,st.settings.balance == com.vlesscardvpn.model.Balance.LEAST_PING,GameSession.active())) 1 else minOf(3,best.size)) || selBroken
+        val switch = BackgroundOptimizationPolicy.mayReplace(repairRequired,qualityGain)
         val pick = if (selBroken) best.filter { now.state(it).bigOk == true } else best
-        if (switch || now.settings.mode == Mode.AUTO) selectBest(AutoEligibility.TOP, close = true, among = pick)
+        if (switch) selectBest(AutoEligibility.TOP, close = true, among = pick)
         val applied = Store.state.value
         val changed = originalSelection != applied.selected.map { AutoRoutePolicy.configuration(it,applied.state(it),originalNet) }.toSet()
         lastOptimizeSwitched = changed

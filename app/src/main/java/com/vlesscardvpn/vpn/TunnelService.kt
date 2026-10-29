@@ -232,6 +232,7 @@ class TunnelService : VpnService() {
         teardown(null, keepTun)
         Store.init(this); Actions.init(this)
         com.vlesscardvpn.core.ConnectionPassport.clear()
+        com.vlesscardvpn.core.BackgroundOptimization.clear()
         val prev = Tunnel.status.value
         Tunnel.status.value = if (keepTun && prev.state == Tunnel.State.CONNECTED) prev.copy(check = "Переподключаюсь без разрыва VPN…", checkOk = null)
             else Tunnel.Status(Tunnel.State.CONNECTING, "Подключение…")
@@ -854,20 +855,23 @@ class TunnelService : VpnService() {
     private fun scheduleOptimize(firstDelay: Long = 120_000) {
         if (Store.state.value.settings.torAll) return
         if (optJob?.isActive == true) return
+        com.vlesscardvpn.core.BackgroundOptimization.show(com.vlesscardvpn.core.BackgroundOptimization.Stage.SCHEDULED)
         optJob = scope.launch {
             delay(firstDelay)
             var calm = 0
             while (Tunnel.status.value.state == Tunnel.State.CONNECTED) {
-                if (com.vlesscardvpn.core.SessionHold.active()) { delay(5000); continue }
-                while (asleep() && Tunnel.status.value.state == Tunnel.State.CONNECTED) delay(60_000) // no re-tests while the phone sleeps
+                if (com.vlesscardvpn.core.SessionHold.active()) { com.vlesscardvpn.core.BackgroundOptimization.show(com.vlesscardvpn.core.BackgroundOptimization.Stage.HOLD); delay(5000); continue }
+                while (asleep() && Tunnel.status.value.state == Tunnel.State.CONNECTED) { com.vlesscardvpn.core.BackgroundOptimization.show(com.vlesscardvpn.core.BackgroundOptimization.Stage.POWER); delay(60_000) } // no re-tests while the phone sleeps
                 // Starting test cores/downloads is itself load, even when their resulting reconnect is deferred.
                 val startupRemaining = com.vlesscardvpn.core.MaintenanceReconnectPolicy.remaining(
                     android.os.SystemClock.elapsedRealtime(), connectedElapsed)
-                if (startupRemaining > 0) { delay(startupRemaining); continue }
-                if (!com.vlesscardvpn.core.PhonePower.refresh(this@TunnelService).allowLight) { delay(60_000); continue }
+                if (startupRemaining > 0) { com.vlesscardvpn.core.BackgroundOptimization.show(com.vlesscardvpn.core.BackgroundOptimization.Stage.SCHEDULED); delay(startupRemaining); continue }
+                if (!com.vlesscardvpn.core.PhonePower.refresh(this@TunnelService).allowLight) { com.vlesscardvpn.core.BackgroundOptimization.show(com.vlesscardvpn.core.BackgroundOptimization.Stage.POWER); delay(60_000); continue }
                 if (Store.state.value.settings.protectActiveTraffic && userActive() &&
-                    !(Store.state.value.settings.mode == Mode.AUTO && usedServers.size < com.vlesscardvpn.core.AutoEligibility.ACTIVE)) { delay(60_000); continue } // hot phone: no background re-tests
-                if (chainMeasuring || usedChain != null) { delay(60_000);continue }
+                    !(Store.state.value.settings.mode == Mode.AUTO && usedServers.size < com.vlesscardvpn.core.AutoEligibility.ACTIVE)) { com.vlesscardvpn.core.BackgroundOptimization.show(com.vlesscardvpn.core.BackgroundOptimization.Stage.TRAFFIC); delay(60_000); continue } // hot phone: no background re-tests
+                if (chainMeasuring || usedChain != null) { com.vlesscardvpn.core.BackgroundOptimization.show(com.vlesscardvpn.core.BackgroundOptimization.Stage.CHAIN); delay(60_000);continue }
+                if (Actions.progress.value.running) { com.vlesscardvpn.core.BackgroundOptimization.show(com.vlesscardvpn.core.BackgroundOptimization.Stage.SCHEDULED); delay(5000); continue }
+                com.vlesscardvpn.core.BackgroundOptimization.show(com.vlesscardvpn.core.BackgroundOptimization.Stage.RUNNING)
                 val result = runCatching { Store.busy { Actions.optimize() } }.getOrElse {
                     if (it is kotlinx.coroutines.CancellationException) throw it
                     false
@@ -876,17 +880,19 @@ class TunnelService : VpnService() {
                 // Compare with the running engine, not only with the already-updated Store selection.
                 val pending = Store.state.value.let { s -> s.settings.mode == Mode.AUTO &&
                     (s.selected.map { it.id }.toSet() != usedServers.map { it.id }.toSet() ||
-                    appliedAutoWeights != com.vlesscardvpn.core.SpeedBalance.fingerprint(
+                    com.vlesscardvpn.core.BackgroundOptimizationPolicy.weightsNeedRefresh(usedServers.size, appliedAutoWeights, com.vlesscardvpn.core.SpeedBalance.fingerprint(
                         if (!com.vlesscardvpn.core.GameSession.active()) usedServers.map {
                             com.vlesscardvpn.core.ServerChoice.measuredSpeed(s.state(it),Net.key(this@TunnelService),System.currentTimeMillis()) } else emptyList(),
-                        usedServers.map { s.state(it).realMs })) }
+                        usedServers.map { s.state(it).realMs }))) }
                 val reconnect = result || pending
                 // the user is in a call / watching video: wait a minute; still busy → skip, the next pass decides again
-                val busyNow = reconnect && userActive() && run { Log.i("E2E", "optimize: user is busy — switch postponed"); delay(60_000); userActive() }
+                val busyNow = reconnect && userActive() && run { com.vlesscardvpn.core.BackgroundOptimization.show(com.vlesscardvpn.core.BackgroundOptimization.Stage.DEFERRED); Log.i("E2E", "optimize: user is busy — switch postponed"); delay(60_000); userActive() }
                 if (reconnect && !busyNow && !com.vlesscardvpn.core.SessionHold.active() && Tunnel.status.value.state == Tunnel.State.CONNECTED) {
                     Log.i("E2E", "optimize: switching to faster servers")
+                    com.vlesscardvpn.core.BackgroundOptimization.show(com.vlesscardvpn.core.BackgroundOptimization.Stage.APPLYING)
                     lock.withLock { connect(soft = true) }
                 }
+                if (!busyNow) com.vlesscardvpn.core.BackgroundOptimization.show(com.vlesscardvpn.core.BackgroundOptimization.Stage.FINISHED)
                 calm = if (Actions.lastOptimizeSwitched) 0 else minOf(calm + 1, 3)
                 // sleep until the next pass, or wake early (45 s) when the network changes
                 val incomplete = Store.state.value.settings.mode == Mode.AUTO && usedServers.size < com.vlesscardvpn.core.AutoEligibility.ACTIVE
@@ -1212,7 +1218,7 @@ class TunnelService : VpnService() {
         val cm = getSystemService(ConnectivityManager::class.java) ?: return
         val initial = Net.underlying(this)
         curNet = initial
-        handoff.seed(initial?.let { NetworkHandoff.Snapshot(it.toString(), Net.key(this, it)) })
+        handoff.seed(initial?.let { NetworkHandoff.Snapshot(it.toString(), Net.key(this, it), Net.pathRevision(this,it)) })
         val cb = object : ConnectivityManager.NetworkCallback() {
             override fun onAvailable(network: Network) = queueNetworkRefresh()
             override fun onLost(network: Network) = queueNetworkRefresh()
@@ -1233,7 +1239,7 @@ class TunnelService : VpnService() {
             if (networkSignal.get() != signal || netCallback == null) return@launch
             val network = Net.underlying(this@TunnelService)
             val profile = network?.let { Net.key(this@TunnelService, it) }
-            val snapshot = network?.let { NetworkHandoff.Snapshot(it.toString(), profile!!) }
+            val snapshot = network?.let { NetworkHandoff.Snapshot(it.toString(), profile!!, Net.pathRevision(this@TunnelService,it)) }
             val change = handoff.update(snapshot) ?: return@launch
             // Carry endpoints only as unverified candidate hints, never their old-network samples.
             val previousCandidates=(usedServers+chainReserves.candidateServers()).distinctBy {it.id}.take(8)
@@ -1246,6 +1252,7 @@ class TunnelService : VpnService() {
             com.vlesscardvpn.tor.TorCard.invalidateStartup()
             Actions.cancelForNetworkChange()
             if (!change.online) {
+                com.vlesscardvpn.core.BackgroundOptimization.show(com.vlesscardvpn.core.BackgroundOptimization.Stage.NETWORK)
                 val current = Tunnel.status.value
                 if (current.state == Tunnel.State.CONNECTED) Tunnel.status.value = current.copy(
                     check = "Сеть пропала — жду новую, её отсутствие не портит обучение серверов", checkOk = null)
@@ -1277,6 +1284,7 @@ class TunnelService : VpnService() {
     private fun teardown(error: String?, keepTun: Boolean = false) {
         maintenanceJob?.cancel(); maintenanceJob = null
         com.vlesscardvpn.core.ConnectionPassport.clear()
+        com.vlesscardvpn.core.BackgroundOptimization.clear()
         if (error != null) com.vlesscardvpn.core.SessionHold.clear()
         if (BuildConfig.DEBUG) Log.i("E2E", "teardown state=${Tunnel.status.value.state} keepTun=$keepTun reason=${if(error == null) "restart" else if(error.isEmpty()) "stop" else "error"}")
         chainJob?.cancel();chainJob=null;usedChain=null
