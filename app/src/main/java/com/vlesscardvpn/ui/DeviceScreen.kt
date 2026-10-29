@@ -100,6 +100,8 @@ fun DeviceScreen() {
             }
         }
 
+        MaintenanceCard()
+
         DeviceSection("Состояние устройства", "Только показатели, которые Android разрешает прочитать.") {
             snapshot?.let { s ->
                 DeviceFact("Оперативная память", "${gb(s.ramAvailable)} свободно из ${gb(s.ramTotal)}")
