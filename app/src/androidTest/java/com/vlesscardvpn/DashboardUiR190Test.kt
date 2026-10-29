@@ -51,9 +51,12 @@ class DashboardUiR190Test {
             HealthInput(true,100,true,true,true,if(ok==true) 120 else 700,null),HealthRequirements()))
         Tunnel.status.value=Tunnel.Status(state=state,checkOk=ok,route=if(state==Tunnel.State.CONNECTED) "Стенд · тестовый маршрут" else "",since=System.currentTimeMillis())
         Updater.state.value=Updater.State()
+        Actions.progress.value=if(state==Tunnel.State.CONNECTING) Actions.Progress(title="Проверяем доступность",running=true,
+            message="HTTPS и Telegram проверяются параллельно") else Actions.Progress()
         ActivityScenario.launch(MainActivity::class.java).use {
             val expected=when(state){Tunnel.State.CONNECTING->"Отменить поиск";Tunnel.State.CONNECTED->"Отключить";else->"Подключить"}
             capture(name,expected)
+            if(name=="searching") {assertTrue(scroll(ins.uiAutomation.rootInActiveWindow));capture("search-progress","Объём проверки ещё уточняется")}
             if(name=="partial") {assertTrue(scroll(ins.uiAutomation.rootInActiveWindow));capture("services","Telegram")}
         }
         if(large) {shell("settings put system font_scale 1.0");shell("wm size reset");shell("wm density reset")}
@@ -64,7 +67,7 @@ class DashboardUiR190Test {
             show("error",state=Tunnel.State.ERROR);show("partial",state=Tunnel.State.CONNECTED,ok=false)
             show("connected",state=Tunnel.State.CONNECTED,ok=true);show("large-narrow",large=true)
         } finally {
-            Tunnel.status.value=Tunnel.Status();ConnectionPassport.clear()
+            Tunnel.status.value=Tunnel.Status();ConnectionPassport.clear();Actions.progress.value=Actions.Progress()
             shell("settings put system font_scale 1.0");shell("wm size reset");shell("wm density reset")
         }
     }

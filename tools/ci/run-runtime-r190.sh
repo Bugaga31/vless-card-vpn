@@ -37,7 +37,7 @@ import json,hashlib,sys
 sys.path.insert(0,'tools/release-gates')
 from check_screenshot import check_png
 files=sorted(Path('docs/validation/r190-ui').glob('*.png'))
-assert len(files)==11, [str(f) for f in files]
+assert len(files)==12, [str(f) for f in files]
 for f in files:check_png(f.read_bytes())
 p=Path('docs/validation/r190-device.json');d=json.loads(p.read_text())
 d['ui_captures_executed']=True

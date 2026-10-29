@@ -19,18 +19,24 @@ jobs:
           base64 -d tools/patches/product-r190.patch.gz.b64 | gzip -d > "$RUNNER_TEMP/product-r190.patch"
           echo '19b5d3e464b4dc10455ff3d19b4b75176cc52022ae298b725a08a0e145176664  '"$RUNNER_TEMP/product-r190.patch" | sha256sum -c -
           PATCH="$RUNNER_TEMP/product-r190.patch"
-          git apply --check "$PATCH"
-          git apply "$PATCH"
+          if ! git apply --reverse --check "$PATCH" 2>/dev/null; then
+            git apply --check "$PATCH"
+            git apply "$PATCH"
+          fi
+          if ! test -f app/src/androidTest/java/com/vlesscardvpn/ProductRuntimeR190Test.kt; then
           base64 -d tools/patches/product-device-r190.patch.gz.b64 | gzip -d > "$RUNNER_TEMP/instrumentation.patch"
           echo '1bf12be0f8119a7ab204aef71171bd4fb05236b95cc11d3a90081fbc821c9184  '"$RUNNER_TEMP/instrumentation.patch" | sha256sum -c -
           git apply --check "$RUNNER_TEMP/instrumentation.patch"
           git apply "$RUNNER_TEMP/instrumentation.patch"
+          fi
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add app
+          if ! git diff --cached --quiet; then
           git commit -m 'fix(auto): apply bounded session source to runtime harness [skip ci]'
           AUTH=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
           git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $AUTH" push origin HEAD:refs/heads/integration/product-device-r190
+          fi
           echo "VALIDATED_SOURCE_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
       - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
         with: {distribution: temurin, java-version: '17'}
@@ -101,4 +107,4 @@ jobs:
           git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $AUTH" push origin HEAD:refs/heads/integration/product-device-r190
       - name: Require runtime assertions
         if: always()
-        run: python3 -c 'import json;d=json.load(open("docs/validation/r190-device.json"));assert d.get("passed") is True and d.get("ui_captures_executed") is True and len(d.get("screenshots",[]))==11,d'
+        run: python3 -c 'import json;d=json.load(open("docs/validation/r190-device.json"));assert d.get("passed") is True and d.get("ui_captures_executed") is True and len(d.get("screenshots",[]))==12,d'
