@@ -11,7 +11,7 @@ import androidx.compose.ui.unit.sp
 import com.vlesscardvpn.model.Settings
 
 @Composable
-fun RuWhitelistCard(settings: Settings, onChange: (Boolean) -> Unit) {
+fun RuWhitelistCard(settings: Settings, onGeoChange: (Boolean) -> Unit = {}, onChange: (Boolean) -> Unit) {
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -24,8 +24,18 @@ fun RuWhitelistCard(settings: Settings, onChange: (Boolean) -> Unit) {
                 settings.ruWhitelist -> "Банки, Госуслуги, Яндекс, VK и другие домены из списка — без VPN. Остальной трафик — через VPN."
                 else -> "Список выключен: эти сервисы тоже идут через VPN."
             }, fontSize = 14.sp)
-            Text("При включении трафик и DNS этих доменов видны провайдеру. Это не все .ru и не все российские IP. «Всегда через VPN» имеет приоритет. Применится после переподключения.", fontSize = 14.sp)
+            Text("При включении трафик и DNS этих доменов видны провайдеру. Короткий список не охватывает все .ru и российские IP. «Всегда через VPN» имеет приоритет. Применится после переподключения.", fontSize = 14.sp)
             Text(com.vlesscardvpn.core.RuWhitelistPolicy.SERVICES.joinToString(" · "), fontSize = 14.sp)
+            HorizontalDivider()
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("RU-домены и IP напрямую", Modifier.weight(1f), fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                Switch(checked = settings.ruAllDirect, onCheckedChange = onGeoChange,
+                    modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp))
+            }
+            Text(when { settings.torAll -> "Выключено режимом «Всё через Tor»."; !settings.ruAllDirect -> "Расширение выключено. Короткий список выше действует отдельно."; else ->
+                "Отдельное расширение Karing: российские домены и IPv4-подсети — без VPN. IPv6 остаётся заблокированным." }, fontSize = 14.sp)
+            Text("Трафик прямых соединений и DNS доменов списка видны провайдеру. База географии может ошибаться и не содержит все серверы. «Всегда через VPN» и выбранные Tor-сервисы приоритетнее. Применится после переподключения.", fontSize = 14.sp)
+            Text("База Karing · " + com.vlesscardvpn.core.KaringRuData.REVISION.take(8), fontSize = 12.sp)
         }
     }
 }

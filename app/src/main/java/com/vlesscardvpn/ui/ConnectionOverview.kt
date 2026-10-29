@@ -45,7 +45,7 @@ fun ConnectionOverview(status:Tunnel.Status,hideRoute:Boolean,modeLabel:String,c
             if(status.message.isNotBlank()) Text(status.message,fontSize=14.sp,
                 color=if(status.state==Tunnel.State.ERROR) Bad else MaterialTheme.colorScheme.onSurfaceVariant)
             HorizontalDivider(color=MaterialTheme.colorScheme.outline.copy(alpha=.3f))
-            Text(if(routeSettings.torAll) "RU-исключения выключены · Всё через Tor" else if(routeSettings.ruWhitelist) "RU-список: напрямую · после переподключения" else "RU-список: через VPN",fontSize=14.sp,color=MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(if(routeSettings.torAll) "RU-исключения выключены · Всё через Tor" else if(routeSettings.ruAllDirect) "RU-домены и IPv4: напрямую · после переподключения" else if(routeSettings.ruWhitelist) "RU-список: напрямую · после переподключения" else "RU-список: через VPN",fontSize=14.sp,color=MaterialTheme.colorScheme.onSurfaceVariant)
             if(status.route.isNotBlank()) Text(if(hideRoute) "Имена маршрута скрыты" else status.route,
                 fontSize=14.sp,color=MaterialTheme.colorScheme.onSurfaceVariant)
         }

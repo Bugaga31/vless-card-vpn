@@ -234,7 +234,7 @@ object XrayConfigBuilder {
         val inSettings = JSONObject().put("udp", true).put("ip", "127.0.0.1")
         if (socks.auth) inSettings.put("auth", "password").put("accounts", arr(JSONObject().put("user", socks.user).put("pass", socks.pass)))
         else inSettings.put("auth", "noauth")
-        fun sniff() = JSONObject().put("enabled", true).put("destOverride", JSONArray(com.vlesscardvpn.core.TransportPolicy.sniff(!settings.blockQuic || com.vlesscardvpn.core.RuWhitelistPolicy.domains(settings).isNotEmpty()))).put("routeOnly", true)
+        fun sniff() = JSONObject().put("enabled", true).put("destOverride", JSONArray(com.vlesscardvpn.core.TransportPolicy.sniff(!settings.blockQuic || com.vlesscardvpn.core.RuWhitelistPolicy.rules(settings).isNotEmpty()))).put("routeOnly", true)
         val inbounds = arr(JSONObject().put("tag", "socks").put("listen", "127.0.0.1").put("port", socks.port)
             .put("protocol", "socks").put("settings", inSettings).put("sniffing", sniff()))
         if (torOn) {
@@ -277,8 +277,9 @@ object XrayConfigBuilder {
         fun toTorUpstream(rule: JSONObject): JSONObject = rule.put("network", "tcp").put("outboundTag", if (hopIdx >= 0) WARP_CHAIN else "$PROXY_PREFIX$torUpstreamIndex")
         fun toMain(rule: JSONObject): JSONObject = if (settings.torAll && torOn) toTor(rule) else toServer(rule)
         val ruRules = com.vlesscardvpn.core.RuWhitelistPolicy.rules(settings)
+        val ruIps = com.vlesscardvpn.core.RuGeoPolicy.ips(settings)
         val dnsServers = JSONArray()
-        val ruDns = settings.ruDns && settings.ruDirect && (useServers || settings.torAll)
+        val ruDns = settings.ruDns && settings.ruDirect && useServers && !settings.torAll && settings.alwaysVpn.isEmpty()
         if (ruDns) dnsServers.put(JSONObject().put("address", RU_DNS).put("port", 53)
             .put("domains", JSONArray(RU_DOMAINS)).put("skipFallback", true))
         // Xray 26.9.30 supports parallel queries within an identical policy group.
@@ -364,6 +365,9 @@ object XrayConfigBuilder {
             rules.put(toServer(JSONObject().put("domain", JSONArray(com.vlesscardvpn.core.Services.domains(listOf("telegram"))))))
             rules.put(toServer(JSONObject().put("ip", JSONArray(com.vlesscardvpn.core.Services.ips(listOf("telegram"))))))
         }
+        // After explicit VPN/Tor/service protections, before the generic route. Keep global IPv6/STUN/QUIC blocks.
+        if (ruIps.isNotEmpty()) rules.put(JSONObject().put("ip", JSONArray(ruIps))
+            .put("network", "tcp,udp").put("outboundTag", "direct"))
         val only = emptyList<String>()
         val speedAware = downloadSpeeds.size == servers.size && downloadSpeeds.any { it > 0 }
         val heavyOn = !settings.torAll && !speedAware && many && hopIdx < 0 && servers.size <= 10 && heavy.isNotEmpty() && heavy.size < servers.size && heavy.all { it in servers.indices }
@@ -372,7 +376,7 @@ object XrayConfigBuilder {
             rules.put(toTor(JSONObject().put("network", "tcp")))
             rules.put(toServer(JSONObject().put("network", "udp")))
         } else rules.put(toServer(JSONObject().put("network", "tcp,udp")))
-        val routing = JSONObject().put("domainStrategy", "AsIs").put("rules", rules)
+        val routing = JSONObject().put("domainStrategy", if (ruIps.isNotEmpty()) "IPOnDemand" else "AsIs").put("rules", rules)
         if (many) {
             fun strategy() = if (speedAware) com.vlesscardvpn.core.SpeedBalance.strategy(downloadSpeeds,downloadLatencies)
             else JSONObject().put("type", settings.balance.xray).apply {
