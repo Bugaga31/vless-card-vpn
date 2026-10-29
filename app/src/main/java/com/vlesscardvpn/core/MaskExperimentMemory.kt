@@ -22,7 +22,7 @@ class MaskExperimentMemory(private val capacity:Int=512) {
         if(count==0) return emptyList()
         fun entry(id:String)=entries[Key(network,handle,server,id)]
         val oldest=eligible.sortedBy {entry(it)?.scheduled ?: Long.MIN_VALUE}
-        val best=eligible.filter {id->entry(id)?.let {it.ok==true && it.latency>0 && now-it.observed<=600_000L}==true}
+        val best=eligible.filter {id->entry(id)?.let {it.completed && !it.unknown && it.ok==true && it.latency>0 && now-it.observed<=600_000L}==true}
             .minByOrNull {id->entry(id)!!.let {it.latency+120/(it.successes.coerceAtMost(8)+1)}}
         // At most one exploitation slot; preserve one exploration slot when two are allowed.
         return if(best==null) oldest.take(count) else (listOf(best)+oldest.filter {it!=best}).take(count)

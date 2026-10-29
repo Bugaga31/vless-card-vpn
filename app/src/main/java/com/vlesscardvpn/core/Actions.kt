@@ -456,7 +456,7 @@ object Actions {
     /** For each server, tries masks in [Masks.searchOrder] and keeps the fastest working one (remembered per network). */
     fun findMasks(servers: List<Server>, perServer: Int = 48) = launch("Подбор маскировки") { doFindMasks(servers, perServer) }
 
-    suspend fun doFindMasks(servers: List<Server>, perServer: Int = 48, enough: Int = 3, group: (Server) -> String = { it.id }, budgetMs: Long = Long.MAX_VALUE): String {
+    suspend fun doFindMasks(servers: List<Server>, perServer: Int = 48, enough: Int = 3, group: (Server) -> String = { it.id }, budgetMs: Long = Long.MAX_VALUE, strictServices: Boolean = false): String {
         val deadline = if (budgetMs == Long.MAX_VALUE) Long.MAX_VALUE else android.os.SystemClock.elapsedRealtime() + budgetMs
         if (servers.isEmpty()) return "Выберите серверы"
         val pinned = pinCertificates(servers)
@@ -465,6 +465,7 @@ object Actions {
         val dpiOk = probe.available(DpiEngine.BYEDPI)
         val tpwsOk = probe.available(DpiEngine.TPWS)
         val cfg = Store.state.value.settings
+        val strict = strictServices || cfg.mode == Mode.AUTO
         val net0 = Net.key(app)
         val maskNetwork = Net.underlying(app)?.toString()
         val stats = Store.state.value.maskStats.let { it[net0] ?: it[Net.family(net0)] }.orEmpty()
@@ -480,7 +481,7 @@ object Actions {
         val pool = if (evo) MaskLab.breed(parents, (slots * 4).coerceIn(6, 40), known = kept.map { it.id }.toSet()) else emptyList()
         val untried = kept.filter { stats[it.id] == null }
         val evoCand = (0 until maxOf(untried.size, pool.size)).flatMap { i -> listOfNotNull(untried.getOrNull(i), pool.getOrNull(i)) }
-        fun maskReady(p:Probe)=p.works && (cfg.mode!=Mode.AUTO || AutoLatencyPolicy.accepts(p))
+        fun maskReady(p:Probe)=p.works && (!strict || AutoLatencyPolicy.accepts(p))
         val order = { s: Server ->
             val ok = { m: Mask -> Masks.compatible(m, s) && (dpiOk || !m.viaByeDpi) }
             val fresh = evoCand.filter(ok).shuffled().take(slots)
@@ -527,16 +528,16 @@ object Actions {
             // «Жёсткий поиск»: 24 probes at once (PowerPolicy caps it on a hot/low-power phone) —
             // the whole pass takes seconds, not half a minute.
             kotlinx.coroutines.withTimeoutOrNull(if (deadline == Long.MAX_VALUE) Long.MAX_VALUE else remaining()) {
-            Tester.real(current, cfg.testUrl, port, own.ports, youtube = false, telegram=cfg.mode==Mode.AUTO, requireTelegram=cfg.mode==Mode.AUTO, batch = 64, parallel = 24, attempts = 1, budgetMs = remaining(),
+            Tester.real(current, cfg.testUrl, port, own.ports, youtube = false, telegram=strict, requireTelegram=strict, batch = 64, parallel = 24, attempts = 1, budgetMs = remaining(),
                 skip = { i -> android.os.SystemClock.elapsedRealtime() >= deadline || synchronized(best) { (found[group(variants[indices[i]].first)] ?: 0) >= enough } || dead(variants[indices[i]].second) }) { i, p ->
                 if (Net.key(app) != net0 || Net.underlying(app)?.toString() != maskNetwork) return@real
                 val (s, m) = variants[indices[i]]
                 synchronized(best) {
                     val cur = best[s.id]
-                    if (m != null && p !== Tester.SKIPPED && (cfg.mode!=Mode.AUTO || !p.works || p.tgOk!=null)) (if (maskReady(p)) kindOk else kindFail).merge(Masks.kind(m), 1, Int::plus)
+                    if (m != null && p !== Tester.SKIPPED && (!strict || !p.works || p.tgOk!=null)) (if (maskReady(p)) kindOk else kindFail).merge(Masks.kind(m), 1, Int::plus)
                     if (maskReady(p) && m != null && (cur == null || eff(m, p) < eff(cur.first, cur.second))) best[s.id] = m to p
                     if (maskReady(p) && m != null) { good.getOrPut(s.id) { mutableListOf() } += m to p.realMs; found.merge(group(s), 1, Int::plus) }
-                    if (m != null && p !== Tester.SKIPPED && (cfg.mode!=Mode.AUTO || !p.works || p.tgOk!=null)) tried += Triple(s.id, m.id, maskReady(p))
+                    if (m != null && p !== Tester.SKIPPED && (!strict || !p.works || p.tgOk!=null)) tried += Triple(s.id, m.id, maskReady(p))
                 }
                 step(done.incrementAndGet(), variants.size)
             }
@@ -553,14 +554,14 @@ object Actions {
             val (own2, port2) = dpiForTests(confirm.map { it.second })
             try {
                 kotlinx.coroutines.withTimeoutOrNull(if (deadline == Long.MAX_VALUE) Long.MAX_VALUE else remaining()) {
-                Tester.real(confirm, cfg.testUrl, port2, own2.ports, youtube = true, batch = 64, parallel = 24, attempts = 1, big = true, budgetMs = remaining()) { i, p -> res[i] = p; step(i + 1, confirm.size) }
+                Tester.real(confirm, cfg.testUrl, port2, own2.ports, youtube = true, telegram = strict, requireTelegram = strict, batch = 64, parallel = 24, attempts = 1, big = true, budgetMs = remaining()) { i, p -> res[i] = p; step(i + 1, confirm.size) }
                 }
             } finally { own2.close() }
             pinned.forEach { s ->
                 val mine = confirm.indices.filter { confirm[it].first.id == s.id }
                 // passed again (with YouTube) and the fastest in real use: ping + download speed + how heavy the mask is
-                val pick = mine.filter { res[it]?.works == true && res[it]?.ytOk == true && (cfg.mode!=Mode.AUTO && res[it]?.tgOk!=false || res[it]?.let(AutoLatencyPolicy::accepts)==true) }.minByOrNull { eff(confirm[it].second, res.getValue(it)) }
-                    ?: mine.filter { res[it]?.let { p -> p.works && p.ytOk != false && (cfg.mode!=Mode.AUTO && p.tgOk!=false || AutoLatencyPolicy.accepts(p)) } == true }.minByOrNull { eff(confirm[it].second, res.getValue(it)) }
+                val pick = mine.filter { res[it]?.works == true && res[it]?.ytOk == true && (!strict && res[it]?.tgOk!=false || res[it]?.let(AutoLatencyPolicy::accepts)==true) }.minByOrNull { eff(confirm[it].second, res.getValue(it)) }
+                    ?: mine.filter { res[it]?.let { p -> p.works && p.ytOk != false && (!strict && p.tgOk!=false || AutoLatencyPolicy.accepts(p)) } == true }.minByOrNull { eff(confirm[it].second, res.getValue(it)) }
                 if (pick != null) best[s.id] = confirm[pick].second to res.getValue(pick)
                 else if (mine.any { res[it] != null && res[it] !== Tester.SKIPPED }) best.remove(s.id)
                 mine.forEach { i -> if (res[i]?.works == false) synchronized(best) { tried += Triple(s.id, confirm[i].second.id, false) } }
@@ -958,14 +959,14 @@ object Actions {
      * «WARP»: registers up to 3 free Cloudflare accounts (one key each — the tester runs one WireGuard tunnel per key
      * at a time), 4 endpoints per account, then searches UDP noise masks for them and selects the working ones.
      */
-    fun setupWarp(accounts: Int = 3, onlyKey: String? = null) = launch("WARP") {
+    fun setupWarp(accounts: Int = 1, onlyKey: String? = null) = launch("WARP") {
         val msg = doSetupWarp(if (onlyKey != null) 1 else accounts, onlyKey)
         // Ready = connect right away (or reconnect onto WARP): no guessing whether WARP is on.
         val st = Store.state.value
-        val warpOk = st.selected.any { Masks.isWarp(it) && st.state(it).works }
+        val warpOk = msg.startsWith("WARP готов:") && st.selected.any { Masks.isWarp(it) && st.state(it).works }
         if (warpOk && (android.net.VpnService.prepare(app) == null)) {
             withContext(Dispatchers.Main) { com.vlesscardvpn.vpn.TunnelService.start(app) }
-            msg.replace("Нажмите «Подключить».", "Подключаюсь через WARP — на главном экране будет «WARP: включён ✓».")
+            msg.replace("Нажмите «Подключить».", "Подключаюсь через проверенную точку WARP; статус WARP проверяется после запуска.")
         } else msg
     }
 
@@ -975,25 +976,35 @@ object Actions {
     }
 
     /** [onlyKey]: «Подключить с этим ключом» in «Ключи WARP+» — one account, just this key. */
-    suspend fun doSetupWarp(accounts: Int = 3, onlyKey: String? = null): String {
+    suspend fun doSetupWarp(accounts: Int = 1, onlyKey: String? = null): String =
+        kotlinx.coroutines.withTimeoutOrNull(120_000L) { setupWarpBounded(accounts, onlyKey) }
+            ?: "WARP: лимит ожидания исчерпан. Сохранённые серверы и выбранный маршрут не удалены."
+
+    private suspend fun setupWarpBounded(accounts: Int, onlyKey: String?): String {
+        val setupNet = Net.key(app) to Net.underlying(app)?.toString()
+        val setupStarted = System.currentTimeMillis()
+        val count = accounts.coerceIn(1,3)
         progress.value = progress.value.copy(title = "WARP: регистрация")
         val accs = mutableListOf<Warp.Account>(); var err = ""
         var dpi: DpiSet? = null
         var plusErr = ""
         try {
         withContext(Dispatchers.IO) {
-            repeat(accounts) { i ->
-                step(i, accounts)
-                var r = runCatching { Warp.register() }
+            repeat(count) { i ->
+                kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                step(i, count)
+                var r = runCatching { kotlinx.coroutines.withTimeout(12_000L) { Warp.register() } }
+                kotlinx.coroutines.currentCoroutineContext().ensureActive()
                 if (r.isFailure && dpi == null) {
                     // Cloudflare API blocked: retry through the DPI bypass picked for this network.
                     dpi = runCatching { DpiSet(app).start(Store.state.value.settings, Net.key(app), true, emptySet(), com.vlesscardvpn.BuildConfig.DEBUG) }.getOrNull()
-                    dpi?.currentPort?.let { Warp.extraSocks = listOf(it); r = runCatching { Warp.register() } }
+                    dpi?.currentPort?.let { Warp.extraSocks = listOf(it); r = runCatching { kotlinx.coroutines.withTimeout(12_000L) { Warp.register() } } }
                 }
+                kotlinx.coroutines.currentCoroutineContext().ensureActive()
                 r.onSuccess { accs += it }.onFailure { err = Errors.human(it) }
             }
         }
-        // WARP+: bind a key to every account (own keys first, then the built-in public ones).
+        // Respect configured keys, but cap attempts and time so WARP+ cannot stall ordinary WARP.
         val cfg = Store.state.value.settings
         val own = WarpKeys.parse(cfg.warpKeys)
         val order = if (onlyKey != null) mutableListOf(onlyKey)
@@ -1003,11 +1014,13 @@ object Actions {
             val seen = HashMap<String, String>()
             withContext(Dispatchers.IO) {
                 accs.indices.forEach { i ->
-                    val (key, e) = Warp.upgrade(accs[i], order, maxTries = if (onlyKey != null) 1 else 12) { k, err ->
+                    val upgraded = kotlinx.coroutines.withTimeoutOrNull(12_000L) { Warp.upgrade(accs[i], order, maxTries = if (onlyKey != null) 1 else 2) { k, err ->
                         WarpKeys.classify(err)?.let { seen[k] = WarpKeys.mark(it) }
                         // used up / invalid: don't retry it for the next account
                         if (err != null && WarpKeys.classify(err) != null) order.remove(k)
                     }
+                    }
+                    val (key, e) = upgraded ?: (null to "Лимит ожидания WARP+")
                     // a key that worked is the best bet for the next account too
                     if (key != null) { accs[i] = accs[i].copy(plus = true); order.remove(key); order.add(0, key) } else plusErr = e
                 }
@@ -1019,17 +1032,23 @@ object Actions {
         android.util.Log.i("E2E", "warp accounts=${accs.size} plus=$plus err=$err plusErr=$plusErr")
         if (accs.isEmpty()) return "WARP: регистрация не удалась ($err). Попробуйте после подключения к любому серверу или ByeDPI."
         val list = accs.flatMapIndexed { i, a -> Warp.servers(a, Warp.endpointsFor(i)) }
-        Store.replaceSource(Warp.SOURCE, list)
+        // Preserve existing accounts, selected route and results when a new setup fails.
+        Store.addServers(list)
         // one working endpoint per account is enough (only one tunnel per key can run at a time anyway)
-        // 10 most likely masks, 2.5 min at most: an account whose endpoints are all dead must not stall the search
-        val res = doFindMasks(list, perServer = 10, enough = 1, group = { it.secret }, budgetMs = 150_000)
+        // 10 compatible candidates, 90 seconds at most: an account whose endpoints are all dead must not stall the search
+        val res = doFindMasks(list, perServer = 10, enough = 1, group = { it.secret }, budgetMs = 90_000, strictServices = true)
         val st = Store.state.value
         val ok = list.filter { st.state(it).works }
         android.util.Log.i("E2E", "warp servers=${list.size} working=${ok.size} masks=${ok.map { st.state(it).maskId }}")
         // one endpoint per account: two tunnels with the same key at once would roam and stall
-        if (ok.isNotEmpty()) selectBest(3, ok.sortedBy { st.state(it).score }.distinctBy { it.secret })
-        return if (ok.isEmpty()) "WARP: аккаунтов ${accs.size}, но ни одна точка входа не ответила ($res). WireGuard в этой сети, похоже, режут."
-        else "WARP готов: рабочих точек входа ${ok.size} (по одной на аккаунт, всего ${list.size}), выбраны. " +
+        kotlinx.coroutines.currentCoroutineContext().ensureActive()
+        var chosen = false
+        Store.update { current ->
+            if ((Net.key(app) to Net.underlying(app)?.toString()) != setupNet) current
+            else WarpSetupPolicy.select(current,list,setupNet.first,setupStarted).also { chosen = it !== current }
+        }
+        return if (!chosen) "WARP: новый маршрут не подтверждён ($res). Сохранённые серверы не удалены. Причиной могут быть сеть, API или недоступность точек входа; блокировка UDP не доказана."
+        else "WARP готов: рабочих точек входа ${ok.size} (по одной на аккаунт, всего ${list.size}), выбран один основной маршрут в режиме «Серверы». " +
             (if (plus > 0) "WARP+: $plus из ${accs.size} аккаунтов. " else if (plusErr.isNotEmpty()) "WARP+ не подключился ($plusErr) — обычный WARP. " else "") +
             "Нажмите «Подключить»."
     }
