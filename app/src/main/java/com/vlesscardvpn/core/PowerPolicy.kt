@@ -55,7 +55,7 @@ object PowerPolicy {
             if (i.voiceCall || eco) 30000 else if (!i.screen && !chargeWork) 15000 else if (pressure) 5000 else 3000,
             if (i.voiceCall) 120000 else if (eco) 90000 else if (pressure) 45000 else 20000,
             allowLight, activeProtected, i.screen, i.voiceCall,
-            if (hot || i.lowMemory) 2 else 8, if (i.voiceCall) 1 else if (hot || i.lowMemory) 2 else 8)
+            if (hot || i.lowMemory) 2 else if (!i.screen || i.saver || low || eco) 4 else 8, if (i.voiceCall) 1 else if (hot || i.lowMemory) 2 else if (!i.screen || i.saver || low || eco) 4 else 8)
     }
     fun cap(requested: Int, limit: Int) = requested.coerceIn(1, limit.coerceAtLeast(1))
 }

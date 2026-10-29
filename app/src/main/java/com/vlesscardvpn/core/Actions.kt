@@ -737,9 +737,11 @@ object Actions {
     fun ytDpiWins(serverKbps: Int, dpiKbps: Int) = dpiKbps > 0 && dpiKbps > serverKbps * 1.3 + 500
 
     fun boostYoutube(maintenanceReconnect: (() -> Unit)? = null) = launch("Ускоряю YouTube через сервер") {
-        Store.update { it.copy(settings = it.settings.copy(turbo = true, blockQuic = false, smartYoutube = false, ytDpi = emptyMap())) }
-        progress.value = progress.value.copy(title = "Ускоряю YouTube: облегчаю маски VLESS")
-        lightenMasks(true)
+        // Measure before changing selection; never disable QUIC policy or masks speculatively.
+        val net=Net.key(app); val handle=Net.underlying(app)?.toString()
+        fun sameNetwork()=Net.key(app)==net && Net.underlying(app)?.toString()==handle
+        val measuredAfter=System.currentTimeMillis()
+        val wasConnected=Tunnel.socks!=null
         val initial = Store.state.value
         val fresh = runCatching {
             CloudSpeed.refresh(app)
@@ -747,21 +749,37 @@ object Actions {
         }.getOrDefault(emptyList())
         if (fresh.isNotEmpty()) realTest(fresh, "Проверяю быстрые VLESS-серверы", big = false, youtube = true, telegram = false, attempts = 1)
         val state = Store.state.value
-        val top = (state.servers.filter { state.state(it).works && AutoEligibility.vlessServer(it) }
+        if(!sameNetwork()) return@launch "Сеть изменилась — выбор маршрута оставлен без изменений."
+        val top = (state.selected.filter(AutoEligibility::vlessServer) + state.servers.filter { state.state(it).works && AutoEligibility.vlessServer(it) }
             .sortedWith(ServerChoice.downloadOrder({ state.state(it) }, Net.key(app), System.currentTimeMillis())).take(6) +
             fresh.filter { state.state(it).works }).distinctBy { it.id }
         if (top.isEmpty()) return@launch "Рабочий VLESS-сервер не найден — прямое подключение не включено. Проверьте серверы и повторите."
         progress.value = progress.value.copy(title = "Сравниваю YouTube и Telegram через VLESS")
         realTest(top, "Сравниваю YouTube и Telegram через VLESS", big = false, youtube = true, telegram = true, attempts = 1, parallel = 4)
         realSpeed(top)
-        val updated = Store.state.value
-        selectBest(10, close = true, among = top.filter { updated.state(it).works })
-        val connected = Tunnel.socks != null
-        if (connected) withContext(Dispatchers.Main) { maintenanceReconnect?.invoke() ?: com.vlesscardvpn.vpn.TunnelService.start(app) }
-        val best = Store.state.value.let { current -> current.selected.maxOfOrNull { current.state(it).kbps } ?: 0 }
-        val speed = if (best > 0) "Лучший измеренный поток — ${"%.1f".format(java.util.Locale.US, best / 1000.0)} Мбит/с через VLESS" else
-            "Проверил YouTube через рабочие VLESS-серверы; реальная скорость пока не измерилась"
-        speed + if (connected) (if (maintenanceReconnect != null) ". Применю новый выбор без остановки VPN." else ". Переподключаюсь через выбранный сервер.") else ". Подключитесь, чтобы применить выбор."
+        kotlinx.coroutines.currentCoroutineContext().ensureActive()
+        if(!sameNetwork()) return@launch "Сеть изменилась — измерения не применены. Текущий маршрут сохранён."
+        val updated=Store.state.value
+        fun freshSpeed(s:Server):Int = updated.state(s).let { x ->
+            if(x.works && x.speedNetwork==net && x.speedMask==x.maskFor(net) && x.speedCheckedAt>=measuredAfter) x.kbps else 0
+        }
+        val eligible=AutoEligibility.servicePool(top.filter {freshSpeed(it)>0}, {updated.state(it)}, net,System.currentTimeMillis())
+        val winner=eligible.maxByOrNull(::freshSpeed)
+            ?: return@launch "Ускорение не подтверждено измерениями — маршрут, маски и настройки сохранены."
+        val primary=updated.selected.firstOrNull()
+        val before=primary?.let(::freshSpeed) ?: 0
+        if(!BoostDecision.shouldReplace(wasConnected,primary?.id,winner.id,before,freshSpeed(winner)))
+            return@launch "Заметного ускорения не подтверждено — оставляю текущий маршрут без переподключения."
+        if(!sameNetwork()) return@launch "Сеть изменилась — выбор не применён."
+        selectBest(1, close=false, among=listOf(winner))
+        if(Store.state.value.selected.none {it.id==winner.id}) return@launch "Кандидат не прошёл отбор — переподключение не выполнялось."
+        val connected=Tunnel.socks!=null
+        if(connected) withContext(Dispatchers.Main) {
+            if(sameNetwork()) maintenanceReconnect?.invoke() ?: com.vlesscardvpn.vpn.TunnelService.start(app)
+        }
+        val speed="%.1f".format(java.util.Locale.US,freshSpeed(winner)/1000.0)
+        "Выбран измеренный маршрут: $speed Мбит/с. Маски и политика QUIC сохранены." +
+            if(connected) " Применяю проверенный выбор." else " Подключитесь, чтобы применить выбор."
     }
 
     /** «Облегчи маску» (Помощник). */
@@ -1325,14 +1343,14 @@ object Actions {
 
     private fun autoPrepare(onReady: () -> Unit, setNetwork: () -> Unit) = launch("Авто-настройка") {
         val statistics=AutoSearchStatistics()
-        val handoffNetwork=java.util.concurrent.atomic.AtomicReference<String?>(null)
-        val outcome=AutoSearchCampaign.runBounded(network = { Net.key(app) + "|" + Net.underlying(app)?.toString() },
+        val outcome=AutoSearchCampaign.runPersistent(network = { Net.key(app) + "|" + Net.underlying(app)?.toString() },
             online = { online() }, elapsed = android.os.SystemClock::elapsedRealtime,
+            restMs = { SearchPacingPolicy.rest(PhonePower.refresh(app)) },
             exhausted = { attempted -> Store.state.value.let { st -> preferred(st, st.servers).none { it.id !in attempted } } },
             waiting = { round, offline ->
                 progress.value = progress.value.copy(title = "Авто: продолжаю поиск", message = if (offline)
                     "Нет сети — жду её восстановления. Нажатие отменяет поиск."
-                    else "Волна ${round + 1}/${AutoSearchCampaign.MAX_WAVES} завершена. Облако: ${CloudControl.count()} кандидатов. Проверяю следующие маршруты. Нажатие отменяет поиск.")
+                    else "Волна ${round.toLong() + 1} завершена. Поиск продолжается до подключения или отмены. Облако: ${CloudControl.count()} кандидатов. Проверяю следующие маршруты. Нажатие отменяет поиск.")
                 Tunnel.status.value = Tunnel.Status(Tunnel.State.CONNECTING, if (offline) "Жду сеть…" else "Ищу следующий маршрут…",
                     check = progress.value.message, checkOk = null)
             }) { round, attempted ->
@@ -1342,7 +1360,7 @@ object Actions {
             val startedAt = android.os.SystemClock.elapsedRealtime()
             val network = Net.key(app) to Net.underlying(app)?.toString()
             try {
-                val message = doAutoPrepare(onReady, attempted, continuous = true, round = round, statistics = statistics) { selected = true;handoffNetwork.set(network.first+"|"+network.second) }
+                val message = doAutoPrepare(onReady, attempted, continuous = true, round = round, statistics = statistics) { selected = true }
                 val stale = network != (Net.key(app) to Net.underlying(app)?.toString())
                 AutoDiagnostics.record(app, Net.family(network.first), if (stale) "STALE" else if (selected) "PASS" else "UNKNOWN",
                     if (stale) "NETWORK_CHANGED" else if (selected) "NONE" else "NO_CANDIDATE", android.os.SystemClock.elapsedRealtime() - startedAt)
@@ -1352,18 +1370,8 @@ object Actions {
                 throw e
             }
         }
-        // A committed first winner can be handed off just before timeout during cleanup.
-        // Never replace that same-network handoff with an ERROR screen.
-        val handedOff=handoffNetwork.get()==Net.key(app)+"|"+Net.underlying(app)?.toString()
-        val result=outcome.value ?: if(handedOff) "Проверенный маршрут выбран — подключаюсь" else null
-        AutoDiagnostics.recordSearch(app,Net.family(Net.key(app)),if(result!=null) "FOUND" else outcome.stop.name,outcome.waves,statistics.snapshot())
-        result ?: run {
-            val message="Поиск остановлен: ${outcome.waves}/${AutoSearchCampaign.MAX_WAVES} волн, общий бюджет ${AutoSearchCampaign.MAX_TOTAL_MS/1000} с. " +
-                statistics.explanation()+" Порог HTTPS и Telegram ≤500 мс не ослаблялся. Проверьте источники/сеть или повторите поиск. Прямого обхода нет."
-            Tunnel.status.value=Tunnel.Status(Tunnel.State.ERROR,"Маршрут ≤500 мс не найден",check=message,checkOk=false)
-            progress.value=progress.value.copy(title="Авто: поиск завершён",message=message)
-            message
-        }
+        AutoDiagnostics.recordSearch(app,Net.family(Net.key(app)),"FOUND",outcome.waves,statistics.snapshot())
+        outcome.value ?: error("Persistent search returned without a winner")
     }
 
     private data class AutoSourceAttempt(val at: Long, val failed: Boolean)

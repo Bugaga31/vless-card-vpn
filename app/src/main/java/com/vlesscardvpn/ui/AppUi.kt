@@ -76,8 +76,6 @@ fun AppUi(onConnect: () -> Unit, onDisconnect: () -> Unit) {
                     Triple(2, "Настройки", Icons.Filled.Settings)
                 )
                 Column(Modifier.background(scheme.surface.copy(alpha = .97f))) {
-                if (compact) Text(tabs.first { it.first == tab }.second, modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
-                    textAlign = TextAlign.Center, fontSize = 14.sp, color = scheme.onSurface)
                 NavigationBar(containerColor = Color.Transparent) {
                     tabs.forEach { (index, title, glyph) ->
                         NavigationBarItem(selected = tab == index, onClick = { tab = index },

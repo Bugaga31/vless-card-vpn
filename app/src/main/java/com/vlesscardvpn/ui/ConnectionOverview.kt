@@ -27,24 +27,23 @@ fun ConnectionOverview(status:Tunnel.Status,hideRoute:Boolean,modeLabel:String,c
     val tone=when {issue->Warn;on && status.checkOk==true->Good;else->Accent}
     Card(Modifier.fillMaxWidth().padding(top=12.dp),shape=RoundedCornerShape(12.dp),
         colors=CardDefaults.cardColors(containerColor=MaterialTheme.colorScheme.surface)) {
-        Column(Modifier.padding(16.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
-            Text(when {searching->"ПОИСК СОЕДИНЕНИЯ";on->"ТЕКУЩИЙ МАРШРУТ";issue->"НУЖНО ВНИМАНИЕ";else->"ВАША ЗАЩИЩЁННАЯ СВЯЗЬ"},
-                color=tone,fontSize=14.sp,fontWeight=FontWeight.Bold,letterSpacing=1.sp)
-            Text(ConnectionPresentationPolicy.heading(status.state,status.checkOk),fontSize=24.sp,
-                lineHeight=29.sp,fontWeight=FontWeight.SemiBold,color=MaterialTheme.colorScheme.onSurface)
+        Column(Modifier.padding(16.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
+            Text(if(searching) "Поиск · $modeLabel" else "Режим · $modeLabel",
+                color=tone,fontSize=14.sp,fontWeight=FontWeight.Medium)
+            Text(ConnectionPresentationPolicy.heading(status.state,status.checkOk),fontSize=22.sp,
+                lineHeight=27.sp,fontWeight=FontWeight.SemiBold,color=MaterialTheme.colorScheme.onSurface)
             control()
             Text(when {
-                searching->"Проверяем HTTPS и Telegram. Поиск можно отменить в любой момент."
-                status.state==Tunnel.State.ERROR->"Сохранённые серверы и настройки остаются на месте. Попробуйте снова или откройте диагностику."
+                searching->"Проверяем HTTPS и Telegram. Ищем до подключения; отмена — кнопкой выше."
+                status.state==Tunnel.State.ERROR->"Серверы и настройки сохранены. Повторите поиск или откройте диагностику."
                 on && status.checkOk==false->"Туннель подключён, но не все обязательные проверки прошли. Смотрите результаты ниже."
-                on && status.checkOk==null->"Подключение ещё не означает, что все сервисы отвечают. Ждём результаты проверок."
+                on && status.checkOk==null->"Туннель запущен. Доступность сервисов ещё проверяется."
                 on->"Локальные пробы подтвердили маршрут. Доступность аккаунтов и звонков проверяется отдельно."
-                else->"Проверим HTTPS и Telegram, затем подключим подтверждённый маршрут."
+                else->"Автоматически найдём маршрут с ответом HTTPS и Telegram до 500 мс."
             },fontSize=15.sp,lineHeight=22.sp,color=MaterialTheme.colorScheme.onSurfaceVariant)
             if(status.message.isNotBlank()) Text(status.message,fontSize=14.sp,
                 color=if(status.state==Tunnel.State.ERROR) Bad else MaterialTheme.colorScheme.onSurfaceVariant)
             HorizontalDivider(color=MaterialTheme.colorScheme.outline.copy(alpha=.3f))
-            Text("Режим · $modeLabel",fontSize=14.sp,fontWeight=FontWeight.Medium)
             Text(if(routeSettings.torAll) "RU-исключения выключены · Всё через Tor" else if(routeSettings.ruWhitelist) "RU-список: напрямую · после переподключения" else "RU-список: через VPN",fontSize=14.sp,color=MaterialTheme.colorScheme.onSurfaceVariant)
             if(status.route.isNotBlank()) Text(if(hideRoute) "Имена маршрута скрыты" else status.route,
                 fontSize=14.sp,color=MaterialTheme.colorScheme.onSurfaceVariant)
@@ -60,7 +59,7 @@ fun ServiceHealthCard() {
     LaunchedEffect(owner) {owner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
         while(true) {now=android.os.SystemClock.elapsedRealtime();kotlinx.coroutines.delay(5000)}
     }}
-    Card(Modifier.fillMaxWidth().padding(top=12.dp),shape=RoundedCornerShape(16.dp),
+    Card(Modifier.fillMaxWidth().padding(top=12.dp),shape=RoundedCornerShape(12.dp),
         colors=CardDefaults.cardColors(containerColor=MaterialTheme.colorScheme.surface)) {
         Column(Modifier.padding(16.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
             Text("Проверки сервисов",fontSize=17.sp,fontWeight=FontWeight.SemiBold)
