@@ -1,0 +1,137 @@
+{
+  "source_sha": "a7efc8d07693fb7112885f078acfe583d7d5350d",
+  "run_id": "40914522321",
+  "passed": true,
+  "runtime_tests_executed": true,
+  "count": 372,
+  "scope": "android33_native_vless_tls_not_full_app_tun_not_operator_dpi",
+  "result_tail": ": current=362\nINSTRUMENTATION_STATUS: id=AndroidJUnitRunner\nINSTRUMENTATION_STATUS: numtests=372\nINSTRUMENTATION_STATUS: stream=\nINSTRUMENTATION_STATUS: test=sourceRankControlsFirstPortion\nINSTRUMENTATION_STATUS_CODE: 1\nINSTRUMENTATION_STATUS: class=com.vlesscardvpn.SubscriptionQueueRuntimeR199Test\nINSTRUMENTATION_STATUS: current=362\nINSTRUMENTATION_STATUS: id=AndroidJUnitRunner\nINSTRUMENTATION_STATUS: numtests=372\nINSTRUMENTATION_STATUS: stream=.\nINSTRUMENTATION_STATUS: test=sourceRankControlsFirstPortion\nINSTRUMENTATION_STATUS_CODE: 0\nINSTRUMENTATION_STATUS: class=com.vlesscardvpn.SubscriptionQueueRuntimeR199Test\nINSTRUMENTATION_STATUS: current=363\nINSTRUMENTATION_STATUS: id=AndroidJUnitRunner\nINSTRUMENTATION_STATUS: numtests=372\nINSTRUMENTATION_STATUS: stream=\nINSTRUMENTATION_STATUS: test=newerHostFailureSupersedesOldSuccess\nINSTRUMENTATION_STATUS_CODE: 1\nINSTRUMENTATION_STATUS: class=com.vlesscardvpn.SubscriptionQueueRuntimeR199Test\nINSTRUMENTATION_STATUS: current=363\nINSTRUMENTATION_STATUS: id=AndroidJUnitRunner\nINSTRUMENTATION_STATUS: numtests=372\nINSTRUMENTATION_STATUS: stream=.\nINSTRUMENTATION_STATUS: test=newerHostFailureSupersedesOldSuccess\nINSTRUMENTATION_STATUS_CODE: 0\nINSTRUMENTATION_STATUS: class=com.vlesscardvpn.SubscriptionQueueRuntimeR199Test\nINSTRUMENTATION_STATUS: current=364\nINSTRUMENTATION_STATUS: id=AndroidJUnitRunner\nINSTRUMENTATION_STATUS: numtests=372\nINSTRUMENTATION_STATUS: stream=\nINSTRUMENTATION_STATUS: test=futureHistoryIgnored\nINSTRUMENTATION_STATUS_CODE: 1\nINSTRUMENTATION_STATUS: class=com.vlesscardvpn.SubscriptionQueueRuntimeR199Test\nINSTRUMENTATION_STATUS: current=364\nINSTRUMENTATION_STATUS: id=AndroidJUnitRunner\nINSTRUMENTATION_STATUS: numtests=372\nINSTRUMENTATION_STATUS: stream=.\nINSTRUMENTATION_STATUS: test=futureHistoryIgnored\nINSTRUMENTATION_STATUS_CODE: 0\nINSTRUMENTATION_STATUS: class=com.vlesscardvpn.SubscriptionQueueRuntimeR199Test\nINSTRUMENTATION_STATUS: current=365\nINSTRUMENTATION_STATUS: id=AndroidJUnitRunner\nINSTRUMENTATION_STATUS: numtests=372\nINSTRUMENTATION_STATUS: stream=\nINSTRUMENTATION_STATUS: test=lowerLatencyWinsEqualReliability\nINSTRUMENTATION_STATUS_CODE: 1\nINSTRUMENTATION_STATUS: class=com.vlesscardvpn.SubscriptionQueueRuntimeR199Test\nINSTRUMENTATION_STATUS: current=365\nINSTRUMENTATION_STATUS: id=AndroidJUnitRunner\nINSTRUMENTATION_STATUS: numtests=372\nINSTRUMENTATION_STATUS: stream=.\nINSTRUMENTATION_STATUS: test=lowerLatencyWinsEqualReliability\nINSTRUMENTATION_STATUS_CODE: 0\nINSTRUMENTATION_STATUS: class=com.vlesscardvpn.SubscriptionQueueRuntimeR199Test\nINSTRUMENTATION_STATUS: current=366\nINSTRUMENTATION_STATUS: id=AndroidJUnitRunner\nINSTRUMENTATION_STATUS: numtests=372\nINSTRUMENTATION_STATUS: stream=\nINSTRUMENTATION_STATUS: test=duplicateIdsDoNotInflate\nINSTRUMENTATION_STATUS_CODE: 1\nINSTRUMENTATION_STATUS: class=com.vlesscardvpn.SubscriptionQueueRuntimeR199Test\nINSTRUMENTATION_STATUS: current=366\nINSTRUMENTATION_STATUS: id=AndroidJUnitRunner\nINSTRUMENTATION_STATUS: numtests=372\nINSTRUMENTATION_STATUS: stream=.\nINSTRUMENTATION_STATUS: test=duplicateIdsDoNotInflate\nINSTRUMENTATION_STATUS_CODE: 0\nINSTRUMENTATION_STATUS: class=com.vlesscardvpn.SubscriptionQueueRuntimeR199Test\nINSTRUMENTATION_STATUS: current=367\nINSTRUMENTATION_STATUS: id=AndroidJUnitRunner\nINSTRUMENTATION_STATUS: numtests=372\nINSTRUMENTATION_STATUS: stream=\nINSTRUMENTATION_STATUS: test=fetchZeroLimitEmpty\nINSTRUMENTATION_STATUS_CODE: 1\nINSTRUMENTATION_STATUS: class=com.vlesscardvpn.SubscriptionQueueRuntimeR199Test\nINSTRUMENTATION_STATUS: current=367\nINSTRUMENTATION_STATUS: id=AndroidJUnitRunner\nINSTRUMENTATION_STATUS: numtests=372\nINSTRUMENTATION_STATUS: stream=.\nINSTRUMENTATION_STATUS: test=fetchZeroLimitEmpty\nINSTRUMENTATION_STATUS_CODE: 0\nINSTRUMENTATION_STATUS: class=com.vlesscardvpn.SubscriptionQueueRuntimeR199Test\nINSTRUMENTATION_STATUS: current=368\nINSTRUMENTATION_STATUS: id=AndroidJUnitRunner\nINSTRUMENTATION_STATUS: numtests=372\nINSTRUMENTATION_STATUS: stream=\nINSTRUMENTATION_STATUS: test=oldHistoryIgnored\nINSTRUMENTATION_STATUS_CODE: 1\nINSTRUMENTATION_STATUS: class=com.vlesscardvpn.SubscriptionQueueRuntimeR199Test\nINSTRUMENTATION_STATUS: current=368\nINSTRUMENTATION_STATUS: id=AndroidJUnitRunner\nINSTRUMENTATION_STATUS: numtests=372\nINSTRUMENTATION_STATUS: stream=.\nINSTRUMENTATION_STATUS: test=oldHistoryIgnored\nINSTRUMENTATION_STATUS_CODE: 0\nINSTRUMENTATION_STATUS: class=com.vlesscardvpn.SubscriptionQueueRuntimeR199Test\nINSTRUMENTATION_STATUS: current=369\nINSTRUMENTATION_STATUS: id=AndroidJUnitRunner\nINSTRUMENTATION_STATUS: numtests=372\nINSTRUMENTATION_STATUS: stream=\nINSTRUMENTATION_STATUS: test=fetchChallengerRotates\nINSTRUMENTATION_STATUS_CODE: 1\nINSTRUMENTATION_STATUS: class=com.vlesscardvpn.SubscriptionQueueRuntimeR199Test\nINSTRUMENTATION_STATUS: current=369\nINSTRUMENTATION_STATUS: id=AndroidJUnitRunner\nINSTRUMENTATION_STATUS: numtests=372\nINSTRUMENTATION_STATUS: stream=.\nINSTRUMENTATION_STATUS: test=fetchChallengerRotates\nINSTRUMENTATION_STATUS_CODE: 0\nINSTRUMENTATION_STATUS: class=com.vlesscardvpn.SubscriptionQueueRuntimeR199Test\nINSTRUMENTATION_STATUS: current=370\nINSTRUMENTATION_STATUS: id=AndroidJUnitRunner\nINSTRUMENTATION_STATUS: numtests=372\nINSTRUMENTATION_STATUS: stream=\nINSTRUMENTATION_STATUS: test=provenLeaderIsPreserved\nINSTRUMENTATION_STATUS_CODE: 1\nINSTRUMENTATION_STATUS: class=com.vlesscardvpn.SubscriptionQueueRuntimeR199Test\nINSTRUMENTATION_STATUS: current=370\nINSTRUMENTATION_STATUS: id=AndroidJUnitRunner\nINSTRUMENTATION_STATUS: numtests=372\nINSTRUMENTATION_STATUS: stream=.\nINSTRUMENTATION_STATUS: test=provenLeaderIsPreserved\nINSTRUMENTATION_STATUS_CODE: 0\nINSTRUMENTATION_STATUS: class=com.vlesscardvpn.SubscriptionQueueRuntimeR199Test\nINSTRUMENTATION_STATUS: current=371\nINSTRUMENTATION_STATUS: id=AndroidJUnitRunner\nINSTRUMENTATION_STATUS: numtests=372\nINSTRUMENTATION_STATUS: stream=\nINSTRUMENTATION_STATUS: test=cooledPrefixCannotHideOtherSource\nINSTRUMENTATION_STATUS_CODE: 1\nINSTRUMENTATION_STATUS: class=com.vlesscardvpn.SubscriptionQueueRuntimeR199Test\nINSTRUMENTATION_STATUS: current=371\nINSTRUMENTATION_STATUS: id=AndroidJUnitRunner\nINSTRUMENTATION_STATUS: numtests=372\nINSTRUMENTATION_STATUS: stream=.\nINSTRUMENTATION_STATUS: test=cooledPrefixCannotHideOtherSource\nINSTRUMENTATION_STATUS_CODE: 0\nINSTRUMENTATION_STATUS: class=com.vlesscardvpn.SubscriptionQueueRuntimeR199Test\nINSTRUMENTATION_STATUS: current=372\nINSTRUMENTATION_STATUS: id=AndroidJUnitRunner\nINSTRUMENTATION_STATUS: numtests=372\nINSTRUMENTATION_STATUS: stream=\nINSTRUMENTATION_STATUS: test=clonedHostCredentialsDoNotInflate\nINSTRUMENTATION_STATUS_CODE: 1\nINSTRUMENTATION_STATUS: class=com.vlesscardvpn.SubscriptionQueueRuntimeR199Test\nINSTRUMENTATION_STATUS: current=372\nINSTRUMENTATION_STATUS: id=AndroidJUnitRunner\nINSTRUMENTATION_STATUS: numtests=372\nINSTRUMENTATION_STATUS: stream=.\nINSTRUMENTATION_STATUS: test=clonedHostCredentialsDoNotInflate\nINSTRUMENTATION_STATUS_CODE: 0\nINSTRUMENTATION_RESULT: stream=\n\nTime: 89.133\n\nOK (372 tests)\n\n\nINSTRUMENTATION_CODE: -1\n",
+  "ui_captures_executed": true,
+  "ui_scope": "synthetic_states_real_production_compose_not_live_vpn",
+  "screenshots": [
+    {
+      "file": "background-deferred.png",
+      "sha256": "8dd8bfd1048ce6e130dbb9a1de25f9c168e88123abc5f6da17e101b1a52e0cbd"
+    },
+    {
+      "file": "background-finished.png",
+      "sha256": "84164229c4bae4610e873997dcb93478f42bb7d1bb5d5bd910d3007db16d6509"
+    },
+    {
+      "file": "background-power.png",
+      "sha256": "9e4f7a78f19bc76252fed4cfc629fee918fb6ed05d56fef507b2f1dec3dca006"
+    },
+    {
+      "file": "background-running.png",
+      "sha256": "9299718cccebcee592b61edd54f1b84a422dbc269e14b6ec2305d8b8aa503367"
+    },
+    {
+      "file": "connected.png",
+      "sha256": "3403dfbf84dbb5ba5ac027e8be64caa54e724fa6dc6726a5febd9ecc9adf9ee2"
+    },
+    {
+      "file": "error.png",
+      "sha256": "ff9c9865a5beec8042ce827ae5b208eadafc54b7cb8b40d7b3684134433dce70"
+    },
+    {
+      "file": "idle-dark.png",
+      "sha256": "7c12e7ceb991a08d3b0eaccbff87cfb13613ff6f7ce003023992c9b2647c9ac8"
+    },
+    {
+      "file": "idle-light.png",
+      "sha256": "6ad0bc61fdd7bcabe6513e17b98be76ae0b690d876798b00906ae4e3eb57784f"
+    },
+    {
+      "file": "large-narrow.png",
+      "sha256": "46494fb9db26dabf25ba8fd42d1d17e4814eb97c80b6adf5d7194e275b68973f"
+    },
+    {
+      "file": "maintenance-confirm.png",
+      "sha256": "da333f85a985611f15be27b1ed9c903c23249d56c9adbe7b15cbfeed6454ff78"
+    },
+    {
+      "file": "maintenance-preview.png",
+      "sha256": "f844dac974f4a35eb869ed376d087eb3bf5e0f1f8901225ed47ea50f383f3002"
+    },
+    {
+      "file": "maintenance-result.png",
+      "sha256": "42a8dfb4720d15c26a04d59dc2127981bf2394c2e12d7cf9c8bdac9baf91907f"
+    },
+    {
+      "file": "manual-progress-large.png",
+      "sha256": "2fac9faaad64d4fcfbc71f1eb0af534f5ea491b09ef8aa3ac163fbfd922f6b17"
+    },
+    {
+      "file": "manual-progress.png",
+      "sha256": "166d0f5e962c94242d58dd2ee73ee2f7227c3d8c397d727d731e38ca3c5a0ec3"
+    },
+    {
+      "file": "network-recovery.png",
+      "sha256": "0a68c6ad31526eb71b2d4acee18b13dc6aa536bc07f62b0459b45e0acb2d10bb"
+    },
+    {
+      "file": "partial.png",
+      "sha256": "364abc4a4e6e79469c81318895ed202b1fcbdf1f05b41705133b78ae63be45dd"
+    },
+    {
+      "file": "ru-large.png",
+      "sha256": "4b2497db67fb483d89c3a6e185dce1241c1c4ffc8e7b6ae552ae7eabc3e4cf1d"
+    },
+    {
+      "file": "ru-off.png",
+      "sha256": "5b9d22c9803e65ad481ed57521be37cf48a4bc503d0ba269e847b79f376a4626"
+    },
+    {
+      "file": "ru-on.png",
+      "sha256": "7dd4827fa27af9d142b1b4ae2bc88f86c1d7581ef69078bef18ea43c400ee70a"
+    },
+    {
+      "file": "ru-tor.png",
+      "sha256": "7239a4438bd3d67814f295c754d0706fc07b436437e372f3bf354fc9d32f4fec"
+    },
+    {
+      "file": "search-progress.png",
+      "sha256": "d9472978fc61be34a84c41391bf8a7706174124ad18237a2289f80f0c96b2bde"
+    },
+    {
+      "file": "searching.png",
+      "sha256": "ea023d7980c08c43df44df112a2666acf4883f3a1249d78e1ba2642aa69e35e5"
+    },
+    {
+      "file": "services.png",
+      "sha256": "7b4257158e8ab9ffb5cfd3b58b06ad830b905da1988f1c7a148b0fff7fce7ec1"
+    },
+    {
+      "file": "tor-country-large.png",
+      "sha256": "7bce4492797bb29c5985e18a940c328c5f9be12e2e45b43ab5908345facc4440"
+    },
+    {
+      "file": "tor-country-unknown.png",
+      "sha256": "ec8c518a456888ed2d3696729ff552bb6450dc840d65b003f61aeea83ae9fecd"
+    },
+    {
+      "file": "tor-country.png",
+      "sha256": "5281fbd91d7faa480f13aa22725801d29700a25181b27e724a1103772a795181"
+    },
+    {
+      "file": "tor-preferences-large.png",
+      "sha256": "cec67fcf29c3bb56993587207e7e5c8056792e660273ee5bf12913e246927261"
+    },
+    {
+      "file": "tor-preferences.png",
+      "sha256": "b54beda026343b4d2d09d04479f93fd2f62de0c6ead9d554362e17ceff36dc6c"
+    },
+    {
+      "file": "wait-backoff.png",
+      "sha256": "3df29d372e852b7cddd953862b880333f337d417b3a80ad20203c3e171c3b92f"
+    },
+    {
+      "file": "wait-catalog.png",
+      "sha256": "28a886646afce256024882dbc38ec72b693f651db5b63ebccce21843d857e37a"
+    },
+    {
+      "file": "wait-offline.png",
+      "sha256": "53c43c521d902c0afdb1f505b655ce6a970a48e8e0dbf50e22d9f5cccd6d4930"
+    }
+  ]
+}
