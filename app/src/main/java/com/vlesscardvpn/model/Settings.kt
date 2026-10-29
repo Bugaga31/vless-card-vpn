@@ -20,6 +20,7 @@ data class Settings(
     val socksPort: Int = 10808,
     val ruDirect: Boolean = false,
     val ruWhitelist: Boolean = true,
+    val ruAllDirect: Boolean = false,
     val blockAds: Boolean = true,
     /** Tracker/telemetry block + DoT port 853: apps can't bypass the app's DNS to phone home unseen. */
     val blockTrackers: Boolean = true,
@@ -175,7 +176,7 @@ data class Settings(
 ) {
     val httpPort: Int get() = if (socksPort < 65535) socksPort + 1 else socksPort - 1
     fun toJson(): JSONObject = JSONObject().put("mode", mode.name).put("balance", balance.name).put("socksPort", socksPort)
-        .put("ruWhitelist", ruWhitelist).put("ruDirect", ruDirect).put("blockAds", blockAds).put("blockTrackers", blockTrackers).put("byeDpiArgs", byeDpiArgs).put("byeDpiSni", byeDpiSni)
+        .put("ruAllDirect", ruAllDirect).put("ruWhitelist", ruWhitelist).put("ruDirect", ruDirect).put("blockAds", blockAds).put("blockTrackers", blockTrackers).put("byeDpiArgs", byeDpiArgs).put("byeDpiSni", byeDpiSni)
         .put("hybridDomains", JSONArray(hybridDomains)).put("testUrl", testUrl).put("dnsUrl", dnsUrl).put("dnsAuto", dnsAuto)
         .put("subscriptions", JSONArray(subscriptions))
         .put("dpiStrategy", dpiStrategy).put("dpiRemembered", JSONObject(dpiRemembered as Map<*, *>))
@@ -239,7 +240,7 @@ data class Settings(
                 mode = runCatching { Mode.valueOf(o.getString("mode")) }.getOrDefault(d.mode),
                 balance = runCatching { Balance.valueOf(o.getString("balance")) }.getOrDefault(d.balance),
                 socksPort = o.optInt("socksPort", d.socksPort).takeIf { it in 1024..65535 } ?: d.socksPort,
-                ruWhitelist = o.optBoolean("ruWhitelist", d.ruWhitelist), ruDirect = o.optBoolean("ruDirect", d.ruDirect), blockAds = o.optBoolean("blockAds", d.blockAds), blockTrackers = o.optBoolean("blockTrackers", d.blockTrackers),
+                ruAllDirect = o.optBoolean("ruAllDirect", d.ruAllDirect), ruWhitelist = o.optBoolean("ruWhitelist", d.ruWhitelist), ruDirect = o.optBoolean("ruDirect", d.ruDirect), blockAds = o.optBoolean("blockAds", d.blockAds), blockTrackers = o.optBoolean("blockTrackers", d.blockTrackers),
                 byeDpiArgs = o.optString("byeDpiArgs", d.byeDpiArgs), byeDpiSni = o.optString("byeDpiSni", d.byeDpiSni),
                 hybridDomains = list("hybridDomains", d.hybridDomains), testUrl = o.optString("testUrl", d.testUrl),
                 dnsAuto = o.optBoolean("dnsAuto", o.optString("dnsUrl", d.dnsUrl) == d.dnsUrl),

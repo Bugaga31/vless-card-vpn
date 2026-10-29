@@ -31,7 +31,7 @@ class RuWhitelistUiR192Test {
    Thread.sleep(250);ins.waitForIdleSync();val root=ins.uiAutomation.rootInActiveWindow;root?.refresh();text=labels(root)
   }
   assertTrue("$name: $text",text.any {expected in it})
-  val dir=File(ins.targetContext.getExternalFilesDir(null),"ui203").apply {mkdirs()}
+  val dir=File(ins.targetContext.getExternalFilesDir(null),"ui204").apply {mkdirs()}
   File(dir,"$name.labels.txt").writeText(text.joinToString("\n"))
   val bitmap=ins.uiAutomation.takeScreenshot() ?: error("Missing rendered UI")
   File(dir,"$name.png").outputStream().use {assertTrue(bitmap.compress(Bitmap.CompressFormat.PNG,100,it))};bitmap.recycle()
@@ -48,6 +48,10 @@ class RuWhitelistUiR192Test {
     show(Settings(torAll=true));shot("ru-tor","Всё через Tor")
     shell("wm size 720x1600");shell("wm density 360");shell("settings put system font_scale 1.5");Thread.sleep(1000)
     show(Settings());shot("ru-large","RU-сервисы напрямую")
+    show(Settings(ruAllDirect=true));shell("input swipe 160 540 160 100 500");shell("input swipe 160 540 160 100 500");shot("ru-geo-large","База Karing")
+    shell("settings put system font_scale 1.0");shell("wm size reset");shell("wm density reset");Thread.sleep(1000)
+    show(Settings(ruAllDirect=true));shell("input swipe 160 540 160 100 500");shell("input swipe 160 540 160 100 500");shot("ru-geo-on","База Karing")
+    show(Settings());shell("input swipe 160 540 160 100 500");shell("input swipe 160 540 160 100 500");shot("ru-geo-off","Расширение выключено")
    } finally {shell("settings put system font_scale 1.0");shell("wm size reset");shell("wm density reset")}
   }
  }

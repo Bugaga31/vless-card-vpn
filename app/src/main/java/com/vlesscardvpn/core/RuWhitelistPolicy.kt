@@ -15,5 +15,5 @@ object RuWhitelistPolicy {
         val vpn = settings.alwaysVpn.map { it.trim().trimEnd('.').lowercase().removePrefix("domain:") }
         return SERVICES.filter { d -> vpn.none { v -> v == d || v.endsWith(".$d") || d.endsWith(".$v") } }
     }
-    fun rules(settings: Settings) = domains(settings).map { "domain:$it" }
+    fun rules(settings: Settings) = (domains(settings).map { "domain:$it" } + RuGeoPolicy.domains(settings)).distinct()
 }

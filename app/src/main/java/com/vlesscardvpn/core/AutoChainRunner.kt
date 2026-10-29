@@ -29,7 +29,7 @@ object AutoChainRunner {
     fun digest(text: String) = MessageDigest.getInstance("SHA-256").digest(text.toByteArray(Charsets.UTF_8))
         .joinToString("") { "%02x".format(it.toInt() and 255) }
     fun settingsKey(s: Settings) = digest(listOf(s.autoChainSearch,s.autoChainPurpose,s.torAuto,s.torNetworkRecommendations,s.torBridge,s.torBridgeLines,
-        s.services,s.alwaysDirect,s.alwaysVpn,s.warpChain,s.smartYoutube,s.torRotation,s.torRotationSeconds,s.ruDirect,s.ruDns).joinToString("|"))
+        s.services,s.alwaysDirect,s.alwaysVpn,s.warpChain,s.smartYoutube,s.torRotation,s.torRotationSeconds,s.ruDirect,s.ruDns,s.ruWhitelist,s.ruAllDirect).joinToString("|"))
     fun profileKey(s: Settings) = digest(s.torBridge+"|"+s.torBridgeLines)
     fun choice(server: Server?, mask: Mask?, layout: Layout, s: Settings, dpiIdentity: String = "", dpiStrategy: String = ""): Choice {
         val native = mask?.copy(dpi = "")

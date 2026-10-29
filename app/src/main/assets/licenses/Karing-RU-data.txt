@@ -1,0 +1,7 @@
+Karing RU routing data snapshot
+Source: https://github.com/KaringX/karing-ruleset
+Revision: 2eddd3aa684b50372fe5996378d49158ec1d5eb6
+Paths: geo/geosite/category-ru.json and geo/geoip/ru.json
+Karing upstream credits MetaCubeX/meta-rules-dat and domain-list-community.
+Downloaded factual domain/IP classifications; exact-domain and suffix semantics retained, duplicate domain entries removed. No claim of complete or accurate national hosting classification.
+See docs/karing-ru-provenance.json for original file hashes and record counts.
