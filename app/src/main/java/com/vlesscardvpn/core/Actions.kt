@@ -1518,7 +1518,8 @@ object Actions {
         // Bound expensive scoring for a huge imported catalog; subsequent waves advance attempted IDs.
         val rememberedIds = (st.settings.netServers[net] ?: st.settings.netServers[Net.family(net)]).orEmpty().toSet()
         val eligible = if (firstWaveOnly) (CloudControl.ranked(allEligible, 32) +
-            allEligible.filter { it.id in rememberedIds }.take(32) + ServerChoice.diverse(allEligible, AutoDiscoveryPolicy.RANKING_WINDOW))
+            allEligible.filter { it.id in rememberedIds }.take(32) + TransportExploration.representatives(allEligible) +
+            ServerChoice.diverse(allEligible, AutoDiscoveryPolicy.RANKING_WINDOW))
             .distinctBy { it.id }.take(AutoDiscoveryPolicy.RANKING_WINDOW) else allEligible
         val affinity = SourceAffinity.order(eligible,Store.state.value.servers,{Store.state.value.state(it)},net,System.currentTimeMillis()) { CloudControl.sources(it) }
         val cloud = (CloudSpeed.pick(eligible, emptyList(), n = 4) + affinity.take(4) + CloudControl.ranked(eligible,8)).distinctBy { it.id }.take(ConnectPolicy.FIRST)
