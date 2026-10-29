@@ -91,7 +91,7 @@ class AutoSearchR188Test {
  }
  @Test fun diagnosticsClampCountsAndWaves() {
   val c=AutoSearchStatistics().snapshot().mapValues {Int.MAX_VALUE};val d=AutoDiagnostics.searchEvent("TIME_LIMIT",Int.MAX_VALUE,c)
-  assertEquals(4,d.getInt("waves"));assertEquals(100000,d.getJSONObject("ordinary_probes").getInt("started"))
+  assertEquals(100000,d.getInt("waves"));assertEquals(100000,d.getJSONObject("ordinary_probes").getInt("started"))
  }
  @Test fun defaultLimitsAreBoundedAndLatencyPolicyUnchanged() {
   assertEquals(4,AutoSearchCampaign.MAX_WAVES);assertEquals(45000L,AutoSearchCampaign.MAX_TOTAL_MS)

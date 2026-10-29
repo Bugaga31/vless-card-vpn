@@ -1347,14 +1347,17 @@ object Actions {
             online = { online() }, elapsed = android.os.SystemClock::elapsedRealtime,
             restMs = { SearchPacingPolicy.rest(PhonePower.refresh(app)) },
             exhausted = { attempted -> Store.state.value.let { st -> preferred(st, st.servers).none { it.id !in attempted } } },
-            waiting = { round, offline ->
-                progress.value = progress.value.copy(title = "Авто: продолжаю поиск", message = if (offline)
-                    "Нет сети — жду её восстановления. Нажатие отменяет поиск."
-                    else "Волна ${round.toLong() + 1} завершена. Поиск продолжается до подключения или отмены. Облако: ${CloudControl.count()} кандидатов. Проверяю следующие маршруты. Нажатие отменяет поиск.")
-                Tunnel.status.value = Tunnel.Status(Tunnel.State.CONNECTING, if (offline) "Жду сеть…" else "Ищу следующий маршрут…",
-                    check = progress.value.message, checkOk = null)
+            waiting = { _, _ -> },
+            onWait = { wait ->
+                progress.value = progress.value.copy(title = SearchFeedback.title(wait), done = 0, total = 0,
+                    message = SearchFeedback.message(wait, statistics.snapshot()))
+                Tunnel.status.value = Tunnel.Status(Tunnel.State.CONNECTING,
+                    if(wait.reason==AutoSearchCampaign.WaitReason.OFFLINE) "Жду сеть…" else "Продолжаю поиск…",
+                    checkOk = null)
             }) { round, attempted ->
             setNetwork()
+            progress.value = progress.value.copy(title="Авто: проверяю маршруты",done=0,total=0,
+                message="Источники и сохранённые серверы проверяются параллельно. Рабочий маршрут ещё не подтверждён.")
             refreshPublicCloud(foreground = true)
             var selected = false
             val startedAt = android.os.SystemClock.elapsedRealtime()

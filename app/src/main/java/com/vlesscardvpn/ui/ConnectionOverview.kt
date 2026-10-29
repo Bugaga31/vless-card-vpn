@@ -39,7 +39,7 @@ fun ConnectionOverview(status:Tunnel.Status,hideRoute:Boolean,modeLabel:String,c
                 on && status.checkOk==false->"Туннель подключён, но не все обязательные проверки прошли. Смотрите результаты ниже."
                 on && status.checkOk==null->"Туннель запущен. Доступность сервисов ещё проверяется."
                 on->"Локальные пробы подтвердили маршрут. Доступность аккаунтов и звонков проверяется отдельно."
-                else->"Автоматически найдём маршрут с ответом HTTPS и Telegram до 500 мс."
+                else->"Ищем маршрут с ответом HTTPS и Telegram до 500 мс."
             },fontSize=15.sp,lineHeight=22.sp,color=MaterialTheme.colorScheme.onSurfaceVariant)
             if(status.message.isNotBlank()) Text(status.message,fontSize=14.sp,
                 color=if(status.state==Tunnel.State.ERROR) Bad else MaterialTheme.colorScheme.onSurfaceVariant)

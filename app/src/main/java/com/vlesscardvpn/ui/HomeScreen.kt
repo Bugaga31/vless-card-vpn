@@ -21,6 +21,10 @@ import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -167,7 +171,7 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
         var opts by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
         Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
             Column(Modifier.padding(14.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                Row(Modifier.fillMaxWidth().clickable { opts = !opts }, verticalAlignment = Alignment.CenterVertically) {
+                Row(Modifier.fillMaxWidth().heightIn(min=48.dp).semantics { stateDescription=if(opts) "Развёрнуто" else "Свёрнуто" }.clickable(role=Role.Button) { opts = !opts }, verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Text("Как подключаться", fontWeight = FontWeight.SemiBold)
                         Text(listOf(if (cfg.torAll) "Tor через VLESS" else if (mode == Mode.AUTO) "Авто" else "Серверы",
@@ -262,7 +266,7 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
         Spacer(Modifier.height(12.dp))
         SiteCard()
         }
-        Spacer(Modifier.height(12.dp)); LiveProgress(stop = true)
+        Spacer(Modifier.height(12.dp)); if(com.vlesscardvpn.core.SearchFeedback.secondaryProgress(busy)) LiveProgress(stop = true)
     }
 }
 
@@ -339,12 +343,12 @@ fun ProgressBlock(p: Actions.Progress) {
     Card(Modifier.fillMaxWidth().padding(top=12.dp),shape=RoundedCornerShape(12.dp),
         colors=CardDefaults.cardColors(containerColor=MaterialTheme.colorScheme.surface)) {
         Column(Modifier.padding(16.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
-            Text(if(p.running) p.title else "Результат проверки",fontSize=15.sp,fontWeight=FontWeight.SemiBold)
+            Text(if(p.running) p.title else "Результат проверки",modifier=Modifier.semantics { liveRegion=LiveRegionMode.Polite },fontSize=15.sp,fontWeight=FontWeight.SemiBold)
             if(p.running) {
-                Text(com.vlesscardvpn.core.ExperiencePolicy.counter(p.done,p.total),fontSize=14.sp,
-                    color=MaterialTheme.colorScheme.onSurfaceVariant)
+                com.vlesscardvpn.core.SearchFeedback.counter(p.done,p.total,p.message)?.let { counter ->
+                    Text(counter,fontSize=14.sp,color=MaterialTheme.colorScheme.onSurfaceVariant)
+                }
                 if(p.total>0) LinearProgressIndicator(progress={com.vlesscardvpn.core.ExperiencePolicy.progress(p.done,p.total) ?: 0f},modifier=Modifier.fillMaxWidth())
-                else Text("Объём проверки ещё уточняется",fontSize=14.sp,color=MaterialTheme.colorScheme.onSurfaceVariant)
             }
             if(p.message.isNotBlank()) Text(p.message,fontSize=14.sp,lineHeight=20.sp,color=MaterialTheme.colorScheme.onSurfaceVariant)
         }
