@@ -24,13 +24,13 @@ fun ConnectionOverview(status:Tunnel.Status,hideRoute:Boolean,modeLabel:String,c
     val searching=status.state==Tunnel.State.CONNECTING
     val issue=status.state==Tunnel.State.ERROR || on && status.checkOk==false
     val tone=when {issue->Warn;on && status.checkOk==true->Good;else->Accent}
-    Card(Modifier.fillMaxWidth().padding(top=20.dp),shape=RoundedCornerShape(16.dp),
+    Card(Modifier.fillMaxWidth().padding(top=12.dp),shape=RoundedCornerShape(12.dp),
         colors=CardDefaults.cardColors(containerColor=MaterialTheme.colorScheme.surface)) {
-        Column(Modifier.padding(20.dp),verticalArrangement=Arrangement.spacedBy(16.dp)) {
-            Text(when {searching->"ПОИСК СОЕДИНЕНИЯ";on->"ТЕКУЩИЙ МАРШРУТ";issue->"НУЖНО ВНИМАНИЕ";else->"ЛИЧНАЯ СВЯЗЬ"},
+        Column(Modifier.padding(16.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
+            Text(when {searching->"ПОИСК СОЕДИНЕНИЯ";on->"ТЕКУЩИЙ МАРШРУТ";issue->"НУЖНО ВНИМАНИЕ";else->"ВАША ЗАЩИЩЁННАЯ СВЯЗЬ"},
                 color=tone,fontSize=14.sp,fontWeight=FontWeight.Bold,letterSpacing=1.sp)
-            Text(ConnectionPresentationPolicy.heading(status.state,status.checkOk),fontSize=28.sp,
-                lineHeight=34.sp,fontWeight=FontWeight.SemiBold,color=MaterialTheme.colorScheme.onSurface)
+            Text(ConnectionPresentationPolicy.heading(status.state,status.checkOk),fontSize=24.sp,
+                lineHeight=29.sp,fontWeight=FontWeight.SemiBold,color=MaterialTheme.colorScheme.onSurface)
             control()
             Text(when {
                 searching->"Проверяем HTTPS и Telegram. Поиск можно отменить в любой момент."
@@ -38,7 +38,7 @@ fun ConnectionOverview(status:Tunnel.Status,hideRoute:Boolean,modeLabel:String,c
                 on && status.checkOk==false->"Туннель подключён, но не все обязательные проверки прошли. Смотрите результаты ниже."
                 on && status.checkOk==null->"Подключение ещё не означает, что все сервисы отвечают. Ждём результаты проверок."
                 on->"Локальные пробы подтвердили маршрут. Доступность аккаунтов и звонков проверяется отдельно."
-                else->"Один основной маршрут. Проверенные резервы — на случай сбоя."
+                else->"Проверим HTTPS и Telegram, затем подключим подтверждённый маршрут."
             },fontSize=15.sp,lineHeight=22.sp,color=MaterialTheme.colorScheme.onSurfaceVariant)
             if(status.message.isNotBlank()) Text(status.message,fontSize=14.sp,
                 color=if(status.state==Tunnel.State.ERROR) Bad else MaterialTheme.colorScheme.onSurfaceVariant)

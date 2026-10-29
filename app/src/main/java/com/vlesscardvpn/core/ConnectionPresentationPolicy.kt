@@ -17,7 +17,7 @@ object ConnectionPresentationPolicy {
             observation.status in setOf(ModuleStatus.PASS,ModuleStatus.SLOW) && it>0})
     }
     fun heading(state:Tunnel.State,checked:Boolean?):String = when(state) {
-        Tunnel.State.IDLE->"Связь начинается здесь"
+        Tunnel.State.IDLE->"Готов к подключению"
         Tunnel.State.CONNECTING->"Подбираем маршрут"
         Tunnel.State.ERROR->"Не удалось подключиться"
         Tunnel.State.CONNECTED->when(checked) {true->"Маршрут подключён";false->"Связь требует внимания";null->"Проверяем соединение"}

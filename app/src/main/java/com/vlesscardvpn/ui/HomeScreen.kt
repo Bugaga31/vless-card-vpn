@@ -336,14 +336,18 @@ fun LiveProgress(stop: Boolean = false, show: (Actions.Progress) -> Boolean = { 
 
 @Composable
 fun ProgressBlock(p: Actions.Progress) {
-    Column(Modifier.fillMaxWidth()) {
-        if (p.running) {
-            Text(p.title, fontSize = 14.sp, fontWeight = FontWeight.Medium)
-            Text(com.vlesscardvpn.core.ExperiencePolicy.counter(p.done, p.total), fontSize = 12.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant)
-            if (p.total > 0) LinearProgressIndicator(progress = { com.vlesscardvpn.core.ExperiencePolicy.progress(p.done, p.total) ?: 0f }, modifier = Modifier.fillMaxWidth().padding(top = 4.dp))
-            else HorizontalDivider(Modifier.fillMaxWidth().padding(top = 8.dp), color = Accent.copy(alpha = .4f))
-        } else Text(p.message, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    Card(Modifier.fillMaxWidth().padding(top=12.dp),shape=RoundedCornerShape(12.dp),
+        colors=CardDefaults.cardColors(containerColor=MaterialTheme.colorScheme.surface)) {
+        Column(Modifier.padding(16.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
+            Text(if(p.running) p.title else "Результат проверки",fontSize=15.sp,fontWeight=FontWeight.SemiBold)
+            if(p.running) {
+                Text(com.vlesscardvpn.core.ExperiencePolicy.counter(p.done,p.total),fontSize=14.sp,
+                    color=MaterialTheme.colorScheme.onSurfaceVariant)
+                if(p.total>0) LinearProgressIndicator(progress={com.vlesscardvpn.core.ExperiencePolicy.progress(p.done,p.total) ?: 0f},modifier=Modifier.fillMaxWidth())
+                else Text("Объём проверки ещё уточняется",fontSize=14.sp,color=MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            if(p.message.isNotBlank()) Text(p.message,fontSize=14.sp,lineHeight=20.sp,color=MaterialTheme.colorScheme.onSurfaceVariant)
+        }
     }
 }
 
