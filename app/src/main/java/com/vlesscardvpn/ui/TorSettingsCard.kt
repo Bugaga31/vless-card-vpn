@@ -74,9 +74,9 @@ fun TorSettingsCard(settings: Settings, set: ((Settings) -> Settings) -> Unit) {
             }
             Button(onClick = { set { TorConnectionPolicy.automatic(it) } }, modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(16.dp)) {
-                Text(if (settings.mode == com.vlesscardvpn.model.Mode.AUTO && settings.torAll && settings.torBridge == "none" && settings.torNetworkRecommendations && settings.torRotation && settings.torFastOnly && !settings.torDirect) "Автонастройка включена" else "Настроить Tor автоматически")
+                Text(if (settings.mode == com.vlesscardvpn.model.Mode.AUTO && settings.torAll && settings.torBridge in setOf("obfs4","webtunnel") && settings.torNetworkRecommendations && settings.torRotation && settings.torFastOnly && !settings.torDirect) "Автонастройка включена" else "Настроить Tor автоматически")
             }
-            Text("Профиль применится к настройкам; подключение запускается главной кнопкой. Tor работает поверх VPN без прямого обхода и может строить первую цепочку дольше пяти секунд.",
+            Text("Tor → только с мостами igareck или вашими мостами, поверх VLESS. При первом включении список загружается с raw.githack.com; источник видит запрос. Без рабочих мостов прямого обхода нет. Первая цепочка может строиться дольше пяти секунд.",
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surface) {
                 Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -153,8 +153,8 @@ fun TorSettingsCard(settings: Settings, set: ((Settings) -> Settings) -> Unit) {
                 Text("Параметры ротации и транспорта применяются при следующем подключении. Tor работает поверх VLESS; при отсутствии сервера маршрут не переключается напрямую.", style = MaterialTheme.typography.bodyMedium)
             }
             TorOption("Весь TCP-трафик через Tor", "Tor работает вторым шагом после выбранного VLESS-сервера; UDP, включая звонки, остаётся на VLESS-маршруте. Если VLESS недоступен, VPN не уходит напрямую.", settings.torAll) { v -> set { if (v) TorConnectionPolicy.selectTor(it) else it.copy(torAll = false) } }
-            Text("Транспорт и мосты", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-            listOf("obfs4" to "obfs4 · маскировка Tor", "webtunnel" to "WebTunnel · HTTPS-транспорт", "none" to "Без мостов · через VLESS").forEach { (id, label) ->
+            Text("Обязательные мосты · igareck", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            listOf("obfs4" to "obfs4 · маскировка Tor", "webtunnel" to "WebTunnel · HTTPS-транспорт").forEach { (id, label) ->
                 Surface(onClick = { circuit = null; set { it.copy(torBridge = id) } }, shape = RoundedCornerShape(12.dp),
                     color = if (settings.torBridge == id) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface,
                     modifier = Modifier.fillMaxWidth()) {
@@ -164,7 +164,7 @@ fun TorSettingsCard(settings: Settings, set: ((Settings) -> Settings) -> Unit) {
                     }
                 }
             }
-            if (settings.torBridge !in TorCard.EMBEDDED_BRIDGES) Text("Этот транспорт не встроен. Выберите obfs4, WebTunnel или явно режим без мостов.", color = MaterialTheme.colorScheme.error)
+            if (settings.torBridge !in TorCard.EMBEDDED_BRIDGES) Text("Выберите obfs4 или WebTunnel. Tor без мостов не запускается; прежние настройки будут обновлены при подключении.", color = MaterialTheme.colorScheme.error)
             if (settings.torBridge != "none") {
                 Text("$parsed корректных мостов ${settings.torBridge} · максимум 12", fontWeight = FontWeight.Medium)
                 TorOption("Автообновление мостов", "Список igareck TOP100: раз в 6 часов при работе Tor, повтор ошибки не чаще 15 минут. Источник увидит запрос; старые мосты сохранятся при сбое.", auto) { value ->

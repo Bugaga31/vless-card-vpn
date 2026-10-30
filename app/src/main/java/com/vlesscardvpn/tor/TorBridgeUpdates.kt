@@ -10,7 +10,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.util.concurrent.atomic.AtomicLong
 
-/** Opt-in, bounded source refresh. Existing Tor connections are never restarted by a catalog update. */
+/** User-requested bounded igareck source refresh for mandatory-bridge Tor. Existing Tor connections are never restarted by a catalog update. */
 object TorBridgeUpdates {
     private val mutex = Mutex()
     private val guard = Any()
@@ -20,7 +20,7 @@ object TorBridgeUpdates {
     // No guard lock here: Store.wipe owns Store's lock, while refresh locks guard before Store.update.
     fun consentCleared() { generation.incrementAndGet(); status.value = "Автообновление выключено · согласие сброшено" }
     fun lastUpdated(ctx: Context, transport: String) = prefs(ctx).getLong("success:$transport", 0)
-    fun enabled(ctx: Context) = prefs(ctx).getBoolean("enabled", false)
+    fun enabled(ctx: Context) = prefs(ctx).getBoolean("enabled", true)
     fun setEnabled(ctx: Context, value: Boolean) = synchronized(guard) {
         generation.incrementAndGet()
         prefs(ctx).edit().putBoolean("enabled", value).apply()
