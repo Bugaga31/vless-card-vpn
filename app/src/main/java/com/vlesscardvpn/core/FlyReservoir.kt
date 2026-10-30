@@ -47,7 +47,7 @@ object FlyReservoir {
         input.copyInto(out,1)
         val counts=IntArray(16)
         repeat(NODES) {i->val group=i%16;out[6+group]+=state[i];counts[group]++}
-        repeat(16) {out[6+it]/=counts[it].coerceAtLeast(1)}
+        repeat(16) {out[6+it]=out[6+it]/counts[it].coerceAtLeast(1).toDouble()}
         return out
     }
     // Offline synthetic scenario fit only. Not evidence of phone/network efficacy.

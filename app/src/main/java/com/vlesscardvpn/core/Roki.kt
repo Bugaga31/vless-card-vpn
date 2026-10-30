@@ -14,7 +14,7 @@ class RokiRanker {
         val raw=doubleArrayOf(1.0,
         s.tcpMs.coerceIn(0,2000)/2000.0,s.realMs.coerceIn(0,2000)/2000.0,
         if(s.bigOk==true) 1.0 else 0.0,
-        s.okCount.toDouble().coerceAtLeast(0)/(s.okCount.toDouble().coerceAtLeast(0)+s.failCount.toDouble().coerceAtLeast(0)+1.0))
+        s.okCount.toDouble().coerceAtLeast(0.0)/(s.okCount.toDouble().coerceAtLeast(0.0)+s.failCount.toDouble().coerceAtLeast(0.0)+1.0))
         val key=raw.toList()
         return featureCache.getOrPut(key) {FlyReservoir.encode(raw)}.also {
             while(featureCache.size>128) featureCache.remove(featureCache.keys.first())
