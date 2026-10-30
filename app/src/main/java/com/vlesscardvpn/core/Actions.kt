@@ -334,7 +334,7 @@ object Actions {
             }.getOrNull()
             val sha = res?.optString("sha256").orEmpty()
             if (sha.isEmpty()) s else s.copy(pcs = sha).also { pinned ->
-                Store.update { st -> st.copy(servers = st.servers.map { if (it.id == s.id) pinned else it }) }
+                Store.update { st -> st.copy(servers = st.servers.map { FoundCandidateLedger.applyPin(it,s,pinned) }) }
             }
         } } }.awaitAll()
     }
@@ -422,6 +422,7 @@ object Actions {
                 // Do not train the old profile with a result completed after Wi-Fi/cellular handoff.
                 if (!Net.matches(app,observed) || profile!=null && (AutoChecks.current!=profile || AutoLatencyPolicy.MAX_MS!=profileLimit)) return@real
                 val s = variants[i].first
+                if(s !in Store.state.value.servers) return@real
                 if(Store.state.value.state(s).maskFor(net)!=st.state(s).maskFor(net)) return@real
                 onObservation?.invoke(p)
                 val speedSample = ServerChoice.acceptsSpeedSample(p.kbps, slots)
@@ -441,8 +442,10 @@ object Actions {
                 if (!p.works && budgetMs in 1 until ConnectPolicy.QUICK_BUDGET_MS) return@real
                 probeMemory.record(net, s.id, st.state(s).maskFor(net), p.works, System.currentTimeMillis())
                 runCatching { Brain.learn(net, s, st.state(s), p.works) }
+                if(profile!=null) runCatching { Roki.session.observe(Roki.context(net,profile,profileLimit,st.settings.testUrl),
+                    st.state(s),profile.verdict(p,profileLimit),Thread.currentThread().isInterrupted) }
                 states.put(s.id) {
-                    if (!Net.matches(app,observed) || it.maskFor(net)!=st.state(s).maskFor(net) || it.checkedAt>sampleStartedAt) it else
+                    if (s !in Store.state.value.servers || !Net.matches(app,observed) || it.maskFor(net)!=st.state(s).maskFor(net) || !ProbePublication.unchangedExceptPing(it,st.state(s))) it else
                     it.copy(autoChecksKey=if(profile!=null) p.autoChecksKey else "",autoChecksAt=if(profile!=null && p.autoChecksKey.isNotEmpty()) System.currentTimeMillis() else 0, netEvidence = (it.netEvidence + ((net + "|" + st.state(s).maskFor(net)) to it.evidenceFor(net).observe(p.works, p.realMs, System.currentTimeMillis()))).entries.sortedByDescending { e -> e.value.at }.take(8).associate { e -> e.toPair() }, realMs = p.realMs, bigOk = p.bigOk ?: it.bigOk?.takeIf { old -> old }, ytOk = if (profile!=null) p.ytOk else if (youtube) p.ytOk else if (telegram) null else it.ytOk, tgOk = if (profile!=null) p.tgOk else if (telegram) p.tgOk else if (youtube) null else it.tgOk, tgMs = if(profile!=null || telegram) p.tgMs else if(youtube) 0 else it.tgMs, checkedAt = System.currentTimeMillis(), kbps = if (speedSample) p.kbps else it.kbps,
                         serviceNetwork = if ((profile!=null || youtube || telegram) && p.works) net else it.serviceNetwork,
                         serviceMask = if ((profile!=null || youtube || telegram) && p.works) st.state(s).maskFor(net) else it.serviceMask,
@@ -1219,14 +1222,16 @@ object Actions {
                 val torKey=com.vlesscardvpn.tor.TorFoundPolicy.key(snapshot.settings)
                 val path=Net.observation(app) ?: error("Нет доступной сети")
                 val profile=AutoChecks.current;val limit=AutoLatencyPolicy.MAX_MS;val url=snapshot.settings.testUrl
-                val candidates=FoundConnectPolicy.shortlist(snapshot.servers,snapshot::state)
+                val shortlist=FoundConnectPolicy.shortlist(snapshot.servers,snapshot::state)
+                val candidates=runCatching {Roki.session.order(Roki.context(path.profile,profile,limit,url),shortlist,snapshot::state)}.getOrDefault(shortlist)
+                val found=FoundCandidateLedger(candidates)
                 fun valid()=autoGeneration.get()==ticket && Net.matches(app,path) &&
                     Store.state.value.settings.let {it.mode==Mode.AUTO && com.vlesscardvpn.tor.TorFoundPolicy.key(it)==torKey && it.testUrl==url} &&
                     AutoChecks.current==profile && AutoLatencyPolicy.MAX_MS==limit
                 suspend fun select():Boolean {
                     if(!valid()) return false
                     val current=Store.state.value
-                    val routes=AutoEligibility.servicePool(candidates.filter {it in current.servers},current::state,path.profile,System.currentTimeMillis())
+                    val routes=AutoEligibility.servicePool(found.current(current.servers),current::state,path.profile,System.currentTimeMillis())
                     // Only complete current proof (or exact explicit latency consent) can rehabilitate a route.
                     routes.forEach {s->RouteStabilityMemory.session.confirmed(path.profile,s.id,current.state(s).maskFor(path.profile),true)}
                     if(routes.isEmpty() || selectBest(1,among=routes)==0 || !valid()) return false
@@ -1240,7 +1245,7 @@ object Actions {
                     if(candidates.isEmpty()) error("В «Рабочих» нет подходящих для Авто серверов")
                     // Exactly the already-found shortlist; the selected gates remain mandatory.
                     realTest(candidates,"Авто: проверяю найденные",big=true,youtube=profile.youtube,
-                        telegram=profile.telegram,calls=profile.voice,foreground=true,attempts=1,stopAfter=1)
+                        telegram=profile.telegram,calls=profile.voice,foreground=true,attempts=1,stopAfter=1,onSuccess={found.verified(it)})
                     kotlinx.coroutines.currentCoroutineContext().ensureActive()
                 }) {
                     FoundConnectSequence.Result.READY->return@launch
@@ -2054,8 +2059,9 @@ object Actions {
         val remote = list.filter(ServerOnlyPolicy::userRoute)
         val safe = if (st.settings.mode == Mode.AUTO) remote.filter(AutoEligibility::allowed) else remote
         val c = st.settings.country
-        if (c.isEmpty()) return safe
-        return safe.filter { Countries.of(it.name) == c }.ifEmpty { safe }
+        val preferred=if(c.isEmpty()) safe else safe.filter { Countries.of(it.name) == c }.ifEmpty { safe }
+        return if(st.settings.mode==Mode.AUTO) runCatching {Roki.session.order(
+            Roki.context(Net.key(app),AutoChecks.current,AutoLatencyPolicy.MAX_MS,st.settings.testUrl),preferred,st::state)}.getOrDefault(preferred) else preferred
     }
 
     /** Countries of the working servers, most servers first: (ISO, count). */

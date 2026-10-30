@@ -9,7 +9,7 @@ object AutoAdmissionReason {
         if(p.bigOk==false) why+="передача данных не прошла"
         fun gate(name:String,value:Boolean?,id:String) {
             if(value!=true) why+=name+if(value==false) " — проверка не прошла" else
-                " — "+if(p.serviceNotes.containsKey(id)) ProbeTaskNotes.label(p.serviceNotes[id]) else "результат неизвестен"
+                " — "+ServiceProbeStatus.label(true,null,p.serviceNotes[id])
         }
         if(profile.telegram) {
             gate("Telegram",p.tgOk,"telegram")

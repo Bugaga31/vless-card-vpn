@@ -12,7 +12,8 @@ object YouTubeMediaProbe {
     const val WATCH = "https://www.youtube.com/watch?v=jNQXAC9IVRw"
     const val SAMPLE_BYTES = 131072
     const val PROOF_PREFS = "youtube_media_proof_v1"
-    data class Result(val ok: Boolean?, val kbps: Int = 0)
+    data class Result(val ok: Boolean?, val kbps: Int = 0,val reason:String="")
+    data class Discovery(val url:String?,val reason:String="")
 
     fun freshProof(at: Long, now: Long) = at > 0 && now >= at && now - at < 10 * 60000L
     fun allowedUrl(value: String): Boolean {
@@ -58,22 +59,24 @@ object YouTubeMediaProbe {
         null
     }.getOrNull()
 
-    fun discover(call: (Request) -> Call): String? = runCatching {
+    fun discover(call:(Request)->Call):String? = discoverDetailed(call).url
+    fun discoverDetailed(call:(Request)->Call):Discovery = try {
         call(Request.Builder().url(WATCH).header("User-Agent", "Mozilla/5.0").build()).execute().use { r ->
-            if (r.code != 200 || !r.header("Content-Type").orEmpty().startsWith("text/html", true)) return null
-            val input = r.body?.byteStream() ?: return null
-            val out = java.io.ByteArrayOutputStream(); val buf = ByteArray(8192)
-            while (out.size() < 1048576) {
-                if (Thread.currentThread().isInterrupted) return null
-                val n = input.read(buf, 0, minOf(buf.size, 1048576 - out.size()))
-                if (n < 0) break
-                out.write(buf, 0, n)
-                // Do not fetch an entire multi-megabyte watch page once usable player data arrived.
-                if (out.size() % 32768 < 8192) mediaUrl(out.toString("UTF-8"))?.let { return it }
+            if(r.code!=200) return Discovery(null,"YT_HTTP")
+            if(!r.header("Content-Type").orEmpty().startsWith("text/html",true)) return Discovery(null,"YT_FORMAT")
+            val input=r.body?.byteStream() ?: return Discovery(null,"YT_FORMAT")
+            val out=java.io.ByteArrayOutputStream();val buf=ByteArray(8192)
+            while(out.size()<1048576) {
+                if(Thread.currentThread().isInterrupted) return Discovery(null,"CANCELLED")
+                val n=input.read(buf,0,minOf(buf.size,1048576-out.size()))
+                if(n<0) break
+                out.write(buf,0,n)
+                if(out.size()%32768<8192) mediaUrl(out.toString("UTF-8"))?.let {return Discovery(it)}
             }
-            mediaUrl(out.toString("UTF-8"))
+            mediaUrl(out.toString("UTF-8"))?.let {Discovery(it)} ?: Discovery(null,"YT_NO_DIRECT_MEDIA")
         }
-    }.getOrNull()
+    } catch(_:java.net.SocketTimeoutException) {Discovery(null,"TIMEOUT")}
+      catch(_:Exception) {Discovery(null,if(Thread.currentThread().isInterrupted) "CANCELLED" else "ERROR")}
 
     /** Caller disables redirects and bounds the call by the shared probe deadline. */
     fun measure(url: String, call: (Request) -> Call): Result {
@@ -83,8 +86,8 @@ object YouTubeMediaProbe {
             call(Request.Builder().url(url).header("Range", "bytes=0-${SAMPLE_BYTES - 1}")
                 .header("Accept-Encoding", "identity").build()).execute().use { r ->
                 // Signed URL expiry, consent and rate limiting are not route failures.
-                if (r.code !in listOf(200, 206)) return Result(null)
-                if (!r.header("Content-Type").orEmpty().startsWith("video/", true)) return Result(null)
+                if (r.code !in listOf(200, 206)) return Result(null,reason="YT_HTTP")
+                if (!r.header("Content-Type").orEmpty().startsWith("video/", true)) return Result(null,reason="YT_FORMAT")
                 if (!TransferProof.rangeValid(r.code,r.header("Content-Range"),SAMPLE_BYTES)) return Result(false)
                 if (!r.header("Content-Encoding").isNullOrBlank() && !r.header("Content-Encoding").equals("identity",true)) return Result(null)
                 val input = r.body?.byteStream() ?: return Result(null)
@@ -109,5 +112,8 @@ object YouTubeMediaProbe {
         } catch (_: Exception) { Result(if (Thread.currentThread().isInterrupted) null else false) }
     }
 
-    fun check(call: (Request) -> Call): Result = discover(call)?.let { measure(it, call) } ?: Result(null)
+    fun check(call:(Request)->Call):Result {
+        val discovery=discoverDetailed(call)
+        return discovery.url?.let {measure(it,call)} ?: Result(null,reason=discovery.reason)
+    }
 }

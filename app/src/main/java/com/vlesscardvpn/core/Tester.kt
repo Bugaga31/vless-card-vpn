@@ -232,6 +232,8 @@ object Tester {
             }.also {tasks+=it} else null
             val bigResult = await(bigF, remaining(), BodyResult(),"payload")
             val ytResult = await(ytF, remaining(), YouTubeMediaProbe.Result(null),"youtube") {it.ok!=null}
+            if(ytF!=null && ytResult.ok==null && ytResult.reason.isNotBlank() && notes["youtube"]=="INCONCLUSIVE")
+                notes["youtube"]=ytResult.reason
             val callsOk = if (callF != null) await(callF, remaining(), null,"voice") {it!=null} else null
             val discordOk=await(discordF,remaining(),null,"discord") {it!=null}
             val stableOk=await(stabilityF,remaining(),null,"stability") {it!=null}

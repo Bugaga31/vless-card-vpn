@@ -29,6 +29,7 @@ fun AutoCheckSettings() {
         Text("По умолчанию 5. Сейчас до $slots одновременно; выбранный предел $parallel. Новый лимит действует со следующей волны. Внутренняя оптимизация, нагрев и звонки больше не урезают выбранное число; системные ограничения Android остаются.",style=MaterialTheme.typography.bodySmall)
         Text("В одном тестовом ядре создаются только проверяемые маршруты. Первый подходящий сервер останавливает ненужные пробы; это снижает лишнюю нагрузку, но не гарантирует отсутствие нагрева.",style=MaterialTheme.typography.bodySmall)
         Text("Что проверять в Авто",style=MaterialTheme.typography.titleMedium)
+        Text("ROKI · эксперимент на подграфе FlyWire. Учится на завершённых проверках этой сессии и меняет только порядок кандидатов после 8 результатов. Не целый мозг мухи; неизвестные проверки не разрешает.",style=MaterialTheme.typography.bodySmall)
         Text("HTTPS проверяется всегда. Выбранные проверки обязательны для нового сервера и резервов.",style=MaterialTheme.typography.bodySmall)
         listOf("telegram" to "Telegram · ответ дата-центра", "stability" to "Telegram · устойчивость серии",
             "voice" to "Звонки · UDP-транспорт", "discord" to "Discord · gateway", "youtube" to "YouTube · медиа").forEach {(id,title)->
