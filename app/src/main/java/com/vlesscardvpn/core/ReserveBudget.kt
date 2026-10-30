@@ -4,10 +4,10 @@ package com.vlesscardvpn.core
 object ReserveBudget {
     private data class Bucket(var tokens:Double=2.0,var at:Long)
     private val buckets=linkedMapOf<String,Bucket>()
-    @Synchronized fun take(network:String,now:Long):Boolean {
+    @Synchronized fun take(network:String,now:Long, refillMs:Long=60_000L):Boolean {
         val b=buckets.getOrPut(network){Bucket(at=now)}
         if(now<b.at) {b.tokens=2.0;b.at=now}
-        b.tokens=(b.tokens+(now-b.at).coerceAtLeast(0)/60_000.0).coerceAtMost(2.0);b.at=now
+        b.tokens=(b.tokens+(now-b.at).coerceAtLeast(0)/refillMs.coerceIn(15_000L,60_000L).toDouble()).coerceAtMost(2.0);b.at=now
         while(buckets.size>8) buckets.remove(buckets.keys.first())
         if(b.tokens<1.0) return false
         b.tokens-=1.0;return true

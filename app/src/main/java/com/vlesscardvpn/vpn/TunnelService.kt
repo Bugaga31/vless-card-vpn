@@ -954,7 +954,7 @@ class TunnelService : VpnService() {
     /** New network (Wi-Fi ↔ mobile): other servers may be faster here — re-run the speed-up soon. */
     private val optKick = kotlinx.coroutines.channels.Channel<Unit>(kotlinx.coroutines.channels.Channel.CONFLATED)
     private fun optimizeSoon() {
-        if (optJob?.isActive == true) optKick.trySend(Unit) else scheduleOptimize(firstDelay = 45_000)
+        if (optJob?.isActive == true) optKick.trySend(Unit) else scheduleOptimize(firstDelay = 5_000)
     }
 
     private var netJob: Job? = null
@@ -977,7 +977,7 @@ class TunnelService : VpnService() {
                 val stabilityPending = watchSettings.mode == Mode.AUTO && usedChain==null && !usedTorRoute && !watchSettings.torAll &&
                     !(watchSettings.torRouting && "telegram" in watchSettings.services) &&
                     com.vlesscardvpn.core.TelegramStability.summary(android.os.SystemClock.elapsedRealtime()).attempted < 3
-                val period = if (offline) 10_000L else if (stabilityPending || telegramUnstable > 0 || miss > 0 || dnsMiss > 0 || telegramMiss > 0 || telegramSlow > 0 || servicePending && Store.state.value.settings.mode == Mode.AUTO && usedChain==null && !usedTorRoute) 3_000L else com.vlesscardvpn.core.PhonePower.refresh(this@TunnelService).healthyMs
+                val period = if (offline) 10_000L else if (stabilityPending || telegramUnstable > 0 || miss > 0 || dnsMiss > 0 || telegramMiss > 0 || telegramSlow > 0 || servicePending && Store.state.value.settings.mode == Mode.AUTO && usedChain==null && !usedTorRoute) 3_000L else com.vlesscardvpn.core.VpnRecoveryPolicy.watchPeriod(com.vlesscardvpn.core.PhonePower.refresh(this@TunnelService).healthyMs, watchSettings.mode==Mode.AUTO)
                 if (asleep()) {
                     // Quiet-screen mode suspends on a screen event, not a minute polling timer.
                     do { screenSignals.receive() } while (asleep())
@@ -1108,18 +1108,28 @@ class TunnelService : VpnService() {
                     com.vlesscardvpn.core.PhonePower.state.first { it.screenInteractive }
                     previous = TProxyService.stats(); windows = 0
                 }
-                if (!com.vlesscardvpn.core.PhonePower.refresh(this@TunnelService).allowLight) {
-                    windows = 0; previous = null; delay(60000); continue
+                if (!com.vlesscardvpn.core.BackgroundReservePolicy.mayProbe(Store.state.value.settings.mode==Mode.AUTO,com.vlesscardvpn.core.PhonePower.refresh(this@TunnelService))) {
+                    windows = 0; previous = null; delay(com.vlesscardvpn.core.VpnRecoveryPolicy.RESERVE_RETRY_MS); continue
                 }
                 delay(5000)
                 val current = TProxyService.stats()
                 val a=previous;previous=current
                 if (asleep() || Store.state.value.settings.mode != com.vlesscardvpn.model.Mode.AUTO ||
-                    !com.vlesscardvpn.core.PhonePower.refresh(this@TunnelService).allowLight || healJob?.isActive == true) { windows=0;continue }
+                    !com.vlesscardvpn.core.BackgroundReservePolicy.mayProbe(true,com.vlesscardvpn.core.PhonePower.refresh(this@TunnelService)) || healJob?.isActive == true || recoveryJob?.isActive == true) { windows=0;continue }
                 val suspicious = a != null && current != null && a.size>=4 && current.size>=4 && current[1]-a[1]>=4096 && current[3]==a[3]
                 windows=if (suspicious) windows+1 else 0
                 val now=System.currentTimeMillis()
-                if (windows<2 || now-lastAttempt<120000) continue
+                if (windows<2) {
+                    if (now-lastAttempt>=15000 && Actions.warmReserveCount(usedServers)<3) {
+                        lastAttempt=now
+                        // Accumulate proofs without changing the live selection or downloading speed samples.
+                        try { Actions.prepareStandby(usedServers) }
+                        catch(e:kotlinx.coroutines.CancellationException) { throw e }
+                        catch(e:Exception) { Log.w(TAG,"Reserve preparation failed",e) }
+                    }
+                    continue
+                }
+                if (now-lastAttempt<15000) continue
                 windows=0;lastAttempt=now
                 val original=Tunnel.socks ?: continue;val network=Net.key(this@TunnelService)
                 val healthy=Tester.probeSocks(original.port,Store.state.value.settings.testUrl,big=false,youtube=false,attempts=1,budgetMs=1200).works
@@ -1204,14 +1214,11 @@ class TunnelService : VpnService() {
             var identity=Net.key(this@TunnelService) to Net.underlying(this@TunnelService)?.toString()
             var resetAt=android.os.SystemClock.elapsedRealtime()
             while (tun != null && Tunnel.socks != null && Tunnel.status.value.state == Tunnel.State.CONNECTED) {
-                if (com.vlesscardvpn.core.PhonePower.isVoiceCallActive(this@TunnelService)) {
-                    healStatus("Идёт звонок — не переключаю маршрут; VPN блокирует трафик до восстановления сервера")
-                    delay(10_000)
-                    continue
-                }
+                // Reached only after confirmed failure (VoiceCallPolicy already protects uncertain calls).
+                // A broken route must not wait forever merely because AudioManager still reports a call.
                 if (!Actions.online()) {
                     healStatus("Сеть недоступна — VPN оставляет трафик заблокированным и повторит поиск")
-                    delay(20_000)
+                    delay(com.vlesscardvpn.core.VpnRecoveryPolicy.RETRY_MS)
                     continue
                 }
                 healStatus(if (attempt == 0) "Сервер не отвечает — ищу рабочий VLESS-маршрут; прямого обхода нет" else "VLESS-маршрут не найден — повторяю поиск")
@@ -1239,8 +1246,8 @@ class TunnelService : VpnService() {
                     if (Tunnel.status.value.check == "Проверяю интернет…") break
                 }
                 attempt++
-                healStatus("Рабочего VLESS-сервера пока нет. Трафик остаётся заблокированным; повторный поиск через 5 с")
-                delay(com.vlesscardvpn.core.AutoSearchCampaign.WAVE_PAUSE_MS)
+                healStatus("Рабочего VLESS-сервера пока нет. Трафик остаётся заблокированным; повторный поиск через 1 с")
+                delay(com.vlesscardvpn.core.VpnRecoveryPolicy.RETRY_MS)
             }
         }
     }

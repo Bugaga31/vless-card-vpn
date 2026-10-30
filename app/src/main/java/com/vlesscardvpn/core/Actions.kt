@@ -406,6 +406,7 @@ object Actions {
         val done = AtomicInteger(); val ok = AtomicInteger()
         val states = StateBatch(200)
         val firstWinner = java.util.concurrent.atomic.AtomicReference<Server?>(null)
+        val warmPassed = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
         try {
             Tester.real(variants, st.settings.testUrl, port, own.ports, batch = if (onFirst != null) ConnectPolicy.FIRST else batch, parallel = parallel, big = big, youtube = youtube, telegram = telegram, calls = calls, foreground = foreground, attempts = attempts, requireTelegram = st.settings.mode == Mode.AUTO && telegram, stopAfter = stopAfter, budgetMs = budgetMs, onStarted = { i ->
                 if(Net.matches(app,observed)) onAttempt?.invoke(variants[i].first)
@@ -422,6 +423,8 @@ object Actions {
                     (!telegram || AutoLatencyPolicy.accepts(p)) && !RouteStabilityMemory.session.cooling(net,s.id,st.state(s).maskFor(net),System.currentTimeMillis()))
                 val firstSuccess = routeReady && ok.incrementAndGet() == 1
                 if (routeReady) onSuccess?.invoke(s)
+                if (telegram && routeReady && p.tgOk == true && AutoLatencyPolicy.accepts(p)) warmPassed.add(s.id)
+                else WarmReserveMemory.session.remove(listOf(s.id))
                 // A deliberately short attempt is inconclusive when it times out; confirm with the normal budget.
                 if (!p.works && budgetMs in 1 until ConnectPolicy.QUICK_BUDGET_MS) return@real
                 probeMemory.record(net, s.id, st.state(s).maskFor(net), p.works, System.currentTimeMillis())
@@ -441,6 +444,15 @@ object Actions {
                 step(done.incrementAndGet(), variants.size)
             }
         } finally { own?.close(); states.flush(); runCatching { Brain.save(app) } }
+        if (Net.matches(app,observed)) {
+            val committed = Store.state.value
+            pinned.filter { it.id in warmPassed && committed.servers.contains(it) }.forEach { s ->
+                val x=committed.state(s)
+                if (x.works && x.checkedAt>=sampleStartedAt && x.maskFor(net)==st.state(s).maskFor(net) &&
+                    AutoEligibility.telegramRank(x,net,System.currentTimeMillis())==0 && AutoLatencyPolicy.accepts(x))
+                    WarmReserveMemory.session.record(observed,s,x.maskFor(net),st.settings.testUrl,android.os.SystemClock.elapsedRealtime())
+            }
+        }
         // stopAfter=1 already cancels the remaining probes. Finish their cleanup and
         // commit all results before starting a VPN core; do not race two core lifecycles.
         firstWinner.get()?.let { s ->
@@ -1165,6 +1177,25 @@ object Actions {
         val net=Net.key(app);val handle=Net.underlying(app)?.toString()
         fun valid()=Net.key(app)==net && Net.underlying(app)?.toString()==handle
         val ids=failed.mapTo(HashSet()){it.id}
+        WarmReserveMemory.session.remove(ids)
+        val observed=Net.observation(app)
+        if (observed!=null && valid()) {
+            val snapshot=Store.state.value
+            val ready=WarmReserveMemory.session.candidates(observed,snapshot.servers.filter {it.id !in ids && it.id !in attempted},
+                {snapshot.state(it).maskFor(net)},snapshot.settings.testUrl,android.os.SystemClock.elapsedRealtime())
+                .filter { !RouteStabilityMemory.session.cooling(net,it.id,snapshot.state(it).maskFor(net),now) &&
+                    !TelegramRouteMemory.cooling(net,it.id,snapshot.state(it).maskFor(net),now) }
+            val eligible=AutoEligibility.servicePool(ready,{snapshot.state(it)},net,now).filter {snapshot.state(it).works}
+            if (eligible.isNotEmpty() && Net.matches(app,observed)) {
+                onStep("переключаю на недавно проверенный резерв")
+                val selected=selectBest(1,close=true,among=eligible)
+                if(selected>0 && Net.matches(app,observed)) {
+                    val chosen=Store.state.value.selected.map {it.id}
+                    attempted.addAll(chosen); WarmReserveMemory.session.remove(chosen)
+                    return@coroutineScope selected
+                }
+            }
+        }
         if(ids.isNotEmpty()) Store.setStates(failed.associate {server -> server.id to {x:com.vlesscardvpn.model.ServerState ->
             if(valid()) x.copy(realMs=0,checkedAt=now) else x } })
         fun selectFresh():Int {
@@ -1832,15 +1863,29 @@ object Actions {
         }
     }
 
+    fun warmReserveCount(used: List<Server>): Int {
+        val observation=Net.observation(app) ?: return 0
+        val st=Store.state.value; val now=System.currentTimeMillis()
+        return WarmReserveMemory.session.candidates(observation,st.servers.filter {s->used.none {it.id==s.id}},
+            {st.state(it).maskFor(observation.profile)},st.settings.testUrl,android.os.SystemClock.elapsedRealtime())
+            .count { st.state(it).works && AutoEligibility.telegramRank(st.state(it),observation.profile,now)==0 &&
+                AutoLatencyPolicy.accepts(st.state(it)) && !RouteStabilityMemory.session.cooling(observation.profile,it.id,st.state(it).maskFor(observation.profile),now) }
+    }
+
     /** Find a VERIFIED spare while the existing TUN stays up. Selection changes only after returning success. */
     suspend fun prepareStandby(used: List<Server>): Server? {
         if (job?.isActive == true) return null
         val plan=PhonePower.refresh(app)
-        if(SessionHold.active() || GameSession.active() || !plan.allowLight || plan.deferTraffic) return null
+        if(SessionHold.active() || GameSession.active() || !BackgroundReservePolicy.mayProbe(Store.state.value.settings.mode==Mode.AUTO,plan) || plan.deferTraffic) return null
         val st = Store.state.value; val ids = used.map { it.id }.toSet(); val net = Net.key(app)
-        if(!ReserveBudget.take(net+"|"+Net.underlying(app)?.toString(),android.os.SystemClock.elapsedRealtime())) return null
+        if(!ReserveBudget.take(net+"|"+Net.underlying(app)?.toString(),android.os.SystemClock.elapsedRealtime(),refillMs=15_000L)) return null
         val stamp=System.currentTimeMillis()
-        val pool = preferred(st, st.servers.filter { it.id !in ids }).filter {server->
+        val warm = warmReserveCount(used)
+        if (warm>=3) return null
+        val observation=Net.observation(app) ?: return null
+        val cached=WarmReserveMemory.session.candidates(observation,st.servers,{st.state(it).maskFor(net)},st.settings.testUrl,
+            android.os.SystemClock.elapsedRealtime()).mapTo(HashSet()) {it.id}
+        val pool = preferred(st, st.servers.filter { it.id !in ids && it.id !in cached }).filter {server->
             !probeMemory.cooling(net,server.id,st.state(server).maskFor(net),stamp) &&
             !RouteStabilityMemory.session.cooling(net,server.id,st.state(server).maskFor(net),stamp) &&
             !TelegramRouteMemory.cooling(net,server.id,st.state(server).maskFor(net),stamp) &&
@@ -1855,7 +1900,7 @@ object Actions {
             ServerChoice.blended(CloudSpeed.prior(it), st.state(it).evidenceFor(net), now) +
                 .08 * ServerChoice.exploration(st.state(it).evidenceFor(net).checks, total)
         }
-        val candidates = exploit + listOfNotNull(explore)
+        val candidates = (exploit + listOfNotNull(explore)).take(BackgroundReservePolicy.candidates(plan).coerceAtMost(6))
         var found: Server? = null
         val previous = progress.value
         try { realTest(candidates,"Фоновый запасной маршрут",big=false,youtube=false,telegram=st.settings.mode==Mode.AUTO,attempts=1,stopAfter=1,
