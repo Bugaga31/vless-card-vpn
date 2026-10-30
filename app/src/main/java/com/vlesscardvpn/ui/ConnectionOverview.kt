@@ -22,7 +22,7 @@ import com.vlesscardvpn.health.HealthModule
 fun ConnectionOverview(status:Tunnel.Status,hideRoute:Boolean,modeLabel:String,control:@Composable ()->Unit) {
     val routeSettings by Store.settings.collectAsState()
     val selectedEvidence by AutoCheckEvidence.frame.collectAsState()
-    val profilePending=routeSettings.mode==com.vlesscardvpn.model.Mode.AUTO && (selectedEvidence?.profile!=AutoCheckProfile.of(routeSettings.autoChecks) || selectedEvidence?.limit!=routeSettings.autoLatencyMaxMs)
+    val profilePending=routeSettings.mode==com.vlesscardvpn.model.Mode.AUTO && (selectedEvidence?.profile!=AutoCheckProfile.of(routeSettings.autoChecks) || selectedEvidence?.limit!=routeSettings.autoLatencyMaxMs || selectedEvidence?.let {android.os.SystemClock.elapsedRealtime()<it.at || android.os.SystemClock.elapsedRealtime()-it.at>90_000L}==true)
     val presented=if(profilePending && status.state==Tunnel.State.CONNECTED) status.copy(checkOk=null,check="Набор проверок изменён или ещё не измерен. Ожидаем свежие результаты…") else status
     val on=status.state==Tunnel.State.CONNECTED
     val searching=status.state==Tunnel.State.CONNECTING

@@ -343,4 +343,20 @@ class AutoCheckProfileR209RuntimeTest {
         val empty=old.copy(autoChecks=emptySet());assertEquals(emptySet<String>(),Settings.fromJson(empty.toJson()).autoChecks)
         val custom=old.copy(autoChecks=setOf("youtube","discord"));assertEquals(custom.autoChecks,Settings.fromJson(custom.toJson()).autoChecks)
     }
+    @Test fun disabledTelegramFailureDoesNotVetoQueue() {
+        val p=AutoCheckProfile.of(emptyList());val x=com.vlesscardvpn.model.ServerState(realMs=50,tgOk=false,serviceNetwork="wifi",serviceMask="",serviceCheckedAt=100,autoChecksAt=100,autoChecksKey=AutoChecks.key(p,1000))
+        assertEquals(0,AutoChecks.rank(x,"wifi",101,p,1000))
+    }
+    @Test fun enabledTelegramFailureVetoesQueue() {
+        val p=AutoCheckProfile.of(listOf("telegram"));val x=com.vlesscardvpn.model.ServerState(realMs=50,tgOk=false,serviceNetwork="wifi",serviceMask="",serviceCheckedAt=100)
+        assertEquals(2,AutoChecks.rank(x,"wifi",101,p,1000))
+    }
+    @Test fun enabledMediaFailureVetoesQueue() {
+        val p=AutoCheckProfile.of(listOf("youtube"));val x=com.vlesscardvpn.model.ServerState(realMs=50,ytOk=false,serviceNetwork="wifi",serviceMask="",serviceCheckedAt=100)
+        assertEquals(2,AutoChecks.rank(x,"wifi",101,p,1000))
+    }
+    @Test fun freshHttpsCannotRenewOldProfileProof() {
+        val p=AutoCheckProfile.of(emptyList());val x=com.vlesscardvpn.model.ServerState(realMs=50,serviceNetwork="wifi",serviceMask="",serviceCheckedAt=400000,autoChecksAt=100,autoChecksKey=AutoChecks.key(p,1000))
+        assertEquals(1,AutoChecks.rank(x,"wifi",400001,p,1000))
+    }
 }
