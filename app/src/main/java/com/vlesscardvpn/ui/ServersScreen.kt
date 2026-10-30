@@ -44,7 +44,7 @@ private enum class Filter(val title: String) { ALL("Все"), WORKING("Рабо�
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun ServersScreen() {
+fun ServersScreen(onConnectFound:()->Unit = {}) {
     val ctx = LocalContext.current
     val app by Store.ui.collectAsState()
     val busy by Actions.running.collectAsState()
@@ -101,6 +101,7 @@ fun ServersScreen() {
                 OutlinedButton(onClick = { addOpen = true }) { Text("Добавить") }
             }
         }
+        item { FoundRoutesCard(onConnectFound) }
         item {
             Button(onClick = { Actions.testAll(onlySelected = filter == Filter.SELECTED) }, enabled = !busy,
                 modifier = Modifier.fillMaxWidth(), shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp)) {
@@ -185,7 +186,7 @@ fun ServersScreen() {
             Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)) {
                 Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text("Автоматический выбор", fontWeight = FontWeight.SemiBold)
-                    Text("При подключении возьму быстрые рабочие серверы и подберу маскировку. Отмечайте серверы, только если нужны конкретные.",
+                    Text("Кнопка «Подключиться к найденным» сверху использует «Рабочие» без нового поиска по каталогу. Если доказательства устарели, перепроверю только найденные выбранными сервисами.",
                         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }

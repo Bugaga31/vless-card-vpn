@@ -426,6 +426,8 @@ object Actions {
                 onObservation?.invoke(p)
                 val speedSample = ServerChoice.acceptsSpeedSample(p.kbps, slots)
                 if (telegram && p.works) TelegramRouteMemory.record(net,s.id,st.state(s).maskFor(net),p.tgOk,System.currentTimeMillis())
+                // Complete fresh proof, not one ping, can rehabilitate a previously quarantined route.
+                RouteStabilityMemory.session.confirmed(net,s.id,st.state(s).maskFor(net),profile?.accepts(p,profileLimit)==true)
                 val cooling=RouteStabilityMemory.session.cooling(net,s.id,st.state(s).maskFor(net),System.currentTimeMillis())
                 val routeReady = p.works && (st.settings.mode != Mode.AUTO ||
                     (profile?.accepts(p,profileLimit) ?: (!telegram || AutoChecks.accepts(p))) && !cooling)
@@ -1196,6 +1198,71 @@ object Actions {
                     check="Сеть, настройки или результат проверки изменились. Запустите поиск снова.",checkOk=false)
             }
         }
+    }
+
+    /** Explicit found-only operation. Cancel/join probe cores, reuse fresh proof or revalidate this
+     * bounded Working shortlist. Never refresh subscriptions or scan the rest of the catalog. */
+    fun connectFound(onReady:()->Unit) {
+        val initial=Store.state.value
+        if(initial.settings.mode!=Mode.AUTO || initial.settings.torAll || Tunnel.status.value.state==Tunnel.State.CONNECTED) return
+        val ticket=autoGeneration.incrementAndGet()
+        val old=job;old?.cancel()
+        val next=scope.launch(start=kotlinx.coroutines.CoroutineStart.LAZY) {
+            old?.join()
+            if(autoGeneration.get()!=ticket) return@launch
+            progress.value=Progress("Авто: подключаю найденные",running=true)
+            Tunnel.status.value=Tunnel.Status(Tunnel.State.CONNECTING,"Проверяю найденные…",check="Без нового поиска по каталогу")
+            try {
+                withContext(Dispatchers.IO) { XrayCore.init(app) }
+                val snapshot=Store.state.value
+                val path=Net.observation(app) ?: error("Нет доступной сети")
+                val profile=AutoChecks.current;val limit=AutoLatencyPolicy.MAX_MS;val url=snapshot.settings.testUrl
+                val candidates=FoundConnectPolicy.shortlist(snapshot.servers,snapshot::state)
+                fun valid()=autoGeneration.get()==ticket && Net.matches(app,path) &&
+                    Store.state.value.settings.let {it.mode==Mode.AUTO && !it.torAll && it.testUrl==url} &&
+                    AutoChecks.current==profile && AutoLatencyPolicy.MAX_MS==limit
+                suspend fun select():Boolean {
+                    if(!valid()) return false
+                    val current=Store.state.value
+                    val routes=AutoEligibility.servicePool(candidates.filter {it in current.servers},current::state,path.profile,System.currentTimeMillis())
+                    // Only complete current proof (or exact explicit latency consent) can rehabilitate a route.
+                    routes.forEach {s->RouteStabilityMemory.session.confirmed(path.profile,s.id,current.state(s).maskFor(path.profile),true)}
+                    if(routes.isEmpty() || selectBest(1,among=routes)==0 || !valid()) return false
+                    deepPending=true
+                    SlowRouteConsent.hide()
+                    var delivered=false
+                    withContext(Dispatchers.Main) { if(valid()) {onReady();delivered=true} }
+                    return delivered
+                }
+                when(FoundConnectSequence.run(::valid,::select) {
+                    if(candidates.isEmpty()) error("В «Рабочих» нет подходящих для Авто серверов")
+                    // Exactly the already-found shortlist; the selected gates remain mandatory.
+                    realTest(candidates,"Авто: проверяю найденные",big=true,youtube=profile.youtube,
+                        telegram=profile.telegram,calls=profile.voice,foreground=true,attempts=1,stopAfter=1)
+                    kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                }) {
+                    FoundConnectSequence.Result.READY->return@launch
+                    FoundConnectSequence.Result.STALE->error("Сеть или настройки изменились. Повторите подключение к найденным")
+                    FoundConnectSequence.Result.NONE->Unit
+                }
+                SlowRouteConsent.remember(candidates,0)
+                val reason=if(SlowRouteConsent.offer.value!=null)
+                    "Есть проверенный сервер выше предела. Нажмите «Подключиться к найденным» и подтвердите задержку."
+                    else progress.value.message.ifBlank {"Выбранные сервисные проверки не пройдены. Можно продолжить общий поиск."}
+                Tunnel.status.value=Tunnel.Status(Tunnel.State.ERROR,"Найденные пока не допущены",check=reason,checkOk=false)
+                progress.value=progress.value.copy(message=reason)
+            } catch(e:Exception) {
+                if(e is kotlinx.coroutines.CancellationException) throw e
+                if(autoGeneration.get()==ticket) {
+                    val reason=Errors.human(e)
+                    Tunnel.status.value=Tunnel.Status(Tunnel.State.ERROR,"Не удалось подключить найденные",check=reason,checkOk=false)
+                    progress.value=progress.value.copy(message=reason)
+                }
+            } finally {
+                if(autoGeneration.get()==ticket) progress.value=progress.value.copy(running=false)
+            }
+        }
+        job=next;next.start()
     }
 
     fun online(): Boolean = runCatching {

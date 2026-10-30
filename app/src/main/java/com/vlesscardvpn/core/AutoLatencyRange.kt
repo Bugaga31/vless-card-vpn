@@ -2,9 +2,10 @@ package com.vlesscardvpn.core
 
 /** User target: the upper bound is a gate; faster-than-target replies are welcome. */
 object AutoLatencyRange {
-    const val DEFAULT_MAX = 1000
+    const val DEFAULT_MAX = 800
+    const val DEFAULT_MIN = 100
     const val LIMIT = 3000
-    data class Range(val min: Int = 1, val max: Int = DEFAULT_MAX) {
+    data class Range(val min: Int = DEFAULT_MIN, val max: Int = DEFAULT_MAX) {
         fun valid() = min in 1..LIMIT && max in min..LIMIT
         fun accepts(works: Boolean, https: Int, telegram: Boolean?, tg: Int) =
             valid() && works && telegram == true && https in 1..max && tg in 1..max

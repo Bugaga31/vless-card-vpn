@@ -27,6 +27,11 @@ class RouteStabilityMemory(private val capacity:Int=512) {
         while(entries.size>capacity.coerceAtLeast(1))entries.remove(entries.keys.first())
         return newly
     }
+    /** A complete fresh selected-service probe supersedes old failure history on this exact route.
+     * A lone good watchdog sample or partial HTTPS result must NOT clear quarantine. */
+    @Synchronized fun confirmed(net:String,id:String,mask:String,passed:Boolean) {
+        if(passed) entries.remove(Triple(net,id,mask))
+    }
     @Synchronized fun cooling(net:String,id:String,mask:String,now:Long):Boolean {
         val key=Triple(net,id,mask);val e=entries[key] ?: return false
         if(now<e.at) {entries.remove(key);return false}

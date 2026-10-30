@@ -30,7 +30,7 @@ val Bad: Color @Composable get() = if(MaterialTheme.colorScheme.surface.luminanc
 val Warn: Color @Composable get() = if(MaterialTheme.colorScheme.surface.luminance() > .5f) Color(0xFF805000) else Color(0xFFFFCE83)
 
 @Composable
-fun AppUi(onConnect: () -> Unit, onDisconnect: () -> Unit) {
+fun AppUi(onConnect: () -> Unit, onDisconnect: () -> Unit, onConnectFound:()->Unit = onConnect) {
     val theme by remember { com.vlesscardvpn.core.Store.settings }.collectAsState()
     val ctx = androidx.compose.ui.platform.LocalContext.current
     val systemDark = isSystemInDarkTheme()
@@ -89,8 +89,8 @@ fun AppUi(onConnect: () -> Unit, onDisconnect: () -> Unit) {
         ) { pad ->
             Box(Modifier.padding(pad).fillMaxSize()) {
                 androidx.compose.animation.Crossfade(tab, animationSpec = tween(if(theme.reducedMotion) 0 else 200), label = "tab") { t -> when (t) {
-                    0 -> HomeScreen(onConnect, onDisconnect, openServers = { tab = 1 })
-                    1 -> ServersScreen()
+                    0 -> HomeScreen(onConnect, onDisconnect, openServers = { tab = 1 }, onConnectFound=onConnectFound)
+                    1 -> ServersScreen(onConnectFound)
                     3 -> ChatScreen()
                     4 -> DeviceScreen()
                     else -> SettingsScreen()
