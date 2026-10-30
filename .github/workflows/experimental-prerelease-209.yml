@@ -1,4 +1,4 @@
-name: Experimental prerelease 1.2.98 (gated scoped checks)
+name: Experimental prerelease 1.2.98 (UNVALIDATED owner-requested)
 on:
   push:
     branches: ['experiment/prerelease-209-release']
@@ -12,31 +12,16 @@ concurrency:
 jobs:
   source:
     runs-on: ubuntu-latest
-    permissions: {contents: write}
     outputs:
       sha: ${{ steps.source.outputs.sha }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with: {persist-credentials: false}
       - id: source
-        env: {GH_TOKEN: '${{ github.token }}'}
         run: |
           set -euo pipefail
           test "$GITHUB_REF" = refs/heads/experiment/prerelease-209-release
-          base64 -d tools/patches/check-profile-r209.patch.gz.b64 | gzip -d > "$RUNNER_TEMP/r209.patch"
-          echo '20f4c93aee796411b67af30f16b8be467384c8589b345a7103144187af8c0e9a  '"$RUNNER_TEMP/r209.patch" | sha256sum -c -
-          git fetch --quiet --no-tags origin 4166bc2957050caed3cb3583ba9879720def3c37
-          git restore --source 4166bc2957050caed3cb3583ba9879720def3c37 -- app/src/main app/src/test app/build.gradle.kts
-          git apply --check "$RUNNER_TEMP/r209.patch"
-          git apply "$RUNNER_TEMP/r209.patch"
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add app
-          if ! git diff --cached --quiet; then
-            git commit -m 'feat(auto): pin selectable profile source for experimental 209 [skip ci]'
-            AUTH=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
-            git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $AUTH" push origin HEAD:refs/heads/experiment/prerelease-209-release
-          fi
+          # Build the already materialized selectable-profile source; do not restore or patch it again.
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
   build:
     needs: source
@@ -71,13 +56,11 @@ jobs:
           key: native-${{ runner.os }}-${{ runner.arch }}-ndk27.2.12479018-api24-all-${{ hashFiles('native/**', 'app/build.gradle.kts') }}
       - name: Install pinned NDK
         run: sdkmanager 'ndk;27.2.12479018'
-      - name: Compile gated release APKs
+      - name: Compile release APKs (functional checks intentionally skipped)
         run: |
           export GITHUB_RUN_NUMBER=209
           chmod +x gradlew
           ./gradlew -PbetaPreview=true -PemulatorAbis=true -PsplitAbi=true --no-daemon --max-workers=2 :app:assembleRelease
-      - name: Require actual successful matching JVM and Android results
-        run: python3 tools/release-gates/gate_experimental_209.py
       - name: Sign with persistent Beta key
         env:
           KS_B64: ${{ secrets.BETA_KEYSTORE_B64 }}
@@ -103,7 +86,7 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          python3 tools/release-gates/prepare_experimental_209.py 2>&1 | tee "$RUNNER_TEMP/package-check.log" || {
+          python3 tools/release-gates/prepare_unvalidated_209.py 2>&1 | tee "$RUNNER_TEMP/package-check.log" || {
             python3 -c 'import pathlib,os; s=pathlib.Path(os.environ["RUNNER_TEMP"],"package-check.log").read_text()[-5000:]; print("::error title=Package integrity check failed::"+s.replace("%","%25").replace("\n","%0A").replace("\r","%0D"))'
             exit 1
           }
@@ -134,9 +117,8 @@ jobs:
             release/VLESS-Card-Beta-1.2.98-experimental.apk \
             release/VLESS-Card-Beta-1.2.98-experimental-arm64.apk \
             release/SHA256SUMS-Beta.txt release/verification.json \
-            release/validation-jvm.json release/validation-device.json release/validation-ui-review.json \
             --repo "$GITHUB_REPOSITORY" --target "$CANDIDATE_SHA" \
-            --prerelease --latest=false --title 'VLESS Card 1.2.98 · Experimental' \
+            --prerelease --latest=false --title 'VLESS Card 1.2.98 · Experimental — НЕ ПРОВЕРЕНО' \
             --notes-file release/notes-experimental.md
 
-# Publication still requires exact-source runtime results and captured UI visual review.
+# Owner explicitly requested an unvalidated experimental prerelease; signature/package checks remain mandatory.
