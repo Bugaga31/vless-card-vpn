@@ -6,6 +6,8 @@ import com.vlesscardvpn.model.Server
  * replace the empty pin, but never credentials, transport, SNI or an existing pin. */
 class FoundCandidateLedger(candidates:List<Server>) {
     private val expected=candidates.associateBy {it.id}.toMutableMap()
+    /** Preparation records exact local pin acquisition, not successful service admission. */
+    fun prepared(server:Server)=verified(server)
     @Synchronized fun verified(server:Server) {
         val old=expected[server.id] ?: return
         if(server==old || ForegroundProbePlan.needsCertificate(old) && server.pcs.isNotBlank() &&
