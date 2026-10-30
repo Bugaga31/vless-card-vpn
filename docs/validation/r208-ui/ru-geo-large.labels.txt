@@ -1,5 +1,3 @@
-gosuslugi.ru · sberbank.ru · sber.ru · tbank.ru · tinkoff.ru · alfabank.ru · vtb.ru · nspk.ru · yandex.ru · ya.ru · yandex.net · yastatic.net · vk.com · vk.ru · vkvideo.ru · userapi.com · ok.ru · mail.ru · ozon.ru · ozonusercontent.com · wildberries.ru · wb.ru · wbstatic.net · avito.ru · rzd.ru · pochta.ru
-RU-домены и IP напрямую
-Расширение выключено. Короткий список выше действует отдельно.
+Отдельное расширение Karing: российские домены и IPv4-подсети — без VPN. IPv6 остаётся заблокированным.
 Трафик прямых соединений и DNS доменов списка видны провайдеру. База географии может ошибаться и не содержит все серверы. «Всегда через VPN» и выбранные Tor-сервисы приоритетнее. Применится после переподключения.
 База Karing · 2eddd3aa
