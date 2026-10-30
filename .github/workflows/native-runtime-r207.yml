@@ -112,3 +112,5 @@ jobs:
       - name: Require runtime assertions
         if: always()
         run: python3 -c 'import json;d=json.load(open("docs/validation/r207-device.json"));assert d.get("passed") is True and d.get("ui_captures_executed") is True and len(d.get("screenshots",[]))==39,d'
+
+# Full unchanged rerun after isolated controlled-fixture TLS timeout.
