@@ -511,6 +511,7 @@ class TunnelService : VpnService() {
                 "plus" -> " · WARP+: включён ✓"; "on" -> " · WARP: включён ✓"; "off" -> " · WARP: не через Cloudflare ✗"; else -> " · WARP: Cloudflare не ответил"
             } else ""
             if (Tunnel.status.value.state != Tunnel.State.CONNECTED || core !== sampledCore ||
+                chainEpoch.get()!=sampledChainEpoch || Tunnel.socks!=auth ||
                 Net.key(this@TunnelService) != sampledNet || Net.underlying(this@TunnelService)?.toString() != sampledHandle) return@launch
             val text = if(chainExitRejected) "Выход Tor не подтверждён или недопустим — возвращаюсь к проверенному Auto" else if (p.realMs > 0) "HTTPS · ${p.realMs} мс · Видео YouTube: ${if(p.ytOk==true) "✓" else if(p.ytOk==false) "нет ответа" else "не проверен"} · Telegram MTProto: ${if(p.tgOk==true) "${p.tgMs} мс" else if(p.tgOk==false) "нет ответа" else "не проверен"}$warp"
                 else "Нет ответа через выбранный маршрут (${p.error}). " + if (st.mode == Mode.AUTO && st.autoHeal) "Ищу рабочий вариант сам…" else "Проверьте серверы или включите маскировку."
@@ -996,6 +997,8 @@ class TunnelService : VpnService() {
                 if (vpnMode && runCatching { !TProxyService.TProxyIsRunning() }.getOrDefault(false)) { hardRestart("движок VPN остановился"); break }
                 val settings = Store.state.value.settings
                 val sampledCore = core
+                val sampledEpoch = chainEpoch.get()
+                val sampledTorRoute = usedTorRoute
                 val network = Net.key(this@TunnelService)
                 val handle = Net.underlying(this@TunnelService)?.toString()
                 val checkTelegram = settings.mode == Mode.AUTO && !settings.torAll &&
@@ -1004,7 +1007,8 @@ class TunnelService : VpnService() {
                     Tester.probeSocks(port, settings.testUrl, big = false, youtube = false, telegram = checkTelegram,
                         attempts = 1, budgetMs = 6500L, onCall = { call -> bind { call.cancel() } }, onCancel = bind)
                 }
-                if (core !== sampledCore || Tunnel.socks != auth || Net.key(this@TunnelService) != network ||
+                if (core !== sampledCore || chainEpoch.get()!=sampledEpoch || usedTorRoute!=sampledTorRoute ||
+                    Tunnel.socks != auth || Net.key(this@TunnelService) != network ||
                     Net.underlying(this@TunnelService)?.toString() != handle) { telegramMiss = 0; telegramSlow = 0; com.vlesscardvpn.core.TelegramStability.clear(); continue }
                 val ok = live.works
                 val qualityPlan=com.vlesscardvpn.core.PhonePower.refresh(this@TunnelService)
@@ -1024,6 +1028,16 @@ class TunnelService : VpnService() {
                     }
                 }
                 com.vlesscardvpn.core.ConnectionPassport.light(ok,live.tgOk,checkTelegram)
+                com.vlesscardvpn.core.ConnectionPassport.lightModules(live,checkTelegram,
+                    settings.mode==Mode.AUTO && usedChain==null && !sampledTorRoute)
+                // Never leave a healthy heading after a fresh failure/unknown Telegram result.
+                if(!ok || checkTelegram && live.tgOk!=true) {
+                    val cur=Tunnel.status.value
+                    Tunnel.status.value=cur.copy(check=if(!ok) "HTTPS не подтвердился — перепроверяю маршрут…"
+                        else if(live.tgOk==false) "Дата-центры Telegram не ответили — перепроверяю маршрут…"
+                        else "Проверка Telegram не завершена — работоспособность пока не подтверждена.",
+                        checkOk=if(!ok || live.tgOk==false) false else null)
+                }
                 if(checkTelegram) com.vlesscardvpn.core.TelegramStability.record(live.tgOk,live.tgMs,"$network/$handle/${auth.port}/${chainEpoch.get()}")
                 if (ok && checkTelegram) {
                     telegramSlow = com.vlesscardvpn.core.AutoLatencyPolicy.slowStreak(telegramSlow,live)
@@ -1076,9 +1090,15 @@ class TunnelService : VpnService() {
                 if (ok && vpnMode) {
                     // the proxy works, but do apps? DNS the way apps ask it, and traffic through the TUN in both directions
                     val dnsHealthy = Tester.dnsViaSocks(port, auth.user, auth.pass) || Tester.dnsViaSocks(port, auth.user, auth.pass, "cloudflare.com")
-                    if (core !== sampledCore || Tunnel.socks != auth || Net.key(this@TunnelService) != network ||
+                    if (core !== sampledCore || chainEpoch.get()!=sampledEpoch || usedTorRoute!=sampledTorRoute ||
+                        Tunnel.socks != auth || Net.key(this@TunnelService) != network ||
                         Net.underlying(this@TunnelService)?.toString() != handle) continue
                     com.vlesscardvpn.core.ConnectionPassport.dns(dnsHealthy)
+                    com.vlesscardvpn.core.ConnectionPassport.dnsModule(dnsHealthy)
+                    if(!dnsHealthy) {
+                        val cur=Tunnel.status.value
+                        Tunnel.status.value=cur.copy(check="DNS через SOCKS не отвечает — перепроверяю путь приложений…",checkOk=false)
+                    }
                     dnsMiss = if (dnsHealthy) 0 else dnsMiss + 1
                     val now = TProxyService.stats()
                     stall = if (Tester.tunStalled(stats, now)) stall + 1 else 0

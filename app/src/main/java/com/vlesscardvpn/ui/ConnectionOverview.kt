@@ -66,8 +66,8 @@ fun ServiceHealthCard() {
         Column(Modifier.padding(16.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
             Text("Проверки сервисов",fontSize=17.sp,fontWeight=FontWeight.SemiBold)
             listOf(HealthModule.HTTPS to "Интернет · HTTPS",HealthModule.DNS to "DNS через SOCKS",
-                HealthModule.TELEGRAM to "Telegram · MTProto",HealthModule.YOUTUBE to "YouTube · медиа").forEach {(module,title)->
-                val p=ConnectionPresentationPolicy.probe(frame?.assessment?.observations?.firstOrNull {it.module==module},frame?.at,now)
+                HealthModule.TELEGRAM to "Telegram · ответ дата-центра",HealthModule.YOUTUBE to "YouTube · медиа").forEach {(module,title)->
+                val p=ConnectionPresentationPolicy.probe(frame?.assessment?.observations?.firstOrNull {it.module==module},frame?.sampledAt?.get(module),now)
                 val tone=when(p.status) {"PASS"->Good;"FAIL"->Bad;"SLOW"->Warn;else->MaterialTheme.colorScheme.onSurfaceVariant}
                 // A column, not a fixed-width badge row: survives narrow screens and large fonts.
                 Column(Modifier.fillMaxWidth().semantics(mergeDescendants=true){}) {
@@ -79,7 +79,7 @@ fun ServiceHealthCard() {
             Text("Telegram · стабильность",fontSize=14.sp,fontWeight=FontWeight.Medium)
             Text(LinkStabilityPolicy.label(stability),fontSize=14.sp,
                 color=if(stability.stable==false) Warn else MaterialTheme.colorScheme.onSurfaceVariant)
-            Text("Локальные пробы через SOCKS. Не проверка вашего аккаунта, звонков или полного TUN-пути.",
+            Text("Локальные пробы через SOCKS. Ответ дата-центра не подтверждает работу приложения Telegram, аккаунта, звонков или полного TUN-пути.",
                 fontSize=14.sp,lineHeight=20.sp,color=MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
