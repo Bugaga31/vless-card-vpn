@@ -1,6 +1,6 @@
 {
-  "source_sha": "efb8100343e52103f3216f4c1b7b7624797a97b5",
-  "run_id": "41029584979",
+  "source_sha": "1c53ba90091b1840f58f431cc763414f8dec1a63",
+  "run_id": "41037909448",
   "steps": {
     "source": "success",
     "host": "success",
@@ -1116,6 +1116,14 @@
       "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.routing.TorStartR165Test.xml",
       "name": "com.vlesscardvpn.routing.TorStartR165Test",
       "tests": "10",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-com.vlesscardvpn.tor.MandatoryBridgesR208Test.xml",
+      "name": "com.vlesscardvpn.tor.MandatoryBridgesR208Test",
+      "tests": "12",
       "failures": "0",
       "errors": "0",
       "skipped": "0"
@@ -2353,6 +2361,14 @@
       "skipped": "0"
     },
     {
+      "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.tor.MandatoryBridgesR208Test.xml",
+      "name": "com.vlesscardvpn.tor.MandatoryBridgesR208Test",
+      "tests": "12",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
       "path": "app/build/test-results/testReleaseUnitTest/TEST-com.vlesscardvpn.tor.TorBridgeCatalogR163Test.xml",
       "name": "com.vlesscardvpn.tor.TorBridgeCatalogR163Test",
       "tests": "11",
@@ -2492,6 +2508,7 @@
   "failures": [],
   "lint_errors": [],
   "compile_errors": [
+    "w: file:///home/runner/work/vless-card-vpn/vless-card-vpn/app/src/main/java/com/vlesscardvpn/core/Actions.kt:1486:21 Name shadowed: net",
     "w: file:///home/runner/work/vless-card-vpn/vless-card-vpn/app/src/main/java/com/vlesscardvpn/core/AppWatch.kt:351:20 'getter for allNetworks: Array<(out) Network!>' is deprecated. Deprecated in Java",
     "w: file:///home/runner/work/vless-card-vpn/vless-card-vpn/app/src/main/java/com/vlesscardvpn/core/Assistant.kt:126:25 Parameter 'f' is never used",
     "w: file:///home/runner/work/vless-card-vpn/vless-card-vpn/app/src/main/java/com/vlesscardvpn/core/Assistant.kt:389:21 Parameter 'app' is never used",
@@ -2508,22 +2525,21 @@
     "w: file:///home/runner/work/vless-card-vpn/vless-card-vpn/app/src/main/java/com/vlesscardvpn/ui/HomeScreen.kt:124:13 Name shadowed: busy",
     "w: file:///home/runner/work/vless-card-vpn/vless-card-vpn/app/src/main/java/com/vlesscardvpn/ui/HomeScreen.kt:390:49 Parameter 'color' is never used",
     "w: file:///home/runner/work/vless-card-vpn/vless-card-vpn/app/src/main/java/com/vlesscardvpn/ui/ServersScreen.kt:133:33 Name shadowed: now",
-    "w: file:///home/runner/work/vless-card-vpn/vless-card-vpn/app/src/main/java/com/vlesscardvpn/vpn/TunnelService.kt:243:13 The value '\"selection\"' assigned to 'var connectPhase: String defined in com.vlesscardvpn.vpn.TunnelService.connect' is never used",
-    "w: file:///home/runner/work/vless-card-vpn/vless-card-vpn/app/src/main/java/com/vlesscardvpn/vpn/TunnelService.kt:308:13 The value '\"dpi\"' assigned to 'var connectPhase: String defined in com.vlesscardvpn.vpn.TunnelService.connect' is never used",
-    "w: file:///home/runner/work/vless-card-vpn/vless-card-vpn/app/src/main/java/com/vlesscardvpn/vpn/TunnelService.kt:331:13 The value '\"config\"' assigned to 'var connectPhase: String defined in com.vlesscardvpn.vpn.TunnelService.connect' is never used",
-    "w: file:///home/runner/work/vless-card-vpn/vless-card-vpn/app/src/main/java/com/vlesscardvpn/vpn/TunnelService.kt:341:13 The value '\"core\"' assigned to 'var connectPhase: String defined in com.vlesscardvpn.vpn.TunnelService.connect' is never used",
-    "w: file:///home/runner/work/vless-card-vpn/vless-card-vpn/app/src/main/java/com/vlesscardvpn/vpn/TunnelService.kt:351:13 The value '\"tun\"' assigned to 'var connectPhase: String defined in com.vlesscardvpn.vpn.TunnelService.connect' is never used",
-    "w: file:///home/runner/work/vless-card-vpn/vless-card-vpn/app/src/main/java/com/vlesscardvpn/vpn/TunnelService.kt:808:25 The value 'false' assigned to 'var pending: Boolean defined in com.vlesscardvpn.vpn.TunnelService.serviceRoutes.`<anonymous>`' is never used",
+    "w: file:///home/runner/work/vless-card-vpn/vless-card-vpn/app/src/main/java/com/vlesscardvpn/vpn/TunnelService.kt:244:13 The value '\"selection\"' assigned to 'var connectPhase: String defined in com.vlesscardvpn.vpn.TunnelService.connect' is never used",
+    "w: file:///home/runner/work/vless-card-vpn/vless-card-vpn/app/src/main/java/com/vlesscardvpn/vpn/TunnelService.kt:309:13 The value '\"dpi\"' assigned to 'var connectPhase: String defined in com.vlesscardvpn.vpn.TunnelService.connect' is never used",
+    "w: file:///home/runner/work/vless-card-vpn/vless-card-vpn/app/src/main/java/com/vlesscardvpn/vpn/TunnelService.kt:332:13 The value '\"config\"' assigned to 'var connectPhase: String defined in com.vlesscardvpn.vpn.TunnelService.connect' is never used",
+    "w: file:///home/runner/work/vless-card-vpn/vless-card-vpn/app/src/main/java/com/vlesscardvpn/vpn/TunnelService.kt:342:13 The value '\"core\"' assigned to 'var connectPhase: String defined in com.vlesscardvpn.vpn.TunnelService.connect' is never used",
+    "w: file:///home/runner/work/vless-card-vpn/vless-card-vpn/app/src/main/java/com/vlesscardvpn/vpn/TunnelService.kt:352:13 The value '\"tun\"' assigned to 'var connectPhase: String defined in com.vlesscardvpn.vpn.TunnelService.connect' is never used",
+    "w: file:///home/runner/work/vless-card-vpn/vless-card-vpn/app/src/main/java/com/vlesscardvpn/vpn/TunnelService.kt:830:25 The value 'false' assigned to 'var pending: Boolean defined in com.vlesscardvpn.vpn.TunnelService.serviceRoutes.`<anonymous>`' is never used",
     "w: file:///home/runner/work/vless-card-vpn/vless-card-vpn/app/src/main/java/com/vlesscardvpn/xray/XrayConfigBuilder.kt:218:60 Parameter 'listen' is never used",
     "w: file:///home/runner/work/vless-card-vpn/vless-card-vpn/app/src/main/java/com/vlesscardvpn/xray/XrayConfigBuilder.kt:218:90 Parameter 'httpPort' is never used",
     "w: file:///home/runner/work/vless-card-vpn/vless-card-vpn/app/src/main/java/com/vlesscardvpn/xray/XrayConfigBuilder.kt:371:13 Variable 'only' is never used",
     "",
-    "> Task :app:compileDebugJavaWithJavac",
-    "> Task :app:bundleDebugClassesToRuntimeJar",
-    "> Task :app:bundleDebugClassesToCompileJar",
-    "> Task :app:processDebugJavaRes",
-    "> Task :app:javaPreCompileRelease",
     "> Task :app:compileReleaseJavaWithJavac",
+    "> Task :app:compileDebugJavaWithJavac",
+    "> Task :app:bundleDebugClassesToCompileJar",
+    "> Task :app:bundleDebugClassesToRuntimeJar",
+    "> Task :app:processDebugJavaRes",
     "> Task :app:bundleReleaseClassesToRuntimeJar",
     "> Task :app:bundleReleaseClassesToCompileJar",
     "> Task :app:compileDebugUnitTestKotlin",
@@ -2578,8 +2594,8 @@
     "> Task :vpn-test-probe:extractDeepLinksDebug",
     "> Task :vpn-test-probe:processDebugMainManifest",
     "> Task :vpn-test-probe:processDebugManifest",
-    "> Task :vpn-test-probe:processDebugManifestForPackage",
     "> Task :vpn-test-probe:preDebugUnitTestBuild UP-TO-DATE",
+    "> Task :vpn-test-probe:processDebugManifestForPackage",
     "> Task :vpn-test-probe:javaPreCompileDebugUnitTest",
     "> Task :vpn-test-probe:processDebugJavaRes NO-SOURCE",
     "> Task :vpn-test-probe:processDebugUnitTestJavaRes NO-SOURCE",
@@ -2590,7 +2606,7 @@
     "> Task :vpn-test-probe:compileDebugUnitTestJavaWithJavac",
     "> Task :vpn-test-probe:testDebugUnitTest",
     "",
-    "BUILD SUCCESSFUL in 6m 35s",
+    "BUILD SUCCESSFUL in 6m 33s",
     "75 actionable tasks: 75 executed"
   ]
 }
