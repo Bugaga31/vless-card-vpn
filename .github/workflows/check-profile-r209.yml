@@ -23,7 +23,7 @@ jobs:
         run: |
           set -euo pipefail
           base64 -d tools/patches/check-profile-r209.patch.gz.b64 | gzip -d > "$RUNNER_TEMP/check-profile-r209.patch"
-          echo '225218735e3b9353a34c44dbc7a570aa46fb2e5f7c79dd386f43ace56ed45baa  '"$RUNNER_TEMP/check-profile-r209.patch" | sha256sum -c -
+          echo '37d8fbc9a10e357074191e1203c341204cf9bc81b80c97d1bd3cccf471c6fb11  '"$RUNNER_TEMP/check-profile-r209.patch" | sha256sum -c -
           git fetch --quiet --no-tags origin 4166bc2957050caed3cb3583ba9879720def3c37
           git restore --source 4166bc2957050caed3cb3583ba9879720def3c37 -- app/src/main app/src/test app/build.gradle.kts
           git apply --check "$RUNNER_TEMP/check-profile-r209.patch"
@@ -129,4 +129,4 @@ jobs:
         run: python3 -c 'import json; d=json.load(open("docs/validation/r209-jvm.json")); s=[s for s in d["suites"] if s["name"]=="com.vlesscardvpn.tor.MandatoryBridgesR208Test"]; assert len(s)==2 and all(int(x["tests"])==14 and int(x["failures"])==0 and int(x["errors"])==0 and int(x["skipped"])==0 for x in s),s'
 
       - name: Require selected-check regressions
-        run: python3 -c 'import json; d=json.load(open("docs/validation/r209-jvm.json")); s=[s for s in d["suites"] if s["name"]=="com.vlesscardvpn.core.AutoCheckProfileR209Test"]; assert len(s)==2 and all(int(x["tests"])==44 and int(x["failures"])==0 and int(x["errors"])==0 and int(x["skipped"])==0 for x in s),s'
+        run: python3 -c 'import json; d=json.load(open("docs/validation/r209-jvm.json")); s=[s for s in d["suites"] if s["name"]=="com.vlesscardvpn.core.AutoCheckProfileR209Test"]; assert len(s)==2 and all(int(x["tests"])==48 and int(x["failures"])==0 and int(x["errors"])==0 and int(x["skipped"])==0 for x in s),s'
