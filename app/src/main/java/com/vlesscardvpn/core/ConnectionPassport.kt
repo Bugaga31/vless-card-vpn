@@ -15,7 +15,7 @@ object ConnectionPassport {
         modules.value=ModuleFrame(assessment,SystemClock.elapsedRealtime())
     }
     private fun check(v: Boolean?) = Check(v,SystemClock.elapsedRealtime())
-    @Synchronized fun clear() { state.value = Snapshot(); modules.value=null; ConnectionHistory.boundary() }
+    @Synchronized fun clear() { state.value = Snapshot(); modules.value=null; TelegramStability.clear(); ConnectionHistory.boundary() }
     @Synchronized fun full(https: Boolean, dns: Boolean?, telegram: Boolean?, youtube: Boolean?) {
         state.value = Snapshot(check(https),check(dns),check(telegram),check(youtube))
         ConnectionHistory.record("https",https); ConnectionHistory.record("dns",dns)

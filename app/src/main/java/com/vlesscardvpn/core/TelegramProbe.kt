@@ -62,7 +62,7 @@ object TelegramProbe {
     fun measure(port: Int, budgetMs: Long = 3000, onCancel:((()->Unit)->Unit)?=null): Result {
         val started=System.nanoTime()
         if(port !in 1..65535 || budgetMs<200 || Thread.currentThread().isInterrupted) return Result(null,0)
-        val deadline=started+TimeUnit.MILLISECONDS.toNanos(budgetMs.coerceAtMost(3000))
+        val deadline=started+TimeUnit.MILLISECONDS.toNanos(budgetMs.coerceAtMost(3100))
         val resources=ProbeCancellation()
         onCancel?.invoke {resources.close()}
         val completed=java.util.concurrent.ExecutorCompletionService<Boolean?>(workers)
@@ -73,7 +73,7 @@ object TelegramProbe {
                     if(resources.isClosed() || Thread.currentThread().isInterrupted) return@Callable null
                     val left=TimeUnit.NANOSECONDS.toMillis(deadline-System.nanoTime())
                     if(left<100) return@Callable null
-                    val allowance=minOf(1500L,left).coerceAtLeast(1)
+                    val allowance=minOf(maxOf(1500L, AutoLatencyPolicy.MAX_MS.toLong()+100L),left).coerceAtLeast(1)
                     val socket=Socket(Proxy(Proxy.Type.SOCKS,InetSocketAddress("127.0.0.1",port)))
                     resources.add {socket.close()}
                     val attemptStarted=System.nanoTime()

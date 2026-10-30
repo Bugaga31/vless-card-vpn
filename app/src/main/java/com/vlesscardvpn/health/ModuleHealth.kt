@@ -35,19 +35,19 @@ data class HealthAssessment(val observations:List<ModuleObservation>,val blocked
 }
 object ModuleHealthPolicy {
     const val MAX_LATENCY_MS=1000
-    fun status(value:Boolean?,latencyMs:Int=0,strict:Boolean=false):ModuleStatus = when {
+    fun status(value:Boolean?,latencyMs:Int=0,strict:Boolean=false,maxMs:Int=MAX_LATENCY_MS):ModuleStatus = when {
         value==null -> ModuleStatus.UNKNOWN
         !value -> ModuleStatus.FAIL
         strict && latencyMs<=0 -> ModuleStatus.UNKNOWN
-        strict && latencyMs>MAX_LATENCY_MS -> ModuleStatus.SLOW
+        strict && latencyMs>maxMs -> ModuleStatus.SLOW
         else -> ModuleStatus.PASS
     }
     /** Allocation-free admission path shared by Auto and the module supervisor. */
     fun fastLink(works:Boolean,httpsMs:Int,telegram:Boolean?,telegramMs:Int):Boolean =
         works && status(true,httpsMs,true)==ModuleStatus.PASS && status(telegram,telegramMs,true)==ModuleStatus.PASS
-    fun assess(input:HealthInput,requirements:HealthRequirements,blocked:Boolean=false):HealthAssessment {
+    fun assess(input:HealthInput,requirements:HealthRequirements,blocked:Boolean=false,maxMs:Int=MAX_LATENCY_MS):HealthAssessment {
         fun observation(module:HealthModule,ok:Boolean?,required:Boolean=true,ms:Int=0,strict:Boolean=false)=
-            ModuleObservation(module,if(required) status(ok,ms,strict) else ModuleStatus.DISABLED,
+            ModuleObservation(module,if(required) status(ok,ms,strict,maxMs) else ModuleStatus.DISABLED,
                 ms.takeIf {required && ok==true && it>0})
         return HealthAssessment(listOf(
             observation(HealthModule.HTTPS,input.https,ms=input.httpsMs,strict=requirements.strictLatency),

@@ -166,7 +166,7 @@ object Tester {
             val tgF = if (telegram) telegramPool.submit<TelegramProbe.Result> {
                 val left=if(budgetDeadline==Long.MAX_VALUE) 3000L else
                     TimeUnit.NANOSECONDS.toMillis((budgetDeadline-System.nanoTime()).coerceAtLeast(1)).coerceAtLeast(1)
-                TelegramProbe.measure(port,minOf(3000L,left),onCancel)
+                TelegramProbe.measure(port,minOf(maxOf(3000L,AutoLatencyPolicy.MAX_MS.toLong()+100L),left),onCancel)
             }.also {tasks+=it} else null
             var best = Long.MAX_VALUE; var err = ""
             repeat(attempts.coerceIn(1, 3)) {

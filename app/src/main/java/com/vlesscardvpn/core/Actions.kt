@@ -2040,6 +2040,9 @@ object Actions {
     enum class Kind { NONE, OPEN, DPI, WHITELIST, OFFLINE, PARTIAL }
     val netReport = MutableStateFlow(NetReport())
 
+    private data class DiagnosticSeries(val control:Boolean,val youtube:Boolean,val telegram:LinkStabilityPolicy.Summary,
+        val whatsapp:Boolean,val discord:LinkStabilityPolicy.Summary,val udp:LinkStabilityPolicy.Summary?)
+
     fun diagnoseNetwork() = launch("Проверка маршрута VLESS") {
         val auth = Tunnel.socks ?: run {
             val report = NetReport("Сначала подключитесь к рабочему VLESS-серверу", "Проверки без сервера отключены.", Kind.NONE)
@@ -2049,24 +2052,49 @@ object Actions {
         val total = 6
         step(0, total)
         val settings = Store.state.value.settings
+        val network = Net.key(app)
+        val handle = Net.underlying(app)?.toString()
+        suspend fun series(sample: suspend () -> LinkStabilityPolicy.Sample): LinkStabilityPolicy.Summary {
+            val probes = mutableListOf<LinkStabilityPolicy.Sample>()
+            repeat(3) {
+                kotlin.coroutines.coroutineContext.ensureActive()
+                probes += sample()
+                if(it<2) kotlinx.coroutines.delay(250)
+            }
+            return LinkStabilityPolicy.summarize(probes,AutoLatencyRange.safe(settings.autoLatencyMinMs,settings.autoLatencyMaxMs).max)
+        }
         val results = coroutineScope {
             val control = async(Bg.io) { Tester.site(settings.testUrl, auth.port).answers }
             val youtube = async(Bg.io) { Tester.youtubeMedia(auth.port).ok == true }
-            val telegram = async(Bg.io) { TelegramProbe.check(auth.port) == true }
+            val telegram = async(Bg.io) { series {
+                CancellableProbe.run { bind -> TelegramProbe.measure(auth.port,3100,bind) }.let { LinkStabilityPolicy.Sample(it.ok,it.ms) }
+            } }
             val whatsapp = async(Bg.io) { Tester.site("https://web.whatsapp.com/", auth.port).answers }
-            val discord = async(Bg.io) { Tester.site("https://discord.com/api/v9/gateway", auth.port).answers }
-            val voiceUdp = async(Bg.io) { UdpCallProbe.probe(auth.port, auth.user, auth.pass, 1500) }
-            listOf(control.await(), youtube.await(), telegram.await(), whatsapp.await(), discord.await(), voiceUdp.await())
+            val discord = async(Bg.io) { series {
+                val started=System.nanoTime()
+                val ok=Tester.site("https://discord.com/api/v9/gateway",auth.port).answers
+                LinkStabilityPolicy.Sample(ok,((System.nanoTime()-started)/1_000_000).toInt().coerceAtLeast(1))
+            } }
+            val voiceUdp = async(Bg.io) { if(settings.blockStun) null else series {
+                CancellableProbe.run { bind -> UdpCallProbe.measure(auth.port,auth.user,auth.pass,1500,bind) }
+                    .let { LinkStabilityPolicy.Sample(it.ok,it.ms) }
+            } }
+            DiagnosticSeries(control.await(),youtube.await(),telegram.await(),whatsapp.await(),discord.await(),voiceUdp.await())
         }
         step(total, total)
-        if (Tunnel.socks?.port != auth.port) return@launch "Маршрут изменился во время проверки — результат отброшен."
-        val labels = listOf("базовый маршрут", "YouTube", "Telegram", "WhatsApp", "Discord")
-        val details = "Сеть «${Net.key(app)}» · только через VLESS: " + labels.zip(results.take(5)).joinToString(" · ") { (name, ok) -> "$name ${if (ok) "✓" else "✗"}" } +
-            " · UDP/STUN для звонков ${if (results[5]) "✓" else "не подтвердился"}"
-        val servicesOk = results.take(5).all { it }
-        val report = if (!results[0]) NetReport("Выбранный VLESS-маршрут не отвечает — попробуйте «Авто» или другой сервер", details, Kind.OFFLINE)
-            else if (servicesOk) NetReport("YouTube, Telegram, WhatsApp и Discord отвечают через VLESS", details, Kind.OPEN)
-            else NetReport("Часть проверок через VLESS не прошла — попробуйте «Авто» или другой сервер", details, Kind.PARTIAL)
+        if (Tunnel.socks != auth || Net.key(app)!=network || Net.underlying(app)?.toString()!=handle)
+            return@launch "Маршрут или сеть изменились во время проверки — результат отброшен."
+        val udp = if(settings.blockStun) "Не проверено: STUN заблокирован настройкой приватности; защита не отключалась."
+            else results.udp?.let(LinkStabilityPolicy::label) ?: "Не проверено"
+        val details = "HTTPS: ${if(results.control) "ответ получен" else "нет ответа"} · YouTube: ${results.youtube} · WhatsApp: ${results.whatsapp}\n" +
+            "Telegram · MTProto: ${LinkStabilityPolicy.label(results.telegram)}\n" +
+            "Telegram · звонки: сигнализация — ${LinkStabilityPolicy.label(results.telegram)}; общий UDP/STUN — $udp\n" +
+            "Discord · звонки: API — ${LinkStabilityPolicy.label(results.discord)}; общий UDP/STUN — $udp\n" +
+            "UDP/STUN — одна общая транспортная проба, не отдельные медиасерверы Telegram/Discord. Это не RTP-джиттер и не проверка реального звонка или аккаунта."
+        val servicesOk = results.control && results.youtube && results.whatsapp && results.telegram.stable==true && results.discord.stable==true
+        val report = if (!results.control) NetReport("Выбранный VLESS-маршрут не отвечает — попробуйте «Авто» или другой сервер", details, Kind.OFFLINE)
+            else if (servicesOk) NetReport("Сервисы отвечают; медиапуть звонков отдельно не подтверждён", details, Kind.OPEN)
+            else NetReport("Часть проб нестабильна или не подтверждена — попробуйте «Авто» или другой сервер", details, Kind.PARTIAL)
         netReport.value = report
         "${report.verdict} ($details)"
     }

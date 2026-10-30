@@ -55,6 +55,7 @@ fun ConnectionOverview(status:Tunnel.Status,hideRoute:Boolean,modeLabel:String,c
 @Composable
 fun ServiceHealthCard() {
     val frame by ConnectionPassport.modules.collectAsState()
+    val stabilityRevision by TelegramStability.revision.collectAsState()
     val owner=LocalLifecycleOwner.current
     var now by remember {mutableLongStateOf(android.os.SystemClock.elapsedRealtime())}
     LaunchedEffect(owner) {owner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
@@ -74,6 +75,10 @@ fun ServiceHealthCard() {
                     Text(p.label+(p.latencyMs?.let {" · $it мс"} ?: ""),fontSize=14.sp,color=tone)
                 }
             }
+            val stability = remember(stabilityRevision,now) { TelegramStability.summary(now) }
+            Text("Telegram · стабильность",fontSize=14.sp,fontWeight=FontWeight.Medium)
+            Text(LinkStabilityPolicy.label(stability),fontSize=14.sp,
+                color=if(stability.stable==false) Warn else MaterialTheme.colorScheme.onSurfaceVariant)
             Text("Локальные пробы через SOCKS. Не проверка вашего аккаунта, звонков или полного TUN-пути.",
                 fontSize=14.sp,lineHeight=20.sp,color=MaterialTheme.colorScheme.onSurfaceVariant)
         }

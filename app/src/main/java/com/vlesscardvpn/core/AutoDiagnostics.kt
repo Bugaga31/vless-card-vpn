@@ -29,10 +29,14 @@ object AutoDiagnostics {
     }
     fun searchEvent(stop:String,waves:Int,counts:Map<String,Int>):JSONObject {
         require(stop in AutoSearchCampaign.Stop.values().map {it.name})
-        require(counts.keys==setOf("started","completed","ready","https_unconfirmed","telegram_unconfirmed","telegram_unknown","over_1000ms","unfinished"))
+        val fixed=setOf("started","completed","ready","https_unconfirmed","telegram_unconfirmed","telegram_unknown","unfinished")
+        val latencyKey=counts.keys.singleOrNull {it.matches(Regex("over_[0-9]{1,4}ms"))}
+        require(latencyKey!=null && counts.keys-latencyKey==fixed)
+        val limit=latencyKey.removePrefix("over_").removeSuffix("ms").toInt()
+        require(limit in 1..AutoLatencyRange.LIMIT)
         val summary=JSONObject()
         counts.forEach {(key,value)->summary.put(key,value.coerceIn(0,100000))}
-        return JSONObject().put("stop",stop).put("waves",waves.coerceIn(0,100000)).put("ordinary_probes",summary)
+        return JSONObject().put("latency_limit_ms",limit).put("stop",stop).put("waves",waves.coerceIn(0,100000)).put("ordinary_probes",summary)
     }
     @Synchronized fun recordSearch(ctx:Context,networkFamily:String,stop:String,waves:Int,counts:Map<String,Int>) {
         ctx.getSharedPreferences("auto_diagnostics",0).edit().putString("search_family",family(networkFamily))
@@ -40,7 +44,7 @@ object AutoDiagnostics {
     }
     /** Old 500ms counters cannot be relabelled as a 1000ms observation. */
     fun compatibleSearch(raw: String?): JSONObject = runCatching { JSONObject(raw ?: "{}") }
-        .getOrDefault(JSONObject()).let { if (it.optJSONObject("ordinary_probes")?.has("over_500ms") == true) JSONObject() else it }
+        .getOrDefault(JSONObject()).let { if (it.optJSONObject("ordinary_probes")?.has("over_500ms") == true && !it.has("latency_limit_ms")) JSONObject() else it }
     fun report(ctx: Context): String {
         val p=ctx.getSharedPreferences("auto_diagnostics",0)
         return JSONObject().put("schema",3).put("version",com.vlesscardvpn.BuildConfig.VERSION_NAME)

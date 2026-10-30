@@ -1001,9 +1001,10 @@ class TunnelService : VpnService() {
                         attempts = 1, budgetMs = 6500L, onCall = { call -> bind { call.cancel() } }, onCancel = bind)
                 }
                 if (core !== sampledCore || Tunnel.socks != auth || Net.key(this@TunnelService) != network ||
-                    Net.underlying(this@TunnelService)?.toString() != handle) { telegramMiss = 0; telegramSlow = 0; continue }
+                    Net.underlying(this@TunnelService)?.toString() != handle) { telegramMiss = 0; telegramSlow = 0; com.vlesscardvpn.core.TelegramStability.clear(); continue }
                 val ok = live.works
                 com.vlesscardvpn.core.ConnectionPassport.light(ok,live.tgOk,checkTelegram)
+                if(checkTelegram) com.vlesscardvpn.core.TelegramStability.record(live.tgOk,live.tgMs,"$network/$handle/${auth.port}/${chainEpoch.get()}")
                 if (ok && checkTelegram) {
                     telegramSlow = com.vlesscardvpn.core.AutoLatencyPolicy.slowStreak(telegramSlow,live)
                     val wasFailing = telegramMiss > 0 || servicePending
