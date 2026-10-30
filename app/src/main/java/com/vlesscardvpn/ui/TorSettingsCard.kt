@@ -195,6 +195,7 @@ fun TorSettingsCard(settings: Settings, set: ((Settings) -> Settings) -> Unit) {
 }
 
 private suspend fun torCircuitReady(ctx: android.content.Context): Boolean = withContext(Dispatchers.IO) {
+    if(!TorCard.ownsRunningEmbedded()) return@withContext false
     TorCard.controlEndpoints(ctx).any { endpoint ->
         val control = TorControl("127.0.0.1", endpoint.port, 600)
         try { control.connect(endpoint.cookieHex); control.circuitEstablished() }

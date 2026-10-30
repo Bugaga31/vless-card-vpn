@@ -499,6 +499,7 @@ class TunnelService : VpnService() {
                 Tunnel.status.value=cur.copy(check=if(pending) "Tor строит цепочку через обязательные мосты и VLESS. Telegram пока не подтверждён…"
                     else "Tor-цепочка не подтвердилась. Проверьте мосты igareck; работа Telegram через Tor не подтверждена. Прямого обхода нет.",
                     checkOk=if(pending) null else false)
+                watchdog() // Circuit readiness must be revisited even before the first full probe succeeds.
                 return@launch
             }
             var p = Tester.probeSocks(port, st.testUrl, big = false, youtube = Tunnel.ytViaDpi, telegram = checkServices, attempts = 1, budgetMs = 5000)
@@ -615,7 +616,7 @@ class TunnelService : VpnService() {
                     val set=dpi ?: return@withLock
                     kotlinx.coroutines.withTimeoutOrNull(2500) {set.warmCurrent(settings,net,BuildConfig.DEBUG)}
                     var torReady=false
-                    if(settings.torAuto) {
+                    if(settings.torAuto && com.vlesscardvpn.tor.TorCard.ownsRunningEmbedded()) {
                         torReady=kotlinx.coroutines.withTimeoutOrNull(1500) {
                             com.vlesscardvpn.core.CancellableProbe.run {bind ->
                                 com.vlesscardvpn.tor.TorCard.controlEndpoints(this@TunnelService).any { endpoint ->
