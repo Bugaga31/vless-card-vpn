@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.unit.dp
 import com.vlesscardvpn.core.*
@@ -19,7 +20,7 @@ fun AutoCheckSettings() {
             "voice" to "Звонки · UDP-транспорт", "discord" to "Discord · gateway", "youtube" to "YouTube · медиа").forEach {(id,title)->
             Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) {
                 Text(title,Modifier.weight(1f))
-                Switch(checked=id in selected,onCheckedChange={on->Store.update {state->
+                Switch(modifier=Modifier.semantics {contentDescription="Авто: $title"},checked=id in selected,onCheckedChange={on->Store.update {state->
                     val old=AutoCheckProfile.of(state.settings.autoChecks).selected
                     state.copy(settings=state.settings.copy(autoChecks=if(on) old+id else old-id))
                 }})

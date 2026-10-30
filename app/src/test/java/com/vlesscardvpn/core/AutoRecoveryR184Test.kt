@@ -36,7 +36,7 @@ class AutoRecoveryR184Test {
         assertTrue(AutoEligibility.servicePool(listOf(state),{it},"new",1001).isEmpty())
     }
     @Test fun currentNetworkTelegramProofAuthorizesNoVideoStartup() {
-        val state=ServerState(realMs=40,tgOk=true,tgMs=120,ytOk=null,serviceNetwork="new",serviceMask="",serviceCheckedAt=1000)
+        val state=ServerState(autoChecksKey=AutoChecks.key(AutoChecks.current,AutoLatencyPolicy.MAX_MS),autoChecksAt=1000,realMs=40,tgOk=true,tgMs=120,ytOk=null,serviceNetwork="new",serviceMask="",serviceCheckedAt=1000)
         assertEquals(listOf(state),AutoEligibility.servicePool(listOf(state),{it},"new",1001))
     }
     @Test fun staleMaskRescueCannotOverwriteNewerObservation() {

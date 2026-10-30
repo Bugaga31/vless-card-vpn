@@ -543,7 +543,7 @@ object Actions {
             // «Жёсткий поиск»: 24 probes at once (PowerPolicy caps it on a hot/low-power phone) —
             // the whole pass takes seconds, not half a minute.
             kotlinx.coroutines.withTimeoutOrNull(if (deadline == Long.MAX_VALUE) Long.MAX_VALUE else remaining()) {
-            Tester.real(current, cfg.testUrl, port, own.ports, youtube = false, telegram=strict, requireTelegram=strict, batch = 64, parallel = 24, attempts = 1, budgetMs = remaining(),
+            Tester.real(current, cfg.testUrl, port, own.ports, youtube = false, telegram=strict, requireTelegram=strict,autoChecks=if(strict) AutoChecks.current else null, batch = 64, parallel = 24, attempts = 1, budgetMs = remaining(),
                 skip = { i -> android.os.SystemClock.elapsedRealtime() >= deadline || synchronized(best) { (found[group(variants[indices[i]].first)] ?: 0) >= enough } || dead(variants[indices[i]].second) }) { i, p ->
                 if (Net.key(app) != net0 || Net.underlying(app)?.toString() != maskNetwork) return@real
                 val (s, m) = variants[indices[i]]
@@ -570,7 +570,7 @@ object Actions {
             val (own2, port2) = dpiForTests(confirm.map { it.second })
             try {
                 kotlinx.coroutines.withTimeoutOrNull(if (deadline == Long.MAX_VALUE) Long.MAX_VALUE else remaining()) {
-                Tester.real(confirm, cfg.testUrl, port2, own2.ports, youtube = true, telegram = strict, requireTelegram = strict, batch = 64, parallel = 24, attempts = 1, big = true, budgetMs = remaining()) { i, p -> res[i] = p; step(i + 1, confirm.size) }
+                Tester.real(confirm, cfg.testUrl, port2, own2.ports, youtube = true, telegram = strict, requireTelegram = strict,autoChecks=if(strict) AutoChecks.current else null, batch = 64, parallel = 24, attempts = 1, big = true, budgetMs = remaining()) { i, p -> res[i] = p; step(i + 1, confirm.size) }
                 }
             } finally { own2.close() }
             pinned.forEach { s ->

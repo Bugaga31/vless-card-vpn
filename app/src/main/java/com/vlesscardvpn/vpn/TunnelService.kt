@@ -507,15 +507,15 @@ class TunnelService : VpnService() {
                 watchdog() // Circuit readiness must be revisited even before the first full probe succeeds.
                 return@launch
             }
-            var p = Tester.probeSocks(port, st.testUrl, big = false, youtube = Tunnel.ytViaDpi, telegram = checkServices, attempts = 1, budgetMs = 6500, autoChecks=profile)
+            var p = Tester.probeSocks(port, st.testUrl, big = false, youtube = Tunnel.ytViaDpi, telegram = checkServices, attempts = 1, budgetMs = 6500, autoChecks=profile,user=auth.user,pass=auth.pass)
             // right after connecting the first packets may still be on their way (WireGuard/WARP handshake, a slow
             // mobile network): one calm second try before calling the route bad and starting a heal or a reconnect
-            if (!p.works) { delay(3000); if (Tunnel.socks?.port == port) p = Tester.probeSocks(port, st.testUrl, big = false, youtube = Tunnel.ytViaDpi, telegram = checkServices, attempts = 1, budgetMs = 6500, autoChecks=profile) }
+            if (!p.works) { delay(3000); if (Tunnel.socks?.port == port) p = Tester.probeSocks(port, st.testUrl, big = false, youtube = Tunnel.ytViaDpi, telegram = checkServices, attempts = 1, budgetMs = 6500, autoChecks=profile,user=auth.user,pass=auth.pass) }
             if (p.works && checkServices && p.tgOk == false) {
                 delay(1500)
                 if (core !== sampledCore || Tunnel.socks != auth || Net.key(this@TunnelService) != sampledNet ||
                     Net.underlying(this@TunnelService)?.toString() != sampledHandle) return@launch
-                p = Tester.probeSocks(port, st.testUrl, big = false, youtube = Tunnel.ytViaDpi, telegram = checkServices, attempts = 1, budgetMs = 6500L, autoChecks=profile)
+                p = Tester.probeSocks(port, st.testUrl, big = false, youtube = Tunnel.ytViaDpi, telegram = checkServices, attempts = 1, budgetMs = 6500L, autoChecks=profile,user=auth.user,pass=auth.pass)
             }
             // A SOCKS HTTPS success uses remote name resolution and does not prove
             // Android apps' UDP DNS path. Never show a healthy VPN on that evidence alone.
@@ -1052,7 +1052,7 @@ class TunnelService : VpnService() {
                     !(settings.torRouting && "telegram" in settings.services) && usedChain == null
                 val live = com.vlesscardvpn.core.CancellableProbe.run { bind ->
                     Tester.probeSocks(port, settings.testUrl, big = false, youtube = false, telegram = checkTelegram,
-                        attempts = 1, budgetMs = 6500L, onCall = { call -> bind { call.cancel() } }, onCancel = bind, autoChecks=profile)
+                        attempts = 1, budgetMs = 6500L, onCall = { call -> bind { call.cancel() } }, onCancel = bind, autoChecks=profile,user=auth.user,pass=auth.pass)
                 }
                 if (core !== sampledCore || chainEpoch.get()!=sampledEpoch || usedTorRoute!=sampledTorRoute ||
                     Tunnel.socks != auth || Net.key(this@TunnelService) != network ||

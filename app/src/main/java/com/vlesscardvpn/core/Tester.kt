@@ -405,7 +405,7 @@ object Tester {
         variants: List<Pair<Server, Mask?>>, testUrl: String, byeDpiPort: Int?, dpiPorts: Map<String, Int> = emptyMap(), youtube: Boolean = true,
         batch: Int = 32, parallel: Int = 12, attempts: Int = 2, big: Boolean = true, telegram: Boolean = youtube, calls: Boolean = false, foreground: Boolean = false,
         /** Early stop: variants for which this returns true are not probed (reported as skipped). */
-        requireTelegram: Boolean = false, autoChecks:AutoCheckProfile?=if(requireTelegram) AutoChecks.current else null, skip: (Int) -> Boolean = { false },
+        requireTelegram: Boolean = false, autoChecks:AutoCheckProfile?=null, skip: (Int) -> Boolean = { false },
         stopAfter: Int = Int.MAX_VALUE,
         budgetMs: Long = 0,
         onStarted: ((Int) -> Unit)? = null,

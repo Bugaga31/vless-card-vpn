@@ -9,7 +9,7 @@ import org.junit.Test
 class FullCloudSelectionR139Test {
     private val now=1_000_000L
     private fun server(name:String)=Server(name,"vless","$name.invalid",443,name)
-    private fun state(speed:Int=1000)=ServerState(realMs=50,kbps=speed,speedNetwork="wifi",speedMask="",speedCheckedAt=now,
+    private fun state(speed:Int=1000)=ServerState(autoChecksKey=AutoChecks.key(AutoChecks.current,AutoLatencyPolicy.MAX_MS),autoChecksAt=now,realMs=50,kbps=speed,speedNetwork="wifi",speedMask="",speedCheckedAt=now,
         serviceNetwork="wifi",serviceMask="",serviceCheckedAt=now,ytOk=true,tgOk=true,tgMs=120)
     @Test fun russianFlagAnywhereOverridesEvenForeignFirstFlag() {
         assertFalse(AutoEligibility.allowed(server("🇳🇱 test 🇷🇺")))

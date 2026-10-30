@@ -26,8 +26,8 @@ fun ConnectionOverview(status:Tunnel.Status,hideRoute:Boolean,modeLabel:String,c
     val presented=if(profilePending && status.state==Tunnel.State.CONNECTED) status.copy(checkOk=null,check="Набор проверок изменён или ещё не измерен. Ожидаем свежие результаты…") else status
     val on=status.state==Tunnel.State.CONNECTED
     val searching=status.state==Tunnel.State.CONNECTING
-    val issue=status.state==Tunnel.State.ERROR || on && status.checkOk==false
-    val tone=when {issue->Warn;on && status.checkOk==true->Good;else->Accent}
+    val issue=presented.state==Tunnel.State.ERROR || on && presented.checkOk==false
+    val tone=when {issue->Warn;on && presented.checkOk==true->Good;else->Accent}
     Card(Modifier.fillMaxWidth().padding(top=12.dp),shape=RoundedCornerShape(12.dp),
         colors=CardDefaults.cardColors(containerColor=MaterialTheme.colorScheme.surface)) {
         Column(Modifier.padding(16.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
