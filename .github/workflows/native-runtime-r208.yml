@@ -122,3 +122,5 @@ jobs:
 # Scroll/tap only visible expander bounds; require expanded-state label.
 
 # Guard foreign listeners before Xray routing.
+
+# Capture selected bridge transport/count after opening advanced controls.
