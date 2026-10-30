@@ -39,6 +39,26 @@ class EvidenceUiR208Test {
     }}
    }
    ins.waitForIdleSync();Thread.sleep(1200)
+   if(tor) {
+    fun find(n:AccessibilityNodeInfo?):AccessibilityNodeInfo? {
+     if(n==null) return null
+     if(n.text?.toString()?.contains("Маршруты, выходы и мосты")==true) return n
+     for(i in 0 until n.childCount) {val hit=find(n.getChild(i));if(hit!=null) return hit}
+     return null
+    }
+    // The production bridge selector is intentionally under the advanced expander.
+    var node=find(ins.uiAutomation.rootInActiveWindow)
+    var clicked=false
+    repeat(5) {if(!clicked && node!=null) {clicked=node!!.performAction(AccessibilityNodeInfo.ACTION_CLICK);if(!clicked) node=node!!.parent}}
+    assertTrue("Tor advanced controls must be actionable",clicked)
+    ins.waitForIdleSync();Thread.sleep(300)
+    val dm=ins.targetContext.resources.displayMetrics
+    for(i in 0 until 20) {
+     if(labels(ins.uiAutomation.rootInActiveWindow).any {"Обязательные мосты" in it}) break
+     shell("input swipe ${dm.widthPixels/2} ${dm.heightPixels*4/5} ${dm.widthPixels/2} ${dm.heightPixels/4} 300")
+     ins.waitForIdleSync();Thread.sleep(150)
+    }
+   }
    val expected=if(tor) "Обязательные мосты" else if(unknown) "Не проверено" else "Нет ответа"
    val end=android.os.SystemClock.elapsedRealtime()+8000
    while(labels(ins.uiAutomation.rootInActiveWindow).none {expected in it} && android.os.SystemClock.elapsedRealtime()<end) Thread.sleep(200)
