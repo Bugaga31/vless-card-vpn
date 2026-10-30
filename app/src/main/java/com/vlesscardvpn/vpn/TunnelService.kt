@@ -492,6 +492,7 @@ class TunnelService : VpnService() {
             val checkServices = st.mode == Mode.AUTO || Tunnel.ytViaDpi
             if(sampledTorRoute && !torCircuitReady()) {
                 if(core !== sampledCore || Tunnel.socks!=auth || chainEpoch.get()!=sampledChainEpoch) return@launch
+                com.vlesscardvpn.core.ConnectionPassport.torPending()
                 val elapsed=android.os.SystemClock.elapsedRealtime()-connectedElapsed
                 val pending=elapsed in 0..45_000L
                 val cur=Tunnel.status.value
@@ -1024,6 +1025,7 @@ class TunnelService : VpnService() {
                 if(sampledTorRoute && !torCircuitReady()) {
                     if(core !== sampledCore || Tunnel.socks!=auth || chainEpoch.get()!=sampledEpoch ||
                         Net.key(this@TunnelService)!=network || Net.underlying(this@TunnelService)?.toString()!=handle) continue
+                    com.vlesscardvpn.core.ConnectionPassport.torPending()
                     val cur=Tunnel.status.value
                     val pending=android.os.SystemClock.elapsedRealtime()-connectedElapsed in 0..45_000L
                     Tunnel.status.value=cur.copy(check=if(pending) "Ожидаю Tor-цепочку через мосты. VLESS ещё не подтверждает Telegram через Tor."
