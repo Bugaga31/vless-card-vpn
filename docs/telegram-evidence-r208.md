@@ -14,11 +14,11 @@ Fix:
 - Guard publication after suspended work with route epoch/Tor identity.
 - Clarify MTProto label: sampled DC reachability, not authenticated application readiness.
 
-Tests: 10 new pure policy regressions, debug/release; full JVM/host/lint run required. Android visual/runtime verification not yet executed for r208. No new APK/release published.
+Tests: 22 new pure policy regressions, debug/release; full JVM/host/lint run required. Android visual/runtime verification not yet executed for r208. No new APK/release published.
 
 Remaining, not claimed fixed:
 - Real app/TUN path, account-specific DCs, Telegram media/calls. Current probe succeeds on one of two unauthenticated sampled DC responses.
 - Configurable service-check profile and selected-service eligibility.
-- Mandatory igareck Tor bridges and end-to-end VLESS→bridge→Tor selection.
-- Current Tor automatic preset explicitly chooses no bridges; must be migrated and tested rather than relabelled.
+- Tor-specific upstream comparison and reserve ranking remain future work; no instant bootstrap claim.
+- Mandatory obfs4/WebTunnel presets/runtime migration, guarded owned-daemon startup and circuit-before-PASS checks implemented. Default bounded igareck updates; cached/manual valid lines retained, explicit update opt-out respected. Tor bootstrap is not attributed to VLESS failure.
 - One-second failover cannot be guaranteed; no physical-operator or real-account call evidence.

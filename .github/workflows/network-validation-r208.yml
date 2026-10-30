@@ -23,7 +23,7 @@ jobs:
         run: |
           set -euo pipefail
           base64 -d tools/patches/telegram-evidence-r208.patch.gz.b64 | gzip -d > "$RUNNER_TEMP/telegram-evidence-r208.patch"
-          echo 'dcdfed7917ddba05c3a612f74d95fa6363525522c0655b061c3c6345f93791ba  '"$RUNNER_TEMP/telegram-evidence-r208.patch" | sha256sum -c -
+          echo '12f8a5827a3a39331daa75f0c404b3d89427733c67292879ec657aa35241abdd  '"$RUNNER_TEMP/telegram-evidence-r208.patch" | sha256sum -c -
           git fetch --quiet --no-tags origin b14d3987d7cb9f4a59a4527413cae0e3fc97e6cc
           git restore --source b14d3987d7cb9f4a59a4527413cae0e3fc97e6cc -- app/src/main app/src/test app/build.gradle.kts
           git apply --check "$RUNNER_TEMP/telegram-evidence-r208.patch"
@@ -124,3 +124,6 @@ jobs:
 
       - name: Require live evidence regressions
         run: python3 -c 'import json; d=json.load(open("docs/validation/r208-jvm.json")); s=[s for s in d["suites"] if s["name"]=="com.vlesscardvpn.core.ModuleEvidenceR208Test"]; assert len(s)==2 and all(int(x["tests"])==10 and int(x["failures"])==0 and int(x["errors"])==0 and int(x["skipped"])==0 for x in s),s'
+
+      - name: Require mandatory bridge regressions
+        run: python3 -c 'import json; d=json.load(open("docs/validation/r208-jvm.json")); s=[s for s in d["suites"] if s["name"]=="com.vlesscardvpn.tor.MandatoryBridgesR208Test"]; assert len(s)==2 and all(int(x["tests"])==12 and int(x["failures"])==0 and int(x["errors"])==0 and int(x["skipped"])==0 for x in s),s'
