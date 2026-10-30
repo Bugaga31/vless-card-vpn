@@ -1509,7 +1509,7 @@ object Actions {
             val usable=DiscoveryWindow.pool(candidates,{server ->
                 val ss=st.state(server);val e=ss.evidenceFor(net)
                 RouteStabilityMemory.session.cooling(net,server.id,ss.maskFor(net),stamp) ||
-                TelegramRouteMemory.cooling(net,server.id,ss.maskFor(net),stamp) ||
+                (AutoChecks.current.telegram && TelegramRouteMemory.cooling(net,server.id,ss.maskFor(net),stamp)) ||
                     probeMemory.cooling(net,server.id,ss.maskFor(net),stamp) ||
                     (e.streak>0 && stamp>=e.at && stamp-e.at<ProbeMemory.cooldownMs(e.streak))
             },{AutoChecks.rank(st.state(it),net,stamp)})
