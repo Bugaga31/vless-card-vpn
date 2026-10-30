@@ -1187,48 +1187,28 @@ class TunnelService : VpnService() {
 
     private var scoutJob: Job? = null
     private fun standbyScout() {
-        if(usedChain != null) return
-        if (Store.state.value.settings.torAll) return
-        if(scoutJob?.isActive==true) return
-        scoutJob = scope.launch {
-            var previous = TProxyService.stats(); var windows = 0; var lastAttempt = 0L
-            while (kotlinx.coroutines.currentCoroutineContext().isActive) {
-                if (!com.vlesscardvpn.core.BackgroundReservePolicy.mayProbe(Store.state.value.settings.mode==Mode.AUTO,com.vlesscardvpn.core.PhonePower.refresh(this@TunnelService))) {
-                    windows = 0; previous = null; delay(com.vlesscardvpn.core.VpnRecoveryPolicy.RESERVE_RETRY_MS); continue
-                }
+        if(usedChain!=null || Store.state.value.settings.torAll || scoutJob?.isActive==true) return
+        scoutJob=scope.launch {
+            var previous=TProxyService.stats();var windows=0
+            while(isActive && Tunnel.status.value.state==Tunnel.State.CONNECTED) {
                 delay(1000)
-                val current = TProxyService.stats()
-                val a=previous;previous=current
-                if (Store.state.value.settings.mode != com.vlesscardvpn.model.Mode.AUTO ||
-                    !com.vlesscardvpn.core.BackgroundReservePolicy.mayProbe(true,com.vlesscardvpn.core.PhonePower.refresh(this@TunnelService)) || healJob?.isActive == true || recoveryJob?.isActive == true) { windows=0;continue }
-                val suspicious = a != null && current != null && a.size>=4 && current.size>=4 && current[1]-a[1]>=4096 && current[3]==a[3]
-                windows=if (suspicious) windows+1 else 0
-                val now=System.currentTimeMillis()
-                if (windows<2) {
-                    if (now-lastAttempt>=1000 && Actions.warmReserveCount(usedServers)<3) {
-                        lastAttempt=now
-                        // Accumulate proofs without changing the live selection or downloading speed samples.
-                        try { Actions.prepareStandby(usedServers) }
-                        catch(e:kotlinx.coroutines.CancellationException) { throw e }
-                        catch(e:Exception) { Log.w(TAG,"Reserve preparation failed",e) }
-                    }
-                    continue
+                if(Store.state.value.settings.mode!=Mode.AUTO) break
+                if(healJob?.isActive==true || recoveryJob?.isActive==true) continue
+                val current=TProxyService.stats();val old=previous;previous=current
+                val suspicious=old!=null && current!=null && old.size>=4 && current.size>=4 && current[1]-old[1]>=4096 && current[3]==old[3]
+                windows=if(suspicious) windows+1 else 0
+                when(com.vlesscardvpn.core.ReserveScoutPolicy.next(windows,Actions.warmReserveCount(usedServers))) {
+                    com.vlesscardvpn.core.ReserveScoutPolicy.Action.PREPARE -> try {Actions.prepareStandby(usedServers)}
+                        catch(e:kotlinx.coroutines.CancellationException) {throw e}
+                        catch(e:Exception) {Log.w(TAG,"Reserve preparation failed",e)}
+                    com.vlesscardvpn.core.ReserveScoutPolicy.Action.VERIFY -> {windows=0;verifySoon(0)}
+                    com.vlesscardvpn.core.ReserveScoutPolicy.Action.KEEP -> Unit
                 }
-                if (now-lastAttempt<1000) continue
-                windows=0;lastAttempt=now
-                val original=Tunnel.socks ?: continue;val network=Net.key(this@TunnelService)
-                val healthy=Tester.probeSocks(original.port,Store.state.value.settings.testUrl,big=false,youtube=false,attempts=1,budgetMs=1200).works
-                if (healthy) continue
-                val spare=runCatching { Actions.prepareStandby(usedServers) }.getOrElse { if (it is kotlinx.coroutines.CancellationException) throw it else null } ?: continue
-                if (Tunnel.socks != original || Net.key(this@TunnelService)!=network) continue
-                Actions.selectBest(1,among=listOf(spare),close=true)
-                scope.launch { lock.withLock { connect(soft=true) } }
-                break
+                // This scout never selects a route. Full verification/watchdog owns confirmed-failure recovery.
             }
         }
     }
 
-    /** What the big button does (stop + start), by itself: TUN, DNS and Xray are rebuilt. */
     private var lastHard = 0L
     @Volatile private var lastSoft = false
     @Volatile private var netChangedAt = 0L

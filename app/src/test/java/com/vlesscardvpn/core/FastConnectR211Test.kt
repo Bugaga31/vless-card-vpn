@@ -45,4 +45,10 @@ class FastConnectR211Test {
         assertEquals(false,LinkStabilityPolicy.summarize(listOf(LinkStabilityPolicy.Sample(true,1800),LinkStabilityPolicy.Sample(false,0),LinkStabilityPolicy.Sample(true,1800)),Int.MAX_VALUE).stable)
         assertEquals(false,LinkStabilityPolicy.summarize(listOf(LinkStabilityPolicy.Sample(true,1000),LinkStabilityPolicy.Sample(true,2000),LinkStabilityPolicy.Sample(true,3000)),Int.MAX_VALUE).stable)
     }
+    @Test fun reserveScoutCannotSwitchBasedOnTrafficCountersOrShortPing() {
+        assertEquals(ReserveScoutPolicy.Action.VERIFY,ReserveScoutPolicy.next(2,0))
+        assertEquals(ReserveScoutPolicy.Action.KEEP,ReserveScoutPolicy.next(0,3))
+        assertEquals(ReserveScoutPolicy.Action.PREPARE,ReserveScoutPolicy.next(0,0))
+        assertEquals(setOf("PREPARE","VERIFY","KEEP"),ReserveScoutPolicy.Action.values().map {it.name}.toSet())
+    }
 }
