@@ -71,25 +71,30 @@ fun ServiceHealthCard() {
         colors=CardDefaults.cardColors(containerColor=MaterialTheme.colorScheme.surface)) {
         Column(Modifier.padding(16.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
             Text("Проверки сервисов",fontSize=17.sp,fontWeight=FontWeight.SemiBold)
+            val evidence=selectedEvidence?.takeIf {it.profile==profile && it.limit==autoSettings.autoLatencyMaxMs && now>=it.at && now-it.at<=90_000L}
             listOf(HealthModule.HTTPS to "Интернет · HTTPS",HealthModule.DNS to "DNS через SOCKS",
                 HealthModule.TELEGRAM to "Telegram · ответ дата-центра",HealthModule.YOUTUBE to "YouTube · медиа").forEach {(module,title)->
                 val disabled=autoSettings.mode==com.vlesscardvpn.model.Mode.AUTO && (module==HealthModule.TELEGRAM && !profile.telegram || module==HealthModule.YOUTUBE && !profile.youtube)
                 val activeFrame=if(autoSettings.mode==com.vlesscardvpn.model.Mode.AUTO && (selectedEvidence?.profile!=profile || selectedEvidence?.limit!=autoSettings.autoLatencyMaxMs)) null else frame
-                val p=ConnectionPresentationPolicy.probe(activeFrame?.assessment?.observations?.firstOrNull {it.module==module},activeFrame?.sampledAt?.get(module),now)
+                val observation=activeFrame?.assessment?.observations?.firstOrNull {it.module==module}
+                val sampledAt=activeFrame?.sampledAt?.get(module)
+                val selectedModule=autoSettings.mode==com.vlesscardvpn.model.Mode.AUTO && module in setOf(HealthModule.TELEGRAM,HealthModule.YOUTUBE)
+                val p=if(selectedModule) ConnectionPresentationPolicy.requiredProbe(observation,sampledAt,now,!disabled)
+                    else ConnectionPresentationPolicy.probe(observation,sampledAt,now)
                 val tone=when(p.status) {"PASS"->Good;"FAIL"->Bad;"SLOW"->Warn;else->MaterialTheme.colorScheme.onSurfaceVariant}
                 // A column, not a fixed-width badge row: survives narrow screens and large fonts.
                 Column(Modifier.fillMaxWidth().semantics(mergeDescendants=true){}) {
                     Text(title,fontSize=14.sp,fontWeight=FontWeight.Medium)
-                    Text((if(disabled) "Отключено в Авто" else p.label)+(p.latencyMs?.takeIf {!disabled}?.let {" · $it мс"} ?: ""),fontSize=14.sp,color=tone)
+                    val note=if(!disabled && selectedModule && p.status=="UNKNOWN") evidence?.probe?.serviceNotes?.get(if(module==HealthModule.TELEGRAM) "telegram" else "youtube") else null
+                    Text((if(disabled) "Отключено в Авто" else if(note!=null) ProbeTaskNotes.label(note) else p.label)+(p.latencyMs?.takeIf {!disabled}?.let {" · $it мс"} ?: ""),fontSize=14.sp,color=tone)
                 }
             }
-            val evidence=selectedEvidence?.takeIf {it.profile==profile && it.limit==autoSettings.autoLatencyMaxMs && now>=it.at && now-it.at<=90_000L}
             if(autoSettings.mode==com.vlesscardvpn.model.Mode.AUTO) {
                 Text("Выбрано в Авто: ${AutoChecks.label(profile)}",fontSize=14.sp)
                 listOf("stability" to "Telegram · устойчивость серии", "voice" to "Звонки · UDP-транспорт", "discord" to "Discord · gateway").forEach {(id,title)->
                     val value=when(id) {"stability"->evidence?.probe?.stableOk; "voice"->evidence?.probe?.callsOk; else->evidence?.probe?.discordOk}
                     Text(title,fontSize=14.sp,fontWeight=FontWeight.Medium)
-                    Text(if(id !in profile.selected) "Отключено в Авто" else when(value) {true->"Локальная проверка пройдена";false->"Проверка не пройдена";null->"Не подтверждено / требуется свежая проба"},fontSize=14.sp,
+                    Text(if(id !in profile.selected) "Отключено в Авто" else when(value) {true->"Локальная проверка пройдена";false->"Проверка не пройдена";null->"Обязательная проверка: "+ProbeTaskNotes.label(evidence?.probe?.serviceNotes?.get(id))},fontSize=14.sp,
                         color=if(id in profile.selected && value==false) Warn else MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             } else {

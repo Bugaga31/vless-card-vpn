@@ -38,8 +38,8 @@ class FoundConnectR213Test {
         assertTrue(FoundConnectPolicy.enabled(true,false,false,1))
         assertFalse(FoundConnectPolicy.enabled(true,false,false,0))
     }
-    @Test fun connectedAndTorCannotBeReplacedByOrdinaryFoundButton() {
-        assertFalse(FoundConnectPolicy.enabled(true,true,false,1));assertFalse(FoundConnectPolicy.enabled(true,false,true,1))
+    @Test fun connectedCannotBeReplacedAndTorHasSeparateBootstrapValidation() {
+        assertTrue(FoundConnectPolicy.enabled(true,true,false,1));assertFalse(FoundConnectPolicy.enabled(true,false,true,1))
         assertFalse(FoundConnectPolicy.enabled(false,false,false,1))
     }
     @Test fun tested578IsInFoundShortlistEvenWithoutCurrentProfileProof() {

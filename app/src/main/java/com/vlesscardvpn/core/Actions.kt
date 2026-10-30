@@ -1204,7 +1204,7 @@ object Actions {
      * bounded Working shortlist. Never refresh subscriptions or scan the rest of the catalog. */
     fun connectFound(onReady:()->Unit) {
         val initial=Store.state.value
-        if(initial.settings.mode!=Mode.AUTO || initial.settings.torAll || Tunnel.status.value.state==Tunnel.State.CONNECTED) return
+        if(initial.settings.mode!=Mode.AUTO || Tunnel.status.value.state==Tunnel.State.CONNECTED) return
         val ticket=autoGeneration.incrementAndGet()
         val old=job;old?.cancel()
         val next=scope.launch(start=kotlinx.coroutines.CoroutineStart.LAZY) {
@@ -1215,11 +1215,13 @@ object Actions {
             try {
                 withContext(Dispatchers.IO) { XrayCore.init(app) }
                 val snapshot=Store.state.value
+                com.vlesscardvpn.tor.TorFoundPolicy.blocker(snapshot.settings)?.let {error(it)}
+                val torKey=com.vlesscardvpn.tor.TorFoundPolicy.key(snapshot.settings)
                 val path=Net.observation(app) ?: error("Нет доступной сети")
                 val profile=AutoChecks.current;val limit=AutoLatencyPolicy.MAX_MS;val url=snapshot.settings.testUrl
                 val candidates=FoundConnectPolicy.shortlist(snapshot.servers,snapshot::state)
                 fun valid()=autoGeneration.get()==ticket && Net.matches(app,path) &&
-                    Store.state.value.settings.let {it.mode==Mode.AUTO && !it.torAll && it.testUrl==url} &&
+                    Store.state.value.settings.let {it.mode==Mode.AUTO && com.vlesscardvpn.tor.TorFoundPolicy.key(it)==torKey && it.testUrl==url} &&
                     AutoChecks.current==profile && AutoLatencyPolicy.MAX_MS==limit
                 suspend fun select():Boolean {
                     if(!valid()) return false

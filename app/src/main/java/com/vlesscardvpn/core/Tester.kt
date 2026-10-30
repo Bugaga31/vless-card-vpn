@@ -21,7 +21,7 @@ import java.net.ServerSocket
 import java.net.Socket
 import java.util.concurrent.TimeUnit
 
-data class Probe(val realMs: Int, val bigOk: Boolean?, val ytOk: Boolean?, val error: String = "", val tgOk: Boolean? = null, val kbps: Int = 0, val ytKbps: Int = 0, val bodyBytes: Long = 0, val bodyMs: Long = 0, val callsOk: Boolean? = null, val tgMs: Int = 0, val discordOk:Boolean?=null, val stableOk:Boolean?=null, val autoChecksKey:String="",val latencyOnlyOk:Boolean=false) {
+data class Probe(val realMs: Int, val bigOk: Boolean?, val ytOk: Boolean?, val error: String = "", val tgOk: Boolean? = null, val kbps: Int = 0, val ytKbps: Int = 0, val bodyBytes: Long = 0, val bodyMs: Long = 0, val callsOk: Boolean? = null, val tgMs: Int = 0, val discordOk:Boolean?=null, val stableOk:Boolean?=null, val autoChecksKey:String="",val latencyOnlyOk:Boolean=false,val serviceNotes:Map<String,String> = emptyMap()) {
     val works: Boolean get() = realMs > 0 && bigOk != false
     fun latencyConsented()=if(latencyOnlyOk) copy(stableOk=true,callsOk=true) else this
 }
@@ -162,6 +162,16 @@ object Tester {
             .proxy(Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", port))).build()
         val mediaClient = client.newBuilder().followRedirects(false).followSslRedirects(false).build()
         val tasks = mutableListOf<java.util.concurrent.Future<*>>()
+        val isolated=if(autoChecks!=null) ProbeServiceWorkers() else null
+        val servicePool=isolated?.executor ?: pool
+        val notes=linkedMapOf<String,String>()
+        fun <T> await(f:java.util.concurrent.Future<T>?,ms:Long,fallback:T,id:String,known:(T)->Boolean={true}):T {
+            if(f==null) return fallback
+            val outcome=ProbeTasks.result(f,ms,fallback)
+            if(outcome.reason!=null) notes[id]=outcome.reason
+            else if(!known(outcome.value)) notes[id]="INCONCLUSIVE"
+            return outcome.value
+        }
         try {
             // Independent service evidence starts with HTTPS, not after it. The same route/SOCKS only.
             val tgF = if (autoChecks?.telegram ?: telegram) telegramPool.submit<TelegramProbe.Result> {
@@ -184,13 +194,13 @@ object Tester {
             if (best == Long.MAX_VALUE) return Probe(0, null, null, err)
             val deadline = if (budgetDeadline == Long.MAX_VALUE) System.nanoTime() + TimeUnit.SECONDS.toNanos(40) else budgetDeadline
             fun remaining() = TimeUnit.NANOSECONDS.toMillis((deadline - System.nanoTime()).coerceAtLeast(1)).coerceAtLeast(1)
-            val bigF = if (big) pool.submit<BodyResult> { bigDownload(client,budgetDeadline,onCall) }.also { tasks += it } else null
-            val ytF = if (autoChecks?.youtube ?: youtube) pool.submit<YouTubeMediaProbe.Result> {
+            val bigF = if (big) servicePool.submit<BodyResult> { bigDownload(client,budgetDeadline,onCall) }.also { tasks += it } else null
+            val ytF = if (autoChecks?.youtube ?: youtube) servicePool.submit<YouTubeMediaProbe.Result> {
                 YouTubeMediaProbe.check { boundedCall(mediaClient, it) }
             }.also { tasks += it } else null
             val relaxedCalls=java.util.concurrent.atomic.AtomicReference<Boolean?>(null)
             val relaxedStable=java.util.concurrent.atomic.AtomicReference<Boolean?>(null)
-            val callF = if (autoChecks?.voice ?: calls) pool.submit<Boolean?> {
+            val callF = if (autoChecks?.voice ?: calls) servicePool.submit<Boolean?> {
                 if(autoChecks?.voice==true) {
                     val t=UdpCallProbe.train(port,user,pass,minOf(4000L,remaining()).toInt(),CallTransportPolicy.PACKETS,onCancel)
                     val summary=CallTransportPolicy.assess(t.sent,t.rttMs,t.complete,AutoLatencyPolicy.MAX_MS)
@@ -201,7 +211,7 @@ object Tester {
                     }
                 } else UdpCallProbe.probe(port, user, pass, minOf(1800L, remaining()).toInt(), onCancel)
             }.also { tasks += it } else null
-            val discordF = if(autoChecks?.discord==true) pool.submit<Boolean?> {
+            val discordF = if(autoChecks?.discord==true) servicePool.submit<Boolean?> {
                 runCatching { boundedCall(client,Request.Builder().url("https://discord.com/api/v10/gateway").build()).execute().use {r->
                     r.code==200 && r.body?.byteStream()?.use {input-> val bytes=ByteArray(8193); var n=0; while(n<bytes.size) {val x=input.read(bytes,n,bytes.size-n);if(x<0) break;n+=x}; if(n>8192) null else String(bytes,0,n,Charsets.UTF_8)}?.let {body->
                         val url=org.json.JSONObject(body).optString("url")
@@ -209,7 +219,7 @@ object Tester {
                     }==true
                 }}.getOrDefault(false)
             }.also {tasks+=it} else null
-            val tgResult = ProbeTasks.await(tgF, remaining(), TelegramProbe.Result(null,0))
+            val tgResult = await(tgF, remaining(), TelegramProbe.Result(null,0),"telegram") {it.ok!=null}
             val stabilityF = if(autoChecks?.stability==true) telegramPool.submit<Boolean?> {
                 val samples=mutableListOf(LinkStabilityPolicy.Sample(tgResult.ok,tgResult.ms))
                 repeat(2) {
@@ -220,23 +230,24 @@ object Tester {
                 relaxedStable.set(LinkStabilityPolicy.summarize(samples,Int.MAX_VALUE).stable)
                 LinkStabilityPolicy.summarize(samples,AutoLatencyPolicy.MAX_MS).stable
             }.also {tasks+=it} else null
-            val bigResult = ProbeTasks.await(bigF, remaining(), BodyResult())
-            val ytResult = ProbeTasks.await(ytF, remaining(), YouTubeMediaProbe.Result(null))
-            val callsOk = if (callF != null) ProbeTasks.await(callF, remaining(), null) else null
-            val discordOk=ProbeTasks.await(discordF,remaining(),null)
-            val stableOk=ProbeTasks.await(stabilityF,remaining(),null)
-            val result=Probe(best.toInt().coerceAtLeast(1), if (bigF != null) bigResult.ok else null, ytResult.ok, tgOk = tgResult.ok, tgMs = if(tgResult.ok==true) tgResult.ms else 0, kbps = bigResult.kbps, ytKbps = ytResult.kbps, bodyBytes = bigResult.bytes, bodyMs = bigResult.ms, callsOk = callsOk, discordOk=discordOk,stableOk=stableOk)
+            val bigResult = await(bigF, remaining(), BodyResult(),"payload")
+            val ytResult = await(ytF, remaining(), YouTubeMediaProbe.Result(null),"youtube") {it.ok!=null}
+            val callsOk = if (callF != null) await(callF, remaining(), null,"voice") {it!=null} else null
+            val discordOk=await(discordF,remaining(),null,"discord") {it!=null}
+            val stableOk=await(stabilityF,remaining(),null,"stability") {it!=null}
+            val result=Probe(best.toInt().coerceAtLeast(1), if (bigF != null) bigResult.ok else null, ytResult.ok, tgOk = tgResult.ok, tgMs = if(tgResult.ok==true) tgResult.ms else 0, kbps = bigResult.kbps, ytKbps = ytResult.kbps, bodyBytes = bigResult.bytes, bodyMs = bigResult.ms, callsOk = callsOk, discordOk=discordOk,stableOk=stableOk,serviceNotes=notes.toMap())
             val measured=if(autoChecks!=null) LatencyOnlyProbe.proof(result,autoChecks,relaxedStable.get(),relaxedCalls.get()) else result
             return if(autoChecks!=null) measured.copy(autoChecksKey=AutoChecks.stamp(measured,autoChecks,AutoLatencyPolicy.MAX_MS)) else measured
         } finally {
             ProbeTasks.cancel(tasks)
+            isolated?.close()
             // Private dispatcher/pool: cancellation cannot cancel another probe or the live VPN's HTTP calls.
             client.dispatcher.cancelAll(); client.connectionPool.evictAll()
         }
     }
 
     // Media downloads cannot occupy all workers needed to establish native Telegram evidence.
-    private val telegramPool = java.util.concurrent.Executors.newFixedThreadPool(8) { r -> Thread(r, "probe-tg").apply { isDaemon = true } }
+    private val telegramPool = java.util.concurrent.Executors.newFixedThreadPool(12) { r -> Thread(r, "probe-tg").apply { isDaemon = true } }
     private val pool = java.util.concurrent.Executors.newFixedThreadPool(12) { r -> Thread(r, "probe").apply { isDaemon = true } }
 
     /** 256 KB through the server: (passed, kbit/s). A freeze (read timeout — the TSPU "16 KB" cut) fails at once, no second mirror. */
