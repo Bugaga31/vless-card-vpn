@@ -23,7 +23,7 @@ jobs:
         run: |
           set -euo pipefail
           base64 -d tools/patches/telegram-evidence-r208.patch.gz.b64 | gzip -d > "$RUNNER_TEMP/telegram-evidence-r208.patch"
-          echo '12f8a5827a3a39331daa75f0c404b3d89427733c67292879ec657aa35241abdd  '"$RUNNER_TEMP/telegram-evidence-r208.patch" | sha256sum -c -
+          echo '445bbf0d1012c1652a2d682bd425254309a95c24220df0a5927077eb0d7f0f9d  '"$RUNNER_TEMP/telegram-evidence-r208.patch" | sha256sum -c -
           git fetch --quiet --no-tags origin b14d3987d7cb9f4a59a4527413cae0e3fc97e6cc
           git restore --source b14d3987d7cb9f4a59a4527413cae0e3fc97e6cc -- app/src/main app/src/test app/build.gradle.kts
           git apply --check "$RUNNER_TEMP/telegram-evidence-r208.patch"

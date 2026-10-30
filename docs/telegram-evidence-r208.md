@@ -19,6 +19,6 @@ Tests: 22 new pure policy regressions, debug/release; full JVM/host/lint run req
 Remaining, not claimed fixed:
 - Real app/TUN path, account-specific DCs, Telegram media/calls. Current probe succeeds on one of two unauthenticated sampled DC responses.
 - Configurable service-check profile and selected-service eligibility.
+- Implemented mandatory obfs4/WebTunnel presets/runtime migration, guarded owned-daemon startup and circuit-before-PASS checks. Default bounded igareck updates; cached/manual valid lines retained, explicit update opt-out respected. Tor bootstrap is not attributed to VLESS failure.
 - Tor-specific upstream comparison and reserve ranking remain future work; no instant bootstrap claim.
-- Mandatory obfs4/WebTunnel presets/runtime migration, guarded owned-daemon startup and circuit-before-PASS checks implemented. Default bounded igareck updates; cached/manual valid lines retained, explicit update opt-out respected. Tor bootstrap is not attributed to VLESS failure.
 - One-second failover cannot be guaranteed; no physical-operator or real-account call evidence.
