@@ -103,8 +103,8 @@ fun ServiceHealthCard() {
                 Text(LinkStabilityPolicy.label(stability),fontSize=14.sp,
                     color=if(stability.stable==false) Warn else MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            Text("Настройки → Автоматический выбор → Что проверять в Авто",fontSize=12.sp)
-            Text("Discord gateway и короткий STUN-тест не подтверждают вход в аккаунт или реальный звонок. Tor не переносит UDP.",fontSize=12.sp)
+            Text("Настройки → Автоматический выбор → Что проверять в Авто",fontSize = 14.sp)
+            Text("Discord gateway и короткий STUN-тест не подтверждают вход в аккаунт или реальный звонок. Tor не переносит UDP.",fontSize = 14.sp)
             Text("Локальные пробы через SOCKS. Ответ дата-центра не подтверждает работу приложения Telegram, аккаунта, звонков или полного TUN-пути.",
                 fontSize=14.sp,lineHeight=20.sp,color=MaterialTheme.colorScheme.onSurfaceVariant)
         }

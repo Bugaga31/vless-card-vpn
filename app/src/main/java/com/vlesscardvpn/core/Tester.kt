@@ -164,6 +164,7 @@ object Tester {
         val tasks = mutableListOf<java.util.concurrent.Future<*>>()
         val isolated=if(autoChecks!=null) ProbeServiceWorkers() else null
         val servicePool=isolated?.executor ?: pool
+        val tgExecutor=isolated?.telegram ?: telegramPool
         val notes=linkedMapOf<String,String>()
         fun <T> await(f:java.util.concurrent.Future<T>?,ms:Long,fallback:T,id:String,known:(T)->Boolean={true}):T {
             if(f==null) return fallback
@@ -174,7 +175,7 @@ object Tester {
         }
         try {
             // Independent service evidence starts with HTTPS, not after it. The same route/SOCKS only.
-            val tgF = if (autoChecks?.telegram ?: telegram) telegramPool.submit<TelegramProbe.Result> {
+            val tgF = if (autoChecks?.telegram ?: telegram) tgExecutor.submit<TelegramProbe.Result> {
                 val left=if(budgetDeadline==Long.MAX_VALUE) 3000L else
                     TimeUnit.NANOSECONDS.toMillis((budgetDeadline-System.nanoTime()).coerceAtLeast(1)).coerceAtLeast(1)
                 TelegramProbe.measure(port,minOf(maxOf(3000L,AutoLatencyPolicy.MAX_MS.toLong()+100L),left),onCancel)
@@ -220,7 +221,7 @@ object Tester {
                 }}.getOrDefault(false)
             }.also {tasks+=it} else null
             val tgResult = await(tgF, remaining(), TelegramProbe.Result(null,0),"telegram") {it.ok!=null}
-            val stabilityF = if(autoChecks?.stability==true) telegramPool.submit<Boolean?> {
+            val stabilityF = if(autoChecks?.stability==true) tgExecutor.submit<Boolean?> {
                 val samples=mutableListOf(LinkStabilityPolicy.Sample(tgResult.ok,tgResult.ms))
                 repeat(2) {
                     if(remaining()<50) return@submit null

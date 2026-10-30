@@ -252,17 +252,17 @@ private fun ServerRow(s: Server, st: ServerState, fav: Boolean = false, compact:
                 if(!compact) Text(ServerBrowser.age(st.checkedAt,now),style=MaterialTheme.typography.labelSmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
                 // Catalog subscriptions are third-party free servers: mark them so they are not mistaken for your own.
                 val isPublic = com.vlesscardvpn.model.Subs.find(s.source) != null
-                if(!compact) Text(s.label + (if (isPublic) " · публичный" else "") + (mask?.let { " · $it" } ?: ""), maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if(!compact) Text(s.label + (if (isPublic) " · публичный" else "") + (mask?.let { " · $it" } ?: ""), maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             Column(horizontalAlignment = Alignment.End) {
                 val real = st.realMs
                 Text(when { real > 0 -> "$real мс"; real == 0 -> "не работает"; st.tcpMs == 0 -> "недоступен"; st.tcpMs > 0 -> "TCP ${st.tcpMs} мс"; else -> "—" },
-                    color = when { real > 0 && st.bigOk != false -> Good; real > 0 -> Warn; real == 0 || st.tcpMs == 0 -> Bad; else -> MaterialTheme.colorScheme.onSurfaceVariant }, fontSize = 13.sp)
+                    color = when { real > 0 && st.bigOk != false -> Good; real > 0 -> Warn; real == 0 || st.tcpMs == 0 -> Bad; else -> MaterialTheme.colorScheme.onSurfaceVariant }, fontSize = 14.sp)
                 if (real > 0 && !compact) Text(buildString {
                     append(when (st.bigOk) { true -> if (st.kbps > 0) Actions.mbps(st.kbps) else "256К ✓"; false -> "256К ✗ (обрыв)"; null -> "" })
                     st.ytOk?.let { append(if (it) " · YT ✓" else " · YT ✗") }
                     st.tgOk?.let { append(if (it) " · TG ✓" else " · TG ✗") }
-                }, fontSize = 11.sp, color = if (st.bigOk == false) Warn else MaterialTheme.colorScheme.onSurfaceVariant)
+                }, fontSize = 14.sp, color = if (st.bigOk == false) Warn else MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
     }
@@ -281,7 +281,7 @@ private fun AddDialog(onDismiss: () -> Unit, onAdd: (String) -> Unit) {
                     val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                     text = cm.primaryClip?.getItemAt(0)?.coerceToText(ctx)?.toString().orEmpty()
                 }) { Text("Вставить из буфера") }
-                Text("Ссылку на подписку (https://…) добавьте в Настройках → Подписки.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("Ссылку на подписку (https://…) добавьте в Настройках → Подписки.", fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         },
         confirmButton = { Button(onClick = { onAdd(text) }, enabled = text.isNotBlank()) { Text("Добавить") } },
@@ -304,7 +304,7 @@ private fun ServerMenu(s: Server, st: ServerState, onDismiss: () -> Unit) {
                 LazyColumn(Modifier.heightIn(max = 420.dp)) {
                     item { TextButton(onClick = { Store.setState(s.id) { com.vlesscardvpn.core.MaskSamplePolicy.invalidate(it).copy(maskId = "", netMasks = emptyMap()) }; onDismiss() }) { Text("Без маскировки (как в ссылке)") } }
                     items(options) { m -> TextButton(onClick = { Store.setState(s.id) { com.vlesscardvpn.core.MaskSamplePolicy.invalidate(it).copy(maskId = m.id, netMasks = emptyMap()) }; onDismiss() }) {
-                        Text((if (m.id == st.maskId) "● " else "") + m.title, fontSize = 13.sp) } }
+                        Text((if (m.id == st.maskId) "● " else "") + m.title, fontSize = 14.sp) } }
                 }
             }, confirmButton = { TextButton(onClick = onDismiss) { Text("Закрыть") } })
         return
@@ -312,8 +312,8 @@ private fun ServerMenu(s: Server, st: ServerState, onDismiss: () -> Unit) {
     AlertDialog(onDismissRequest = onDismiss, title = { Text(s.name, maxLines = 2) },
         text = {
             Column {
-                Text("${s.label}\n${s.address}:${s.port}", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text("Маскировка: " + (Masks.byId(st.maskId)?.title ?: "как в ссылке") + " — стоимость ${Masks.byId(st.maskId)?.let { Masks.cost(it) } ?: 0} (эвристика нагрузки, не невидимость). Пригодность решают реальные пробы этой сети.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("${s.label}\n${s.address}:${s.port}", fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("Маскировка: " + (Masks.byId(st.maskId)?.title ?: "как в ссылке") + " — стоимость ${Masks.byId(st.maskId)?.let { Masks.cost(it) } ?: 0} (эвристика нагрузки, не невидимость). Пригодность решают реальные пробы этой сети.", fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 TextButton(onClick = { Actions.findMasks(listOf(s)); onDismiss() }) { Text("Подобрать заново для этой сети") }
                 var expert by remember { mutableStateOf(false) }
                 TextButton(onClick = { expert = !expert }) { Text(if (expert) "Для опытных ▾" else "Для опытных ▸") }
@@ -350,7 +350,7 @@ fun QrDialog(title: String, text: String, onDismiss: () -> Unit) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 if (bmp != null) androidx.compose.foundation.Image(bmp.asImageBitmap(), "QR", Modifier.size(280.dp))
                 else Text("Ссылка слишком длинная для QR-кода")
-                Text("Внутри ключ сервера — показывайте только себе и тем, кому доверяете.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("Внутри ключ сервера — показывайте только себе и тем, кому доверяете.", fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }, confirmButton = { TextButton(onClick = onDismiss) { Text("Закрыть") } })
 }

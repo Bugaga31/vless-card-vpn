@@ -13,7 +13,7 @@ object YouTubeMediaProbe {
     const val SAMPLE_BYTES = 131072
     const val PROOF_PREFS = "youtube_media_proof_v1"
     data class Result(val ok: Boolean?, val kbps: Int = 0,val reason:String="")
-    data class Discovery(val url:String?,val reason:String="")
+    data class Discovery(val url:String?,val reason:String="",val alternatives:List<String> = emptyList())
 
     fun freshProof(at: Long, now: Long) = at > 0 && now >= at && now - at < 10 * 60000L
     fun allowedUrl(value: String): Boolean {
@@ -43,20 +43,45 @@ object YouTubeMediaProbe {
         return null
     }
 
-    internal fun mediaUrl(html: String): String? = runCatching {
-        val root = JSONObject(playerJson(html) ?: return null)
-        if (root.optJSONObject("playabilityStatus")?.optString("status") != "OK") return null
-        val data = root.optJSONObject("streamingData") ?: return null
-        // Prefer video; an audio-only URL doesn't prove that video playback can fetch media.
-        for (key in listOf("formats", "adaptiveFormats")) {
-            val list = data.optJSONArray(key) ?: continue
-            for (i in 0 until list.length()) {
-                val f = list.optJSONObject(i) ?: continue
-                val url = f.optString("url")
-                if (f.optString("mimeType").startsWith("video/") && allowedUrl(url)) return url
+    internal fun mediaUrl(html:String):String? = mediaUrls(html).firstOrNull()
+    internal fun mediaUrls(html:String):List<String> = runCatching {
+        val root=JSONObject(playerJson(html) ?: return emptyList())
+        if(root.optJSONObject("playabilityStatus")?.optString("status")!="OK") return emptyList()
+        val data=root.optJSONObject("streamingData") ?: return emptyList()
+        val urls=mutableListOf<String>()
+        for(key in listOf("formats","adaptiveFormats")) {
+            val list=data.optJSONArray(key) ?: continue
+            for(i in 0 until list.length()) {
+                val f=list.optJSONObject(i) ?: continue
+                if(!f.optString("mimeType").startsWith("video/")) continue
+                val direct=f.optString("url")
+                val candidate=if(direct.isNotBlank()) direct else signedCipher(f.optString("signatureCipher",f.optString("cipher")))
+                if(candidate!=null && allowedUrl(candidate) && candidate !in urls) urls+=candidate
+                if(urls.size==3) return urls
             }
         }
-        null
+        urls
+    }.getOrDefault(emptyList())
+
+    /** Already signed URL only; encrypted `s` requires unsupported JS deciphering. */
+    internal fun signedCipher(value:String):String? = runCatching {
+        if(value.length>16384) return null
+        val parts=value.split('&').filter {it.isNotEmpty()}.map {part->
+            val pair=part.split('=',limit=2)
+            java.net.URLDecoder.decode(pair[0],"UTF-8") to java.net.URLDecoder.decode(pair.getOrElse(1){""},"UTF-8")
+        }
+        if(parts.map{it.first}.distinct().size!=parts.size) return null
+        val fields=parts.toMap()
+        if(fields.containsKey("s")) return null
+        val url=fields["url"] ?: return null
+        if(!allowedUrl(url)) return null
+        val sig=fields["sig"] ?: fields["signature"] ?: return null
+        if(sig.isBlank() || sig.length>2048) return null
+        val name=fields["sp"] ?: "signature"
+        if(name !in setOf("sig","signature","lsig")) return null
+        val parsed=url.toHttpUrlOrNull() ?: return null
+        if(parsed.queryParameter(name)!=null) return null
+        parsed.newBuilder().addQueryParameter(name,sig).build().toString()
     }.getOrNull()
 
     fun discover(call:(Request)->Call):String? = discoverDetailed(call).url
@@ -71,9 +96,9 @@ object YouTubeMediaProbe {
                 val n=input.read(buf,0,minOf(buf.size,1048576-out.size()))
                 if(n<0) break
                 out.write(buf,0,n)
-                if(out.size()%32768<8192) mediaUrl(out.toString("UTF-8"))?.let {return Discovery(it)}
+                if(out.size()%32768<8192) mediaUrls(out.toString("UTF-8")).takeIf {it.isNotEmpty()}?.let {return Discovery(it.first(),alternatives=it.drop(1))}
             }
-            mediaUrl(out.toString("UTF-8"))?.let {Discovery(it)} ?: Discovery(null,"YT_NO_DIRECT_MEDIA")
+            mediaUrls(out.toString("UTF-8")).takeIf {it.isNotEmpty()}?.let {Discovery(it.first(),alternatives=it.drop(1))} ?: Discovery(null,"YT_NO_DIRECT_MEDIA")
         }
     } catch(_:java.net.SocketTimeoutException) {Discovery(null,"TIMEOUT")}
       catch(_:Exception) {Discovery(null,if(Thread.currentThread().isInterrupted) "CANCELLED" else "ERROR")}
@@ -114,6 +139,13 @@ object YouTubeMediaProbe {
 
     fun check(call:(Request)->Call):Result {
         val discovery=discoverDetailed(call)
-        return discovery.url?.let {measure(it,call)} ?: Result(null,reason=discovery.reason)
+        val first=discovery.url ?: return Result(null,reason=discovery.reason)
+        var last=Result(null,reason=discovery.reason)
+        for(url in (listOf(first)+discovery.alternatives).distinct().take(3)) {
+            if(Thread.currentThread().isInterrupted) return Result(null,reason="CANCELLED")
+            last=measure(url,call)
+            if(last.ok==true || last.reason in setOf("TIMEOUT","CANCELLED")) return last
+        }
+        return last
     }
 }

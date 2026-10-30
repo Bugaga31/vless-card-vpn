@@ -44,7 +44,7 @@ fun FoundRoutesCard(onConnectFound:()->Unit) {
                 app.settings.torAll && count>0->"Найденных VLESS: $count. Подготовлю один upstream и запущу Tor через сохранённые мосты. Это не число готовых Tor-выходов. Готовность цепочки проверяется отдельно; прямого обхода нет."
                 count==0->"В «Рабочих» пока нет подходящих для Авто серверов. Запустите проверку или общий поиск."
                 else->"В «Рабочих»: $count. Возьму готовый маршрут или перепроверю только найденные — без нового поиска по каталогу. Выбранные сервисы остаются обязательными."
-            },style=MaterialTheme.typography.bodySmall)
+            },style=MaterialTheme.typography.bodyMedium)
             Button(onClick={
                 val current=Store.state.value;val net=Net.key(ctx)
                 val ready=AutoEligibility.servicePool(current.servers,current::state,net,System.currentTimeMillis())
@@ -53,7 +53,7 @@ fun FoundRoutesCard(onConnectFound:()->Unit) {
             },enabled=FoundConnectPolicy.enabled(automatic,app.settings.torAll,connected,count),modifier=Modifier.fillMaxWidth()) {
                 Text(if(app.settings.torAll) "Подключить найденные → Tor ($count)" else "Подключиться к найденным ($count)")
             }
-            Text("Допуск: ${AutoLatencyRange.text(AutoLatencyRange.safe(app.settings.autoLatencyMinMs,app.settings.autoLatencyMaxMs))} мс; быстрее нижней границы тоже подходит.",style=MaterialTheme.typography.bodySmall)
+            Text("Допуск: ${AutoLatencyRange.text(AutoLatencyRange.safe(app.settings.autoLatencyMinMs,app.settings.autoLatencyMaxMs))} мс; быстрее нижней границы тоже подходит.",style=MaterialTheme.typography.bodyMedium)
         }
     }
     val pinned=confirm
