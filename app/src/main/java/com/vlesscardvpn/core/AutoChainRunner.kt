@@ -29,7 +29,7 @@ object AutoChainRunner {
     fun digest(text: String) = MessageDigest.getInstance("SHA-256").digest(text.toByteArray(Charsets.UTF_8))
         .joinToString("") { "%02x".format(it.toInt() and 255) }
     fun settingsKey(s: Settings) = digest(listOf(s.autoChainSearch,s.autoChainPurpose,s.torAuto,s.torNetworkRecommendations,s.torBridge,s.torBridgeLines,
-        s.services,s.alwaysDirect,s.alwaysVpn,s.warpChain,s.smartYoutube,s.torRotation,s.torRotationSeconds,s.ruDirect,s.ruDns,s.ruWhitelist,s.ruAllDirect).joinToString("|"))
+        s.services,s.alwaysDirect,s.alwaysVpn,s.warpChain,s.smartYoutube,s.torRotation,s.torRotationSeconds,s.ruDirect,s.ruDns,s.ruWhitelist,s.ruAllDirect,s.autoChecks.sorted(),s.autoLatencyMaxMs).joinToString("|"))
     fun profileKey(s: Settings) = digest(s.torBridge+"|"+s.torBridgeLines)
     fun choice(server: Server?, mask: Mask?, layout: Layout, s: Settings, dpiIdentity: String = "", dpiStrategy: String = ""): Choice {
         val native = mask?.copy(dpi = "")
@@ -87,11 +87,11 @@ object AutoChainRunner {
                                     val started=elapsed()
                                     if(chain.layout.tor)country=Tester.exitCountry(port,minOf(800,remainingMs.coerceAtLeast(1)),onCall={call->bind {call.cancel()}})
                                     val budget=(remainingMs-(elapsed()-started)).coerceAtLeast(1)
-                                    Tester.probeSocks(port,s.testUrl,big=true,youtube=true,attempts=1,budgetMs=budget,onCall={call->bind {call.cancel()}})
+                                    Tester.probeSocks(port,s.testUrl,big=true,youtube=true,attempts=1,budgetMs=budget,onCall={call->bind {call.cancel()}},onCancel=bind,autoChecks=AutoCheckProfile.of(s.autoChecks))
                                 }
                                 fun status(v:Boolean?)=when(v){true->Verdict.PASS;false->Verdict.FAIL;null->Verdict.UNKNOWN}
-                                val sampled=Sample(chain.id,epoch,elapsed(),if(p.works && p.bigOk==true)Verdict.PASS else Verdict.FAIL,
-                                    status(p.tgOk),status(p.ytOk),p.bigOk==true,p.bodyBytes,p.bodyMs,p.realMs.toLong(),country,youtubeKbps=p.ytKbps)
+                                val sampled=Sample(chain.id,epoch,elapsed(),if(p.works && p.bigOk==true && AutoCheckProfile.of(s.autoChecks).accepts(p,s.autoLatencyMaxMs))Verdict.PASS else Verdict.FAIL,
+                                    if(AutoCheckProfile.of(s.autoChecks).telegram) status(p.tgOk) else Verdict.PASS,if(AutoCheckProfile.of(s.autoChecks).youtube) status(p.ytOk) else Verdict.PASS,p.bigOk==true,p.bodyBytes,p.bodyMs,p.realMs.toLong(),country,youtubeKbps=p.ytKbps)
                                 samples[chain.id]=sampled
                                 return sampled
                             }

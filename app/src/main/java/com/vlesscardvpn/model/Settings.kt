@@ -18,6 +18,7 @@ data class Settings(
     val mode: Mode = Mode.AUTO,
     val balance: Balance = Balance.LEAST_PING,
     val socksPort: Int = 10808,
+    val autoChecks: Set<String> = com.vlesscardvpn.core.AutoCheckProfile.defaults,
     val autoLatencyMinMs: Int = 1,
     val autoLatencyMaxMs: Int = 1000,
     val ruDirect: Boolean = false,
@@ -178,6 +179,7 @@ data class Settings(
 ) {
     val httpPort: Int get() = if (socksPort < 65535) socksPort + 1 else socksPort - 1
     fun toJson(): JSONObject = JSONObject().put("mode", mode.name).put("balance", balance.name).put("socksPort", socksPort)
+        .put("autoChecks", JSONArray(autoChecks.sorted()))
         .put("autoLatencyMinMs", autoLatencyMinMs).put("autoLatencyMaxMs", autoLatencyMaxMs)
         .put("ruAllDirect", ruAllDirect).put("ruWhitelist", ruWhitelist).put("ruDirect", ruDirect).put("blockAds", blockAds).put("blockTrackers", blockTrackers).put("byeDpiArgs", byeDpiArgs).put("byeDpiSni", byeDpiSni)
         .put("hybridDomains", JSONArray(hybridDomains)).put("testUrl", testUrl).put("dnsUrl", dnsUrl).put("dnsAuto", dnsAuto)
@@ -243,6 +245,9 @@ data class Settings(
                 mode = runCatching { Mode.valueOf(o.getString("mode")) }.getOrDefault(d.mode),
                 balance = runCatching { Balance.valueOf(o.getString("balance")) }.getOrDefault(d.balance),
                 socksPort = o.optInt("socksPort", d.socksPort).takeIf { it in 1024..65535 } ?: d.socksPort,
+                autoChecks = if(o.has("autoChecks")) com.vlesscardvpn.core.AutoCheckProfile.of(
+                    o.optJSONArray("autoChecks")?.let {a->(0 until a.length()).map {a.optString(it)}}.orEmpty()).selected
+                    else com.vlesscardvpn.core.AutoCheckProfile.defaults,
                 autoLatencyMinMs = com.vlesscardvpn.core.AutoLatencyRange.safe(o.optInt("autoLatencyMinMs", 1), o.optInt("autoLatencyMaxMs", 1000)).min,
                 autoLatencyMaxMs = com.vlesscardvpn.core.AutoLatencyRange.safe(o.optInt("autoLatencyMinMs", 1), o.optInt("autoLatencyMaxMs", 1000)).max,
                 ruAllDirect = o.optBoolean("ruAllDirect", d.ruAllDirect), ruWhitelist = o.optBoolean("ruWhitelist", d.ruWhitelist), ruDirect = o.optBoolean("ruDirect", d.ruDirect), blockAds = o.optBoolean("blockAds", d.blockAds), blockTrackers = o.optBoolean("blockTrackers", d.blockTrackers),

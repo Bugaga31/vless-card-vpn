@@ -21,7 +21,7 @@ import java.net.ServerSocket
 import java.net.Socket
 import java.util.concurrent.TimeUnit
 
-data class Probe(val realMs: Int, val bigOk: Boolean?, val ytOk: Boolean?, val error: String = "", val tgOk: Boolean? = null, val kbps: Int = 0, val ytKbps: Int = 0, val bodyBytes: Long = 0, val bodyMs: Long = 0, val callsOk: Boolean? = null, val tgMs: Int = 0) {
+data class Probe(val realMs: Int, val bigOk: Boolean?, val ytOk: Boolean?, val error: String = "", val tgOk: Boolean? = null, val kbps: Int = 0, val ytKbps: Int = 0, val bodyBytes: Long = 0, val bodyMs: Long = 0, val callsOk: Boolean? = null, val tgMs: Int = 0, val discordOk:Boolean?=null, val stableOk:Boolean?=null, val autoChecksKey:String="") {
     val works: Boolean get() = realMs > 0 && bigOk != false
 }
 
@@ -149,7 +149,7 @@ object Tester {
     }
 
     /** Requests through a local SOCKS port (the tester's or the running VPN's). */
-    fun probeSocks(port: Int, testUrl: String, big: Boolean = true, youtube: Boolean = true, telegram: Boolean = youtube, attempts: Int = 2, budgetMs: Long = 0, onCall: ((okhttp3.Call) -> Unit)? = null, calls: Boolean = false, user: String = "", pass: String = "", onCancel: ((() -> Unit) -> Unit)? = null): Probe {
+    fun probeSocks(port: Int, testUrl: String, big: Boolean = true, youtube: Boolean = true, telegram: Boolean = youtube, attempts: Int = 2, budgetMs: Long = 0, onCall: ((okhttp3.Call) -> Unit)? = null, calls: Boolean = false, user: String = "", pass: String = "", onCancel: ((() -> Unit) -> Unit)? = null, autoChecks:AutoCheckProfile?=null): Probe {
         val budgetDeadline = if (budgetMs > 0) System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(budgetMs.coerceAtMost(60000)) else Long.MAX_VALUE
         fun boundedCall(client: OkHttpClient, request: Request): okhttp3.Call = client.newCall(request).also { call ->
             if (budgetDeadline != Long.MAX_VALUE) call.timeout().timeout(TimeUnit.NANOSECONDS.toMillis((budgetDeadline-System.nanoTime()).coerceAtLeast(1)).coerceAtLeast(1),TimeUnit.MILLISECONDS)
@@ -163,7 +163,7 @@ object Tester {
         val tasks = mutableListOf<java.util.concurrent.Future<*>>()
         try {
             // Independent service evidence starts with HTTPS, not after it. The same route/SOCKS only.
-            val tgF = if (telegram) telegramPool.submit<TelegramProbe.Result> {
+            val tgF = if (autoChecks?.telegram ?: telegram) telegramPool.submit<TelegramProbe.Result> {
                 val left=if(budgetDeadline==Long.MAX_VALUE) 3000L else
                     TimeUnit.NANOSECONDS.toMillis((budgetDeadline-System.nanoTime()).coerceAtLeast(1)).coerceAtLeast(1)
                 TelegramProbe.measure(port,minOf(maxOf(3000L,AutoLatencyPolicy.MAX_MS.toLong()+100L),left),onCancel)
@@ -184,17 +184,42 @@ object Tester {
             val deadline = if (budgetDeadline == Long.MAX_VALUE) System.nanoTime() + TimeUnit.SECONDS.toNanos(40) else budgetDeadline
             fun remaining() = TimeUnit.NANOSECONDS.toMillis((deadline - System.nanoTime()).coerceAtLeast(1)).coerceAtLeast(1)
             val bigF = if (big) pool.submit<BodyResult> { bigDownload(client,budgetDeadline,onCall) }.also { tasks += it } else null
-            val ytF = if (youtube) pool.submit<YouTubeMediaProbe.Result> {
+            val ytF = if (autoChecks?.youtube ?: youtube) pool.submit<YouTubeMediaProbe.Result> {
                 YouTubeMediaProbe.check { boundedCall(mediaClient, it) }
             }.also { tasks += it } else null
-            val callF = if (calls) pool.submit<Boolean?> {
-                UdpCallProbe.probe(port, user, pass, minOf(1800L, remaining()).toInt(), onCancel)
+            val callF = if (autoChecks?.voice ?: calls) pool.submit<Boolean?> {
+                if(autoChecks?.voice==true) {
+                    val t=UdpCallProbe.train(port,user,pass,minOf(4000L,remaining()).toInt(),CallTransportPolicy.PACKETS,onCancel)
+                    CallTransportPolicy.assess(t.sent,t.rttMs,t.complete,AutoLatencyPolicy.MAX_MS).grade.let {grade->
+                        if(grade==CallTransportPolicy.Grade.UNKNOWN) null else grade==CallTransportPolicy.Grade.PASS
+                    }
+                } else UdpCallProbe.probe(port, user, pass, minOf(1800L, remaining()).toInt(), onCancel)
             }.also { tasks += it } else null
+            val discordF = if(autoChecks?.discord==true) pool.submit<Boolean?> {
+                runCatching { boundedCall(client,Request.Builder().url("https://discord.com/api/v10/gateway").build()).execute().use {r->
+                    r.code==200 && r.body?.byteStream()?.use {input-> val bytes=ByteArray(8193); var n=0; while(n<bytes.size) {val x=input.read(bytes,n,bytes.size-n);if(x<0) break;n+=x}; if(n>8192) null else String(bytes,0,n,Charsets.UTF_8)}?.let {body->
+                        val url=org.json.JSONObject(body).optString("url")
+                        url=="wss://gateway.discord.gg" || url=="wss://gateway.discord.gg/"
+                    }==true
+                }}.getOrDefault(false)
+            }.also {tasks+=it} else null
             val tgResult = ProbeTasks.await(tgF, remaining(), TelegramProbe.Result(null,0))
+            val stabilityF = if(autoChecks?.stability==true) telegramPool.submit<Boolean?> {
+                val samples=mutableListOf(LinkStabilityPolicy.Sample(tgResult.ok,tgResult.ms))
+                repeat(2) {
+                    if(remaining()<50) return@submit null
+                    val x=TelegramProbe.measure(port,minOf(2000L,remaining()),onCancel)
+                    samples+=LinkStabilityPolicy.Sample(x.ok,x.ms)
+                }
+                LinkStabilityPolicy.summarize(samples,AutoLatencyPolicy.MAX_MS).stable
+            }.also {tasks+=it} else null
             val bigResult = ProbeTasks.await(bigF, remaining(), BodyResult())
             val ytResult = ProbeTasks.await(ytF, remaining(), YouTubeMediaProbe.Result(null))
             val callsOk = if (callF != null) ProbeTasks.await(callF, remaining(), null) else null
-            return Probe(best.toInt().coerceAtLeast(1), if (bigF != null) bigResult.ok else null, ytResult.ok, tgOk = tgResult.ok, tgMs = if(tgResult.ok==true) tgResult.ms else 0, kbps = bigResult.kbps, ytKbps = ytResult.kbps, bodyBytes = bigResult.bytes, bodyMs = bigResult.ms, callsOk = callsOk)
+            val discordOk=ProbeTasks.await(discordF,remaining(),null)
+            val stableOk=ProbeTasks.await(stabilityF,remaining(),null)
+            val result=Probe(best.toInt().coerceAtLeast(1), if (bigF != null) bigResult.ok else null, ytResult.ok, tgOk = tgResult.ok, tgMs = if(tgResult.ok==true) tgResult.ms else 0, kbps = bigResult.kbps, ytKbps = ytResult.kbps, bodyBytes = bigResult.bytes, bodyMs = bigResult.ms, callsOk = callsOk, discordOk=discordOk,stableOk=stableOk)
+            return if(autoChecks!=null) result.copy(autoChecksKey=AutoChecks.stamp(result,autoChecks,AutoLatencyPolicy.MAX_MS)) else result
         } finally {
             ProbeTasks.cancel(tasks)
             // Private dispatcher/pool: cancellation cannot cancel another probe or the live VPN's HTTP calls.
@@ -380,17 +405,17 @@ object Tester {
         variants: List<Pair<Server, Mask?>>, testUrl: String, byeDpiPort: Int?, dpiPorts: Map<String, Int> = emptyMap(), youtube: Boolean = true,
         batch: Int = 32, parallel: Int = 12, attempts: Int = 2, big: Boolean = true, telegram: Boolean = youtube, calls: Boolean = false, foreground: Boolean = false,
         /** Early stop: variants for which this returns true are not probed (reported as skipped). */
-        requireTelegram: Boolean = false, skip: (Int) -> Boolean = { false },
+        requireTelegram: Boolean = false, autoChecks:AutoCheckProfile?=null, skip: (Int) -> Boolean = { false },
         stopAfter: Int = Int.MAX_VALUE,
         budgetMs: Long = 0,
         onStarted: ((Int) -> Unit)? = null,
         onEach: (Int, Probe) -> Unit,
     ) = withContext(Bg.io) {
         run {
-            val serviceBudget = StrictProbeBudget.budget(budgetMs, foreground, requireTelegram, big, youtube, calls, attempts)
+            val serviceBudget = if(autoChecks!=null) maxOf(budgetMs,6500L) else StrictProbeBudget.budget(budgetMs, foreground, requireTelegram, big, youtube, calls, attempts)
             val successes = java.util.concurrent.atomic.AtomicInteger()
             fun skipped(i: Int) = successes.get() >= stopAfter.coerceAtLeast(1) || skip(i) || (variants[i].first.protocol == "wireguard" && variants[i].first.secret in Tunnel.wireguardKeys)
-            fun accepted(p: Probe) = p.works && (!requireTelegram || AutoLatencyPolicy.accepts(p))
+            fun accepted(p: Probe) = if(autoChecks!=null) autoChecks.accepts(p,AutoLatencyPolicy.MAX_MS) else p.works && (!requireTelegram || AutoLatencyPolicy.accepts(p))
             fun report(i: Int, p: Probe) { if (accepted(p)) successes.incrementAndGet(); onEach(i, p) }
             // Bound config/socket footprint too, not merely simultaneous HTTP calls.
             val plan = PhonePower.state.value
@@ -415,7 +440,7 @@ object Tester {
                         val one = XrayCore.Instance("test1")
                         val p = freePorts(1)
                         val ok = runCatching { one.start(XrayConfigBuilder.testConfig(listOf(v), p, byeDpiPort, dpiPorts)) }.isSuccess && one.running
-                        try { report(idx[i], if (ok) CancellableProbe.run { bind -> probeSocks(p[0], testUrl, big = big, youtube = youtube, telegram = telegram, attempts = attempts, budgetMs = serviceBudget, onCall = { call -> bind { call.cancel() } }, calls = calls, onCancel = bind) } else Probe(0, null, null, "конфиг не принят ядром")) }
+                        try { report(idx[i], if (ok) CancellableProbe.run { bind -> probeSocks(p[0], testUrl, big = big, youtube = youtube, telegram = telegram, attempts = attempts, budgetMs = serviceBudget, onCall = { call -> bind { call.cancel() } }, calls = calls, onCancel = bind, autoChecks=autoChecks) } else Probe(0, null, null, "конфиг не принят ядром")) }
                         finally { one.stop() }
                     }
                     return@withPermit
@@ -425,7 +450,7 @@ object Tester {
                         ProbeRace.run(chunk.indices.toList(), PowerPolicy.cap(parallel, probeLimit), stopAfter,
                             skip = { i -> skipped(idx[i]) }, staggerMs = ForegroundProbePlan.staggerMs(foreground,stopAfter),
                             probe = { i -> onStarted?.invoke(idx[i]); CancellableProbe.run { bind -> probeSocks(ports[i], testUrl, big = big, youtube = youtube, telegram = telegram,
-                                attempts = attempts, budgetMs = serviceBudget, onCall = { call -> bind { call.cancel() } }, calls = calls, onCancel = bind) } },
+                                attempts = attempts, budgetMs = serviceBudget, onCall = { call -> bind { call.cancel() } }, calls = calls, onCancel = bind, autoChecks=autoChecks) } },
                             accepted = { accepted(it) }, onEach = { i, p -> report(idx[i], p) })
                     }
                 } finally { core.stop() }

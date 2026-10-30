@@ -21,7 +21,7 @@ class AutoLatencyR185Test {
         assertFalse(AutoLatencyPolicy.accepts(sample().copy(bigOk=false)))
     }
     @Test fun noHistoricalServiceSuccessWithoutTimingIsEligible() {
-        val s=ServerState(realMs=100,tgOk=true,serviceNetwork="wifi",serviceMask="",serviceCheckedAt=1000)
+        val s=ServerState(autoChecksKey=AutoChecks.key(AutoChecks.current,AutoLatencyPolicy.MAX_MS),autoChecksAt=1000,realMs=100,tgOk=true,serviceNetwork="wifi",serviceMask="",serviceCheckedAt=1000)
         assertTrue(AutoEligibility.servicePool(listOf(s),{it},"wifi",1001).isEmpty())
         assertEquals(listOf(s.copy(tgMs=500)),AutoEligibility.servicePool(listOf(s.copy(tgMs=500)),{it},"wifi",1001))
     }
