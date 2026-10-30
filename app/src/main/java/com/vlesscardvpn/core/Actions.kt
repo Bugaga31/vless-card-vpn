@@ -391,10 +391,12 @@ object Actions {
                                  batch: Int = 64, foreground: Boolean = false, onAttempt: ((Server)->Unit)? = null, onObservation: ((Probe)->Unit)? = null): Int {
         if (servers.isEmpty()) return 0
         val plan = PhonePower.refresh(app)
-        val slots = PowerPolicy.cap(parallel, if (foreground) plan.foregroundRealParallel else plan.realParallel).coerceAtMost(servers.size)
+        val selectedParallel=ProbeConcurrencyPolicy.normalize(Store.state.value.settings.probeParallel)
+        val slots = ProbeConcurrencyPolicy.limit(parallel,selectedParallel,plan,foreground).coerceAtMost(servers.size)
         progress.value = progress.value.copy(title = title, done = 0, total = servers.size,
             message = if (foreground) "HTTPS: ${servers.size} в волне · одновременно до $slots" +
-                (if (slots < minOf(parallel, servers.size)) " · ${plan.reason}" else "") else progress.value.message)
+                " · выбранный лимит $selectedParallel" +
+                (if (slots < minOf(parallel,selectedParallel,servers.size)) " · ${plan.reason}" else "") else progress.value.message)
         val observed = Net.observation(app) ?: return 0
         val net = observed.profile
         val pinned = pinCertificates(servers)
@@ -419,7 +421,7 @@ object Actions {
                 val s = variants[i].first
                 if(Store.state.value.state(s).maskFor(net)!=st.state(s).maskFor(net)) return@real
                 onObservation?.invoke(p)
-                val speedSample = ServerChoice.acceptsSpeedSample(p.kbps, parallel)
+                val speedSample = ServerChoice.acceptsSpeedSample(p.kbps, slots)
                 if (telegram && p.works) TelegramRouteMemory.record(net,s.id,st.state(s).maskFor(net),p.tgOk,System.currentTimeMillis())
                 val routeReady = p.works && (st.settings.mode != Mode.AUTO ||
                     (profile?.accepts(p,profileLimit) ?: (!telegram || AutoChecks.accepts(p))) && !RouteStabilityMemory.session.cooling(net,s.id,st.state(s).maskFor(net),System.currentTimeMillis()))
@@ -1656,7 +1658,7 @@ object Actions {
         val fastOk = ForegroundProbePlan.run(shortlist, firstWaveOnly,
             valid = { Net.key(app) == net && Net.underlying(app)?.toString() == network }) { cohort ->
         realTest(cohort, "Авто: проверяю первый быстрый маршрут", big = ConnectPolicy.requiresBodyProof(earlyHandoff), youtube = false, telegram = st.settings.mode == Mode.AUTO,
-            attempts = 1, parallel = fast.parallel, foreground = firstWaveOnly, stopAfter = if (onFirst != null || firstWaveOnly) fast.stopAfter else Int.MAX_VALUE,
+            attempts = 1, parallel = if(firstWaveOnly) st.settings.probeParallel else fast.parallel, foreground = firstWaveOnly, stopAfter = if (onFirst != null || firstWaveOnly) fast.stopAfter else Int.MAX_VALUE,
             budgetMs = if (st.settings.mode == Mode.AUTO && firstWaveOnly) ConnectPolicy.FIRST_PROBE_MS else if (st.settings.mode == Mode.AUTO) 6500L else fast.budgetMs, onFirst = firstCallback, onSuccess = { passed.add(it.id) },
             onAttempt = {server->if(firstWaveOnly) attempted.add(server.id);statistics?.start()},
             onObservation = {p->statistics?.observe(p.works,p.realMs,p.tgOk,p.tgMs)})

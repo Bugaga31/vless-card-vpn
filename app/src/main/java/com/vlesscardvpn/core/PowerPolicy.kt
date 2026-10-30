@@ -13,8 +13,8 @@ object PowerPolicy {
     data class Memory(val low: Boolean = false, val hot: Boolean = false, val coolSince: Long = -1)
     data class Plan(val memory: Memory = Memory(), val allowed: Boolean = true,
         val reason: String = "Готов к фоновым улучшениям", val tcpParallel: Int = 96,
-        val realParallel: Int = 12, val loopMs: Long = 3000, val healthyMs: Long = 20000, val allowLight: Boolean = true, val deferTraffic: Boolean = false, val screenInteractive: Boolean = true, val voiceCallActive: Boolean = false,
-        val foregroundTcpParallel: Int = 8, val foregroundRealParallel: Int = 8, val allowReserve: Boolean = false)
+        val realParallel: Int = 10, val loopMs: Long = 3000, val healthyMs: Long = 20000, val allowLight: Boolean = true, val deferTraffic: Boolean = false, val screenInteractive: Boolean = true, val voiceCallActive: Boolean = false,
+        val foregroundTcpParallel: Int = 10, val foregroundRealParallel: Int = 10, val allowReserve: Boolean = false)
     fun evaluate(i: Input, o: Options, prev: Memory = Memory(), pauseUntil: Long = 0): Plan {
         val threshold = o.threshold.coerceIn(5, 50)
         val low = if (i.charging) false else if (i.battery !in 1..100) prev.low
@@ -48,7 +48,8 @@ object PowerPolicy {
         val activeProtected = i.voiceCall || o.protectTraffic && i.activeTraffic
         val pressure = hot || i.lowMemory || i.gaming || i.recentLag || i.saver || low || i.voiceCall || eco || (!i.screen && !chargeWork) || i.dataSaver || (o.wifiOnly && i.metered) || o.chargeOnly && !i.charging || activeProtected
         val tcp = if (hot || i.lowMemory || i.gaming || i.voiceCall) 2 else if (eco) 8 else if (pressure) 16 else if (o.profile == "fast") 128 else 64
-        val real = if (i.voiceCall) 1 else if (pressure) 2 else if (o.profile == "fast") 12 else 6
+        // Nominal capacity; ProbeConcurrencyPolicy applies the stored user ceiling (default 5).
+        val real = if (i.voiceCall) 1 else if (pressure) 2 else 10
         val allowLight = !eco && !hot && !i.lowMemory && !i.gaming && !i.recentLag && !i.saver && !low && !i.voiceCall && i.now >= pauseUntil && !(!i.screen && o.quietScreen && !chargeWork) && !i.dataSaver && !(o.wifiOnly && i.metered) && !(o.chargeOnly && !i.charging) && !(o.protectTraffic && i.activeTraffic)
         // Auto may maintain a tiny reserve in eco/saver, not run heavy speed downloads.
         // Explicit quiet-screen/data/Wi-Fi/charging/hold and safety restrictions still win.
@@ -60,7 +61,7 @@ object PowerPolicy {
             if (i.voiceCall || eco) 30000 else if (!i.screen && !chargeWork) 15000 else if (pressure) 5000 else 3000,
             if (i.voiceCall) 120000 else if (eco) 90000 else if (pressure) 45000 else 20000,
             allowLight, activeProtected, i.screen, i.voiceCall,
-            if (hot || i.lowMemory) 2 else if (!i.screen || i.saver || low || eco) 4 else 8, if (i.voiceCall) 1 else if (hot || i.lowMemory) 2 else if (!i.screen || i.saver || low || eco) 4 else 8, reserve)
+            if (hot || i.lowMemory) 2 else if (!i.screen || i.saver || low || eco) 4 else 10, if (i.voiceCall) 1 else if (hot || i.lowMemory) 2 else if (!i.screen || i.saver || low || eco) 4 else 10, reserve)
     }
     fun cap(requested: Int, limit: Int) = requested.coerceIn(1, limit.coerceAtLeast(1))
 }
