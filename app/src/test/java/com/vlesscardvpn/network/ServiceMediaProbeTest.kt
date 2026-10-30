@@ -28,6 +28,16 @@ class ServiceMediaProbeTest {
         override fun timeout() = Timeout()
         override fun clone(): Call = FakeCall(req, code, mime, body)
     }
+    @Test fun r216DiscoveryExplainsConsentCipherHttpAndFormatWithoutPassing() {
+        val missing=listOf("<html>consent</html>",html().replace("\"url\"","\"signatureCipher\""))
+        for(body in missing) {
+            val r=YouTubeMediaProbe.check {FakeCall(it,200,"text/html",body.toByteArray())}
+            assertNull(r.ok);assertEquals("YT_NO_DIRECT_MEDIA",r.reason)
+        }
+        assertEquals("YT_HTTP",YouTubeMediaProbe.discoverDetailed {FakeCall(it,429,"text/html",byteArrayOf())}.reason)
+        assertEquals("YT_FORMAT",YouTubeMediaProbe.discoverDetailed {FakeCall(it,200,"image/jpeg",byteArrayOf())}.reason)
+        assertEquals(url,YouTubeMediaProbe.discover {FakeCall(it,200,"text/html",html().toByteArray())})
+    }
     @Test fun playerResponseHandlesBracesAndEscapedQuotes() {
         assertEquals(url, YouTubeMediaProbe.mediaUrl(html("} \\\" {")))
         assertNull(YouTubeMediaProbe.playerJson("ytInitialPlayerResponse = {\"x\":{\"unfinished\":true}"))

@@ -543,7 +543,7 @@ class TunnelService : VpnService() {
             if (Tunnel.status.value.state != Tunnel.State.CONNECTED || core !== sampledCore ||
                 chainEpoch.get()!=sampledChainEpoch || Tunnel.socks!=auth ||
                 Net.key(this@TunnelService) != sampledNet || Net.underlying(this@TunnelService)?.toString() != sampledHandle) return@launch
-            val text = if(chainExitRejected) "Выход Tor не подтверждён или недопустим — возвращаюсь к проверенному Auto" else if (p.realMs > 0) "HTTPS · ${p.realMs} мс · Видео YouTube: ${if(p.ytOk==true) "✓" else if(p.ytOk==false) "нет ответа" else "не проверен"} · Telegram MTProto: ${if(p.tgOk==true) "${p.tgMs} мс" else if(p.tgOk==false) "нет ответа" else "не проверен"}$warp"
+            val text = if(chainExitRejected) "Выход Tor не подтверждён или недопустим — возвращаюсь к проверенному Auto" else if (p.realMs > 0) "HTTPS · ${p.realMs} мс · Видео YouTube: ${com.vlesscardvpn.core.ServiceProbeStatus.label(profile?.youtube ?: Tunnel.ytViaDpi,p.ytOk,p.serviceNotes["youtube"])} · Telegram MTProto: ${if(p.tgOk==true && (profile?.telegram ?: true)) "${p.tgMs} мс" else com.vlesscardvpn.core.ServiceProbeStatus.label(profile?.telegram ?: true,p.tgOk,p.serviceNotes["telegram"])}$warp"
                 else "Нет ответа через выбранный маршрут (${p.error}). " + if (st.mode == Mode.AUTO && st.autoHeal) "Ищу рабочий вариант сам…" else "Проверьте серверы или включите маскировку."
             // Module supervisor owns health aggregation; this service owns lifecycle/recovery.
             // Preserve the HTTPS measurement even if the separate DNS module fails.
