@@ -41,9 +41,9 @@ with tempfile.TemporaryDirectory(prefix='vless-local-fixture-') as directory:
             answer = fixture_dns_reply(data)
             if answer is not None:
                 sock.sendto(answer, self.client_address)
-    https = http.server.ThreadingHTTPServer(('127.0.0.1', 18443), Handler)
+    from fixture_https import ThreadedTLSHTTPServer
     tls = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER); tls.load_cert_chain(str(cert), str(key))
-    https.socket = tls.wrap_socket(https.socket, server_side=True)
+    https = ThreadedTLSHTTPServer(('127.0.0.1', 18443), Handler, tls)
     dns = socketserver.ThreadingUDPServer(('127.0.0.1', 15353), DNSHandler)
     config = {'log': {'level': 'info'}, 'inbounds': [
         {'type': 'vless', 'tag': 'fixture-vless', 'listen': '127.0.0.1', 'listen_port': 24443,
