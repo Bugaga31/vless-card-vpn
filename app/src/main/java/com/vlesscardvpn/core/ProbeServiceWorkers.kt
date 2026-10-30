@@ -13,7 +13,7 @@ class ProbeServiceWorkers:AutoCloseable {
 }
 object ProbeTaskNotes {
     fun label(code:String?)=when(code) {
-        "YT_NO_DIRECT_MEDIA", "YT_HTTP", "YT_FORMAT" -> ServiceProbeStatus.label(true,null,code)
+        "YT_NO_DIRECT_MEDIA", "YT_HTTP", "YT_FORMAT", "DISCORD_HTTP", "DISCORD_FORMAT" -> ServiceProbeStatus.label(true,null,code)
         "TIMEOUT"->"время проверки истекло"
         "CANCELLED"->"проверка отменена"
         "ERROR"->"внутренняя ошибка проверки"

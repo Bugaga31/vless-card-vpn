@@ -134,7 +134,11 @@ object YouTubeMediaProbe {
                 val ms = ((System.nanoTime() - start) / 1000000).coerceAtLeast(1)
                 Result(true, (total * 8L / ms).toInt().coerceAtLeast(1))
             }
-        } catch (_: Exception) { Result(if (Thread.currentThread().isInterrupted) null else false) }
+         } catch (_: java.io.InterruptedIOException) {
+            Result(null,reason=if(Thread.currentThread().isInterrupted) "CANCELLED" else "TIMEOUT")
+        } catch (_: Exception) {
+            Result(null,reason=if(Thread.currentThread().isInterrupted) "CANCELLED" else "ERROR")
+        }
     }
 
     fun check(call:(Request)->Call):Result {

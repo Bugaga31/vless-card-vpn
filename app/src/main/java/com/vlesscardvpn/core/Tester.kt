@@ -215,13 +215,8 @@ object Tester {
                     }
                 } else UdpCallProbe.probe(port, user, pass, minOf(1800L, remaining()).toInt(), onCancel)
             }.also { tasks += it } else null
-            val discordF = if(autoChecks?.discord==true) servicePool.submit<Boolean?> {
-                runCatching { boundedCall(client,Request.Builder().url("https://discord.com/api/v10/gateway").build()).execute().use {r->
-                    r.code==200 && r.body?.byteStream()?.use {input-> val bytes=ByteArray(8193); var n=0; while(n<bytes.size) {val x=input.read(bytes,n,bytes.size-n);if(x<0) break;n+=x}; if(n>8192) null else String(bytes,0,n,Charsets.UTF_8)}?.let {body->
-                        val url=org.json.JSONObject(body).optString("url")
-                        url=="wss://gateway.discord.gg" || url=="wss://gateway.discord.gg/"
-                    }==true
-                }}.getOrDefault(false)
+            val discordF = if(autoChecks?.discord==true) servicePool.submit<DiscordApiProbe.Result> {
+                DiscordApiProbe.check { boundedCall(client,it) }
             }.also {tasks+=it} else null
             val tgResult = await(tgF, remaining(), TelegramProbe.Result(null,0),"telegram") {it.ok!=null}
             val stabilityF = if(autoChecks?.stability==true) tgExecutor.submit<Boolean?> {
@@ -239,7 +234,10 @@ object Tester {
             if(ytF!=null && ytResult.ok==null && ytResult.reason.isNotBlank() && notes["youtube"]=="INCONCLUSIVE")
                 notes["youtube"]=ytResult.reason
             val callsOk = if (callF != null) await(callF, remaining(), null,"voice") {it!=null} else null
-            val discordOk=await(discordF,remaining(),null,"discord") {it!=null}
+            val discordResult=await(discordF,remaining(),DiscordApiProbe.Result(null),"discord") {it.ok!=null}
+            if(discordF!=null && discordResult.ok==null && discordResult.reason.isNotBlank() && notes["discord"]=="INCONCLUSIVE")
+                notes["discord"]=discordResult.reason
+            val discordOk=discordResult.ok
             val stableOk=await(stabilityF,remaining(),null,"stability") {it!=null}
             val result=Probe(best.toInt().coerceAtLeast(1), if (bigF != null) bigResult.ok else null, ytResult.ok, tgOk = tgResult.ok, tgMs = if(tgResult.ok==true) tgResult.ms else 0, kbps = bigResult.kbps, ytKbps = ytResult.kbps, bodyBytes = bigResult.bytes, bodyMs = bigResult.ms, callsOk = callsOk, discordOk=discordOk,stableOk=stableOk,serviceNotes=notes.toMap())
             val measured=if(autoChecks!=null) LatencyOnlyProbe.proof(result,autoChecks,relaxedStable.get(),relaxedCalls.get()) else result

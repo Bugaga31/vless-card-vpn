@@ -36,7 +36,7 @@ import com.vlesscardvpn.core.GpsMock
 import com.vlesscardvpn.core.Store
 import com.vlesscardvpn.core.Tunnel
 
-private val Bubble = Color(0xFF1F232C)
+private val Bubble: Color @Composable get() = MaterialTheme.colorScheme.surfaceVariant
 private val Glow: Brush @Composable get() = Brush.linearGradient(listOf(Color(0xFF6A5CFF), Accent, Color(0xFF2EC2B5)))
 
 /** «Помощник»: live panel (status, autopilot switches, what it did) + chat with action buttons. */
@@ -115,9 +115,9 @@ fun ChatScreen() {
                     }
                     Column(Modifier.widthIn(max = 300.dp), horizontalAlignment = if (m.mine) Alignment.End else Alignment.Start) {
                         Box(Modifier.clip(if (m.mine) RoundedCornerShape(18.dp, 18.dp, 4.dp, 18.dp) else RoundedCornerShape(4.dp, 18.dp, 18.dp, 18.dp))
-                            .background(if (m.mine) Brush.linearGradient(listOf(Accent, Color(0xFF6A5CFF))) else Brush.linearGradient(listOf(Bubble, Bubble)))
+                            .background(if (m.mine) Brush.linearGradient(listOf(MaterialTheme.colorScheme.primaryContainer, MaterialTheme.colorScheme.primaryContainer)) else Brush.linearGradient(listOf(Bubble, Bubble)))
                             .padding(horizontal = 12.dp, vertical = 9.dp)) {
-                            Text(m.text, fontSize = 14.sp, color = Color.White, lineHeight = 19.sp)
+                            Text(m.text, fontSize = 14.sp, color = if (m.mine) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant, lineHeight = 20.sp)
                         }
                         if (m.buttons.isNotEmpty()) FlowRow(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                             m.buttons.forEach { b ->
@@ -133,7 +133,7 @@ fun ChatScreen() {
                     Box(Modifier.size(28.dp).clip(CircleShape).background(Glow))
                     Spacer(Modifier.width(8.dp))
                     Column(Modifier.widthIn(max = 300.dp).clip(RoundedCornerShape(4.dp, 18.dp, 18.dp, 18.dp)).background(Bubble).padding(12.dp)) {
-                        Text(prog.title + if (prog.total > 0) " · ${prog.done}/${prog.total}" else "…", fontSize = 13.sp)
+                        Text(prog.title + if (prog.total > 0) " · ${prog.done}/${prog.total}" else "…", fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         Spacer(Modifier.height(6.dp))
                         if (prog.total > 0) LinearProgressIndicator(progress = { prog.done.toFloat() / prog.total }, modifier = Modifier.fillMaxWidth())
                         else LinearProgressIndicator(Modifier.fillMaxWidth())
@@ -162,7 +162,7 @@ fun ChatScreen() {
 
 @Composable
 private fun Tile(title: String, value: String, color: Color, modifier: Modifier) {
-    Column(modifier.clip(RoundedCornerShape(12.dp)).background(Color(0xFF12151B)).padding(horizontal = 10.dp, vertical = 8.dp)) {
+    Column(modifier.clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceVariant).padding(horizontal = 10.dp, vertical = 8.dp)) {
         Text(title, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Text(value, fontSize = 13.sp, color = color, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
