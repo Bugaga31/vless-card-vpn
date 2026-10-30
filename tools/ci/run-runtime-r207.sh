@@ -17,7 +17,7 @@ for pkg in com.google.android.apps.nexuslauncher com.android.launcher3; do
   adb shell am force-stop "$pkg" || true
   adb shell pm disable-user --user 0 "$pkg" || true
 done
-adb shell am instrument -w -r -e fixture_ca_b64 "$CA_B64" -e class com.vlesscardvpn.NativeAutoRuntimeR190Test,com.vlesscardvpn.DashboardUiR190Test,com.vlesscardvpn.FirstConnectRuntimeR190Test,com.vlesscardvpn.ProductRuntimeR190Test,com.vlesscardvpn.MaintenanceUiR190Test,com.vlesscardvpn.WarpRuntimeR191Test,com.vlesscardvpn.PowerRoutingRuntimeR192Test,com.vlesscardvpn.DiscoveryRuntimeR193Test,com.vlesscardvpn.ProductRuntimeR194Test,com.vlesscardvpn.NetworkRuntimeR195Test,com.vlesscardvpn.ExperienceRuntimeR196Test,com.vlesscardvpn.HandoffRuntimeR197Test,com.vlesscardvpn.ObservationRuntimeR198Test,com.vlesscardvpn.SubscriptionQueueRuntimeR199Test,com.vlesscardvpn.SearchPacingRuntimeR200Test,com.vlesscardvpn.HandoffLatencyRuntimeR201Test,com.vlesscardvpn.DiscoveryAdmissionRuntimeR202Test,com.vlesscardvpn.PoolLatencyRuntimeR203Test,com.vlesscardvpn.RuGeoRuntimeR204Test,com.vlesscardvpn.ReserveOptimizationRuntimeR205Test,com.vlesscardvpn.StabilityR206RuntimeTest,com.vlesscardvpn.CallQualityR206RuntimeTest,com.vlesscardvpn.RouteStabilityR206RuntimeTest,com.vlesscardvpn.RecoveryR207RuntimeTest,com.vlesscardvpn.RuWhitelistUiR192Test,com.vlesscardvpn.RuNativeConfigR192Test   com.vlesscardvpn.test/androidx.test.runner.AndroidJUnitRunner | tee runtime-results-r207.txt
+adb shell am instrument -w -r -e fixture_ca_b64 "$CA_B64" -e class com.vlesscardvpn.NativeAutoRuntimeR190Test,com.vlesscardvpn.DashboardUiR190Test,com.vlesscardvpn.FirstConnectRuntimeR190Test,com.vlesscardvpn.ProductRuntimeR190Test,com.vlesscardvpn.MaintenanceUiR190Test,com.vlesscardvpn.WarpRuntimeR191Test,com.vlesscardvpn.PowerRoutingRuntimeR192Test,com.vlesscardvpn.DiscoveryRuntimeR193Test,com.vlesscardvpn.ProductRuntimeR194Test,com.vlesscardvpn.NetworkRuntimeR195Test,com.vlesscardvpn.ExperienceRuntimeR196Test,com.vlesscardvpn.HandoffRuntimeR197Test,com.vlesscardvpn.ObservationRuntimeR198Test,com.vlesscardvpn.SubscriptionQueueRuntimeR199Test,com.vlesscardvpn.SearchPacingRuntimeR200Test,com.vlesscardvpn.HandoffLatencyRuntimeR201Test,com.vlesscardvpn.DiscoveryAdmissionRuntimeR202Test,com.vlesscardvpn.PoolLatencyRuntimeR203Test,com.vlesscardvpn.RuGeoRuntimeR204Test,com.vlesscardvpn.ReserveOptimizationRuntimeR205Test,com.vlesscardvpn.StabilityR206RuntimeTest,com.vlesscardvpn.CallQualityR206RuntimeTest,com.vlesscardvpn.RouteStabilityR206RuntimeTest,com.vlesscardvpn.RecoveryR207RuntimeTest,com.vlesscardvpn.RecoveryUiR207Test,com.vlesscardvpn.RuWhitelistUiR192Test,com.vlesscardvpn.RuNativeConfigR192Test   com.vlesscardvpn.test/androidx.test.runner.AndroidJUnitRunner | tee runtime-results-r207.txt
 CODE=${PIPESTATUS[0]}
 set -e
 export CODE
@@ -28,7 +28,7 @@ python3 - <<'CHECK'
 from pathlib import Path
 import json,re,os
 s=Path('runtime-results-r207.txt').read_text();m=re.search(r'OK \((\d+) tests?\)',s)
-passed=os.environ['CODE']=='0' and m is not None and int(m[1])==595 and not re.search(r'FAILURES!!!|INSTRUMENTATION_FAILED|Process crashed|INSTRUMENTATION_STATUS_CODE: -[1-4]|INSTRUMENTATION_STATUS_CODE: -[34]',s)
+passed=os.environ['CODE']=='0' and m is not None and int(m[1])==596 and not re.search(r'FAILURES!!!|INSTRUMENTATION_FAILED|Process crashed|INSTRUMENTATION_STATUS_CODE: -[1-4]|INSTRUMENTATION_STATUS_CODE: -[34]',s)
 Path('docs/validation').mkdir(parents=True,exist_ok=True)
 d={"source_sha":os.environ.get('VALIDATED_SOURCE_SHA',os.environ['GITHUB_SHA']),"run_id":os.environ['GITHUB_RUN_ID'],"passed":passed,"runtime_tests_executed":m is not None,"count":int(m[1]) if m else 0,"scope":"android33_native_vless_tls_not_full_app_tun_not_operator_dpi","result_tail":s[-7000:]}
 Path('docs/validation/r207-device.json').write_text(json.dumps(d,indent=2))
@@ -42,7 +42,7 @@ import json,hashlib,sys
 sys.path.insert(0,'tools/release-gates')
 from check_screenshot import check_png
 files=sorted(Path('docs/validation/r207-ui').glob('*.png'))
-assert len(files)==34, [str(f) for f in files]
+assert len(files)==39, [str(f) for f in files]
 for f in files:check_png(f.read_bytes())
 p=Path('docs/validation/r207-device.json');d=json.loads(p.read_text())
 d['ui_captures_executed']=True
