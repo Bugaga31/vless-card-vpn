@@ -391,7 +391,7 @@ object Actions {
 
     private suspend fun realTest(servers: List<Server>, title: String, big: Boolean = true, attempts: Int = 2, parallel: Int = 32, youtube: Boolean = true,
                                  telegram: Boolean = youtube, calls: Boolean = false, stopAfter: Int = Int.MAX_VALUE, budgetMs: Long = 0, onFirst: ((Server) -> Unit)? = null, onSuccess: ((Server) -> Unit)? = null,
-                                 batch: Int = 64, foreground: Boolean = false, onAttempt: ((Server)->Unit)? = null, onObservation: ((Probe)->Unit)? = null): Int {
+                                 batch: Int = 64, foreground: Boolean = false, onAttempt: ((Server)->Unit)? = null, onPrepared: ((Server)->Unit)? = null, onObservation: ((Probe)->Unit)? = null): Int {
         if (servers.isEmpty()) return 0
         val plan = PhonePower.refresh(app)
         val selectedParallel=ProbeConcurrencyPolicy.normalize(Store.state.value.settings.probeParallel)
@@ -404,6 +404,9 @@ object Actions {
         val net = observed.profile
         val pinned = pinCertificates(servers)
         if (!Net.matches(app,observed)) return 0
+        // Even an otherwise fully proven slow route may need consent. Pin identity must not
+        // depend on passing the configured latency gate; admission is checked separately.
+        pinned.forEach {if(it in Store.state.value.servers) onPrepared?.invoke(it)}
         val st = Store.state.value
         val profile=if(st.settings.mode==Mode.AUTO) AutoCheckProfile.of(st.settings.autoChecks) else null
         val profileLimit=AutoLatencyPolicy.MAX_MS
@@ -1222,7 +1225,9 @@ object Actions {
                 val torKey=com.vlesscardvpn.tor.TorFoundPolicy.key(snapshot.settings)
                 val path=Net.observation(app) ?: error("Нет доступной сети")
                 val profile=AutoChecks.current;val limit=AutoLatencyPolicy.MAX_MS;val url=snapshot.settings.testUrl
-                val shortlist=FoundConnectPolicy.shortlist(snapshot.servers,snapshot::state)
+                val freshIds=AutoEligibility.servicePool(snapshot.servers.filter{snapshot.state(it).works},
+                    snapshot::state,path.profile,System.currentTimeMillis()).mapTo(HashSet()){it.id}
+                val shortlist=FoundConnectPolicy.shortlist(snapshot.servers,snapshot::state){it.id in freshIds}
                 val candidates=runCatching {Roki.session.order(Roki.context(path.profile,profile,limit,url),shortlist,snapshot::state)}.getOrDefault(shortlist)
                 val found=FoundCandidateLedger(candidates)
                 fun valid()=autoGeneration.get()==ticket && Net.matches(app,path) &&
@@ -1245,14 +1250,14 @@ object Actions {
                     if(candidates.isEmpty()) error("В «Рабочих» нет подходящих для Авто серверов")
                     // Exactly the already-found shortlist; the selected gates remain mandatory.
                     realTest(candidates,"Авто: проверяю найденные",big=true,youtube=profile.youtube,
-                        telegram=profile.telegram,calls=profile.voice,foreground=true,attempts=1,stopAfter=1,onSuccess={found.verified(it)})
+                        telegram=profile.telegram,calls=profile.voice,foreground=true,attempts=1,stopAfter=1,onPrepared={found.prepared(it)},onSuccess={found.verified(it)})
                     kotlinx.coroutines.currentCoroutineContext().ensureActive()
                 }) {
                     FoundConnectSequence.Result.READY->return@launch
                     FoundConnectSequence.Result.STALE->error("Сеть или настройки изменились. Повторите подключение к найденным")
                     FoundConnectSequence.Result.NONE->Unit
                 }
-                SlowRouteConsent.remember(candidates,0)
+                SlowRouteConsent.remember(found.current(Store.state.value.servers),0)
                 val reason=if(SlowRouteConsent.offer.value!=null)
                     "Есть проверенный сервер выше предела. Нажмите «Подключиться к найденным» и подтвердите задержку."
                     else progress.value.message.ifBlank {"Выбранные сервисные проверки не пройдены. Можно продолжить общий поиск."}
