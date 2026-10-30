@@ -23,14 +23,15 @@ jobs:
         run: |
           set -euo pipefail
           base64 -d tools/patches/stability-r206.patch.gz.b64 | gzip -d > "$RUNNER_TEMP/stability-r206.patch"
-          echo 'a9af92fcf8db8eb5f85edf8810d0c6feb46f124919a9d5ef617375f5a0da8992  '"$RUNNER_TEMP/stability-r206.patch" | sha256sum -c -
+          echo 'd7a4d493fda6036c7f8aa6fc875ea604adacd5d41b6994781ab0f977eddc1662  '"$RUNNER_TEMP/stability-r206.patch" | sha256sum -c -
           git fetch --quiet --no-tags origin fa5d2df0048938008e1cd18417858776e99d635b
           git restore --source fa5d2df0048938008e1cd18417858776e99d635b -- app/src/main app/src/test app/build.gradle.kts
+          rm -f docs/research/r206-call-stability.md
           git apply --check "$RUNNER_TEMP/stability-r206.patch"
           git apply "$RUNNER_TEMP/stability-r206.patch"
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add app
+          git add app docs/research/r206-call-stability.md
           if ! git diff --cached --quiet; then
             git commit -m 'fix(auto): apply latency stability policy [skip ci]'
             AUTH=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
@@ -108,3 +109,13 @@ jobs:
       - name: Require passing checks
         if: always()
         run: python3 -c 'import json; d=json.load(open("docs/validation/r206-jvm.json")); assert all(v=="success" for v in d["steps"].values()), d["steps"]; assert not d["failures"] and not d["lint_errors"] and len(d["suites"])>=260; target=[s for s in d["suites"] if s["name"]=="com.vlesscardvpn.StabilityR206Test"]; assert len(target)==2 and all(int(s["tests"])==34 and int(s["failures"])==0 and int(s["errors"])==0 and int(s["skipped"])==0 for s in target), target'
+
+      - name: Require voice and route stability regressions
+        run: |
+          python3 - <<'PYTEST'
+          import json
+          d=json.load(open("docs/validation/r206-jvm.json"))
+          for name,count in {"com.vlesscardvpn.CallQualityR206Test":25,"com.vlesscardvpn.RouteStabilityR206Test":18}.items():
+              suites=[s for s in d["suites"] if s["name"]==name]
+              assert len(suites)==2 and all(int(s["tests"])==count and int(s["failures"])==0 and int(s["errors"])==0 and int(s["skipped"])==0 for s in suites),suites
+          PYTEST
