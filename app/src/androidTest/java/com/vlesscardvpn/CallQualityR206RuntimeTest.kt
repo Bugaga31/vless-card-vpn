@@ -29,8 +29,8 @@ class CallQualityR206RuntimeTest {
  @Test fun malformedGatewayUnknown(){assertNull(DiscordGatewayProbe.opcode("bad"));assertNull(DiscordGatewayProbe.opcode("{}"))}
  @Test fun oversizedGatewayUnknown(){assertNull(DiscordGatewayProbe.opcode(" ".repeat(17000)))}
  private class Relay(val dropEvery:Int=0,val duplicate:Boolean=false):AutoCloseable {
-  val tcp=ServerSocket(0,1,InetAddress.getLoopbackAddress())
-  val udp=DatagramSocket(0,InetAddress.getLoopbackAddress())
+  val tcp=ServerSocket(0,1,InetAddress.getByName("127.0.0.1"))
+  val udp=DatagramSocket(0,InetAddress.getByName("127.0.0.1"))
   @Volatile var control:Socket?=null
   @Volatile var count=0
   val worker=Thread {

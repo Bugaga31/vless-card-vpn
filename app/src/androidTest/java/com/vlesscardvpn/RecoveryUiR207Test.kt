@@ -21,6 +21,7 @@ class RecoveryUiR207Test {
  private fun shell(s:String) {android.os.ParcelFileDescriptor.AutoCloseInputStream(ins.uiAutomation.executeShellCommand(s)).use {it.readBytes()}}
  private fun labels(n:AccessibilityNodeInfo?):List<String> = if(n==null) emptyList() else listOfNotNull(n.text?.toString(),n.contentDescription?.toString())+(0 until n.childCount).flatMap {labels(n.getChild(it))}
  private fun show(name:String,light:Boolean=false,large:Boolean=false,health:Boolean=false,bad:Boolean=false) {
+  val originalSettings=Store.state.value.settings
   if(large) {shell("wm size 720x1600");shell("wm density 360");shell("settings put system font_scale 1.5")}
   Store.update {it.copy(settings=it.settings.copy(secureScreen=false,welcomeSound=false,reducedMotion=true,oceanBackground=false,autoLatencyMinMs=100,autoLatencyMaxMs=800))}
   TelegramStability.clear()
@@ -46,7 +47,7 @@ class RecoveryUiR207Test {
     val image=ins.uiAutomation.takeScreenshot() ?: error("No rendered image")
     File(root,"$name.png").outputStream().use {assertTrue(image.compress(Bitmap.CompressFormat.PNG,100,it))};image.recycle()
    }
-  } finally {TelegramStability.clear();shell("settings put system font_scale 1.0");shell("wm size reset");shell("wm density reset")}
+  } finally {Store.update {it.copy(settings=originalSettings)};TelegramStability.clear();shell("settings put system font_scale 1.0");shell("wm size reset");shell("wm density reset")}
  }
  @Test fun captureNewLatencyAndStabilityControls() {
   show("latency-dark");show("latency-light",light=true);show("latency-large",large=true)
