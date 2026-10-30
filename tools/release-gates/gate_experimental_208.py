@@ -22,7 +22,7 @@ for attempt in range(120):
   for name,count in {"StabilityR206Test":34,"CallQualityR206Test":25,"RouteStabilityR206Test":18}.items():
    suites=[s for s in j['suites'] if s['name']=='com.vlesscardvpn.'+name]
    assert len(suites)==2 and all(int(s['tests'])==count and int(s['skipped'])==0 for s in suites),name
-  for name,count in {"com.vlesscardvpn.core.ModuleEvidenceR208Test":10,"com.vlesscardvpn.tor.MandatoryBridgesR208Test":12}.items():
+  for name,count in {"com.vlesscardvpn.core.ModuleEvidenceR208Test":10,"com.vlesscardvpn.tor.MandatoryBridgesR208Test":14}.items():
    suites=[s for s in j['suites'] if s['name']==name]
    assert len(suites)==2 and all(int(x['tests'])==count and int(x['skipped'])==0 for x in suites),name
   paths=[s['path'] for s in j['suites']]
@@ -30,7 +30,7 @@ for attempt in range(120):
   assert any('app/build/test-results/testReleaseUnitTest/' in p for p in paths)
   assert any('vpn-test-probe/build/test-results/' in p for p in paths)
   assert all(int(s.get('failures') or 0)==0 and int(s.get('errors') or 0)==0 for s in j['suites'])
-  assert d['passed'] is True and d['runtime_tests_executed'] is True and d['count']==619
+  assert d['passed'] is True and d['runtime_tests_executed'] is True and d['count']==621
   assert d.get('ui_captures_executed') is True and len(d.get('screenshots',[]))==44, 'UI captures missing'
   review=load('integration/telegram-evidence-r208','r208-ui-review')
   assert review.get('passed') is True and review.get('source_sha')==d['source_sha'], 'Visual review missing or wrong source'

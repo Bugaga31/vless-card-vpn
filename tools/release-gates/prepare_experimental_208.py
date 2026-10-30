@@ -27,7 +27,7 @@ def prepare(root, sha, run_id, docs):
         "functional_checks": {
             "unit_tests": "passed_debug_and_release_matching_sources",
             "lint": "passed_debug",
-            "emulator": "passed_619_scoped_native_health_ui_tests_not_full_TUN",
+            "emulator": "passed_621_scoped_native_health_ui_tests_not_full_TUN",
             "physical_device": "not_run",
         },
         "apks": [],
@@ -47,7 +47,7 @@ def prepare(root, sha, run_id, docs):
         require("networkSecurityConfig" not in manifest, "Unexpected release network security override")
         with zipfile.ZipFile(apk) as archive:
             require(archive.testzip() is None, "Corrupt APK archive")
-            for name, want in {"geoip":"5f0ebc505ad5a5b219f9c053ce6228c837669364349a1a70c236192dd99a1c3d", "geoip6":"d6bc775efb8f970afacbb702ea0c80dbf9e2add32232afcfe3f376a972503b56"}.items():
+            for name, want in {"geoip":"5f0ebc505ad5a5b219f9c053ce6228c837669364349a1a70c236212dd99a1c3d", "geoip6":"d6bc775efb8f970afacbb702ea0c80dbf9e2add32232afcfe3f376a972503b56"}.items():
                 require(hashlib.sha256(archive.read("assets/"+name)).hexdigest()==want, "Tor GeoIP asset checksum mismatch: "+name)
             abi = "x86_64" if old_name == "VLESS-Card-Beta.apk" else "arm64-v8a"
             for library in ("libTor.so", "libLyrebird.so", "libgojni.so", "libhev-socks5-tunnel.so"):
@@ -66,7 +66,7 @@ def prepare(root, sha, run_id, docs):
     (root / "SHA256SUMS-Beta.txt").write_text("\n".join(sums) + "\n")
     notice = f"""# Experimental prerelease — gated scoped checks
 
-Executed JVM debug/release, lint, host regressions and 619 controlled Android native/DC/queue/cache/consent/UI tests passed before publication. Source inputs were matched to their reports; physical-device, full TUN and operator DPI checks were NOT performed. See attached scoped validation reports.
+Executed JVM debug/release, lint, host regressions and 621 controlled Android native/DC/queue/cache/consent/UI tests passed before publication. Source inputs were matched to their reports; physical-device, full TUN and operator DPI checks were NOT performed. See attached scoped validation reports.
 
 Commit: `{sha}`  
 Build: https://github.com/Bugaga31/vless-card-vpn/actions/runs/{run_id}  

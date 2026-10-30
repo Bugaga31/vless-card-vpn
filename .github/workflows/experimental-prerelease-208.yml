@@ -12,11 +12,32 @@ concurrency:
 jobs:
   source:
     runs-on: ubuntu-latest
+    permissions: {contents: write}
     outputs:
       sha: ${{ steps.source.outputs.sha }}
     steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with: {persist-credentials: false}
       - id: source
-        run: echo "sha=$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+        env: {GH_TOKEN: '${{ github.token }}'}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = refs/heads/experiment/prerelease-208-release
+          base64 -d tools/patches/telegram-evidence-r208.patch.gz.b64 | gzip -d > "$RUNNER_TEMP/r208.patch"
+          echo '7f1357410dcfe2561243086ef0abc0c3aa2a859bdb89e623ee216d074a3b4705  '"$RUNNER_TEMP/r208.patch" | sha256sum -c -
+          git fetch --quiet --no-tags origin b14d3987d7cb9f4a59a4527413cae0e3fc97e6cc
+          git restore --source b14d3987d7cb9f4a59a4527413cae0e3fc97e6cc -- app/src/main app/src/test app/build.gradle.kts
+          git apply --check "$RUNNER_TEMP/r208.patch"
+          git apply "$RUNNER_TEMP/r208.patch"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app
+          if ! git diff --cached --quiet; then
+            git commit -m 'fix(tor): pin final guarded source for experimental 208 [skip ci]'
+            AUTH=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
+            git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $AUTH" push origin HEAD:refs/heads/experiment/prerelease-208-release
+          fi
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
   build:
     needs: source
     if: github.repository == 'Bugaga31/vless-card-vpn' && github.ref == 'refs/heads/experiment/prerelease-208-release'
