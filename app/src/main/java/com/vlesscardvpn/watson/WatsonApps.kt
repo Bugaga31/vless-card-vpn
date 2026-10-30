@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
+import android.content.pm.PackageInfo
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 
@@ -23,7 +24,7 @@ object WatsonApps {
                     PackageManager.GET_ACTIVITIES or PackageManager.GET_RECEIVERS or PackageManager.GET_PROVIDERS)
                 val requested=info.requestedPermissions?.toSet().orEmpty()
                 val granted=info.requestedPermissions.orEmpty().mapIndexedNotNull {i,p->
-                    if(((info.requestedPermissionsFlags?.getOrNull(i) ?: 0) and PackageManager.REQUESTED_PERMISSION_GRANTED)!=0) p else null}.toSet()
+                    if(((info.requestedPermissionsFlags?.getOrNull(i) ?: 0) and PackageInfo.REQUESTED_PERMISSION_GRANTED)!=0) p else null}.toSet()
                 val services=info.services.orEmpty()
                 WatsonApp(pkg,info.applicationInfo?.loadLabel(pm)?.toString()?.take(120) ?: pkg,requested,granted,
                     services.any{it.permission=="android.permission.BIND_ACCESSIBILITY_SERVICE"},
