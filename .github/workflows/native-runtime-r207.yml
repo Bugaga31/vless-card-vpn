@@ -1,4 +1,4 @@
-name: Native Auto attempt accounting and UI validation r207
+name: Native recovery, call transport and UI validation r207
 on:
   push:
     branches: ['integration/recovery-device-r207']
