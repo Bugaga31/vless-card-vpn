@@ -492,7 +492,9 @@ class TunnelService : VpnService() {
             val attributeServers = usedChain == null && com.vlesscardvpn.tor.TorRoutePolicy.canAttributeServerEvidence(sampledTorRoute)
             val sampledCore = core
             val sampledChainEpoch = chainEpoch.get()
-            val checkServices = st.mode == Mode.AUTO || Tunnel.ytViaDpi
+            val profile=if(st.mode==Mode.AUTO) com.vlesscardvpn.core.AutoCheckProfile.of(st.autoChecks) else null
+            val profileLimit=com.vlesscardvpn.core.AutoLatencyPolicy.MAX_MS
+            val checkServices = profile?.telegram ?: Tunnel.ytViaDpi
             if(sampledTorRoute && !torCircuitReady()) {
                 if(core !== sampledCore || Tunnel.socks!=auth || chainEpoch.get()!=sampledChainEpoch) return@launch
                 com.vlesscardvpn.core.ConnectionPassport.torPending()
@@ -505,15 +507,15 @@ class TunnelService : VpnService() {
                 watchdog() // Circuit readiness must be revisited even before the first full probe succeeds.
                 return@launch
             }
-            var p = Tester.probeSocks(port, st.testUrl, big = false, youtube = Tunnel.ytViaDpi, telegram = checkServices, attempts = 1, budgetMs = 5000)
+            var p = Tester.probeSocks(port, st.testUrl, big = false, youtube = Tunnel.ytViaDpi, telegram = checkServices, attempts = 1, budgetMs = 6500, autoChecks=profile)
             // right after connecting the first packets may still be on their way (WireGuard/WARP handshake, a slow
             // mobile network): one calm second try before calling the route bad and starting a heal or a reconnect
-            if (!p.works) { delay(3000); if (Tunnel.socks?.port == port) p = Tester.probeSocks(port, st.testUrl, big = false, youtube = Tunnel.ytViaDpi, telegram = checkServices, attempts = 1, budgetMs = 5000) }
+            if (!p.works) { delay(3000); if (Tunnel.socks?.port == port) p = Tester.probeSocks(port, st.testUrl, big = false, youtube = Tunnel.ytViaDpi, telegram = checkServices, attempts = 1, budgetMs = 6500, autoChecks=profile) }
             if (p.works && checkServices && p.tgOk == false) {
                 delay(1500)
                 if (core !== sampledCore || Tunnel.socks != auth || Net.key(this@TunnelService) != sampledNet ||
                     Net.underlying(this@TunnelService)?.toString() != sampledHandle) return@launch
-                p = Tester.probeSocks(port, st.testUrl, big = false, youtube = Tunnel.ytViaDpi, telegram = checkServices, attempts = 1, budgetMs = 6500L)
+                p = Tester.probeSocks(port, st.testUrl, big = false, youtube = Tunnel.ytViaDpi, telegram = checkServices, attempts = 1, budgetMs = 6500L, autoChecks=profile)
             }
             // A SOCKS HTTPS success uses remote name resolution and does not prove
             // Android apps' UDP DNS path. Never show a healthy VPN on that evidence alone.
@@ -544,9 +546,16 @@ class TunnelService : VpnService() {
             // Preserve the HTTPS measurement even if the separate DNS module fails.
             val moduleHealth=com.vlesscardvpn.health.LiveHealthCoordinator.assess(
                 measuredBeforeDns,if(st.proxyOnly || !httpsReachable) null else dnsOk,
-                requireDns=!st.proxyOnly,requireTelegram=st.mode==Mode.AUTO,requireYouTube=Tunnel.ytViaDpi,
+                requireDns=!st.proxyOnly,requireTelegram=profile?.telegram ?: false,requireYouTube=profile?.youtube ?: Tunnel.ytViaDpi,
                 strictLatency=st.mode==Mode.AUTO && usedChain==null && !usedTorRoute,blocked=chainExitRejected)
-            val liveHealthy=moduleHealth.ready
+            if(profile!=null && (com.vlesscardvpn.core.AutoChecks.current!=profile || com.vlesscardvpn.core.AutoLatencyPolicy.MAX_MS!=profileLimit)) return@launch
+            val selectedVerdict=profile?.verdict(measuredBeforeDns,profileLimit)
+            val liveHealthy=if(profile==null) moduleHealth.ready else when {
+                moduleHealth.ready==false || selectedVerdict==false -> false
+                moduleHealth.ready==null || selectedVerdict==null -> null
+                else -> true
+            }
+            if(profile!=null) com.vlesscardvpn.core.AutoCheckEvidence.publish(profile,profileLimit,measuredBeforeDns)
             com.vlesscardvpn.core.ConnectionPassport.full(httpsReachable, if(st.proxyOnly || !httpsReachable) null else dnsOk, p.tgOk, p.ytOk)
             com.vlesscardvpn.core.ConnectionPassport.fullModules(moduleHealth)
             Tunnel.status.value = cur.copy(check = text, checkOk = liveHealthy)
@@ -1000,7 +1009,7 @@ class TunnelService : VpnService() {
             while (Tunnel.status.value.state == Tunnel.State.CONNECTED) {
                 // wait 45 s (10 s offline), but check right away when the screen turns back on — that's when apps are opened
                 val watchSettings = Store.state.value.settings
-                val stabilityPending = watchSettings.mode == Mode.AUTO && usedChain==null && !usedTorRoute && !watchSettings.torAll &&
+                val stabilityPending = "stability" in watchSettings.autoChecks && watchSettings.mode == Mode.AUTO && usedChain==null && !usedTorRoute && !watchSettings.torAll &&
                     !(watchSettings.torRouting && "telegram" in watchSettings.services) &&
                     com.vlesscardvpn.core.TelegramStability.summary(android.os.SystemClock.elapsedRealtime()).attempted < 3
                 val period = if (offline) 10_000L else if (stabilityPending || telegramUnstable > 0 || miss > 0 || dnsMiss > 0 || telegramMiss > 0 || telegramSlow > 0 || servicePending && Store.state.value.settings.mode == Mode.AUTO && usedChain==null && !usedTorRoute) 3_000L else com.vlesscardvpn.core.VpnRecoveryPolicy.watchPeriod(com.vlesscardvpn.core.PhonePower.refresh(this@TunnelService).healthyMs, watchSettings.mode==Mode.AUTO)
@@ -1037,16 +1046,28 @@ class TunnelService : VpnService() {
                     continue
                 }
                 if(sampledTorRoute && Tunnel.status.value.checkOk!=true) verifySoon(0)
-                val checkTelegram = settings.mode == Mode.AUTO && !settings.torAll &&
+                val profile=if(settings.mode==Mode.AUTO) com.vlesscardvpn.core.AutoCheckProfile.of(settings.autoChecks) else null
+                val profileLimit=com.vlesscardvpn.core.AutoLatencyPolicy.MAX_MS
+                val checkTelegram = profile?.telegram==true && !settings.torAll &&
                     !(settings.torRouting && "telegram" in settings.services) && usedChain == null
                 val live = com.vlesscardvpn.core.CancellableProbe.run { bind ->
                     Tester.probeSocks(port, settings.testUrl, big = false, youtube = false, telegram = checkTelegram,
-                        attempts = 1, budgetMs = 6500L, onCall = { call -> bind { call.cancel() } }, onCancel = bind)
+                        attempts = 1, budgetMs = 6500L, onCall = { call -> bind { call.cancel() } }, onCancel = bind, autoChecks=profile)
                 }
                 if (core !== sampledCore || chainEpoch.get()!=sampledEpoch || usedTorRoute!=sampledTorRoute ||
                     Tunnel.socks != auth || Net.key(this@TunnelService) != network ||
                     Net.underlying(this@TunnelService)?.toString() != handle) { telegramMiss = 0; telegramSlow = 0; com.vlesscardvpn.core.TelegramStability.clear(); continue }
+                if(profile!=null && (com.vlesscardvpn.core.AutoChecks.current!=profile || com.vlesscardvpn.core.AutoLatencyPolicy.MAX_MS!=profileLimit)) continue
                 val ok = live.works
+                if(profile!=null) {
+                    com.vlesscardvpn.core.AutoCheckEvidence.publish(profile,profileLimit,live)
+                    if(profile.verdict(live,profileLimit)!=true) {
+                        val cur=Tunnel.status.value
+                        Tunnel.status.value=cur.copy(check="Не все выбранные проверки подтверждены. Смотрите результаты ниже.",checkOk=profile.verdict(live,profileLimit))
+                    }
+                    // Refresh the full module model as the selected profile can change on a live tunnel.
+                    verifySoon(0)
+                }
                 val qualityPlan=com.vlesscardvpn.core.PhonePower.refresh(this@TunnelService)
                 if(com.vlesscardvpn.core.RouteStabilityMemory.mayAttribute(checkTelegram,usedServers.size,qualityPlan) && (ok || Actions.online())) {
                     val server=usedServers.single()
@@ -1078,7 +1099,7 @@ class TunnelService : VpnService() {
                 if (ok && checkTelegram) {
                     telegramSlow = com.vlesscardvpn.core.AutoLatencyPolicy.slowStreak(telegramSlow,live)
                     val stability = com.vlesscardvpn.core.TelegramStability.summary(android.os.SystemClock.elapsedRealtime())
-                    telegramUnstable = if(stability.stable==false && live.tgOk==true) (telegramUnstable+1).coerceAtMost(3) else 0
+                    telegramUnstable = if(profile?.stability==true && stability.stable==false && live.tgOk==true) (telegramUnstable+1).coerceAtMost(3) else 0
                     if(telegramUnstable>=3 && !com.vlesscardvpn.core.SessionHold.active() &&
                         !com.vlesscardvpn.core.PhonePower.isVoiceCallActive(this@TunnelService)) {
                         optimizeSoon(); telegramUnstable=0 // Compare reserves; never tear down a call for probe variance alone.

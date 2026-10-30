@@ -35,12 +35,12 @@ fun ConnectionOverview(status:Tunnel.Status,hideRoute:Boolean,modeLabel:String,c
             control()
             Text(when {
                 (searching || on) && status.check.isNotBlank()->status.check
-                searching->"Проверяем HTTPS и Telegram. Ищем до подключения; отмена — кнопкой выше."
+                searching->"Проверяем: ${AutoChecks.label()}. Отмена — кнопкой выше."
                 status.state==Tunnel.State.ERROR->"Серверы и настройки сохранены. Повторите поиск или откройте диагностику."
                 on && status.checkOk==false->"Туннель подключён, но не все обязательные проверки прошли. Смотрите результаты ниже."
                 on && status.checkOk==null->"Туннель запущен. Доступность сервисов ещё проверяется."
                 on->"Локальные пробы подтвердили маршрут. Доступность аккаунтов и звонков проверяется отдельно."
-                else->"Ищем маршрут с ответом HTTPS и Telegram до ${AutoLatencyPolicy.MAX_MS} мс."
+                else->"Проверки: ${AutoChecks.label()}. Допуск ответа до ${AutoLatencyPolicy.MAX_MS} мс."
             },fontSize=15.sp,lineHeight=22.sp,color=MaterialTheme.colorScheme.onSurfaceVariant)
             if(status.message.isNotBlank()) Text(status.message,fontSize=14.sp,
                 color=if(status.state==Tunnel.State.ERROR) Bad else MaterialTheme.colorScheme.onSurfaceVariant)
@@ -55,6 +55,9 @@ fun ConnectionOverview(status:Tunnel.Status,hideRoute:Boolean,modeLabel:String,c
 @Composable
 fun ServiceHealthCard() {
     val frame by ConnectionPassport.modules.collectAsState()
+    val autoSettings by Store.settings.collectAsState()
+    val profile=AutoCheckProfile.of(autoSettings.autoChecks)
+    val selectedEvidence by AutoCheckEvidence.frame.collectAsState()
     val stabilityRevision by TelegramStability.revision.collectAsState()
     val owner=LocalLifecycleOwner.current
     var now by remember {mutableLongStateOf(android.os.SystemClock.elapsedRealtime())}
@@ -67,18 +70,33 @@ fun ServiceHealthCard() {
             Text("Проверки сервисов",fontSize=17.sp,fontWeight=FontWeight.SemiBold)
             listOf(HealthModule.HTTPS to "Интернет · HTTPS",HealthModule.DNS to "DNS через SOCKS",
                 HealthModule.TELEGRAM to "Telegram · ответ дата-центра",HealthModule.YOUTUBE to "YouTube · медиа").forEach {(module,title)->
-                val p=ConnectionPresentationPolicy.probe(frame?.assessment?.observations?.firstOrNull {it.module==module},frame?.sampledAt?.get(module),now)
+                val disabled=autoSettings.mode==com.vlesscardvpn.model.Mode.AUTO && (module==HealthModule.TELEGRAM && !profile.telegram || module==HealthModule.YOUTUBE && !profile.youtube)
+                val activeFrame=if(autoSettings.mode==com.vlesscardvpn.model.Mode.AUTO && (selectedEvidence?.profile!=profile || selectedEvidence?.limit!=autoSettings.autoLatencyMaxMs)) null else frame
+                val p=ConnectionPresentationPolicy.probe(activeFrame?.assessment?.observations?.firstOrNull {it.module==module},activeFrame?.sampledAt?.get(module),now)
                 val tone=when(p.status) {"PASS"->Good;"FAIL"->Bad;"SLOW"->Warn;else->MaterialTheme.colorScheme.onSurfaceVariant}
                 // A column, not a fixed-width badge row: survives narrow screens and large fonts.
                 Column(Modifier.fillMaxWidth().semantics(mergeDescendants=true){}) {
                     Text(title,fontSize=14.sp,fontWeight=FontWeight.Medium)
-                    Text(p.label+(p.latencyMs?.let {" · $it мс"} ?: ""),fontSize=14.sp,color=tone)
+                    Text((if(disabled) "Отключено в Авто" else p.label)+(p.latencyMs?.takeIf {!disabled}?.let {" · $it мс"} ?: ""),fontSize=14.sp,color=tone)
                 }
             }
-            val stability = remember(stabilityRevision,now) { TelegramStability.summary(now) }
-            Text("Telegram · стабильность",fontSize=14.sp,fontWeight=FontWeight.Medium)
-            Text(LinkStabilityPolicy.label(stability),fontSize=14.sp,
-                color=if(stability.stable==false) Warn else MaterialTheme.colorScheme.onSurfaceVariant)
+            val evidence=selectedEvidence?.takeIf {it.profile==profile && it.limit==autoSettings.autoLatencyMaxMs && now>=it.at && now-it.at<=90_000L}
+            if(autoSettings.mode==com.vlesscardvpn.model.Mode.AUTO) {
+                Text("Выбрано в Авто: ${AutoChecks.label(profile)}",fontSize=14.sp)
+                listOf("stability" to "Telegram · устойчивость серии", "voice" to "Звонки · UDP-транспорт", "discord" to "Discord · gateway").forEach {(id,title)->
+                    val value=when(id) {"stability"->evidence?.probe?.stableOk; "voice"->evidence?.probe?.callsOk; else->evidence?.probe?.discordOk}
+                    Text(title,fontSize=14.sp,fontWeight=FontWeight.Medium)
+                    Text(if(id !in profile.selected) "Отключено в Авто" else when(value) {true->"Локальная проверка пройдена";false->"Проверка не пройдена";null->"Не подтверждено / требуется свежая проба"},fontSize=14.sp,
+                        color=if(id in profile.selected && value==false) Warn else MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            } else {
+                val stability = remember(stabilityRevision,now) { TelegramStability.summary(now) }
+                Text("Telegram · стабильность",fontSize=14.sp,fontWeight=FontWeight.Medium)
+                Text(LinkStabilityPolicy.label(stability),fontSize=14.sp,
+                    color=if(stability.stable==false) Warn else MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Text("Настройки → Автоматический выбор → Что проверять в Авто",fontSize=12.sp)
+            Text("Discord gateway и короткий STUN-тест не подтверждают вход в аккаунт или реальный звонок. Tor не переносит UDP.",fontSize=12.sp)
             Text("Локальные пробы через SOCKS. Ответ дата-центра не подтверждает работу приложения Telegram, аккаунта, звонков или полного TUN-пути.",
                 fontSize=14.sp,lineHeight=20.sp,color=MaterialTheme.colorScheme.onSurfaceVariant)
         }

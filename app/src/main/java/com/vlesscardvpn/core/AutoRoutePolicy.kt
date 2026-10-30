@@ -44,7 +44,7 @@ object AutoRoutePolicy {
             }
 
     fun apply(current: ServerState, net: String, mask: String, now: Long, sample: Probe): ServerState = current.copy(
-        maskId = mask, netMasks = current.netMasks + (net to mask),
+        autoChecksKey=sample.autoChecksKey, maskId = mask, netMasks = current.netMasks + (net to mask),
         realMs = sample.realMs, bigOk = sample.bigOk, kbps = sample.kbps,
         tgOk = sample.tgOk, tgMs = sample.tgMs, ytOk = null, serviceNetwork=net, serviceMask=mask, serviceCheckedAt=now,
         speedNetwork = net, speedMask = mask, speedCheckedAt = now, checkedAt = now)

@@ -58,6 +58,10 @@ object AutoEligibility {
     fun <T> servicePool(list: List<T>, state: (T) -> ServerState, net: String, now: Long): List<T> {
         // HTTPS alone is not proof that a native Telegram connection works.
         // Unknown, expired and different-mask samples must be revalidated before Auto selects them.
-        return list.filter { serviceRank(state(it),net,now) != 2 && telegramRank(state(it),net,now) == 0 && AutoLatencyPolicy.accepts(state(it)) }
+        val profile=AutoChecks.current
+        return list.filter { val s=state(it)
+            s.works && s.serviceNetwork==net && s.serviceMask==s.maskFor(net) &&
+                AutoChecks.fresh(s.autoChecksKey,profile,AutoLatencyPolicy.MAX_MS,s.serviceCheckedAt,now)
+        }
     }
 }
