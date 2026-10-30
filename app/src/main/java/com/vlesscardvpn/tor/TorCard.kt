@@ -158,6 +158,14 @@ object TorCard {
         !stopping && runCatching { process.exitValue(); false }.getOrDefault(true)
     } ?: false
 
+    /** Reject an already occupied unowned listener before Xray can route app traffic to it. */
+    fun requireOwnedOrFree(port:Int=DEFAULT_SOCKS_PORT) {
+        require(port in 1..65535)
+        check(!portUp(port) || port==DEFAULT_SOCKS_PORT && ownsRunningEmbedded()) {
+            "Порт Tor занят внешним процессом. Остановите внешний Tor: обязательные мосты не подтверждены"
+        }
+    }
+
     /** Starts the embedded daemon unless a local Tor already answers on [socksPort]. */
     @Synchronized
     fun ensureStarted(ctx: android.content.Context, bridge: String = "none",
