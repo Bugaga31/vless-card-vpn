@@ -36,6 +36,11 @@ object AutoChecks {
         proof==key(profile,maxMs) && at>0 && now>=at && now-at<=5*60_000L
     fun accepts(s:com.vlesscardvpn.model.ServerState):Boolean = s.works &&
         fresh(s.autoChecksKey,current,AutoLatencyPolicy.MAX_MS,s.autoChecksAt,System.currentTimeMillis())
+    fun rank(s:com.vlesscardvpn.model.ServerState,net:String,now:Long,profile:AutoCheckProfile=current,maxMs:Int=AutoLatencyPolicy.MAX_MS):Int {
+        if(s.serviceNetwork!=net || s.serviceMask!=s.maskFor(net) || s.serviceCheckedAt<=0 || now<s.serviceCheckedAt || now-s.serviceCheckedAt>300_000L) return 1
+        if(profile.telegram && s.tgOk==false || profile.youtube && s.ytOk==false) return 2
+        return if(fresh(s.autoChecksKey,profile,maxMs,s.autoChecksAt,now)) 0 else 1
+    }
     fun label(profile:AutoCheckProfile=current):String = (listOf("HTTPS")+listOf(
         "telegram" to "Telegram", "stability" to "устойчивость Telegram", "voice" to "UDP для звонков",
         "discord" to "Discord gateway", "youtube" to "YouTube медиа").filter {it.first in profile.selected}.map {it.second}).joinToString(", ")

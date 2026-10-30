@@ -1186,7 +1186,7 @@ object Actions {
             val ready=WarmReserveMemory.session.candidates(observed,snapshot.servers.filter {it.id !in ids && it.id !in attempted},
                 {snapshot.state(it).maskFor(net)},snapshot.settings.testUrl,android.os.SystemClock.elapsedRealtime())
                 .filter { !RouteStabilityMemory.session.cooling(net,it.id,snapshot.state(it).maskFor(net),now) &&
-                    !TelegramRouteMemory.cooling(net,it.id,snapshot.state(it).maskFor(net),now) }
+                    (!AutoChecks.current.telegram || !TelegramRouteMemory.cooling(net,it.id,snapshot.state(it).maskFor(net),now)) }
             val eligible=AutoEligibility.servicePool(ready,{snapshot.state(it)},net,now).filter {snapshot.state(it).works}
             if (eligible.isNotEmpty() && Net.matches(app,observed)) {
                 onStep("переключаю на недавно проверенный резерв")
@@ -1255,7 +1255,7 @@ object Actions {
         val alternatives = preferred(snapshot, snapshot.servers.filter { s ->
             AutoEligibility.vlessServer(s) && used.none { it.id == s.id }
         }).sortedWith(compareBy<Server> { TelegramRouteMemory.cooling(net,it.id,snapshot.state(it).maskFor(net),stamp) }
-            .thenBy { AutoEligibility.telegramRank(snapshot.state(it),net,stamp) }.thenBy { snapshot.state(it).score })
+            .thenBy { AutoChecks.rank(snapshot.state(it),net,stamp) }.thenBy { snapshot.state(it).score })
         val candidates = (current + ServerChoice.diverse(alternatives, 8)).distinctBy { it.id }
         val passed = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
         kotlinx.coroutines.withTimeoutOrNull(18_000L) {
@@ -1487,7 +1487,7 @@ object Actions {
                 val snapshot = Store.state.value
                 val net = Net.key(app)
                 val committed = snapshot.selected.any { it.id == server.id && snapshot.state(it).works &&
-                    AutoEligibility.vlessServer(it) && AutoEligibility.serviceRank(snapshot.state(it), net, System.currentTimeMillis()) != 2 }
+                    AutoEligibility.vlessServer(it) && AutoChecks.rank(snapshot.state(it), net, System.currentTimeMillis()) != 2 }
                 if (com.vlesscardvpn.BuildConfig.DEBUG) android.util.Log.i("E2E",
                     "auto handoff selected=$n committed=$committed working=${snapshot.servers.count { snapshot.state(it).works }}")
                 n > 0 && committed
@@ -1512,7 +1512,7 @@ object Actions {
                 TelegramRouteMemory.cooling(net,server.id,ss.maskFor(net),stamp) ||
                     probeMemory.cooling(net,server.id,ss.maskFor(net),stamp) ||
                     (e.streak>0 && stamp>=e.at && stamp-e.at<ProbeMemory.cooldownMs(e.streak))
-            },{AutoEligibility.telegramRank(st.state(it),net,stamp)})
+            },{AutoChecks.rank(st.state(it),net,stamp)})
             val queue=SubscriptionQueue.quality(st.settings.subscriptions,st.servers,{st.state(it)},net,stamp)
             val rankedCandidates=AdaptiveRouteRank.order(usable,{st.state(it)},net,stamp,{CloudSpeed.prior(it)})
             return SubscriptionQueue.window(rankedCandidates,queue.map {it.source})
@@ -1593,11 +1593,11 @@ object Actions {
         // Apply cheap cooldown/service eligibility across the catalog BEFORE truncating ranking.
         // Otherwise 256 cooled/failed leaders can hide every fresh route behind them forever.
         val time = System.currentTimeMillis()
-        val serviceRanks=allEligible.associate { it.id to AutoEligibility.telegramRank(st.state(it),net,time) }
+        val serviceRanks=allEligible.associate { it.id to AutoChecks.rank(st.state(it),net,time) }
         val coolingIds=allEligible.filter { server ->
             val e=st.state(server).evidenceFor(net)
             RouteStabilityMemory.session.cooling(net,server.id,st.state(server).maskFor(net),time) ||
-            TelegramRouteMemory.cooling(net,server.id,st.state(server).maskFor(net),time) ||
+            (AutoChecks.current.telegram && TelegramRouteMemory.cooling(net,server.id,st.state(server).maskFor(net),time)) ||
                 probeMemory.cooling(net,server.id,st.state(server).maskFor(net),time) ||
                 (e.streak>0 && time>=e.at && time-e.at<ProbeMemory.cooldownMs(e.streak))
         }.mapTo(HashSet()) {it.id}
@@ -1636,7 +1636,7 @@ object Actions {
             title = if (earlyHandoff) "Авто: очередь подписок" else "Авто: TCP-проверка ${ping.size} кандидатов",
             done = 0,
             total = ping.size,
-            message = if (earlyHandoff) "${first.map {it.source}.distinct().size} источников в порции · до $slots параллельно. Приоритет — местная история; каждый маршрут подтверждаем HTTPS и Telegram." else
+            message = if (earlyHandoff) "${first.map {it.source}.distinct().size} источников в порции · до $slots параллельно. Приоритет — местная история; каждый маршрут подтверждаем выбранными проверками: ${AutoChecks.label()}." else
                 "Одновременно до $slots · ${cachedGood.size} с недавним подтверждением" +
                     (if (slots < minOf(ConnectPolicy.FIRST, ping.size)) " · ${plan.reason}" else ""))
         val reachable = if (ConnectPolicy.requiresTcpFilter(earlyHandoff)) Tester.fastFilter(ping, foreground = true) else emptyMap()
@@ -1760,7 +1760,7 @@ object Actions {
         suspend fun compare(pool: List<Server>): Server? {
             val before = Store.state.value
             val working = pool.filter { before.state(it).works && (before.settings.mode != Mode.AUTO || AutoEligibility.allowed(it)) }
-            val missing = ServerChoice.diverse(working.filter { AutoEligibility.serviceRank(before.state(it),net,System.currentTimeMillis()) != 0 },6)
+            val missing = ServerChoice.diverse(working.filter { AutoChecks.rank(before.state(it),net,System.currentTimeMillis()) != 0 },6)
             if (before.settings.mode == Mode.AUTO && missing.isNotEmpty() && remaining() >= 1500) {
                 kotlinx.coroutines.withTimeoutOrNull(minOf(4000L,remaining())) {
                     realTest(missing,"Авто: проверяю Telegram и YouTube",big=false,youtube=true,attempts=1,parallel=6,
@@ -1792,7 +1792,7 @@ object Actions {
         }
         // A working 100 kbit/s route is a fallback, not grounds to stop looking.
         // Only one additional diverse wave; no whole-catalog scan or unbounded masks.
-        if (allowed() && valid() && (AutoRoutePolicy.needsFaster(Store.state.value.state(winner),net,System.currentTimeMillis()) || AutoEligibility.serviceRank(Store.state.value.state(winner),net,System.currentTimeMillis()) == 2) && remaining() >= 2000) {
+        if (allowed() && valid() && (AutoRoutePolicy.needsFaster(Store.state.value.state(winner),net,System.currentTimeMillis()) || AutoChecks.rank(Store.state.value.state(winner),net,System.currentTimeMillis()) == 2) && remaining() >= 2000) {
             val wave = ServerChoice.diverse(explore.filter { s -> AutoEligibility.allowed(s) && candidates.none { it.id == s.id } },8)
             val passed = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
             if (wave.isNotEmpty()) {
@@ -1870,7 +1870,7 @@ object Actions {
         val st=Store.state.value; val now=System.currentTimeMillis()
         return WarmReserveMemory.session.candidates(observation,st.servers.filter {s->used.none {it.id==s.id}},
             {st.state(it).maskFor(observation.profile)},st.settings.testUrl,android.os.SystemClock.elapsedRealtime())
-            .count { st.state(it).works && AutoEligibility.telegramRank(st.state(it),observation.profile,now)==0 &&
+            .count { st.state(it).works && AutoChecks.rank(st.state(it),observation.profile,now)==0 &&
                 AutoChecks.accepts(st.state(it)) && !RouteStabilityMemory.session.cooling(observation.profile,it.id,st.state(it).maskFor(observation.profile),now) }
     }
 
@@ -1890,8 +1890,8 @@ object Actions {
         val pool = preferred(st, st.servers.filter { it.id !in ids && it.id !in cached }).filter {server->
             !probeMemory.cooling(net,server.id,st.state(server).maskFor(net),stamp) &&
             !RouteStabilityMemory.session.cooling(net,server.id,st.state(server).maskFor(net),stamp) &&
-            !TelegramRouteMemory.cooling(net,server.id,st.state(server).maskFor(net),stamp) &&
-            AutoEligibility.telegramRank(st.state(server),net,stamp)!=2
+            (!AutoChecks.current.telegram || !TelegramRouteMemory.cooling(net,server.id,st.state(server).maskFor(net),stamp)) &&
+            AutoChecks.rank(st.state(server),net,stamp)!=2
         }
         val now = System.currentTimeMillis()
         val total = pool.sumOf { st.state(it).evidenceFor(net).checks.coerceIn(0, 10000) }.coerceAtMost(1_000_000)
