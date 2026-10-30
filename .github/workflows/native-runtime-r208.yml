@@ -124,3 +124,5 @@ jobs:
 # Guard foreign listeners before Xray routing.
 
 # Capture selected bridge transport/count after opening advanced controls.
+
+# RU card resets scroll per state; original assertions preserved with measured viewport navigation.
