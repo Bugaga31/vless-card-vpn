@@ -47,12 +47,24 @@ class EvidenceUiR208Test {
      return null
     }
     // The production bridge selector is intentionally under the advanced expander.
-    var node=find(ins.uiAutomation.rootInActiveWindow)
-    var clicked=false
-    repeat(5) {if(!clicked && node!=null) {clicked=node!!.performAction(AccessibilityNodeInfo.ACTION_CLICK);if(!clicked) node=node!!.parent}}
-    assertTrue("Tor advanced controls must be actionable",clicked)
-    ins.waitForIdleSync();Thread.sleep(300)
     val dm=ins.targetContext.resources.displayMetrics
+    var clicked=false
+    var lastBounds="not found"
+    for(attempt in 0 until 20) {
+     val node=find(ins.uiAutomation.rootInActiveWindow)
+     if(node!=null) {
+      val rect=android.graphics.Rect();node.getBoundsInScreen(rect);lastBounds=rect.toString()
+      if(node.isVisibleToUser && rect.width()>0 && rect.height()>0 && rect.centerY() in 40 until dm.heightPixels-40) {
+       shell("input tap ${rect.centerX()} ${rect.centerY()}")
+       ins.waitForIdleSync();Thread.sleep(350)
+       clicked=labels(ins.uiAutomation.rootInActiveWindow).any {"Скрыть дополнительные настройки" in it}
+       if(clicked) break
+      }
+     }
+     shell("input swipe ${dm.widthPixels/2} ${dm.heightPixels*4/5} ${dm.widthPixels/2} ${dm.heightPixels/3} 300")
+     ins.waitForIdleSync();Thread.sleep(150)
+    }
+    assertTrue("Tor advanced expander must open; bounds=$lastBounds; labels=${labels(ins.uiAutomation.rootInActiveWindow)}",clicked)
     for(i in 0 until 20) {
      if(labels(ins.uiAutomation.rootInActiveWindow).any {"Обязательные мосты" in it}) break
      shell("input swipe ${dm.widthPixels/2} ${dm.heightPixels*4/5} ${dm.widthPixels/2} ${dm.heightPixels/4} 300")
