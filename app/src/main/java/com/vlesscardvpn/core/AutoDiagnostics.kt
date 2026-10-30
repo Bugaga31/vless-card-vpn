@@ -47,7 +47,7 @@ object AutoDiagnostics {
         .getOrDefault(JSONObject()).let { if (it.optJSONObject("ordinary_probes")?.has("over_500ms") == true && !it.has("latency_limit_ms")) JSONObject() else it }
     fun report(ctx: Context): String {
         val p=ctx.getSharedPreferences("auto_diagnostics",0)
-        return JSONObject().put("schema",3).put("version",com.vlesscardvpn.BuildConfig.VERSION_NAME)
+        return JSONObject().put("schema",4).put("version",com.vlesscardvpn.BuildConfig.VERSION_NAME)
             .put("family",p.getString("family","other"))
             .put("last_search",compatibleSearch(p.getString("last_search","{}")))
             .put("search_family",p.getString("search_family","other"))

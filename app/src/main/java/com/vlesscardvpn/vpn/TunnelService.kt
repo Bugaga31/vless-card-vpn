@@ -1007,6 +1007,22 @@ class TunnelService : VpnService() {
                 if (core !== sampledCore || Tunnel.socks != auth || Net.key(this@TunnelService) != network ||
                     Net.underlying(this@TunnelService)?.toString() != handle) { telegramMiss = 0; telegramSlow = 0; com.vlesscardvpn.core.TelegramStability.clear(); continue }
                 val ok = live.works
+                val qualityPlan=com.vlesscardvpn.core.PhonePower.refresh(this@TunnelService)
+                if(com.vlesscardvpn.core.RouteStabilityMemory.mayAttribute(checkTelegram,usedServers.size,qualityPlan) && (ok || Actions.online())) {
+                    val server=usedServers.single()
+                    val mask=usedVariants.firstOrNull {it.first.id==server.id}?.second?.id ?: Store.state.value.state(server).maskFor(network)
+                    if(Store.state.value.state(server).maskFor(network)==mask) {
+                        val outcome=if(!ok || live.tgOk==false) false else live.tgOk
+                        val quarantined=com.vlesscardvpn.core.RouteStabilityMemory.session.record(network,server.id,mask,
+                            com.vlesscardvpn.core.LinkStabilityPolicy.Sample(outcome,maxOf(live.realMs,live.tgMs)),System.currentTimeMillis(),
+                            com.vlesscardvpn.core.AutoLatencyPolicy.MAX_MS)
+                        if(quarantined) {
+                            val cur=Tunnel.status.value
+                            Tunnel.status.value=cur.copy(check="Маршрут нестабилен — временно исключён из Авто. Проверяю резерв без прямого обхода.",checkOk=false)
+                            repairTelegramRoute(unstable=true)
+                        }
+                    }
+                }
                 com.vlesscardvpn.core.ConnectionPassport.light(ok,live.tgOk,checkTelegram)
                 if(checkTelegram) com.vlesscardvpn.core.TelegramStability.record(live.tgOk,live.tgMs,"$network/$handle/${auth.port}/${chainEpoch.get()}")
                 if (ok && checkTelegram) {
@@ -1138,7 +1154,7 @@ class TunnelService : VpnService() {
 
     private var telegramRepairAt = -60_000L
     /** Isolate bad members instead of restarting the same aggregate pool indefinitely. */
-    private fun repairTelegramRoute(manual: Boolean = false) {
+    private fun repairTelegramRoute(manual: Boolean = false, unstable: Boolean = false) {
         val settings = Store.state.value.settings
         if (settings.mode != Mode.AUTO || settings.torAll || usedChain != null ||
             settings.torRouting && "telegram" in settings.services) {
@@ -1149,7 +1165,7 @@ class TunnelService : VpnService() {
         if (recoveryJob?.isActive == true || tun == null || Tunnel.socks == null) return
         if (com.vlesscardvpn.core.PhonePower.isVoiceCallActive(this)) return
         val now = android.os.SystemClock.elapsedRealtime()
-        if (now - telegramRepairAt < if (manual) 10_000L else 60_000L) return
+        if (now - telegramRepairAt < if (manual || unstable) 10_000L else 60_000L) return
         telegramRepairAt = now
         val sampledCore = core
         val auth = Tunnel.socks
@@ -1157,8 +1173,8 @@ class TunnelService : VpnService() {
         val servers = usedServers.toList()
         recoveryJob = scope.launch {
             val before = Tunnel.status.value
-            Tunnel.status.value = before.copy(check = "Telegram не отвечает — проверяю серверы отдельно и ищу резерв", checkOk = false)
-            val found = try { Store.busy { Actions.repairTelegram(servers, preferAlternative = manual) } }
+            Tunnel.status.value = before.copy(check = if(unstable) "Маршрут нестабилен — проверяю резерв; проблемный сервер временно вне Авто" else "Telegram не отвечает — проверяю серверы отдельно и ищу резерв", checkOk = false)
+            val found = try { Store.busy { Actions.repairTelegram(servers, preferAlternative = manual || unstable) } }
                 catch (e: kotlinx.coroutines.CancellationException) { throw e }
                 catch (e: Exception) { Log.w(TAG, "Telegram repair failed", e); 0 }
             if (core !== sampledCore || Tunnel.socks != auth || Net.key(this@TunnelService) != network ||

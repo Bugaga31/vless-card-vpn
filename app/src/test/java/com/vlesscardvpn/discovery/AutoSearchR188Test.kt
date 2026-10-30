@@ -83,7 +83,7 @@ class AutoSearchR188Test {
  }
  @Test fun diagnosticsAreFixedSchemaWithoutEndpointNames() {
   val s=AutoSearchStatistics();s.start();s.observe(true,1200,true,1200)
-  val d=AutoDiagnostics.searchEvent("WAVE_LIMIT",4,s.snapshot());assertEquals(setOf("stop","waves","ordinary_probes"),d.keys().asSequence().toSet());assertEquals(1,d.getJSONObject("ordinary_probes").getInt("over_1000ms"))
+  val d=AutoDiagnostics.searchEvent("WAVE_LIMIT",4,s.snapshot());assertEquals(setOf("stop","waves","ordinary_probes","latency_limit_ms"),d.keys().asSequence().toSet());assertEquals(1,d.getJSONObject("ordinary_probes").getInt("over_1000ms"))
  }
  @Test fun diagnosticsRejectFreeTextAndUnknownCounters() {
   try {AutoDiagnostics.searchEvent("https://private.test",1,AutoSearchStatistics().snapshot());fail("free text")} catch(_:IllegalArgumentException) {}

@@ -11,7 +11,7 @@ object AutoEligibility {
     const val ACTIVE = 1
     /** Only the chosen stable primary carries traffic; validated alternatives remain reserves. */
     fun connectedPool(servers: List<Server>, state: (Server) -> ServerState, net: String, now: Long, gaming: Boolean): List<Server> =
-        servers.distinctBy { it.id }.filter { vlessServer(it) && state(it).works }.let { candidates ->
+        servers.distinctBy { it.id }.filter { vlessServer(it) && state(it).works && !RouteStabilityMemory.session.cooling(net,it.id,state(it).maskFor(net),now) }.let { candidates ->
             val routes = servicePool(candidates, state, net, now)
             val usable = routes
             if (gaming) usable.sortedBy { ServerChoice.latencyScore(state(it).evidenceFor(net),state(it).realMs) }

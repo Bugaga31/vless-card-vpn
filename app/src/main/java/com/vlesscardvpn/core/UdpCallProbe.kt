@@ -58,6 +58,15 @@ object UdpCallProbe {
 
     fun measure(socksPort: Int, user: String = "", pass: String = "", budgetMs: Int = 1800,
                 onCancel: ((() -> Unit) -> Unit)? = null): Result {
+        val train = train(socksPort,user,pass,budgetMs,1,onCancel)
+        return Result(train.rttMs.isNotEmpty(), train.elapsedMs)
+    }
+
+    data class Train(val sent:Int,val rttMs:List<Int>,val complete:Boolean,val elapsedMs:Int)
+    fun voiceTrain(socksPort:Int,user:String="",pass:String="",onCancel:((()->Unit)->Unit)?=null):Train =
+        train(socksPort,user,pass,4000,CallTransportPolicy.PACKETS,onCancel)
+
+    private fun train(socksPort:Int,user:String,pass:String,budgetMs:Int,count:Int,onCancel:((()->Unit)->Unit)?):Train {
         val started = System.nanoTime()
         val deadline = started + TimeUnit.MILLISECONDS.toNanos(budgetMs.coerceIn(1, 5000).toLong())
         var udp: DatagramSocket? = null
@@ -83,7 +92,11 @@ object UdpCallProbe {
             control.soTimeout = remaining()
             return input.readUnsignedShort()
         }
-        val ok = try {
+        var sent = 0
+        val rtts = mutableListOf<Int>()
+        var complete = false
+        var timingReliable = true
+        try {
             control.connect(InetSocketAddress("127.0.0.1", socksPort), minOf(800, remaining()))
             val out = control.getOutputStream()
             val input = DataInputStream(control.getInputStream())
@@ -114,22 +127,48 @@ object UdpCallProbe {
             check(relay.isLoopbackAddress) { "SOCKS UDP relay must stay on loopback" }
             remaining()
             udp = DatagramSocket().apply { connect(relay, relayPort); soTimeout = remaining() }
-            val transactionId = ByteArray(12).also(SecureRandom()::nextBytes)
-            val request = socksUdpFrame(HOST, PORT, bindingRequest(transactionId))
-            remaining()
-            udp.send(DatagramPacket(request, request.size, relay, relayPort))
-            val response = ByteArray(1200)
-            val packet = DatagramPacket(response, response.size)
-            udp.soTimeout = remaining()
-            udp.receive(packet)
-            val payload = socksUdpPayload(response, packet.length)
-            payload != null && isBindingResponse(payload, payload.size, transactionId)
+            val transactionIds = List(count) { ByteArray(12).also(SecureRandom()::nextBytes) }
+            val sentAt = LongArray(count)
+            val received = BooleanArray(count)
+            val trainStart = System.nanoTime()
+            // One UDP association and one receiver loop. Distinct nonces reject duplicates,
+            // delayed replies from another run and out-of-order corruption. No direct fallback.
+            val receiveUntil = minOf(deadline,trainStart + TimeUnit.MILLISECONDS.toNanos(
+                (count-1)*CallTransportPolicy.INTERVAL_MS + 1500L))
+            while(System.nanoTime()<receiveUntil && !cancelled.get() && !Thread.currentThread().isInterrupted) {
+                val now=System.nanoTime()
+                val nextSend=trainStart + TimeUnit.MILLISECONDS.toNanos(sent*CallTransportPolicy.INTERVAL_MS)
+                if(sent<count && now>=nextSend) {
+                    if(now-nextSend>TimeUnit.MILLISECONDS.toNanos(100)) timingReliable=false
+                    val request=socksUdpFrame(HOST,PORT,bindingRequest(transactionIds[sent]))
+                    sentAt[sent]=System.nanoTime()
+                    udp.send(DatagramPacket(request,request.size,relay,relayPort))
+                    sent++
+                }
+                if(sent==count && received.count {it}==count) {complete=true;break}
+                val next=if(sent<count) trainStart+TimeUnit.MILLISECONDS.toNanos(sent*CallTransportPolicy.INTERVAL_MS) else receiveUntil
+                val wait=TimeUnit.NANOSECONDS.toMillis(minOf(next,receiveUntil)-System.nanoTime()).coerceIn(1,100)
+                val response=ByteArray(1200)
+                val packet=DatagramPacket(response,response.size)
+                udp.soTimeout=minOf(remaining(),wait.toInt())
+                try {
+                    udp.receive(packet)
+                    val at=System.nanoTime()
+                    val payload=socksUdpPayload(response,packet.length) ?: continue
+                    val index=transactionIds.indices.firstOrNull {it<sent && !received[it] && isBindingResponse(payload,payload.size,transactionIds[it])}
+                    if(index!=null) {
+                        received[index]=true
+                        rtts.add(TimeUnit.NANOSECONDS.toMillis(at-sentAt[index]).toInt().coerceAtLeast(1))
+                    }
+                } catch (_:SocketTimeoutException) { /* scheduled next send/finite response window */ }
+            }
+            if(!cancelled.get() && !Thread.currentThread().isInterrupted && sent==count) complete=true
         } catch (_: Exception) {
-            false
+            complete=false
         } finally {
             cancel()
         }
         val elapsed = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started).toInt().coerceAtLeast(1)
-        return Result(ok, elapsed)
+        return Train(sent,rtts.toList(),complete && timingReliable,elapsed)
     }
 }

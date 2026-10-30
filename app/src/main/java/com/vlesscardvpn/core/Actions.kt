@@ -418,7 +418,8 @@ object Actions {
                 onObservation?.invoke(p)
                 val speedSample = ServerChoice.acceptsSpeedSample(p.kbps, parallel)
                 if (telegram && p.works) TelegramRouteMemory.record(net,s.id,st.state(s).maskFor(net),p.tgOk,System.currentTimeMillis())
-                val routeReady = p.works && (st.settings.mode != Mode.AUTO || !telegram || AutoLatencyPolicy.accepts(p))
+                val routeReady = p.works && (st.settings.mode != Mode.AUTO ||
+                    (!telegram || AutoLatencyPolicy.accepts(p)) && !RouteStabilityMemory.session.cooling(net,s.id,st.state(s).maskFor(net),System.currentTimeMillis()))
                 val firstSuccess = routeReady && ok.incrementAndGet() == 1
                 if (routeReady) onSuccess?.invoke(s)
                 // A deliberately short attempt is inconclusive when it times out; confirm with the normal budget.
@@ -1474,6 +1475,7 @@ object Actions {
             val stamp=System.currentTimeMillis()
             val usable=DiscoveryWindow.pool(candidates,{server ->
                 val ss=st.state(server);val e=ss.evidenceFor(net)
+                RouteStabilityMemory.session.cooling(net,server.id,ss.maskFor(net),stamp) ||
                 TelegramRouteMemory.cooling(net,server.id,ss.maskFor(net),stamp) ||
                     probeMemory.cooling(net,server.id,ss.maskFor(net),stamp) ||
                     (e.streak>0 && stamp>=e.at && stamp-e.at<ProbeMemory.cooldownMs(e.streak))
@@ -1561,6 +1563,7 @@ object Actions {
         val serviceRanks=allEligible.associate { it.id to AutoEligibility.telegramRank(st.state(it),net,time) }
         val coolingIds=allEligible.filter { server ->
             val e=st.state(server).evidenceFor(net)
+            RouteStabilityMemory.session.cooling(net,server.id,st.state(server).maskFor(net),time) ||
             TelegramRouteMemory.cooling(net,server.id,st.state(server).maskFor(net),time) ||
                 probeMemory.cooling(net,server.id,st.state(server).maskFor(net),time) ||
                 (e.streak>0 && time>=e.at && time-e.at<ProbeMemory.cooldownMs(e.streak))
@@ -1839,6 +1842,7 @@ object Actions {
         val stamp=System.currentTimeMillis()
         val pool = preferred(st, st.servers.filter { it.id !in ids }).filter {server->
             !probeMemory.cooling(net,server.id,st.state(server).maskFor(net),stamp) &&
+            !RouteStabilityMemory.session.cooling(net,server.id,st.state(server).maskFor(net),stamp) &&
             !TelegramRouteMemory.cooling(net,server.id,st.state(server).maskFor(net),stamp) &&
             AutoEligibility.telegramRank(st.state(server),net,stamp)!=2
         }
@@ -1969,7 +1973,7 @@ object Actions {
             // the balancer spreads connections over all selected servers: one that cannot reach Telegram would break
             // every few Telegram connections («иногда не работает»), so such servers stay out while others exist
             // (only in «Авто»: in «Серверы» the user's own choice stays as it is)
-            val all = if (st.settings.mode == com.vlesscardvpn.model.Mode.AUTO) AutoEligibility.servicePool(works.filter(AutoEligibility::allowed),{st.state(it)},Net.key(app),System.currentTimeMillis()) else works
+            val all = if (st.settings.mode == com.vlesscardvpn.model.Mode.AUTO) AutoEligibility.servicePool(works.filter(AutoEligibility::allowed).filter { !RouteStabilityMemory.session.cooling(Net.key(app),it.id,st.state(it).maskFor(Net.key(app)),System.currentTimeMillis()) },{st.state(it)},Net.key(app),System.currentTimeMillis()) else works
             val me = runCatching { Report.loadFrom(app); Report.phoneId(app) }.getOrDefault("")
             val gaming = GameSession.active()
             val netKey = Net.key(app)
@@ -2041,7 +2045,7 @@ object Actions {
     val netReport = MutableStateFlow(NetReport())
 
     private data class DiagnosticSeries(val control:Boolean,val youtube:Boolean,val telegram:LinkStabilityPolicy.Summary,
-        val whatsapp:Boolean,val discord:LinkStabilityPolicy.Summary,val udp:LinkStabilityPolicy.Summary?)
+        val whatsapp:Boolean,val discord:LinkStabilityPolicy.Summary,val udp:CallTransportPolicy.Summary?)
 
     fun diagnoseNetwork() = launch("Проверка маршрута VLESS") {
         val auth = Tunnel.socks ?: run {
@@ -2073,14 +2077,13 @@ object Actions {
             } }
             val whatsapp = async(Bg.io) { Tester.site("https://web.whatsapp.com/", auth.port).answers }
             val discord = async(Bg.io) { series {
-                val started=System.nanoTime()
-                val ok=Tester.site("https://discord.com/api/v9/gateway",auth.port).answers
-                LinkStabilityPolicy.Sample(ok,((System.nanoTime()-started)/1_000_000).toInt().coerceAtLeast(1))
+                CancellableProbe.run {bind -> DiscordGatewayProbe.check(auth.port,bind)}
+                    .let {LinkStabilityPolicy.Sample(it.ok,it.ms)}
             } }
-            val voiceUdp = async(Bg.io) { if(settings.blockStun) null else series {
-                CancellableProbe.run { bind -> UdpCallProbe.measure(auth.port,auth.user,auth.pass,1500,bind) }
-                    .let { LinkStabilityPolicy.Sample(it.ok,it.ms) }
-            } }
+            val voiceUdp = async(Bg.io) { if(settings.blockStun) null else
+                CancellableProbe.run {bind -> UdpCallProbe.voiceTrain(auth.port,auth.user,auth.pass,bind)}
+                    .let {CallTransportPolicy.assess(it.sent,it.rttMs,it.complete,AutoLatencyRange.safe(settings.autoLatencyMinMs,settings.autoLatencyMaxMs).max)}
+            }
             DiagnosticSeries(control.await(),youtube.await(),telegram.await(),whatsapp.await(),discord.await(),voiceUdp.await())
         }
         step(total, total)
@@ -2088,15 +2091,15 @@ object Actions {
             Net.key(app)!=network || Net.underlying(app)?.toString()!=handle)
             return@launch "Маршрут или сеть изменились во время проверки — результат отброшен."
         val udp = if(settings.blockStun) "Не проверено: STUN заблокирован настройкой приватности; защита не отключалась."
-            else results.udp?.let(LinkStabilityPolicy::label) ?: "Не проверено"
+            else results.udp?.let(CallTransportPolicy::label) ?: "Не проверено"
         val details = "HTTPS: ${if(results.control) "ответ получен" else "нет ответа"} · YouTube: ${results.youtube} · WhatsApp: ${results.whatsapp}\n" +
             "Telegram · MTProto: ${LinkStabilityPolicy.label(results.telegram)}\n" +
             "Telegram · звонки: доступность MTProto — ${LinkStabilityPolicy.label(results.telegram)}; общий UDP/STUN — $udp\n" +
-            "Discord · звонки: API — ${LinkStabilityPolicy.label(results.discord)}; общий UDP/STUN — $udp\n" +
-            "UDP/STUN — одна общая транспортная проба, не отдельные медиасерверы Telegram/Discord. Это не RTP-джиттер и не проверка реального звонка или аккаунта."
+            "Discord · звонки: Gateway WebSocket/heartbeat — ${LinkStabilityPolicy.label(results.discord)}; общий UDP/STUN — $udp\n" +
+            "20 UDP/STUN-пакетов через VPN с шагом 50 мс — общая транспортная проба. Потери относятся к ответам STUN, разброс RTT — не RTP-джиттер. STUN-сервис тоже может ограничивать ответы; это не доказательство вины сервера. Gateway Discord — управляющий, не голосовой шлюз. Аккаунт, собеседник, микрофон и медиасессия не проверялись."
         val servicesOk = results.control && results.youtube && results.whatsapp && results.telegram.stable==true && results.discord.stable==true
         val report = if (!results.control) NetReport("Выбранный VLESS-маршрут не отвечает — попробуйте «Авто» или другой сервер", details, Kind.OFFLINE)
-            else if (servicesOk) NetReport("Сервисы отвечают; медиапуть звонков отдельно не подтверждён", details, Kind.OPEN)
+            else if (servicesOk && results.udp?.grade==CallTransportPolicy.Grade.PASS) NetReport("Сервисы и короткий UDP-тест пройдены; реальный звонок не подтверждён", details, Kind.OPEN)
             else NetReport("Часть проб нестабильна или не подтверждена — попробуйте «Авто» или другой сервер", details, Kind.PARTIAL)
         netReport.value = report
         "${report.verdict} ($details)"
