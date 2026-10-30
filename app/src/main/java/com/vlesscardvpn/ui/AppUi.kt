@@ -72,7 +72,7 @@ fun AppUi(onConnect: () -> Unit, onDisconnect: () -> Unit, onConnectFound:()->Un
                     Triple(0, "Главная", Icons.Filled.PowerSettingsNew),
                     Triple(1, "Серверы", Icons.Filled.Dns),
                     Triple(3, "Помощник", Icons.Filled.Psychology),
-                    Triple(4, "Телефон", Icons.Filled.PhoneAndroid),
+                    Triple(4, "ВАТСОН", Icons.Filled.PhoneAndroid),
                     Triple(2, "Настройки", Icons.Filled.Settings)
                 )
                 Column(Modifier.background(scheme.surface.copy(alpha = .97f))) {
@@ -89,10 +89,11 @@ fun AppUi(onConnect: () -> Unit, onDisconnect: () -> Unit, onConnectFound:()->Un
         ) { pad ->
             Box(Modifier.padding(pad).fillMaxSize()) {
                 androidx.compose.animation.Crossfade(tab, animationSpec = tween(if(theme.reducedMotion) 0 else 200), label = "tab") { t -> when (t) {
-                    0 -> HomeScreen(onConnect, onDisconnect, openServers = { tab = 1 }, onConnectFound=onConnectFound)
+                    0 -> HomeScreen(onConnect, onDisconnect, openServers = { tab = 1 }, onConnectFound=onConnectFound, openWatson={tab=4})
                     1 -> ServersScreen(onConnectFound)
                     3 -> ChatScreen()
-                    4 -> DeviceScreen()
+                    4 -> WatsonScreen(openPhone={tab=5})
+                    5 -> DeviceScreen(openWatson={tab=4})
                     else -> SettingsScreen()
                 } }
             }

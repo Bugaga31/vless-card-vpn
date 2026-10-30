@@ -23,7 +23,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 @Composable
-fun DeviceScreen() {
+fun DeviceScreen(openWatson:()->Unit = {}) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     val snapshot by DeviceCoach.state.collectAsState()
@@ -100,6 +100,7 @@ fun DeviceScreen() {
             }
         }
 
+        WatsonEntry(openWatson)
         MaintenanceCard()
 
         DeviceSection("Состояние устройства", "Только показатели, которые Android разрешает прочитать.") {
