@@ -78,6 +78,7 @@ class TunnelService : VpnService() {
         fun repairTelegram(context: Context) { context.startService(Intent(context,TunnelService::class.java).setAction(ACTION_REPAIR_TELEGRAM)) }
         fun pause(context: Context) { context.startService(Intent(context, TunnelService::class.java).setAction(ACTION_PAUSE)) }
         fun stop(context: Context) {
+            com.vlesscardvpn.core.SlowRouteConsent.clear()
             context.startService(Intent(context, TunnelService::class.java).setAction(ACTION_STOP))
         }
     }
@@ -488,12 +489,14 @@ class TunnelService : VpnService() {
             val sampledNet = Net.key(this@TunnelService)
             val sampledHandle = Net.underlying(this@TunnelService)?.toString()
             val sampledServers = usedServers.toList()
+            val sampleStarted=System.currentTimeMillis()
             val sampledTorRoute = usedTorRoute
             val attributeServers = usedChain == null && com.vlesscardvpn.tor.TorRoutePolicy.canAttributeServerEvidence(sampledTorRoute)
             val sampledCore = core
             val sampledChainEpoch = chainEpoch.get()
             val profile=if(st.mode==Mode.AUTO) com.vlesscardvpn.core.AutoCheckProfile.of(st.autoChecks) else null
-            val profileLimit=com.vlesscardvpn.core.AutoLatencyPolicy.MAX_MS
+            val configuredLimit=com.vlesscardvpn.core.AutoLatencyPolicy.MAX_MS
+            val profileLimit=com.vlesscardvpn.core.SlowRouteConsent.runtimeLimit(usedServers)
             val checkServices = profile?.telegram ?: Tunnel.ytViaDpi
             if(sampledTorRoute && !torCircuitReady()) {
                 if(core !== sampledCore || Tunnel.socks!=auth || chainEpoch.get()!=sampledChainEpoch) return@launch
@@ -547,18 +550,24 @@ class TunnelService : VpnService() {
             val moduleHealth=com.vlesscardvpn.health.LiveHealthCoordinator.assess(
                 measuredBeforeDns,if(st.proxyOnly || !httpsReachable) null else dnsOk,
                 requireDns=!st.proxyOnly,requireTelegram=profile?.telegram ?: false,requireYouTube=profile?.youtube ?: Tunnel.ytViaDpi,
-                strictLatency=st.mode==Mode.AUTO && usedChain==null && !usedTorRoute,blocked=chainExitRejected)
-            if(profile!=null && (com.vlesscardvpn.core.AutoChecks.current!=profile || com.vlesscardvpn.core.AutoLatencyPolicy.MAX_MS!=profileLimit)) return@launch
-            val selectedVerdict=profile?.verdict(measuredBeforeDns,profileLimit)
+                strictLatency=st.mode==Mode.AUTO && usedChain==null && !usedTorRoute && !com.vlesscardvpn.core.SlowRouteConsent.runtime(usedServers),blocked=chainExitRejected)
+            if(profile!=null && (com.vlesscardvpn.core.AutoChecks.current!=profile || com.vlesscardvpn.core.AutoLatencyPolicy.MAX_MS!=configuredLimit)) return@launch
+            val consentedProbe=if(com.vlesscardvpn.core.SlowRouteConsent.runtime(usedServers)) measuredBeforeDns.latencyConsented() else measuredBeforeDns
+            val selectedVerdict=profile?.verdict(consentedProbe,profileLimit)
             val liveHealthy=if(profile==null) moduleHealth.ready else when {
                 moduleHealth.ready==false || selectedVerdict==false -> false
                 moduleHealth.ready==null || selectedVerdict==null -> null
                 else -> true
             }
-            if(profile!=null) com.vlesscardvpn.core.AutoCheckEvidence.publish(profile,profileLimit,measuredBeforeDns)
+            if(profile!=null) com.vlesscardvpn.core.AutoCheckEvidence.publish(profile,configuredLimit,measuredBeforeDns)
             com.vlesscardvpn.core.ConnectionPassport.full(httpsReachable, if(st.proxyOnly || !httpsReachable) null else dnsOk, p.tgOk, p.ytOk)
             com.vlesscardvpn.core.ConnectionPassport.fullModules(moduleHealth)
-            Tunnel.status.value = cur.copy(check = text, checkOk = liveHealthy)
+            if(attributeServers && profile!=null && sampledServers.size==1) {
+                val server=sampledServers.single()
+                val mask=usedVariants.firstOrNull {it.first.id==server.id}?.second?.id ?: Store.state.value.state(server).maskFor(sampledNet)
+                Store.setState(server.id) {old->com.vlesscardvpn.core.LiveRouteEvidence.commit(old,p,profile,sampledNet,mask,sampleStarted,System.currentTimeMillis())}
+            }
+            Tunnel.status.value = cur.copy(check = text + (if(com.vlesscardvpn.core.SlowRouteConsent.runtime(usedServers)) " · повышенная задержка разрешена вами для этой сессии" else ""), checkOk = liveHealthy)
             if (attributeServers) runCatching { val stv = Store.state.value; com.vlesscardvpn.core.Brain.lived(sampledNet, sampledServers, { stv.state(it) }, p.works); com.vlesscardvpn.core.Brain.save(this@TunnelService) }
             Log.i("E2E", "check ok=${p.works} ms=${p.realMs} big=${p.bigOk} yt=${p.ytOk} tg=${p.tgOk} err=${p.error} warp=$warp dns=$dnsOk")
             if (attributeServers && liveHealthy == true && st.mode == Mode.AUTO) Actions.rememberNet(sampledNet)
@@ -596,7 +605,7 @@ class TunnelService : VpnService() {
                 if (sinceNet < 90_000L && !netHardDone) { netHardDone = true; hardRestart("новая сеть, а интернет не пошёл", force = true); return@launch }
                 if (System.currentTimeMillis() - lastHard > 5 * 60_000L) { hardRestart("после переподключения интернет не пошёл"); return@launch }
             }
-            if (p.works) { healStep = 0; dpiHeals = 0; connectFails = 0; scheduleOptimize(if (com.vlesscardvpn.core.Actions.deepPending || usedServers.size < com.vlesscardvpn.core.AutoEligibility.ACTIVE) 5_000 else 60_000); com.vlesscardvpn.core.AppWatch.start(this@TunnelService, reconnect = { scope.launch { lock.withLock { connect(soft = true) } } }, maintenanceReconnect = { scheduleMaintenanceReconnect() }, connectedAt = { connectedElapsed }); watchdog(); standbyScout(); coverTraffic(); torLoop(); serviceRoutes(); autoChainScout() } else heal()
+            if (p.works) { healStep = 0; dpiHeals = 0; connectFails = 0; scheduleOptimize(if (com.vlesscardvpn.core.Actions.deepPending || usedServers.size < com.vlesscardvpn.core.AutoEligibility.ACTIVE) 5_000 else 60_000); if(st.mode!=Mode.AUTO) com.vlesscardvpn.core.AppWatch.start(this@TunnelService, reconnect = { scope.launch { lock.withLock { connect(soft = true) } } }, maintenanceReconnect = { scheduleMaintenanceReconnect() }, connectedAt = { connectedElapsed }); watchdog(); standbyScout(); coverTraffic(); torLoop(); serviceRoutes(); if(st.mode!=Mode.AUTO) autoChainScout() } else heal()
         }
     }
 
@@ -913,6 +922,7 @@ class TunnelService : VpnService() {
 
     private fun scheduleOptimize(firstDelay: Long = 30_000) {
         val settings = Store.state.value.settings
+        if(settings.mode==Mode.AUTO) {optJob?.cancel();optJob=null;com.vlesscardvpn.core.BackgroundOptimization.clear();return}
         if (!com.vlesscardvpn.core.BackgroundRunPolicy.enabled(settings.mode == Mode.AUTO,settings.autoOptimize,
                 settings.torAll || settings.mode == Mode.BYEDPI || settings.mode == Mode.HYBRID)) {
             optJob?.cancel(); optJob = null
@@ -1047,7 +1057,8 @@ class TunnelService : VpnService() {
                 }
                 if(sampledTorRoute && Tunnel.status.value.checkOk!=true) verifySoon(0)
                 val profile=if(settings.mode==Mode.AUTO) com.vlesscardvpn.core.AutoCheckProfile.of(settings.autoChecks) else null
-                val profileLimit=com.vlesscardvpn.core.AutoLatencyPolicy.MAX_MS
+                val configuredLimit=com.vlesscardvpn.core.AutoLatencyPolicy.MAX_MS
+                val profileLimit=com.vlesscardvpn.core.SlowRouteConsent.runtimeLimit(usedServers)
                 val checkTelegram = profile?.telegram==true && !settings.torAll &&
                     !(settings.torRouting && "telegram" in settings.services) && usedChain == null
                 val live = com.vlesscardvpn.core.CancellableProbe.run { bind ->
@@ -1057,13 +1068,14 @@ class TunnelService : VpnService() {
                 if (core !== sampledCore || chainEpoch.get()!=sampledEpoch || usedTorRoute!=sampledTorRoute ||
                     Tunnel.socks != auth || Net.key(this@TunnelService) != network ||
                     Net.underlying(this@TunnelService)?.toString() != handle) { telegramMiss = 0; telegramSlow = 0; com.vlesscardvpn.core.TelegramStability.clear(); continue }
-                if(profile!=null && (com.vlesscardvpn.core.AutoChecks.current!=profile || com.vlesscardvpn.core.AutoLatencyPolicy.MAX_MS!=profileLimit)) continue
+                if(profile!=null && (com.vlesscardvpn.core.AutoChecks.current!=profile || com.vlesscardvpn.core.AutoLatencyPolicy.MAX_MS!=configuredLimit)) continue
                 val ok = live.works
                 if(profile!=null) {
-                    com.vlesscardvpn.core.AutoCheckEvidence.publish(profile,profileLimit,live)
-                    if(profile.verdict(live,profileLimit)!=true) {
+                    com.vlesscardvpn.core.AutoCheckEvidence.publish(profile,configuredLimit,live)
+                    val selectedLive=if(com.vlesscardvpn.core.SlowRouteConsent.runtime(usedServers)) live.latencyConsented() else live
+                    if(profile.verdict(selectedLive,profileLimit)!=true) {
                         val cur=Tunnel.status.value
-                        Tunnel.status.value=cur.copy(check="Не все выбранные проверки подтверждены. Смотрите результаты ниже.",checkOk=profile.verdict(live,profileLimit))
+                        Tunnel.status.value=cur.copy(check="Не все выбранные проверки подтверждены. Смотрите результаты ниже.",checkOk=profile.verdict(selectedLive,profileLimit))
                     }
                     // Refresh the full module model as the selected profile can change on a live tunnel.
                     verifySoon(0)
@@ -1076,7 +1088,7 @@ class TunnelService : VpnService() {
                         val outcome=if(!ok || live.tgOk==false) false else live.tgOk
                         val quarantined=com.vlesscardvpn.core.RouteStabilityMemory.session.record(network,server.id,mask,
                             com.vlesscardvpn.core.LinkStabilityPolicy.Sample(outcome,maxOf(live.realMs,live.tgMs)),System.currentTimeMillis(),
-                            com.vlesscardvpn.core.AutoLatencyPolicy.MAX_MS)
+                            profileLimit)
                         if(quarantined) {
                             val cur=Tunnel.status.value
                             Tunnel.status.value=cur.copy(check="Маршрут нестабилен — временно исключён из Авто. Проверяю резерв без прямого обхода.",checkOk=false)
@@ -1086,7 +1098,7 @@ class TunnelService : VpnService() {
                 }
                 com.vlesscardvpn.core.ConnectionPassport.light(ok,live.tgOk,checkTelegram)
                 com.vlesscardvpn.core.ConnectionPassport.lightModules(live,checkTelegram,
-                    settings.mode==Mode.AUTO && usedChain==null && !sampledTorRoute)
+                    settings.mode==Mode.AUTO && usedChain==null && !sampledTorRoute && !com.vlesscardvpn.core.SlowRouteConsent.runtime(usedServers))
                 // Never leave a healthy heading after a fresh failure/unknown Telegram result.
                 if(!ok || checkTelegram && live.tgOk!=true) {
                     val cur=Tunnel.status.value
@@ -1097,7 +1109,7 @@ class TunnelService : VpnService() {
                 }
                 if(checkTelegram) com.vlesscardvpn.core.TelegramStability.record(live.tgOk,live.tgMs,"$network/$handle/${auth.port}/${chainEpoch.get()}")
                 if (ok && checkTelegram) {
-                    telegramSlow = com.vlesscardvpn.core.AutoLatencyPolicy.slowStreak(telegramSlow,live)
+                    telegramSlow = com.vlesscardvpn.core.AutoLatencyPolicy.slowStreak(telegramSlow,live,profileLimit)
                     val stability = com.vlesscardvpn.core.TelegramStability.summary(android.os.SystemClock.elapsedRealtime())
                     telegramUnstable = if(profile?.stability==true && stability.stable==false && live.tgOk==true) (telegramUnstable+1).coerceAtMost(3) else 0
                     if(telegramUnstable>=3 && !com.vlesscardvpn.core.SessionHold.active() &&
@@ -1175,52 +1187,28 @@ class TunnelService : VpnService() {
 
     private var scoutJob: Job? = null
     private fun standbyScout() {
-        if(usedChain != null) return
-        if (Store.state.value.settings.torAll) return
-        scoutJob?.cancel()
-        scoutJob = scope.launch {
-            var previous = TProxyService.stats(); var windows = 0; var lastAttempt = 0L
-            while (kotlinx.coroutines.currentCoroutineContext().isActive) {
-                if (!com.vlesscardvpn.core.PhonePower.refresh(this@TunnelService).screenInteractive) {
-                    com.vlesscardvpn.core.PhonePower.state.first { it.screenInteractive }
-                    previous = TProxyService.stats(); windows = 0
+        if(usedChain!=null || Store.state.value.settings.torAll || scoutJob?.isActive==true) return
+        scoutJob=scope.launch {
+            var previous=TProxyService.stats();var windows=0
+            while(isActive && Tunnel.status.value.state==Tunnel.State.CONNECTED) {
+                delay(1000)
+                if(Store.state.value.settings.mode!=Mode.AUTO) break
+                if(healJob?.isActive==true || recoveryJob?.isActive==true) continue
+                val current=TProxyService.stats();val old=previous;previous=current
+                val suspicious=old!=null && current!=null && old.size>=4 && current.size>=4 && current[1]-old[1]>=4096 && current[3]==old[3]
+                windows=if(suspicious) windows+1 else 0
+                when(com.vlesscardvpn.core.ReserveScoutPolicy.next(windows,Actions.warmReserveCount(usedServers))) {
+                    com.vlesscardvpn.core.ReserveScoutPolicy.Action.PREPARE -> try {Actions.prepareStandby(usedServers)}
+                        catch(e:kotlinx.coroutines.CancellationException) {throw e}
+                        catch(e:Exception) {Log.w(TAG,"Reserve preparation failed",e)}
+                    com.vlesscardvpn.core.ReserveScoutPolicy.Action.VERIFY -> {windows=0;verifySoon(0)}
+                    com.vlesscardvpn.core.ReserveScoutPolicy.Action.KEEP -> Unit
                 }
-                if (!com.vlesscardvpn.core.BackgroundReservePolicy.mayProbe(Store.state.value.settings.mode==Mode.AUTO,com.vlesscardvpn.core.PhonePower.refresh(this@TunnelService))) {
-                    windows = 0; previous = null; delay(com.vlesscardvpn.core.VpnRecoveryPolicy.RESERVE_RETRY_MS); continue
-                }
-                delay(5000)
-                val current = TProxyService.stats()
-                val a=previous;previous=current
-                if (asleep() || Store.state.value.settings.mode != com.vlesscardvpn.model.Mode.AUTO ||
-                    !com.vlesscardvpn.core.BackgroundReservePolicy.mayProbe(true,com.vlesscardvpn.core.PhonePower.refresh(this@TunnelService)) || healJob?.isActive == true || recoveryJob?.isActive == true) { windows=0;continue }
-                val suspicious = a != null && current != null && a.size>=4 && current.size>=4 && current[1]-a[1]>=4096 && current[3]==a[3]
-                windows=if (suspicious) windows+1 else 0
-                val now=System.currentTimeMillis()
-                if (windows<2) {
-                    if (now-lastAttempt>=15000 && Actions.warmReserveCount(usedServers)<3) {
-                        lastAttempt=now
-                        // Accumulate proofs without changing the live selection or downloading speed samples.
-                        try { Actions.prepareStandby(usedServers) }
-                        catch(e:kotlinx.coroutines.CancellationException) { throw e }
-                        catch(e:Exception) { Log.w(TAG,"Reserve preparation failed",e) }
-                    }
-                    continue
-                }
-                if (now-lastAttempt<15000) continue
-                windows=0;lastAttempt=now
-                val original=Tunnel.socks ?: continue;val network=Net.key(this@TunnelService)
-                val healthy=Tester.probeSocks(original.port,Store.state.value.settings.testUrl,big=false,youtube=false,attempts=1,budgetMs=1200).works
-                if (healthy) continue
-                val spare=runCatching { Actions.prepareStandby(usedServers) }.getOrElse { if (it is kotlinx.coroutines.CancellationException) throw it else null } ?: continue
-                if (Tunnel.socks != original || Net.key(this@TunnelService)!=network || asleep()) continue
-                Actions.selectBest(1,among=listOf(spare),close=true)
-                scope.launch { lock.withLock { connect(soft=true) } }
-                break
+                // This scout never selects a route. Full verification/watchdog owns confirmed-failure recovery.
             }
         }
     }
 
-    /** What the big button does (stop + start), by itself: TUN, DNS and Xray are rebuilt. */
     private var lastHard = 0L
     @Volatile private var lastSoft = false
     @Volatile private var netChangedAt = 0L

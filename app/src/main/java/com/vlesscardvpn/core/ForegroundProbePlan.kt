@@ -16,7 +16,8 @@ object ForegroundProbePlan {
         val (pending,ready)=candidates.partition(::needsCertificate)
         return listOf(ready,pending).filter {it.isNotEmpty()}
     }
-    fun staggerMs(foreground:Boolean,stopAfter:Int):Long = if(!foreground && stopAfter==1) 120L else 0L
+    @Suppress("UNUSED_PARAMETER")
+    fun staggerMs(foreground:Boolean,stopAfter:Int):Long = 0L
     suspend fun run(candidates:List<Server>,foreground:Boolean,valid:()->Boolean,
         probe:suspend (List<Server>)->Int):Int {
         var passed=0

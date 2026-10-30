@@ -31,7 +31,11 @@ object AutoChecks {
     val current get()=AutoCheckProfile.of(Store.state.value.settings.autoChecks)
     fun accepts(p:Probe)=current.accepts(p,AutoLatencyPolicy.MAX_MS)
     fun key(profile:AutoCheckProfile,maxMs:Int)=profile.key+"@"+maxMs
-    fun stamp(p:Probe,profile:AutoCheckProfile,maxMs:Int):String = if(profile.accepts(p,maxMs)) key(profile,maxMs) else ""
+    fun stamp(p:Probe,profile:AutoCheckProfile,maxMs:Int):String = when {
+        profile.accepts(p,maxMs)->key(profile,maxMs)
+        (profile.accepts(p,Int.MAX_VALUE) || p.latencyOnlyOk && profile.accepts(p.latencyConsented(),Int.MAX_VALUE))->key(profile,Int.MAX_VALUE)
+        else->""
+    }
     fun fresh(proof:String,profile:AutoCheckProfile,maxMs:Int,at:Long,now:Long):Boolean =
         proof==key(profile,maxMs) && at>0 && now>=at && now-at<=5*60_000L
     fun accepts(s:com.vlesscardvpn.model.ServerState):Boolean = s.works &&

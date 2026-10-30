@@ -2,8 +2,8 @@ package com.vlesscardvpn.core
 
 /** Only discovery pacing; never drops a live VPN or weakens service acceptance. */
 object SearchPacingPolicy {
-    /** Explicit connect search keeps a five-second inter-wave pause in every power profile.
-     * Heat/call/battery protection still caps foreground probe concurrency in PowerPolicy;
+    /** Explicit connect search keeps a one-second inter-wave pause in every power profile.
+     * The explicit probe ceiling is no longer reduced by app power/call policies;
      * optional background work retains its own independent deferral rules.
      */
     @Suppress("UNUSED_PARAMETER")

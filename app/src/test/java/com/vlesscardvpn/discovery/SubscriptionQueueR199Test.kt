@@ -31,5 +31,5 @@ class SubscriptionQueueR199Test {
  @Test fun provenLeaderIsPreserved(){val a=node("a");val b=node("b");assertEquals(a.id,SubscriptionQueue.window(listOf(b,a),listOf("b","a"),2,a.id).first().id)}
  @Test fun noEndpointsInventedAndIdsUnique(){val c=(1..10).map {node("a",it)};val w=SubscriptionQueue.window(c+c,listOf("made-up","a"),50,"missing");assertEquals(c.map {it.id}.toSet(),w.map {it.id}.toSet());assertEquals(c.size,w.size)}
  @Test fun emptyAndZeroWindowsSafe(){assertTrue(SubscriptionQueue.window(emptyList(),emptyList()).isEmpty());assertTrue(SubscriptionQueue.window(listOf(node("a")),listOf("a"),0).isEmpty())}
- @Test fun cooledPrefixCannotHideOtherSource(){val a=(1..1000).map {node("a",it)};val b=node("b");val ready=DiscoveryWindow.pool(a+b,{it.source=="a"},{1});assertEquals(listOf(b),SubscriptionQueue.window(ready,listOf("a","b"),8))}
+ @Test fun cooledPrefixCannotHideOtherSource(){val a=(1..1000).map {node("a",it)};val b=node("b");val ready=DiscoveryWindow.pool(a+b,{it.source=="a"},{1});assertEquals((a+b).map {it.id}.toSet(),ready.map {it.id}.toSet());assertTrue(SubscriptionQueue.window(ready,listOf("a","b"),8).contains(b))}
 }

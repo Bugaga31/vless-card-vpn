@@ -50,6 +50,7 @@ object Actions {
 
     fun init(context: Context) {
         app = context.applicationContext
+        SlowRouteConsent.init(app)
         maybeLoadRequestedSource()
         runCatching { Brain.load(app) } // load before the first probe can initialize fresh weights
         // 1.0.81–1.0.83 left a mask neural network and maybe a 0.5–1.8 GB language model on the phone: removed, space freed
@@ -58,6 +59,7 @@ object Actions {
 
     fun cancelForNetworkChange() {
         autoGeneration.incrementAndGet()
+        SlowRouteConsent.clear()
         job?.cancel()
         progress.value = progress.value.copy(running = false, message = "Сеть изменилась — старые проверки отменены")
     }
@@ -352,7 +354,8 @@ object Actions {
         val snapshot = Store.state.value
         val targets = if (onlySelected) snapshot.selected else snapshot.servers
         if (targets.isEmpty()) return@launch if (onlySelected) "Сначала выберите серверы для проверки" else "Нет серверов — добавьте ссылку или обновите подписки"
-        val limits = ManualServerCheckPolicy.limits(PhonePower.refresh(app))
+        val chosen=ProbeConcurrencyPolicy.normalize(Store.state.value.settings.probeParallel)
+        val limits = ManualServerCheckPolicy.Limits(chosen,chosen,chosen)
         doTestAll(targets, realLimit, tcpParallel = limits.tcpParallel, realParallel = limits.realParallel, realBatch = limits.batch)
     }
 
@@ -457,6 +460,8 @@ object Actions {
                     WarmReserveMemory.session.record(observed,s,x.maskFor(net),st.settings.testUrl,android.os.SystemClock.elapsedRealtime())
             }
         }
+        if(Tunnel.status.value.state==Tunnel.State.CONNECTING && st.settings.mode==Mode.AUTO && Net.matches(app,observed))
+            SlowRouteConsent.remember(pinned,sampleStartedAt)
         // stopAfter=1 already cancels the remaining probes. Finish their cleanup and
         // commit all results before starting a VPN core; do not race two core lifecycles.
         firstWinner.get()?.let { s ->
@@ -1159,9 +1164,22 @@ object Actions {
 
     /** «Подключение…» tapped again while Auto is still preparing: stop preparing. */
     fun cancelPrepare() {
+        SlowRouteConsent.clear()
         autoGeneration.incrementAndGet()
         if (progress.value.title.startsWith("Авто")) cancel()
         if (Tunnel.status.value.state == Tunnel.State.CONNECTING && Tunnel.socks == null) Tunnel.status.value = Tunnel.Status()
+    }
+
+    fun acceptSlowRoute(onReady:()->Unit) {
+        if(!SlowRouteConsent.approve()) return
+        autoGeneration.incrementAndGet()
+        val old=job;old?.cancel()
+        scope.launch {
+            old?.join()
+            progress.value=progress.value.copy(running=false)
+            val route=Store.state.value.servers.filter {s->SlowRouteConsent.permits(s,Store.state.value.state(s),Net.key(app),System.currentTimeMillis())}
+            if(route.isNotEmpty() && selectBest(1,among=route)>0) withContext(Dispatchers.Main) {onReady()}
+        }
     }
 
     fun online(): Boolean = runCatching {
@@ -1400,6 +1418,7 @@ object Actions {
             onWait = { wait ->
                 progress.value = progress.value.copy(title = SearchFeedback.title(wait), done = 0, total = 0,
                     message = SearchFeedback.message(wait, statistics.snapshot()))
+                SlowRouteConsent.expose()
                 Tunnel.status.value = Tunnel.Status(Tunnel.State.CONNECTING,
                     if(wait.reason==AutoSearchCampaign.WaitReason.OFFLINE) "Жду сеть…" else "Продолжаю поиск…",
                     checkOk = null)
@@ -1517,7 +1536,8 @@ object Actions {
             },{AutoChecks.rank(st.state(it),net,stamp)})
             val queue=SubscriptionQueue.quality(st.settings.subscriptions,st.servers,{st.state(it)},net,stamp)
             val rankedCandidates=AdaptiveRouteRank.order(usable,{st.state(it)},net,stamp,{CloudSpeed.prior(it)})
-            return SubscriptionQueue.window(rankedCandidates,queue.map {it.source})
+            return KnownRouteQueue.merge(SubscriptionQueue.window(rankedCandidates,queue.map {it.source}),
+                usable.filter {st.state(it).works || st.state(it).tcpMs>0},AutoDiscoveryPolicy.RANKING_WINDOW){it.id}
         }
         val batches = kotlinx.coroutines.channels.Channel<List<Server>>(AutoDiscoveryPolicy.SOURCES)
         val refresh = launch(Bg.io) {
@@ -1571,7 +1591,8 @@ object Actions {
                 withContext(Dispatchers.Main) { if (sameNetwork()) onReady() }
                 return@coroutineScope "Авто: проверенный VLESS-маршрут выбран — подключаюсь"
             }
-            if (continuous) return@coroutineScope "Продолжаю поиск следующей порцией серверов; прямого обхода нет"
+            SlowRouteConsent.expose()
+            if (continuous) return@coroutineScope "Сервера в заданном пределе пока нет. Можно продолжить поиск или подтвердить более медленный маршрут."
             val message = if (Store.state.value.settings.autoUpdateSubs)
                 "Авто попытался обновить подписки и проверил ограниченный набор маршрутов. Рабочий маршрут пока не подтверждён; прямого обхода нет. Повторите поиск после смены сети или проверьте доступ к источникам."
                 else "Рабочий маршрут не подтверждён. Автообновление подписок выключено в настройках; прямого обхода нет."
@@ -1626,21 +1647,24 @@ object Actions {
         val readySources=eligible.filter {it.id !in coolingIds && serviceRanks.getValue(it.id)<2}
         val provenLeader=proposed.firstOrNull {server -> st.state(server).evidenceFor(net).let {e ->
             e.successes>0 && e.streak==0 && time>=e.at && time-e.at<1800000} && serviceRanks.getValue(server.id)==0 }?.id
-        val first=if(firstWaveOnly && readySources.isNotEmpty()) SubscriptionQueue.window(
+        val firstBase=if(firstWaveOnly && readySources.isNotEmpty()) SubscriptionQueue.window(
             (proposed+readySources.sortedBy {learned[it.id] ?: Int.MAX_VALUE}).distinctBy {it.id},
             sourceQuality.map {it.source},ConnectPolicy.FIRST,provenLeader) else proposed
+        val known=allEligible.filter {st.state(it).works || st.state(it).tcpMs>0}
+            .sortedWith(compareBy<Server>{!st.state(it).works}.thenByDescending {st.state(it).checkedAt})
+        val first=KnownRouteQueue.merge(firstBase,known,ConnectPolicy.FIRST){it.id}
         val cachedGood = first.filter { st.state(it).evidenceFor(net).let { e -> e.successes > 0 && e.streak == 0 && time >= e.at && time - e.at < 1800000 } }.map { it.id }.toSet()
         val ping = first.filter { it.id !in cachedGood }
         val earlyHandoff = firstWaveOnly
         val plan = PhonePower.refresh(app)
-        val slots = minOf(ping.size, PowerPolicy.cap(ConnectPolicy.FIRST, plan.foregroundTcpParallel))
+        val slots = minOf(first.size, ProbeConcurrencyPolicy.normalize(st.settings.probeParallel))
         progress.value = progress.value.copy(
             title = if (earlyHandoff) "Авто: очередь подписок" else "Авто: TCP-проверка ${ping.size} кандидатов",
             done = 0,
             total = ping.size,
-            message = if (earlyHandoff) "${first.map {it.source}.distinct().size} источников в порции · до $slots параллельно. Приоритет — местная история; каждый маршрут подтверждаем выбранными проверками: ${AutoChecks.label()}." else
+            message = if (earlyHandoff) "${first.map {it.source}.distinct().size} источников · ранее отвечали ${first.count {st.state(it).works || st.state(it).tcpMs>0}} · до $slots параллельно. Приоритет — местная история; каждый маршрут подтверждаем выбранными проверками: ${AutoChecks.label()}." else
                 "Одновременно до $slots · ${cachedGood.size} с недавним подтверждением" +
-                    (if (slots < minOf(ConnectPolicy.FIRST, ping.size)) " · ${plan.reason}" else ""))
+                    " · выбранный лимит ${st.settings.probeParallel}")
         val reachable = if (ConnectPolicy.requiresTcpFilter(earlyHandoff)) Tester.fastFilter(ping, foreground = true) else emptyMap()
         if (reachable.isNotEmpty()) Store.setStates(reachable.mapValues { (_, ms) -> { old: com.vlesscardvpn.model.ServerState -> old.copy(tcpMs = ms) } })
         val available = first.filter { (reachable[it.id] ?: -1) != 0 }.ifEmpty { first }
@@ -1880,9 +1904,9 @@ object Actions {
     suspend fun prepareStandby(used: List<Server>): Server? {
         if (job?.isActive == true) return null
         val plan=PhonePower.refresh(app)
-        if(SessionHold.active() || GameSession.active() || !BackgroundReservePolicy.mayProbe(Store.state.value.settings.mode==Mode.AUTO,plan) || plan.deferTraffic) return null
+        if(!BackgroundReservePolicy.mayProbe(Store.state.value.settings.mode==Mode.AUTO,plan)) return null
         val st = Store.state.value; val ids = used.map { it.id }.toSet(); val net = Net.key(app)
-        if(!ReserveBudget.take(net+"|"+Net.underlying(app)?.toString(),android.os.SystemClock.elapsedRealtime(),refillMs=15_000L)) return null
+        if(!ReserveBudget.take(net+"|"+Net.underlying(app)?.toString(),android.os.SystemClock.elapsedRealtime(),refillMs=1000L)) return null
         val stamp=System.currentTimeMillis()
         val warm = warmReserveCount(used)
         if (warm>=3) return null

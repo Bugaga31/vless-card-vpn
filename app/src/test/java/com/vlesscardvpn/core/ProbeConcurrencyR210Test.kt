@@ -32,16 +32,16 @@ class ProbeConcurrencyR210Test {
         assertEquals(10,ProbeConcurrencyPolicy.limit(20,10,plan(),false))
     }
     @Test fun requestedSingleRouteRemainsSingle() {assertEquals(1,ProbeConcurrencyPolicy.limit(1,10,plan(),true))}
-    @Test fun thermalCapWinsEvenWhenAutoCoolIsOff() {
+    @Test fun explicitChoiceNotReducedWhenHot() {
         val p=plan(PowerPolicy.Input(1,thermal=3),PowerPolicy.Options(autoCool=false))
         assertTrue(p.memory.hot);assertFalse(p.allowLight)
-        assertEquals(2,ProbeConcurrencyPolicy.limit(20,10,p,true))
+        assertEquals(10,ProbeConcurrencyPolicy.limit(20,10,p,true))
     }
-    @Test fun lowMemoryStillCapsAtTwo() {assertEquals(2,ProbeConcurrencyPolicy.limit(20,10,plan(PowerPolicy.Input(1,lowMemory=true)),true))}
-    @Test fun callStillCapsAtOne() {assertEquals(1,ProbeConcurrencyPolicy.limit(20,10,plan(PowerPolicy.Input(1,voiceCall=true)),true))}
-    @Test fun saverAndEcoStillCapAtFour() {
-        assertEquals(4,ProbeConcurrencyPolicy.limit(20,10,plan(PowerPolicy.Input(1,saver=true)),true))
-        assertEquals(4,ProbeConcurrencyPolicy.limit(20,10,plan(options=PowerPolicy.Options(profile="eco")),true))
+    @Test fun explicitChoiceNotReducedForMemory() {assertEquals(10,ProbeConcurrencyPolicy.limit(20,10,plan(PowerPolicy.Input(1,lowMemory=true)),true))}
+    @Test fun explicitChoiceNotReducedForCall() {assertEquals(10,ProbeConcurrencyPolicy.limit(20,10,plan(PowerPolicy.Input(1,voiceCall=true)),true))}
+    @Test fun explicitChoiceNotReducedBySaverAndEco() {
+        assertEquals(10,ProbeConcurrencyPolicy.limit(20,10,plan(PowerPolicy.Input(1,saver=true)),true))
+        assertEquals(10,ProbeConcurrencyPolicy.limit(20,10,plan(options=PowerPolicy.Options(profile="eco")),true))
     }
     @Test fun lowerUserChoiceIsNotRaisedBySafetyCap() {assertEquals(1,ProbeConcurrencyPolicy.limit(20,1,plan(PowerPolicy.Input(1,thermal=3)),true))}
     @Test fun coreBatchNeverStartsMoreRoutesThanActiveSlots() {

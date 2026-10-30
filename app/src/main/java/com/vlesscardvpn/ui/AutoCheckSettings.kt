@@ -26,7 +26,7 @@ fun AutoCheckSettings() {
                     modifier=Modifier.semantics {contentDescription="Проверять одновременно до $n серверов"},label={Text(n.toString())})
             }
         }
-        Text("По умолчанию 5. Сейчас до $slots одновременно; выбранный предел $parallel. В следующей волне действует новый лимит. Нагрев, нехватка памяти и звонок могут временно снизить его.",style=MaterialTheme.typography.bodySmall)
+        Text("По умолчанию 5. Сейчас до $slots одновременно; выбранный предел $parallel. Новый лимит действует со следующей волны. Внутренняя оптимизация, нагрев и звонки больше не урезают выбранное число; системные ограничения Android остаются.",style=MaterialTheme.typography.bodySmall)
         Text("В одном тестовом ядре создаются только проверяемые маршруты. Первый подходящий сервер останавливает ненужные пробы; это снижает лишнюю нагрузку, но не гарантирует отсутствие нагрева.",style=MaterialTheme.typography.bodySmall)
         Text("Что проверять в Авто",style=MaterialTheme.typography.titleMedium)
         Text("HTTPS проверяется всегда. Выбранные проверки обязательны для нового сервера и резервов.",style=MaterialTheme.typography.bodySmall)

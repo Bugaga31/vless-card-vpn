@@ -11,9 +11,9 @@ object AutoLatencyPolicy {
     fun accepts(p:Probe):Boolean = range.accepts(p.works,p.realMs,p.tgOk,p.tgMs)
     fun accepts(s:ServerState):Boolean = range.accepts(s.works,s.realMs,s.tgOk,s.tgMs)
     /** A single load spike is not a reason to tear down a working tunnel. */
-    fun slowStreak(previous:Int,p:Probe):Int = when {
+    fun slowStreak(previous:Int,p:Probe,maxMs:Int=MAX_MS):Int = when {
         !p.works || p.tgOk!=true || p.tgMs<=0 -> 0
-        accepts(p) -> 0
+        p.works && p.tgOk==true && p.realMs in 1..maxMs && p.tgMs in 1..maxMs -> 0
         else -> (previous+1).coerceAtMost(3)
     }
 }
