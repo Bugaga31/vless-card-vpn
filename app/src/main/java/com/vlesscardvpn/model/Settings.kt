@@ -20,8 +20,8 @@ data class Settings(
     val socksPort: Int = 10808,
     val autoChecks: Set<String> = com.vlesscardvpn.core.AutoCheckProfile.defaults,
     val probeParallel: Int = com.vlesscardvpn.core.ProbeConcurrencyPolicy.DEFAULT,
-    val autoLatencyMinMs: Int = 1,
-    val autoLatencyMaxMs: Int = 1000,
+    val autoLatencyMinMs: Int = 100,
+    val autoLatencyMaxMs: Int = 800,
     val ruDirect: Boolean = false,
     val ruWhitelist: Boolean = true,
     val ruAllDirect: Boolean = false,
@@ -182,7 +182,7 @@ data class Settings(
     fun toJson(): JSONObject = JSONObject().put("mode", mode.name).put("balance", balance.name).put("socksPort", socksPort)
         .put("autoChecks", JSONArray(autoChecks.sorted()))
         .put("probeParallel", com.vlesscardvpn.core.ProbeConcurrencyPolicy.normalize(probeParallel))
-        .put("autoLatencyMinMs", autoLatencyMinMs).put("autoLatencyMaxMs", autoLatencyMaxMs)
+        .put("autoLatencyMinMs", autoLatencyMinMs).put("autoLatencyMaxMs", autoLatencyMaxMs).put("autoLatencyPresetVersion", 213)
         .put("ruAllDirect", ruAllDirect).put("ruWhitelist", ruWhitelist).put("ruDirect", ruDirect).put("blockAds", blockAds).put("blockTrackers", blockTrackers).put("byeDpiArgs", byeDpiArgs).put("byeDpiSni", byeDpiSni)
         .put("hybridDomains", JSONArray(hybridDomains)).put("testUrl", testUrl).put("dnsUrl", dnsUrl).put("dnsAuto", dnsAuto)
         .put("subscriptions", JSONArray(subscriptions))
@@ -242,6 +242,8 @@ data class Settings(
         fun mirrors(url: String): List<String> = Subs.mirrors(url)
         fun fromJson(o: JSONObject): Settings {
             val d = Settings()
+            val latency = if(o.optInt("autoLatencyPresetVersion",0)<213) com.vlesscardvpn.core.AutoLatencyRange.Range()
+                else com.vlesscardvpn.core.AutoLatencyRange.safe(o.optInt("autoLatencyMinMs",100),o.optInt("autoLatencyMaxMs",800))
             fun list(k: String, def: List<String>) = o.optJSONArray(k)?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: def
             return Settings(
                 mode = runCatching { Mode.valueOf(o.getString("mode")) }.getOrDefault(d.mode),
@@ -251,8 +253,8 @@ data class Settings(
                     o.optJSONArray("autoChecks")?.let {a->(0 until a.length()).map {a.optString(it)}}.orEmpty()).selected
                     else com.vlesscardvpn.core.AutoCheckProfile.defaults,
                 probeParallel = com.vlesscardvpn.core.ProbeConcurrencyPolicy.normalize(o.optInt("probeParallel", com.vlesscardvpn.core.ProbeConcurrencyPolicy.DEFAULT)),
-                autoLatencyMinMs = com.vlesscardvpn.core.AutoLatencyRange.safe(o.optInt("autoLatencyMinMs", 1), o.optInt("autoLatencyMaxMs", 1000)).min,
-                autoLatencyMaxMs = com.vlesscardvpn.core.AutoLatencyRange.safe(o.optInt("autoLatencyMinMs", 1), o.optInt("autoLatencyMaxMs", 1000)).max,
+                autoLatencyMinMs = latency.min,
+                autoLatencyMaxMs = latency.max,
                 ruAllDirect = o.optBoolean("ruAllDirect", d.ruAllDirect), ruWhitelist = o.optBoolean("ruWhitelist", d.ruWhitelist), ruDirect = o.optBoolean("ruDirect", d.ruDirect), blockAds = o.optBoolean("blockAds", d.blockAds), blockTrackers = o.optBoolean("blockTrackers", d.blockTrackers),
                 byeDpiArgs = o.optString("byeDpiArgs", d.byeDpiArgs), byeDpiSni = o.optString("byeDpiSni", d.byeDpiSni),
                 hybridDomains = list("hybridDomains", d.hybridDomains), testUrl = o.optString("testUrl", d.testUrl),

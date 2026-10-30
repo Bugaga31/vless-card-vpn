@@ -41,7 +41,7 @@ import androidx.lifecycle.repeatOnLifecycle
 import androidx.compose.ui.platform.LocalLifecycleOwner
 
 @Composable
-fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () -> Unit) {
+fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () -> Unit, onConnectFound:()->Unit = onConnect) {
     val status by Tunnel.status.collectAsState()
     val lifecycleOwner = LocalLifecycleOwner.current
     // Only settings and a small summary: the home screen does not redraw for every server result of a check.
@@ -124,37 +124,10 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
         val on = status.state == Tunnel.State.CONNECTED
         val busy = status.state == Tunnel.State.CONNECTING
         val color = when { on && status.checkOk == false -> Warn; on && status.checkOk == null -> Accent; on -> Good; busy -> Accent; else -> MaterialTheme.colorScheme.primary }
+        FoundRoutesCard(onConnectFound)
         ConnectionOverview(status, cfg.hideServerNames, if(cfg.torAll) "Tor через VLESS" else if(cfg.mode==Mode.AUTO) "Авто" else "Выбранные серверы") {
             PowerButton(on, busy, color) { if (on || busy) onDisconnect() else onConnect() }
         }
-        val slowOffer by SlowRouteConsent.offer.collectAsState()
-        val foundCount by SlowRouteConsent.count.collectAsState()
-        var confirmSlow by remember {mutableStateOf<SlowRouteConsent.Offer?>(null)}
-        LaunchedEffect(busy,cfg.mode) {
-            if(!busy || cfg.mode!=Mode.AUTO) confirmSlow=null
-            if(busy && cfg.mode==Mode.AUTO) while(true) {
-                SlowRouteConsent.expose()
-                kotlinx.coroutines.delay(1000)
-            }
-        }
-        if(busy && cfg.mode==Mode.AUTO && slowOffer!=null && foundCount>0) {
-            val candidate=slowOffer!!
-            Card(Modifier.fillMaxWidth().padding(top=8.dp)) {
-                Column(Modifier.padding(12.dp)) {
-                    Text("Найдено проверенных серверов: $foundCount. Лучший ответ: ${candidate.ms} мс при пределе ${candidate.limit} мс.")
-                    Text("Можно подключиться сейчас, не дожидаясь остальных. Выбранные сервисные проверки прошли; полный путь приложений через TUN этим не подтверждён.")
-                    Button(onClick={confirmSlow=candidate},modifier=Modifier.fillMaxWidth()) {
-                        Text("Подключиться к найденным ($foundCount)")
-                    }
-                }
-            }
-        }
-        val confirmed=confirmSlow
-        if(confirmed!=null && busy && cfg.mode==Mode.AUTO) AlertDialog(onDismissRequest={confirmSlow=null},
-            title={Text("Подключиться с большей задержкой?")},
-            text={Text("Выберу один проверенный сервер: ${confirmed.ms} мс при пределе ${confirmed.limit} мс. Разрешение только для этого сервера и этой VPN-сессии; настройки не изменятся. Перед запуском повторно проверю свежесть результата.")},
-            confirmButton={TextButton(onClick={confirmSlow=null;Actions.acceptSlowRoute(confirmed) {onConnect()}}){Text("Всё равно подключиться")}},
-            dismissButton={TextButton(onClick={confirmSlow=null}){Text("Продолжить поиск")}})
         val torExit by com.vlesscardvpn.core.TorExitStatus.state.collectAsState()
         if(on && torExit.active) TorExitCountryCard(torExit)
         val backgroundStatus by com.vlesscardvpn.core.BackgroundOptimization.status.collectAsState()

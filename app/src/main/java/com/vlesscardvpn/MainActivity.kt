@@ -17,13 +17,17 @@ import com.vlesscardvpn.ui.AppUi
 import com.vlesscardvpn.vpn.TunnelService
 
 class MainActivity : ComponentActivity() {
+    private var foundStart=false
     private var batteryOffer: android.app.AlertDialog? = null
     private val vpnPermission = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { r ->
         if (r.resultCode == RESULT_OK) start()
+        else {foundStart=false;com.vlesscardvpn.core.SlowRouteConsent.clear()}
     }
 
     /** Auto mode prepares servers/masks/DPI first (Actions.autoConnect), the other modes connect right away. */
     private fun start() {
+        val found=foundStart;foundStart=false
+        if(found) {com.vlesscardvpn.core.Actions.connectFound {TunnelService.start(this)};return}
         if (com.vlesscardvpn.tor.TorConnectionPolicy.needsAutoSearch(com.vlesscardvpn.core.Store.state.value.settings))
             com.vlesscardvpn.core.Actions.autoConnect { TunnelService.start(this) }
         else TunnelService.start(this)
@@ -31,9 +35,21 @@ class MainActivity : ComponentActivity() {
     private val notifPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
 
     fun connect() {
+        foundStart=false
         // Stored legacy proxyOnly cannot bypass Android VPN consent.
         val intent = VpnService.prepare(this)
         if (intent != null) vpnPermission.launch(intent) else start()
+    }
+
+    fun connectFound() {
+        foundStart=true
+        val intent=VpnService.prepare(this)
+        if(intent!=null) vpnPermission.launch(intent) else start()
+    }
+
+    override fun onSaveInstanceState(outState:Bundle) {
+        outState.putBoolean("foundStart",foundStart)
+        super.onSaveInstanceState(outState)
     }
 
     /** Offered only after connection and while this activity is resumed; declining never stops VPN. */
@@ -60,6 +76,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        foundStart=savedInstanceState?.getBoolean("foundStart",false) ?: false
         if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED)
             notifPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
         com.vlesscardvpn.core.Actions.init(this)
@@ -78,7 +95,7 @@ class MainActivity : ComponentActivity() {
                 com.vlesscardvpn.core.Tunnel.status.collect { offerVpnBatteryExemption() }
             }
         }
-        setContent { AppUi(onConnect = { connect() }, onDisconnect = { com.vlesscardvpn.core.Actions.cancelPrepare(); TunnelService.stop(this) }) }
+        setContent { AppUi(onConnectFound = {connectFound()}, onConnect = { connect() }, onDisconnect = { com.vlesscardvpn.core.Actions.cancelPrepare(); TunnelService.stop(this) }) }
         e2e(intent, restored = savedInstanceState != null)
         importFrom(intent)
     }
