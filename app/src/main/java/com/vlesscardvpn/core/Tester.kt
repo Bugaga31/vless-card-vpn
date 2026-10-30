@@ -21,8 +21,9 @@ import java.net.ServerSocket
 import java.net.Socket
 import java.util.concurrent.TimeUnit
 
-data class Probe(val realMs: Int, val bigOk: Boolean?, val ytOk: Boolean?, val error: String = "", val tgOk: Boolean? = null, val kbps: Int = 0, val ytKbps: Int = 0, val bodyBytes: Long = 0, val bodyMs: Long = 0, val callsOk: Boolean? = null, val tgMs: Int = 0, val discordOk:Boolean?=null, val stableOk:Boolean?=null, val autoChecksKey:String="") {
+data class Probe(val realMs: Int, val bigOk: Boolean?, val ytOk: Boolean?, val error: String = "", val tgOk: Boolean? = null, val kbps: Int = 0, val ytKbps: Int = 0, val bodyBytes: Long = 0, val bodyMs: Long = 0, val callsOk: Boolean? = null, val tgMs: Int = 0, val discordOk:Boolean?=null, val stableOk:Boolean?=null, val autoChecksKey:String="",val latencyOnlyOk:Boolean=false) {
     val works: Boolean get() = realMs > 0 && bigOk != false
+    fun latencyConsented()=if(latencyOnlyOk) copy(stableOk=true,callsOk=true) else this
 }
 
 /**
@@ -55,7 +56,7 @@ object Tester {
      */
     suspend fun tcp(servers: List<Server>, parallel: Int = 96, timeoutMs: Int = 2500, onEach: (Server, Int) -> Unit) = coroutineScope {
         val names = servers.map { it.address }.distinct()
-        val limit = PowerPolicy.cap(parallel, PhonePower.state.value.tcpParallel)
+        val limit = minOf(parallel.coerceAtLeast(1),ProbeConcurrencyPolicy.normalize(Store.state.value.settings.probeParallel))
         val sem = Semaphore(minOf(32, limit))
         val ips = linkedMapOf<String, InetAddress?>()
         for (chunk in names.chunked(64)) {
@@ -72,7 +73,7 @@ object Tester {
     /** Bounded TCP hint, never an authenticated Reality/TLS verdict. Timeout is unknown, not a blacklist. */
     suspend fun fastFilter(servers: List<Server>, budgetMs: Long = 600, foreground: Boolean = false): Map<String, Int> = coroutineScope {
         val plan = PhonePower.state.value
-        val sem = Semaphore(PowerPolicy.cap(if (foreground) ConnectPolicy.FIRST else 6, if (foreground) plan.foregroundTcpParallel else plan.tcpParallel))
+        val sem = Semaphore(ProbeConcurrencyPolicy.normalize(Store.state.value.settings.probeParallel))
         // Shared only inside this call: no stale DNS cache crosses a network change.
         val names=servers.filter {it.isTcpBased}.map {RuntimeProbeAddress.host(it.address)}.distinct()
             .associateWith {host->async(start=kotlinx.coroutines.CoroutineStart.LAZY) {ProbeDns.resolve(host,budgetMs)}}
@@ -187,10 +188,15 @@ object Tester {
             val ytF = if (autoChecks?.youtube ?: youtube) pool.submit<YouTubeMediaProbe.Result> {
                 YouTubeMediaProbe.check { boundedCall(mediaClient, it) }
             }.also { tasks += it } else null
+            val relaxedCalls=java.util.concurrent.atomic.AtomicReference<Boolean?>(null)
+            val relaxedStable=java.util.concurrent.atomic.AtomicReference<Boolean?>(null)
             val callF = if (autoChecks?.voice ?: calls) pool.submit<Boolean?> {
                 if(autoChecks?.voice==true) {
                     val t=UdpCallProbe.train(port,user,pass,minOf(4000L,remaining()).toInt(),CallTransportPolicy.PACKETS,onCancel)
-                    CallTransportPolicy.assess(t.sent,t.rttMs,t.complete,AutoLatencyPolicy.MAX_MS).grade.let {grade->
+                    val summary=CallTransportPolicy.assess(t.sent,t.rttMs,t.complete,AutoLatencyPolicy.MAX_MS)
+                    relaxedCalls.set(if(!t.complete || t.sent!=CallTransportPolicy.PACKETS) null else
+                        summary.received==CallTransportPolicy.PACKETS && summary.lossPercent==0 && (summary.rttSpreadMs ?: Int.MAX_VALUE)<=40)
+                    summary.grade.let {grade->
                         if(grade==CallTransportPolicy.Grade.UNKNOWN) null else grade==CallTransportPolicy.Grade.PASS
                     }
                 } else UdpCallProbe.probe(port, user, pass, minOf(1800L, remaining()).toInt(), onCancel)
@@ -211,6 +217,7 @@ object Tester {
                     val x=TelegramProbe.measure(port,minOf(2000L,remaining()),onCancel)
                     samples+=LinkStabilityPolicy.Sample(x.ok,x.ms)
                 }
+                relaxedStable.set(LinkStabilityPolicy.summarize(samples,Int.MAX_VALUE).stable)
                 LinkStabilityPolicy.summarize(samples,AutoLatencyPolicy.MAX_MS).stable
             }.also {tasks+=it} else null
             val bigResult = ProbeTasks.await(bigF, remaining(), BodyResult())
@@ -219,7 +226,8 @@ object Tester {
             val discordOk=ProbeTasks.await(discordF,remaining(),null)
             val stableOk=ProbeTasks.await(stabilityF,remaining(),null)
             val result=Probe(best.toInt().coerceAtLeast(1), if (bigF != null) bigResult.ok else null, ytResult.ok, tgOk = tgResult.ok, tgMs = if(tgResult.ok==true) tgResult.ms else 0, kbps = bigResult.kbps, ytKbps = ytResult.kbps, bodyBytes = bigResult.bytes, bodyMs = bigResult.ms, callsOk = callsOk, discordOk=discordOk,stableOk=stableOk)
-            return if(autoChecks!=null) result.copy(autoChecksKey=AutoChecks.stamp(result,autoChecks,AutoLatencyPolicy.MAX_MS)) else result
+            val measured=if(autoChecks!=null) LatencyOnlyProbe.proof(result,autoChecks,relaxedStable.get(),relaxedCalls.get()) else result
+            return if(autoChecks!=null) measured.copy(autoChecksKey=AutoChecks.stamp(measured,autoChecks,AutoLatencyPolicy.MAX_MS)) else measured
         } finally {
             ProbeTasks.cancel(tasks)
             // Private dispatcher/pool: cancellation cannot cancel another probe or the live VPN's HTTP calls.

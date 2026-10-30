@@ -66,7 +66,7 @@ object AutoSearchCampaign {
     }
 
     const val RETRY_CATALOG_MS = 60_000L
-    const val WAVE_PAUSE_MS = 5000L
+    const val WAVE_PAUSE_MS = 1000L
     @Suppress("UNUSED_PARAMETER")
     fun backoff(round: Int): Long = WAVE_PAUSE_MS
 
@@ -102,11 +102,11 @@ object AutoSearchCampaign {
                 pause(2000L)
                 continue
             }
-            // Retest exhausted catalogs at most once per minute. Re-evaluate every 5s so
+            // Retest exhausted catalogs at most once per minute. Re-evaluate every second so
             // new subscriptions and network changes can resume discovery without a busy loop.
             if (idleOnExhaustion && attempted.isNotEmpty() && exhausted(attempted)) {
                 waiting(round, false)
-                val wait=maxOf(5000L, restMs().coerceIn(0L, 60000L))
+                val wait=maxOf(1000L, restMs().coerceIn(0L, 60000L))
                 onWait(WaitState(round,WaitReason.CATALOG_RETRY,wait))
                 pause(wait)
                 continue

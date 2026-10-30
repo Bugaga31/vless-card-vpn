@@ -35,7 +35,7 @@ object ConnectPolicy {
         val byId = list.associateBy { it.id }
         val uniqueList = list.distinctBy { it.id }
         val hasPossibleServiceRoute = uniqueList.any { serviceRank(it) < 2 }
-        val eligible = if (hasPossibleServiceRoute) uniqueList.filter { serviceRank(it) < 2 } else uniqueList
+        val eligible = uniqueList // Negative service history changes priority, not membership.
         val cloudIds = cloud.mapNotNull { byId[it.id] }.map { it.id }.toSet()
         val unique = eligible.sortedWith(compareBy<Server> { serviceRank(it) }.thenBy { score(it) }
             .thenBy { if (it.id in remembered) 0 else 1 }.thenBy { if (it.id in cloudIds) 0 else 1 })

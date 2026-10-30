@@ -32,6 +32,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.vlesscardvpn.BuildConfig
 import com.vlesscardvpn.core.Actions
+import com.vlesscardvpn.core.SlowRouteConsent
 import com.vlesscardvpn.core.Store
 import com.vlesscardvpn.core.Tunnel
 import com.vlesscardvpn.model.Mode
@@ -126,6 +127,23 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
         ConnectionOverview(status, cfg.hideServerNames, if(cfg.torAll) "Tor через VLESS" else if(cfg.mode==Mode.AUTO) "Авто" else "Выбранные серверы") {
             PowerButton(on, busy, color) { if (on || busy) onDisconnect() else onConnect() }
         }
+        val slowOffer by SlowRouteConsent.offer.collectAsState()
+        var confirmSlow by remember {mutableStateOf(false)}
+        if(busy && slowOffer!=null) {
+            val candidate=slowOffer!!
+            Card(Modifier.fillMaxWidth().padding(top=8.dp)) {
+                Column(Modifier.padding(12.dp)) {
+                    Text("Сервер в заданном пределе пока не найден. Лучший проверенный ответ: ${candidate.ms} мс, предел ${candidate.limit} мс.")
+                    Text("Выбранные сервисные проверки прошли. Это не гарантия работы всех приложений через TUN.")
+                    TextButton(onClick={confirmSlow=true}) {Text("Продолжить")}
+                }
+            }
+        }
+        if(confirmSlow && busy && slowOffer!=null) AlertDialog(onDismissRequest={confirmSlow=false},
+            title={Text("Подключиться с большей задержкой?")},
+            text={Text("Ответ ${slowOffer!!.ms} мс при пределе ${slowOffer!!.limit} мс. Разрешение только для этого сервера и этой VPN-сессии; настройки не изменятся.")},
+            confirmButton={TextButton(onClick={confirmSlow=false;Actions.acceptSlowRoute {onConnect()}}){Text("Всё равно подключиться")}},
+            dismissButton={TextButton(onClick={confirmSlow=false;SlowRouteConsent.hide()}){Text("Продолжить поиск")}})
         val torExit by com.vlesscardvpn.core.TorExitStatus.state.collectAsState()
         if(on && torExit.active) TorExitCountryCard(torExit)
         val backgroundStatus by com.vlesscardvpn.core.BackgroundOptimization.status.collectAsState()

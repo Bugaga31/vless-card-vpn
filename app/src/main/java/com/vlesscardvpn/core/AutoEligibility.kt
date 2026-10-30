@@ -60,10 +60,11 @@ object AutoEligibility {
         // Unknown, expired and different-mask samples must be revalidated before Auto selects them.
         val profile=AutoChecks.current
         return list.filter { val s=state(it)
-            s.works && s.serviceNetwork==net && s.serviceMask==s.maskFor(net) &&
-                AutoChecks.fresh(s.autoChecksKey,profile,AutoLatencyPolicy.MAX_MS,s.autoChecksAt,now) &&
+            val strict=AutoChecks.fresh(s.autoChecksKey,profile,AutoLatencyPolicy.MAX_MS,s.autoChecksAt,now) &&
                 s.realMs in 1..AutoLatencyPolicy.MAX_MS && (!profile.telegram || s.tgOk==true && s.tgMs in 1..AutoLatencyPolicy.MAX_MS) &&
                 (!profile.youtube || s.ytOk==true)
+            s.works && s.serviceNetwork==net && s.serviceMask==s.maskFor(net) &&
+                (strict || SlowRouteConsent.permits(it as? Server,s,net,now))
         }
     }
 }
