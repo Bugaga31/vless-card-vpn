@@ -56,7 +56,11 @@ fun AppUi(onConnect: () -> Unit, onDisconnect: () -> Unit, onConnectFound:()->Un
             onSurfaceVariant = Color(0xFFB3C6D5), outline = Color(0xFF536D80), background = Color(0xFF10151C), surface = Color(0xFF1A222E),
             surfaceVariant = Color(0xFF263345), onBackground = Color(0xFFF0F6FC), onSurface = Color(0xFFF0F6FC))
     }
-    MaterialTheme(colorScheme = scheme) {
+    val readable=Typography().let {t->t.copy(
+        bodySmall=t.bodySmall.copy(fontSize=14.sp,lineHeight=20.sp),
+        labelSmall=t.labelSmall.copy(fontSize=12.sp,lineHeight=16.sp),
+        labelMedium=t.labelMedium.copy(fontSize=14.sp,lineHeight=20.sp))}
+    MaterialTheme(colorScheme = scheme, typography=readable) {
         var tab by rememberSaveable { mutableIntStateOf(0) }
         var intro by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(theme.welcomeSound && !theme.reducedMotion && !light && com.vlesscardvpn.core.Tunnel.socks == null) }
         LaunchedEffect(intro) { if (intro) { withFrameNanos { }; withFrameNanos { }; android.util.Log.i("VCIntro", "INTRO_VISIBLE"); kotlinx.coroutines.delay(1400); intro = false } }

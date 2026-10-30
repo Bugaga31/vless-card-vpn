@@ -70,7 +70,7 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
                 Card(shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)) {
                     Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text("🎁 " + offer.title, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
-                        Text(offer.text, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(offer.text, fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             TextButton(onClick = { runCatching {
                                 android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(offer.link))
@@ -91,20 +91,20 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
                         fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onBackground)
                     if (!compact) Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
                         Text("XRAY", Modifier.padding(horizontal = 12.dp, vertical = 8.dp), color = MaterialTheme.colorScheme.primary,
-                            fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.sp)
+                            fontSize = 14.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.sp)
                     }
                 }
                 Text(if (compact) "На одной волне · Xray" else "Связь на одной волне", fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
         Text("${BuildConfig.VERSION_NAME} · " + if (cfg.stealthSocks) "Локальный прокси защищён паролем" else "SOCKS 127.0.0.1:${cfg.socksPort}",
-            modifier = Modifier.fillMaxWidth(), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            modifier = Modifier.fillMaxWidth(), fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
         val upd by com.vlesscardvpn.core.Updater.state.collectAsState()
         if (upd.latest.isNotEmpty()) {
             val uctx = androidx.compose.ui.platform.LocalContext.current
             Card(Modifier.fillMaxWidth().padding(top = 10.dp), shape = RoundedCornerShape(14.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)) {
                 Row(Modifier.padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text(upd.text.ifEmpty { "Доступна версия ${upd.latest}" }, Modifier.weight(1f), fontSize = 13.sp)
+                    Text(upd.text.ifEmpty { "Доступна версия ${upd.latest}" }, Modifier.weight(1f), fontSize = 14.sp)
                     Button(onClick = { com.vlesscardvpn.core.Updater.install(uctx) }, enabled = !upd.busy) { Text("Обновить") }
                 }
             }
@@ -114,7 +114,7 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
         clip?.let { (text, what) ->
             Card(Modifier.fillMaxWidth().padding(top = 10.dp), shape = RoundedCornerShape(14.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)) {
                 Row(Modifier.padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text("В буфере обмена: $what. Добавить?", Modifier.weight(1f), fontSize = 13.sp)
+                    Text("В буфере обмена: $what. Добавить?", Modifier.weight(1f), fontSize = 14.sp)
                     TextButton(onClick = { Actions.clipOffer.value = null }) { Text("Нет") }
                     Button(onClick = { Actions.clipOffer.value = null; android.widget.Toast.makeText(hctx, Actions.importAny(text), android.widget.Toast.LENGTH_LONG).show() }) { Text("Добавить") }
                 }
@@ -153,15 +153,15 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
             val prev = remember { longArrayOf(rx, tx, android.os.SystemClock.elapsedRealtime()) }
             val now = remember(tick) { val t = android.os.SystemClock.elapsedRealtime(); val dt = (t - prev[2]).coerceAtLeast(1); val r = ((rx - prev[0]) * 8 / dt).coerceAtLeast(0) to ((tx - prev[1]) * 8 / dt).coerceAtLeast(0); prev[0] = rx; prev[1] = tx; prev[2] = t; r }
             if (tick > 0 && (now.first > 0 || now.second > 0)) Text("Сейчас: ↓ ${Actions.mbps(now.first.toInt())} ↑ ${Actions.mbps(now.second.toInt())}",
-                fontSize = 13.sp, color = MaterialTheme.colorScheme.onBackground, textAlign = TextAlign.Center)
+                fontSize = 14.sp, color = MaterialTheme.colorScheme.onBackground, textAlign = TextAlign.Center)
             SessionStats(min, rx, tx, cfg.turbo)
             Text("Оценка счётчиков процесса приложения, не счёт оператора и не объём зарубежного трафика.",
                 style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant,modifier=Modifier.fillMaxWidth().padding(top=6.dp))
             ConnectionTools()
             val aw by com.vlesscardvpn.core.AppWatch.status.collectAsState()
-            if (aw.isNotEmpty()) Text(aw, fontSize = 12.sp, color = Accent, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 4.dp))
+            if (aw.isNotEmpty()) Text(aw, fontSize = 14.sp, color = Accent, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 4.dp))
             val (month, over) = com.vlesscardvpn.core.Traffic.line(cfg)
-            if (month.isNotEmpty()) Text(month, fontSize = 12.sp, color = if (over) Warn else MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
+            if (month.isNotEmpty()) Text(month, fontSize = 14.sp, color = if (over) Warn else MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
             Row(Modifier.horizontalScroll(rememberScrollState()).padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 AssistChip(onClick = { Actions.fixAll { onConnect() } }, enabled = !working, label = { Text("🛠 Починить") })
                 AssistChip(onClick = { Actions.boostYoutube() }, enabled = !working, label = { Text("▶ Ускорить YouTube") })
@@ -184,7 +184,7 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
                         Text("Как подключаться", fontWeight = FontWeight.SemiBold)
                         Text(listOf(if (cfg.torAll) "Tor через VLESS" else if (mode == Mode.AUTO) "Авто" else "Серверы",
                             "VPN", "все приложения", "весь интернет через сервер").joinToString(" · "),
-                            fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                            fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
                     }
                     Text(if (opts) "▴" else "▾", fontSize = 18.sp, color = Accent)
                 }
@@ -205,11 +205,11 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
                 Text(if (cfg.torAll) "Сначала VLESS/Hysteria, затем Tor для TCP. UDP, включая голосовые звонки, остаётся на VLESS. Если сервер недоступен, прямое подключение не включается."
                     else if (mode == Mode.AUTO) "Авто выбирает проверенный быстрый сервер. Все приложения и внешний трафик идут через него; без рабочего сервера VPN не подключается."
                     else "Весь внешний трафик идёт через выбранные рабочие серверы. Прямые исключения отключены.",
-                    fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 6.dp))
+                    fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 6.dp))
                 if (cfg.torAll || mode == Mode.AUTO) TextButton(onClick = { torDialog = true }) { Text(if (cfg.torAll) "Настроить Tor через VLESS" else "Настроить Auto и Tor") }
                 Spacer(Modifier.height(10.dp))
                 Text("Защищённый VPN · все приложения · весь внешний трафик через сервер",
-                    fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
+                    fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
             }
         }
         Spacer(Modifier.height(12.dp))
@@ -227,11 +227,11 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
                         sum.selectedCount == 0 && sum.working > 0 -> "Рабочих по последней проверке: ${sum.working}. Выберу один подтверждённый основной маршрут; остальные — резервы."
                         sum.selectedCount == 0 -> "Всего ${sum.total}. Нажмите «Подключить» — проверю и выберу сам."
                         else -> if(cfg.hideServerNames) "Имена скрыты" else sum.selectedNames.joinToString() + if (sum.selectedCount > 3) " и ещё ${sum.selectedCount - 3}" else ""
-                    }, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }, fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     if (sum.bestMs > 0) Text("Лучший: ${sum.bestMs} мс" + (if (sum.bestKbps > 0) " · ${Actions.mbps(sum.bestKbps)}" else "") +
                         when (sum.bestYt) { true -> " · YouTube ✓"; false -> " · YouTube ✗"; null -> "" },
-                        fontSize = 13.sp, color = if (sum.bestKbps in 1..2999 || sum.bestYt == false) Warn else Good)
-                    Text("Маскировка: авто" + (if (sum.mask.isNotEmpty()) " — ${sum.mask}" else " (подбирается сама под сеть)"), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontSize = 14.sp, color = if (sum.bestKbps in 1..2999 || sum.bestYt == false) Warn else Good)
+                    Text("Маскировка: авто" + (if (sum.mask.isNotEmpty()) " — ${sum.mask}" else " (подбирается сама под сеть)"), fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
                     CountryPicker(onChange = { reconnect() })
                     if (sum.heavyMask) Text("Маскировка «тяжёлая» (мелкие пакеты) — видео может тормозить. После подключения сам поищу лёгкую", fontSize = 14.sp, color = Warn)
@@ -248,7 +248,7 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
         cfg.subInfo.filter { (u, i) -> u in cfg.subscriptions && i.ending(nowSec) }.forEach { (u, i) ->
             Spacer(Modifier.height(8.dp))
             Text("Подписка «${i.title.ifEmpty { com.vlesscardvpn.model.Subs.title(u) }}» заканчивается: " + Actions.subLine(i, nowSec) + ". Продлите у продавца",
-                fontSize = 13.sp, color = Warn, textAlign = TextAlign.Center)
+                fontSize = 14.sp, color = Warn, textAlign = TextAlign.Center)
         }
         Spacer(Modifier.height(12.dp))
         var tools by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
@@ -263,10 +263,10 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
         Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
             Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text("Что с сетью?", fontWeight = FontWeight.SemiBold)
-                if (report.verdict.isEmpty()) Text("Проверка идёт только через выбранный VLESS-сервер; прямые тесты отключены.", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (report.verdict.isEmpty()) Text("Проверка идёт только через выбранный VLESS-сервер; прямые тесты отключены.", fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 else {
                     Text(report.verdict, fontSize = 14.sp, color = when (report.kind) { Actions.Kind.OPEN -> Good; Actions.Kind.OFFLINE -> Bad; else -> Warn })
-                    Text(report.details, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(report.details, fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 OutlinedButton(onClick = { Actions.diagnoseNetwork() }, enabled = !busy) { Text("Проверить VLESS и звонки") }
             }
@@ -288,19 +288,19 @@ private fun SiteCard() {
             Text("Сайт не открывается?", fontWeight = FontWeight.SemiBold)
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 androidx.compose.material3.OutlinedTextField(input, { input = it }, singleLine = true, modifier = Modifier.weight(1f),
-                    placeholder = { Text("адрес, например rutracker.org", fontSize = 13.sp) })
+                    placeholder = { Text("адрес, например rutracker.org", fontSize = 14.sp) })
                 OutlinedButton(onClick = { Actions.checkSite(input) }, enabled = !r.running) { Text("Проверить") }
             }
-            if (r.verdict.isEmpty()) Text("Проверю только через VLESS. Без рабочего сервера запрос не отправляется.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (r.verdict.isEmpty()) Text("Проверю только через VLESS. Без рабочего сервера запрос не отправляется.", fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             else {
                 Text(r.verdict, fontSize = 14.sp, color = when { r.running -> MaterialTheme.colorScheme.onSurfaceVariant; r.good -> Good; else -> Warn })
-                if (r.details.isNotEmpty()) Text(r.details, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (r.details.isNotEmpty()) Text(r.details, fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             val pop by Actions.popular.collectAsState()
             OutlinedButton(onClick = { Actions.checkPopular() }, enabled = !pop.running) { Text("Проверить популярные (YouTube, Instagram, ChatGPT…)") }
-            if (pop.summary.isNotEmpty()) Text(pop.summary, fontSize = 13.sp, color = when { pop.running -> MaterialTheme.colorScheme.onSurfaceVariant; pop.rows.all { it.second.good } -> Good; else -> Warn })
+            if (pop.summary.isNotEmpty()) Text(pop.summary, fontSize = 14.sp, color = when { pop.running -> MaterialTheme.colorScheme.onSurfaceVariant; pop.rows.all { it.second.good } -> Good; else -> Warn })
             pop.rows.forEach { (title, c) ->
-                Text((if (c.good) "✓ " else "✗ ") + title + " — " + c.verdict, fontSize = 12.sp, color = if (c.good) MaterialTheme.colorScheme.onSurfaceVariant else Warn,
+                Text((if (c.good) "✓ " else "✗ ") + title + " — " + c.verdict, fontSize = 14.sp, color = if (c.good) MaterialTheme.colorScheme.onSurfaceVariant else Warn,
                     modifier = Modifier.clickable { Actions.siteCheck.value = c })
             }
         }
@@ -318,9 +318,9 @@ private fun NetCard(on: Boolean, cfgKey: Int) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text("Эта сеть: ${info.net}", fontWeight = FontWeight.SemiBold)
             Text(if (info.dpi.isEmpty()) "Обход DPI ещё не подобран" else "Обход DPI: ${info.dpi}" + if (info.dpiCount > 1) " (запасных: ${info.dpiCount - 1})" else "",
-                fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text(if (info.masks == 0) "Рабочие маскировки здесь ещё не найдены" else "Маскировок, прошедших здесь: ${info.masks}", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            if (speed.text.isNotEmpty()) Text(speed.text, fontSize = 13.sp, color = when { speed.running -> MaterialTheme.colorScheme.onSurfaceVariant; speed.mbps >= 2 -> Good; else -> Warn })
+                fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(if (info.masks == 0) "Рабочие маскировки здесь ещё не найдены" else "Маскировок, прошедших здесь: ${info.masks}", fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (speed.text.isNotEmpty()) Text(speed.text, fontSize = 14.sp, color = when { speed.running -> MaterialTheme.colorScheme.onSurfaceVariant; speed.mbps >= 2 -> Good; else -> Warn })
             Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(onClick = { Actions.speedTest() }, enabled = on && !speed.running) { Text("Тест скорости") }
                 OutlinedButton(onClick = {
@@ -373,7 +373,7 @@ private fun CountryPicker(onChange: () -> Unit) {
     var open by remember { mutableStateOf(false) }
     Box {
         TextButton(onClick = { open = true }, contentPadding = PaddingValues(0.dp)) {
-            Text("Страна: " + com.vlesscardvpn.core.Countries.title(app.settings.country) + " ▾", fontSize = 13.sp)
+            Text("Страна: " + com.vlesscardvpn.core.Countries.title(app.settings.country) + " ▾", fontSize = 14.sp)
         }
         DropdownMenu(open, { open = false }) {
             DropdownMenuItem(text = { Text("🌐 Любая — самый быстрый") }, onClick = { open = false; pick("", onChange) })

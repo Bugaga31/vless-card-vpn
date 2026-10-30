@@ -7,7 +7,9 @@ import java.util.concurrent.*
 class ProbeServiceWorkers:AutoCloseable {
     val executor=ThreadPoolExecutor(4,4,0L,TimeUnit.MILLISECONDS,ArrayBlockingQueue<Runnable>(4),
         ThreadFactory {r->Thread(r,"auto-service").apply {isDaemon=true}},ThreadPoolExecutor.AbortPolicy())
-    override fun close() {executor.shutdownNow()}
+    val telegram=ThreadPoolExecutor(2,2,0L,TimeUnit.MILLISECONDS,ArrayBlockingQueue<Runnable>(2),
+        ThreadFactory {r->Thread(r,"auto-telegram").apply {isDaemon=true}},ThreadPoolExecutor.AbortPolicy())
+    override fun close() {executor.shutdownNow();telegram.shutdownNow()}
 }
 object ProbeTaskNotes {
     fun label(code:String?)=when(code) {

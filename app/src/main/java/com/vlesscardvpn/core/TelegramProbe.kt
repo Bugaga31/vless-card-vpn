@@ -59,26 +59,30 @@ object TelegramProbe {
         java.util.concurrent.ThreadFactory {r->Thread(r,"tg-dc-race").apply {isDaemon=true}},
         java.util.concurrent.ThreadPoolExecutor.AbortPolicy())
 
-    fun measure(port: Int, budgetMs: Long = 3000, onCancel:((()->Unit)->Unit)?=null): Result {
+    fun measure(port: Int, budgetMs: Long = 3000, onCancel:((()->Unit)->Unit)?=null): Result =
+        measureOn(port,budgetMs,onCancel,workers)
+
+    /** Test queue is bounded by the overall deadline, but is not route RTT. */
+    internal fun measureOn(port:Int,budgetMs:Long,onCancel:((()->Unit)->Unit)?,executor:java.util.concurrent.Executor):Result {
         val started=System.nanoTime()
         if(port !in 1..65535 || budgetMs<200 || Thread.currentThread().isInterrupted) return Result(null,0)
         val deadline=started+TimeUnit.MILLISECONDS.toNanos(budgetMs.coerceAtMost(3100))
         val resources=ProbeCancellation()
         onCancel?.invoke {resources.close()}
-        val completed=java.util.concurrent.ExecutorCompletionService<Boolean?>(workers)
+        val completed=java.util.concurrent.ExecutorCompletionService<Result>(executor)
         var received=0;var unknown=false
         try {
             for(host in dc) {
-                val future=completed.submit(java.util.concurrent.Callable<Boolean?> {
-                    if(resources.isClosed() || Thread.currentThread().isInterrupted) return@Callable null
+                val future=completed.submit(java.util.concurrent.Callable<Result> {
+                    if(resources.isClosed() || Thread.currentThread().isInterrupted) return@Callable Result(null,0)
                     val left=TimeUnit.NANOSECONDS.toMillis(deadline-System.nanoTime())
-                    if(left<100) return@Callable null
+                    if(left<100) return@Callable Result(null,0)
                     val allowance=minOf(maxOf(1500L, AutoLatencyPolicy.MAX_MS.toLong()+100L),left).coerceAtLeast(1)
                     val socket=Socket(Proxy(Proxy.Type.SOCKS,InetSocketAddress("127.0.0.1",port)))
                     resources.add {socket.close()}
                     val attemptStarted=System.nanoTime()
                     val timeout=timer.schedule({runCatching {socket.close()}},allowance,TimeUnit.MILLISECONDS)
-                    try {
+                    val answered = try {
                         socket.use {s->
                             s.soTimeout=allowance.toInt()
                             s.connect(InetSocketAddress(host,443),allowance.toInt())
@@ -96,6 +100,7 @@ object TelegramProbe {
                             System.nanoTime()-attemptStarted>=TimeUnit.MILLISECONDS.toNanos(allowance) ||
                             System.nanoTime()>=deadline) null else false
                     } finally {timeout.cancel(false);runCatching {socket.close()}}
+                    Result(answered,elapsedMs(attemptStarted))
                 })
                 resources.add {future.cancel(true)}
             }
@@ -107,8 +112,8 @@ object TelegramProbe {
                 val result=try {f.get()} catch(_:java.util.concurrent.CancellationException) {null}
                     catch(_:java.util.concurrent.ExecutionException) {null}
                 received++
-                if(result==true) return Result(true,elapsedMs(started))
-                if(result==null) unknown=true
+                if(result?.ok==true) return result
+                if(result?.ok==null) unknown=true
             }
             return Result(if(unknown) null else false,elapsedMs(started))
         } catch(_:InterruptedException) {

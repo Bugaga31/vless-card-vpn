@@ -7,7 +7,7 @@ import kotlin.math.*
 /** Inference only: deliberately supports an ASCII subset with Python feature parity.
  * Unsupported URL forms stay unknown. Never resolves DNS or opens a URL. */
 object WatsonUrl {
-    data class Result(val warning:Boolean=false,val measured:Boolean=false)
+    data class Result(val warning:Boolean=false,val measured:Boolean=false,val flyWarning:Boolean=false,val flyMeasured:Boolean=false)
     fun features(input:String):DoubleArray? = runCatching {
         val s=input.trim()
         if(s.isEmpty() || s.length>8192 || s.any{it.code !in 33..126} || s.contains('\\')) return null
@@ -35,6 +35,8 @@ object WatsonUrl {
         val x=features(input) ?: return Result()
         val z=(x.indices.sumOf{(x[it]-WatsonUrlModel.mean[it])/WatsonUrlModel.scale[it]*WatsonUrlModel.weights[it]}+WatsonUrlModel.intercept).coerceIn(-35.0,35.0)
         val score=1.0/(1.0+exp(-z))
-        return Result(warning=score>=WatsonUrlModel.threshold,measured=true)
+        val fly=runCatching {WatsonFlyUrl.score(x)}.getOrNull()
+        return Result(warning=score>=WatsonUrlModel.threshold,measured=true,
+            flyWarning=fly!=null && fly>=WatsonFlyUrl.threshold,flyMeasured=fly!=null)
     }
 }

@@ -26,11 +26,11 @@ fun AutoCheckSettings() {
                     modifier=Modifier.semantics {contentDescription="Проверять одновременно до $n серверов"},label={Text(n.toString())})
             }
         }
-        Text("По умолчанию 5. Сейчас до $slots одновременно; выбранный предел $parallel. Новый лимит действует со следующей волны. Внутренняя оптимизация, нагрев и звонки больше не урезают выбранное число; системные ограничения Android остаются.",style=MaterialTheme.typography.bodySmall)
-        Text("В одном тестовом ядре создаются только проверяемые маршруты. Первый подходящий сервер останавливает ненужные пробы; это снижает лишнюю нагрузку, но не гарантирует отсутствие нагрева.",style=MaterialTheme.typography.bodySmall)
+        Text("По умолчанию 5. Сейчас до $slots одновременно; выбранный предел $parallel. Новый лимит действует со следующей волны. Внутренняя оптимизация, нагрев и звонки больше не урезают выбранное число; системные ограничения Android остаются.",style=MaterialTheme.typography.bodyMedium)
+        Text("В одном тестовом ядре создаются только проверяемые маршруты. Первый подходящий сервер останавливает ненужные пробы; это снижает лишнюю нагрузку, но не гарантирует отсутствие нагрева.",style=MaterialTheme.typography.bodyMedium)
         Text("Что проверять в Авто",style=MaterialTheme.typography.titleMedium)
-        Text("ROKI · эксперимент на подграфе FlyWire. Учится на завершённых проверках этой сессии и меняет только порядок кандидатов после 8 результатов. Не целый мозг мухи; неизвестные проверки не разрешает.",style=MaterialTheme.typography.bodySmall)
-        Text("HTTPS проверяется всегда. Выбранные проверки обязательны для нового сервера и резервов.",style=MaterialTheme.typography.bodySmall)
+        Text("ROKI · эксперимент на подграфе FlyWire. Учится на завершённых проверках этой сессии и меняет только порядок кандидатов после 8 результатов. Не целый мозг мухи; неизвестные проверки не разрешает.",style=MaterialTheme.typography.bodyMedium)
+        Text("HTTPS проверяется всегда. Выбранные проверки обязательны для нового сервера и резервов.",style=MaterialTheme.typography.bodyMedium)
         listOf("telegram" to "Telegram · ответ дата-центра", "stability" to "Telegram · устойчивость серии",
             "voice" to "Звонки · UDP-транспорт", "discord" to "Discord · gateway", "youtube" to "YouTube · медиа").forEach {(id,title)->
             Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) {
@@ -41,7 +41,7 @@ fun AutoCheckSettings() {
                 }})
             }
         }
-        Text("Сохранение автоматическое. Текущее соединение не обрывается; новые настройки учитываются со следующей проверки. Старые резервы должны пройти новый набор проверок.",style=MaterialTheme.typography.bodySmall)
-        Text("Устойчивость включает три ответа Telegram даже при выключенном первом переключателе. Discord — ответ публичного gateway API, не вход в аккаунт. Звонки — серия STUN через этот SOCKS, не реальный звонок Telegram/Discord. Через Tor UDP не поддерживается: для Tor отключите UDP-проверку. YouTube использует небольшой объём видеотрафика. STUN-сервис Google видит запросы с выхода VPN.",style=MaterialTheme.typography.bodySmall)
+        Text("Сохранение автоматическое. Текущее соединение не обрывается; новые настройки учитываются со следующей проверки. Старые резервы должны пройти новый набор проверок.",style=MaterialTheme.typography.bodyMedium)
+        Text("Устойчивость включает три ответа Telegram даже при выключенном первом переключателе. Discord — ответ публичного gateway API, не вход в аккаунт. Звонки — серия STUN через этот SOCKS, не реальный звонок Telegram/Discord. Через Tor UDP не поддерживается: для Tor отключите UDP-проверку. YouTube использует небольшой объём видеотрафика. STUN-сервис Google видит запросы с выхода VPN.",style=MaterialTheme.typography.bodyMedium)
     }
 }
