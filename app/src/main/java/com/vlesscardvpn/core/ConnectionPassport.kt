@@ -9,10 +9,30 @@ object ConnectionPassport {
     data class Check(val value: Boolean? = null, val at: Long = 0L)
     data class Snapshot(val https: Check = Check(), val dns: Check = Check(), val telegram: Check = Check(), val youtube: Check = Check())
     val state = MutableStateFlow(Snapshot())
-    data class ModuleFrame(val assessment:com.vlesscardvpn.health.HealthAssessment,val at:Long)
+    data class ModuleFrame(val assessment:com.vlesscardvpn.health.HealthAssessment,val at:Long,
+        val sampledAt:Map<com.vlesscardvpn.health.HealthModule,Long> = assessment.observations.associate {it.module to at})
     val modules = MutableStateFlow<ModuleFrame?>(null)
     @Synchronized fun fullModules(assessment:com.vlesscardvpn.health.HealthAssessment) {
         modules.value=ModuleFrame(assessment,SystemClock.elapsedRealtime())
+    }
+    /** Light results supersede old full-check results, without renewing unsampled modules. */
+    @Synchronized fun lightModules(probe:Probe, sampledTelegram:Boolean, strictLatency:Boolean) {
+        val old=modules.value
+        val measured=com.vlesscardvpn.health.LiveHealthCoordinator.assess(probe,null,
+            requireDns=false,requireTelegram=sampledTelegram,requireYouTube=false,strictLatency=strictLatency)
+            .observations.filter {it.module==com.vlesscardvpn.health.HealthModule.HTTPS ||
+                sampledTelegram && it.module==com.vlesscardvpn.health.HealthModule.TELEGRAM}
+        val now=SystemClock.elapsedRealtime()
+        val merged=com.vlesscardvpn.health.ModuleEvidencePolicy.merge(old?.assessment,old?.sampledAt.orEmpty(),measured,now)
+        modules.value=ModuleFrame(merged.assessment,now,merged.sampledAt)
+    }
+    @Synchronized fun dnsModule(ok:Boolean) {
+        val old=modules.value
+        val now=SystemClock.elapsedRealtime()
+        val measured=listOf(com.vlesscardvpn.health.ModuleObservation(com.vlesscardvpn.health.HealthModule.DNS,
+            if(ok) com.vlesscardvpn.health.ModuleStatus.PASS else com.vlesscardvpn.health.ModuleStatus.FAIL))
+        val merged=com.vlesscardvpn.health.ModuleEvidencePolicy.merge(old?.assessment,old?.sampledAt.orEmpty(),measured,now)
+        modules.value=ModuleFrame(merged.assessment,now,merged.sampledAt)
     }
     private fun check(v: Boolean?) = Check(v,SystemClock.elapsedRealtime())
     @Synchronized fun clear() { state.value = Snapshot(); modules.value=null; TelegramStability.clear(); ConnectionHistory.boundary() }
@@ -40,7 +60,11 @@ object ConnectionPassport {
         val frame=modules.value
         val now=SystemClock.elapsedRealtime()
         val modules=frame?.takeIf {now>=it.at}?.let {com.vlesscardvpn.health.LiveHealthCoordinator.report(it.assessment)
-            .put("age_seconds",(now-it.at)/1000).put("stale",now-it.at>90_000L)}
+            .put("age_seconds",(now-it.at)/1000).put("stale",it.assessment.observations.any {o ->
+                val at=it.sampledAt[o.module]; o.status!=com.vlesscardvpn.health.ModuleStatus.DISABLED &&
+                    (at==null || now<at || now-at>90_000L)})
+            .put("module_age_seconds",JSONObject().apply {it.sampledAt.forEach {(module,at)->
+                put(module.name,if(now>=at) (now-at)/1000 else JSONObject.NULL)}})}
         return JSONObject().put("schema",1).put("version",com.vlesscardvpn.BuildConfig.VERSION_NAME)
             .put("scope","local_socks_chain_not_independent_app_tun_test")
             .put("last_full_module_assessment",modules ?: JSONObject.NULL)

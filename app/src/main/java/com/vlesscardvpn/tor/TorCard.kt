@@ -152,6 +152,12 @@ object TorCard {
     fun portUp(socksPort: Int = DEFAULT_SOCKS_PORT): Boolean =
         runCatching { java.net.Socket().use { it.connect(java.net.InetSocketAddress("127.0.0.1", socksPort), 200); true } }.getOrDefault(false)
 
+    /** Only a daemon launched by this process under the mandatory-bridge guard can prove readiness. */
+    @Synchronized
+    fun ownsRunningEmbedded(): Boolean = embedded?.let { process ->
+        !stopping && runCatching { process.exitValue(); false }.getOrDefault(true)
+    } ?: false
+
     /** Starts the embedded daemon unless a local Tor already answers on [socksPort]. */
     @Synchronized
     fun ensureStarted(ctx: android.content.Context, bridge: String = "none",
@@ -159,6 +165,12 @@ object TorCard {
                       bridgeLines: List<String> = emptyList(), upstreamHttpPort: Int = DEFAULT_UPSTREAM_PORT,
                       ptProxyPort: Int = DEFAULT_PT_UPSTREAM_PORT): java.lang.Process? {
         val ticket = generation.get()
+        require(bridge in setOf("obfs4","webtunnel") && bridgeLines.isNotEmpty()) {
+            "Tor требует мосты obfs4 или WebTunnel; запуск без мостов запрещён"
+        }
+        require(bridgeLines.all { TorBridgeCatalog.normalize(it)?.startsWith("Bridge $bridge ")==true }) {
+            "Нет корректного списка мостов выбранного транспорта"
+        }
         require(bridge in EMBEDDED_BRIDGES) { "Unsupported embedded Tor transport" }
         validateBridgeLines(bridgeLines)
         val desired = torrcEmbedded(ctx, controlPort, socksPort, bridge, bridgeLines, upstreamHttpPort, ptProxyPort)

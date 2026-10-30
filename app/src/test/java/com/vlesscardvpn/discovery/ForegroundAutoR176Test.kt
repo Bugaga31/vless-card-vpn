@@ -14,5 +14,5 @@ class ForegroundAutoR176Test {
  @Test fun hotPhoneStillProtected() {val p=PowerPolicy.evaluate(PowerPolicy.Input(0,thermal=3),PowerPolicy.Options());assertEquals(2,p.foregroundTcpParallel);assertEquals(2,p.foregroundRealParallel)}
  @Test fun lowMemoryStillProtected() {val p=PowerPolicy.evaluate(PowerPolicy.Input(0,lowMemory=true),PowerPolicy.Options());assertEquals(2,p.foregroundTcpParallel);assertEquals(2,p.foregroundRealParallel)}
  @Test fun voiceCallStillProtectsHeavyHttpsProbes() {val p=PowerPolicy.evaluate(PowerPolicy.Input(0,voiceCall=true),PowerPolicy.Options());assertEquals(1,p.foregroundRealParallel);assertEquals(8,p.foregroundTcpParallel)}
- @Test fun automaticTorNeedsNoManualBridgeAndDoesNotDeleteSavedLines() {val s=TorConnectionPolicy.automatic(Settings(torBridge="obfs4",torBridgeLines="saved"));assertEquals("none",s.torBridge);assertEquals("saved",s.torBridgeLines);assertTrue(s.torAll);assertTrue(s.torNetworkRecommendations);assertFalse(s.torDirect)}
+ @Test fun automaticTorRequiresBridgesAndDoesNotDeleteSavedLines() {val s=TorConnectionPolicy.automatic(Settings(torBridge="obfs4",torBridgeLines="saved"));assertEquals("obfs4",s.torBridge);assertEquals("saved",s.torBridgeLines);assertTrue(s.torAll);assertTrue(s.torNetworkRecommendations);assertFalse(s.torDirect)}
 }
