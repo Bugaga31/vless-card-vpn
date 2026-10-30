@@ -1,6 +1,8 @@
 package com.vlesscardvpn.ui
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -13,7 +15,19 @@ import com.vlesscardvpn.core.*
 fun AutoCheckSettings() {
     val settings by Store.settings.collectAsState()
     val selected=AutoCheckProfile.of(settings.autoChecks).selected
+    val parallel=ProbeConcurrencyPolicy.normalize(settings.probeParallel)
+    val power by PhonePower.state.collectAsState()
+    val slots=ProbeConcurrencyPolicy.limit(parallel,parallel,power,true)
     Column(verticalArrangement=Arrangement.spacedBy(8.dp)) {
+        Text("Одновременные проверки серверов",style=MaterialTheme.typography.titleMedium)
+        Row(Modifier.horizontalScroll(rememberScrollState()),horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+            ProbeConcurrencyPolicy.choices.forEach {n->
+                FilterChip(selected=parallel==n,onClick={Store.update {state->state.copy(settings=state.settings.copy(probeParallel=n))}},
+                    modifier=Modifier.semantics {contentDescription="Проверять одновременно до $n серверов"},label={Text(n.toString())})
+            }
+        }
+        Text("По умолчанию 5. Сейчас до $slots одновременно; выбранный предел $parallel. В следующей волне действует новый лимит. Нагрев, нехватка памяти и звонок могут временно снизить его.",style=MaterialTheme.typography.bodySmall)
+        Text("В одном тестовом ядре создаются только проверяемые маршруты. Первый подходящий сервер останавливает ненужные пробы; это снижает лишнюю нагрузку, но не гарантирует отсутствие нагрева.",style=MaterialTheme.typography.bodySmall)
         Text("Что проверять в Авто",style=MaterialTheme.typography.titleMedium)
         Text("HTTPS проверяется всегда. Выбранные проверки обязательны для нового сервера и резервов.",style=MaterialTheme.typography.bodySmall)
         listOf("telegram" to "Telegram · ответ дата-центра", "stability" to "Telegram · устойчивость серии",

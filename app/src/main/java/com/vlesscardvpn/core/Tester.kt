@@ -419,8 +419,10 @@ object Tester {
             fun report(i: Int, p: Probe) { if (accepted(p)) successes.incrementAndGet(); onEach(i, p) }
             // Bound config/socket footprint too, not merely simultaneous HTTP calls.
             val plan = PhonePower.state.value
-            val probeLimit = if (foreground) plan.foregroundRealParallel else plan.realParallel
-            val effectiveBatch = PowerPolicy.cap(batch, if(foreground) ConnectPolicy.FIRST else minOf(6,probeLimit.coerceAtLeast(1)))
+            val selectedParallel = Store.state.value.settings.probeParallel
+            val probeLimit = ProbeConcurrencyPolicy.limit(parallel,selectedParallel,plan,foreground)
+            // Avoid creating 20 idle SOCKS/outbound routes for only five active workers.
+            val effectiveBatch = ProbeConcurrencyPolicy.batch(batch,probeLimit)
             for (all in chunks(variants, effectiveBatch)) {
                 val idx = all.filter { i -> if (skipped(i)) { onEach(i, SKIPPED); false } else true }
                 if (idx.isEmpty()) continue
@@ -447,7 +449,9 @@ object Tester {
                 }
                 try {
                     coroutineScope {
-                        ProbeRace.run(chunk.indices.toList(), PowerPolicy.cap(parallel, probeLimit), stopAfter,
+                        // Re-read device safety after waiting for the shared test-core permit.
+                        val currentLimit=ProbeConcurrencyPolicy.limit(parallel,Store.state.value.settings.probeParallel,PhonePower.state.value,foreground)
+                        ProbeRace.run(chunk.indices.toList(), currentLimit, stopAfter,
                             skip = { i -> skipped(idx[i]) }, staggerMs = ForegroundProbePlan.staggerMs(foreground,stopAfter),
                             probe = { i -> onStarted?.invoke(idx[i]); CancellableProbe.run { bind -> probeSocks(ports[i], testUrl, big = big, youtube = youtube, telegram = telegram,
                                 attempts = attempts, budgetMs = serviceBudget, onCall = { call -> bind { call.cancel() } }, calls = calls, onCancel = bind, autoChecks=autoChecks) } },
