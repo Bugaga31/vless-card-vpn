@@ -1,0 +1,5 @@
+При включении трафик и DNS этих доменов видны провайдеру. Короткий список не охватывает все .ru и российские IP. «Всегда через VPN» имеет приоритет. Применится после переподключения.
+gosuslugi.ru · sberbank.ru · sber.ru · tbank.ru · tinkoff.ru · alfabank.ru · vtb.ru · nspk.ru · yandex.ru · ya.ru · yandex.net · yastatic.net · vk.com · vk.ru · vkvideo.ru · userapi.com · ok.ru · mail.ru · ozon.ru · ozonusercontent.com · wildberries.ru · wb.ru · wbstatic.net · avito.ru · rzd.ru · pochta.ru
+RU-домены и IP напрямую
+Расширение выключено. Короткий список выше действует отдельно.
+Трафик прямых соединений и DNS доменов списка видны провайдеру. База географии может ошибаться и не содержит все серверы. «Всегда через VPN» и выбранные Tor-сервисы приоритетнее. Применится после переподключения.
