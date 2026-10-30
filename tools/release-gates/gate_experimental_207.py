@@ -11,7 +11,7 @@ def same(sha,paths):
  return subprocess.run(['git','diff','--quiet',sha,'HEAD','--',*paths]).returncode==0
 common=['app/src/main','app/src/debug','app/src/release','native','build.gradle.kts','settings.gradle.kts','gradle.properties','gradle','vpn-test-probe','security-test-probe']
 last='reports pending'
-for attempt in range(65):
+for attempt in range(120):
  try:
   j=load('integration/recovery-r207','r207-jvm')
   d=load('integration/recovery-device-r207','r207-device')

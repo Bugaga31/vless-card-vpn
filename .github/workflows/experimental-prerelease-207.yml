@@ -111,3 +111,5 @@ jobs:
             --repo "$GITHUB_REPOSITORY" --target "$CANDIDATE_SHA" \
             --prerelease --latest=false --title 'VLESS Card 1.2.96 · Experimental' \
             --notes-file release/notes-experimental.md
+
+# Publication still requires exact-source runtime results and individual visual review.
