@@ -47,7 +47,7 @@ def prepare(root, sha, run_id, docs):
         require("networkSecurityConfig" not in manifest, "Unexpected release network security override")
         with zipfile.ZipFile(apk) as archive:
             require(archive.testzip() is None, "Corrupt APK archive")
-            for name, want in {"geoip":"5f0ebc505ad5a5b219f9c053ce6228c837669364349a1a70c236212dd99a1c3d", "geoip6":"d6bc775efb8f970afacbb702ea0c80dbf9e2add32232afcfe3f376a972503b56"}.items():
+            for name, want in {"geoip":"5f0ebc505ad5a5b219f9c053ce6228c837669364349a1a70c236192dd99a1c3d", "geoip6":"d6bc775efb8f970afacbb702ea0c80dbf9e2add32232afcfe3f376a972503b56"}.items():
                 require(hashlib.sha256(archive.read("assets/"+name)).hexdigest()==want, "Tor GeoIP asset checksum mismatch: "+name)
             abi = "x86_64" if old_name == "VLESS-Card-Beta.apk" else "arm64-v8a"
             for library in ("libTor.so", "libLyrebird.so", "libgojni.so", "libhev-socks5-tunnel.so"):

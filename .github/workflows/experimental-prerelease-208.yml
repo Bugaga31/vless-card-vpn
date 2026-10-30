@@ -100,7 +100,13 @@ jobs:
           sign "$OUT/app-arm64-v8a-release-unsigned.apk" release/VLESS-Card-Beta-arm64.apk
           rm -f beta.jks aligned.apk release/*.idsig
       - name: Verify persistent signature and signed package integrity
-        run: python3 tools/release-gates/prepare_experimental_208.py
+        shell: bash
+        run: |
+          set -o pipefail
+          python3 tools/release-gates/prepare_experimental_208.py 2>&1 | tee "$RUNNER_TEMP/package-check.log" || {
+            python3 -c 'import pathlib,os; s=pathlib.Path(os.environ["RUNNER_TEMP"],"package-check.log").read_text()[-5000:]; print("::error title=Package integrity check failed::"+s.replace("%","%25").replace("\n","%0A").replace("\r","%0D"))'
+            exit 1
+          }
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: beta-apk
