@@ -22,12 +22,12 @@ fun FoundRoutesCard(onConnectFound:()->Unit) {
     val owner=LocalLifecycleOwner.current
     val count=remember(app.servers,app.states) {FoundConnectPolicy.count(app.servers,app::state)}
     LaunchedEffect(app.servers,app.states,app.settings.mode,app.settings.torAll) {
-        if(app.settings.mode==Mode.AUTO && !app.settings.torAll)
+        if(app.settings.mode==Mode.AUTO)
             SlowRouteConsent.remember(FoundConnectPolicy.shortlist(app.servers,app::state),0)
     }
     LaunchedEffect(owner,app.settings.mode,app.settings.torAll,status.state) {
-        if(app.settings.mode!=Mode.AUTO || app.settings.torAll || status.state==Tunnel.State.CONNECTED) confirm=null
-        if(app.settings.mode==Mode.AUTO && !app.settings.torAll && status.state!=Tunnel.State.CONNECTED)
+        if(app.settings.mode!=Mode.AUTO || status.state==Tunnel.State.CONNECTED) confirm=null
+        if(app.settings.mode==Mode.AUTO && status.state!=Tunnel.State.CONNECTED)
             owner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {while(true) {
                 SlowRouteConsent.expose()
                 kotlinx.coroutines.delay(1000)
@@ -38,10 +38,10 @@ fun FoundRoutesCard(onConnectFound:()->Unit) {
     if(automatic) Card(Modifier.fillMaxWidth().padding(vertical=6.dp),
         colors=CardDefaults.cardColors(containerColor=MaterialTheme.colorScheme.secondaryContainer)) {
         Column(Modifier.padding(12.dp),verticalArrangement=Arrangement.spacedBy(6.dp)) {
-            Text("Уже найденные серверы",style=MaterialTheme.typography.titleMedium)
+            Text(if(app.settings.torAll) "Найденные VLESS для Tor" else "Уже найденные серверы",style=MaterialTheme.typography.titleMedium)
             Text(when {
-                app.settings.torAll->"Для Tor нужен отдельный поиск цепочки и мостов."
                 connected->"VPN уже подключён. Для смены маршрута сначала отключитесь."
+                app.settings.torAll && count>0->"Найденных VLESS: $count. Подготовлю один upstream и запущу Tor через сохранённые мосты. Это не число готовых Tor-выходов. Готовность цепочки проверяется отдельно; прямого обхода нет."
                 count==0->"В «Рабочих» пока нет подходящих для Авто серверов. Запустите проверку или общий поиск."
                 else->"В «Рабочих»: $count. Возьму готовый маршрут или перепроверю только найденные — без нового поиска по каталогу. Выбранные сервисы остаются обязательными."
             },style=MaterialTheme.typography.bodySmall)
@@ -51,7 +51,7 @@ fun FoundRoutesCard(onConnectFound:()->Unit) {
                 val candidate=offer
                 if(ready.isEmpty() && candidate!=null) confirm=candidate else onConnectFound()
             },enabled=FoundConnectPolicy.enabled(automatic,app.settings.torAll,connected,count),modifier=Modifier.fillMaxWidth()) {
-                Text("Подключиться к найденным ($count)")
+                Text(if(app.settings.torAll) "Подключить найденные → Tor ($count)" else "Подключиться к найденным ($count)")
             }
             Text("Допуск: ${AutoLatencyRange.text(AutoLatencyRange.safe(app.settings.autoLatencyMinMs,app.settings.autoLatencyMaxMs))} мс; быстрее нижней границы тоже подходит.",style=MaterialTheme.typography.bodySmall)
         }

@@ -16,6 +16,12 @@ object ConnectionPresentationPolicy {
         return ProbePresentation(observation.status.name,label,observation.latencyMs?.takeIf {
             observation.status in setOf(ModuleStatus.PASS,ModuleStatus.SLOW) && it>0})
     }
+    /** Current selected requirements outrank an old DISABLED badge. Never invent PASS. */
+    fun requiredProbe(observation:ModuleObservation?,sampledAt:Long?,now:Long,required:Boolean):ProbePresentation {
+        if(!required) return ProbePresentation("DISABLED","Отключено в Авто")
+        if(observation?.status==ModuleStatus.DISABLED) return ProbePresentation("UNKNOWN","Обязательная проверка ожидает результата")
+        return probe(observation,sampledAt,now)
+    }
     fun heading(state:Tunnel.State,checked:Boolean?):String = when(state) {
         Tunnel.State.IDLE->"Готов к подключению"
         Tunnel.State.CONNECTING->"Подбираем маршрут"

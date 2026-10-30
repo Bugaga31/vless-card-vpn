@@ -11,5 +11,5 @@ object FoundConnectPolicy {
         .sortedBy {state(it).realMs}.take(LIMIT)
     fun count(servers:List<Server>,state:(Server)->ServerState)=servers.distinctBy {it.id}
         .count {AutoEligibility.vlessServer(it) && state(it).works}
-    fun enabled(automatic:Boolean,tor:Boolean,connected:Boolean,count:Int)=automatic && !tor && !connected && count>0
+    fun enabled(automatic:Boolean,tor:Boolean,connected:Boolean,count:Int)=automatic && !connected && count>0
 }
