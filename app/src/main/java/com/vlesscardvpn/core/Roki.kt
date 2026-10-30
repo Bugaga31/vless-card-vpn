@@ -4,15 +4,22 @@ import com.vlesscardvpn.model.Server
 import com.vlesscardvpn.model.ServerState
 import kotlin.math.exp
 
-/** Small session-local online logistic ranker. No fly connectome, cloud, app inventory or
+/** Session-local readout trained over a restricted real FlyWire-derived reservoir. No cloud, app inventory or
  * admission authority. No training on unknown/cancelled results. Cold start preserves order. */
 class RokiRanker {
-    private data class Model(val weights:DoubleArray=DoubleArray(5),var samples:Int=0)
+    private data class Model(val weights:DoubleArray=FlyReservoir.initialWeights,var samples:Int=0)
     private val models=linkedMapOf<String,Model>()
-    private fun features(s:ServerState)=doubleArrayOf(1.0,
+    private val featureCache=linkedMapOf<List<Double>,DoubleArray>()
+    private fun features(s:ServerState):DoubleArray {
+        val raw=doubleArrayOf(1.0,
         s.tcpMs.coerceIn(0,2000)/2000.0,s.realMs.coerceIn(0,2000)/2000.0,
         if(s.bigOk==true) 1.0 else 0.0,
         s.okCount.toDouble().coerceAtLeast(0)/(s.okCount.toDouble().coerceAtLeast(0)+s.failCount.toDouble().coerceAtLeast(0)+1.0))
+        val key=raw.toList()
+        return featureCache.getOrPut(key) {FlyReservoir.encode(raw)}.also {
+            while(featureCache.size>128) featureCache.remove(featureCache.keys.first())
+        }
+    }
     private fun predict(m:Model,x:DoubleArray):Double {
         val z=m.weights.indices.sumOf {m.weights[it]*x[it]}.coerceIn(-20.0,20.0)
         return 1.0/(1.0+exp(-z))
@@ -29,7 +36,8 @@ class RokiRanker {
     @Synchronized fun order(context:String,servers:List<Server>,state:(Server)->ServerState):List<Server> {
         val m=models[context] ?: return servers
         if(m.samples<8) return servers
-        return servers.sortedByDescending {predict(m,features(state(it)))}
+        // Bound inference work; never discard the remaining candidates.
+        return servers.take(64).sortedByDescending {predict(m,features(state(it)))}+servers.drop(64)
     }
 }
 object Roki {

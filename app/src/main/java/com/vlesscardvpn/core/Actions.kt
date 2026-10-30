@@ -442,8 +442,8 @@ object Actions {
                 if (!p.works && budgetMs in 1 until ConnectPolicy.QUICK_BUDGET_MS) return@real
                 probeMemory.record(net, s.id, st.state(s).maskFor(net), p.works, System.currentTimeMillis())
                 runCatching { Brain.learn(net, s, st.state(s), p.works) }
-                if(profile!=null) Roki.session.observe(Roki.context(net,profile,profileLimit,st.settings.testUrl),
-                    st.state(s),profile.verdict(p,profileLimit),Thread.currentThread().isInterrupted)
+                if(profile!=null) runCatching { Roki.session.observe(Roki.context(net,profile,profileLimit,st.settings.testUrl),
+                    st.state(s),profile.verdict(p,profileLimit),Thread.currentThread().isInterrupted) }
                 states.put(s.id) {
                     if (s !in Store.state.value.servers || !Net.matches(app,observed) || it.maskFor(net)!=st.state(s).maskFor(net) || !ProbePublication.unchangedExceptPing(it,st.state(s))) it else
                     it.copy(autoChecksKey=if(profile!=null) p.autoChecksKey else "",autoChecksAt=if(profile!=null && p.autoChecksKey.isNotEmpty()) System.currentTimeMillis() else 0, netEvidence = (it.netEvidence + ((net + "|" + st.state(s).maskFor(net)) to it.evidenceFor(net).observe(p.works, p.realMs, System.currentTimeMillis()))).entries.sortedByDescending { e -> e.value.at }.take(8).associate { e -> e.toPair() }, realMs = p.realMs, bigOk = p.bigOk ?: it.bigOk?.takeIf { old -> old }, ytOk = if (profile!=null) p.ytOk else if (youtube) p.ytOk else if (telegram) null else it.ytOk, tgOk = if (profile!=null) p.tgOk else if (telegram) p.tgOk else if (youtube) null else it.tgOk, tgMs = if(profile!=null || telegram) p.tgMs else if(youtube) 0 else it.tgMs, checkedAt = System.currentTimeMillis(), kbps = if (speedSample) p.kbps else it.kbps,
@@ -1222,8 +1222,8 @@ object Actions {
                 val torKey=com.vlesscardvpn.tor.TorFoundPolicy.key(snapshot.settings)
                 val path=Net.observation(app) ?: error("Нет доступной сети")
                 val profile=AutoChecks.current;val limit=AutoLatencyPolicy.MAX_MS;val url=snapshot.settings.testUrl
-                val candidates=Roki.session.order(Roki.context(path.profile,profile,limit,url),
-                    FoundConnectPolicy.shortlist(snapshot.servers,snapshot::state),snapshot::state)
+                val shortlist=FoundConnectPolicy.shortlist(snapshot.servers,snapshot::state)
+                val candidates=runCatching {Roki.session.order(Roki.context(path.profile,profile,limit,url),shortlist,snapshot::state)}.getOrDefault(shortlist)
                 val found=FoundCandidateLedger(candidates)
                 fun valid()=autoGeneration.get()==ticket && Net.matches(app,path) &&
                     Store.state.value.settings.let {it.mode==Mode.AUTO && com.vlesscardvpn.tor.TorFoundPolicy.key(it)==torKey && it.testUrl==url} &&
@@ -2060,8 +2060,8 @@ object Actions {
         val safe = if (st.settings.mode == Mode.AUTO) remote.filter(AutoEligibility::allowed) else remote
         val c = st.settings.country
         val preferred=if(c.isEmpty()) safe else safe.filter { Countries.of(it.name) == c }.ifEmpty { safe }
-        return if(st.settings.mode==Mode.AUTO) Roki.session.order(
-            Roki.context(Net.key(app),AutoChecks.current,AutoLatencyPolicy.MAX_MS,st.settings.testUrl),preferred,st::state) else preferred
+        return if(st.settings.mode==Mode.AUTO) runCatching {Roki.session.order(
+            Roki.context(Net.key(app),AutoChecks.current,AutoLatencyPolicy.MAX_MS,st.settings.testUrl),preferred,st::state)}.getOrDefault(preferred) else preferred
     }
 
     /** Countries of the working servers, most servers first: (ISO, count). */

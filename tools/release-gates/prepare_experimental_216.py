@@ -28,7 +28,8 @@ def prepare(root, sha, run_id, docs):
         suites.append(suite.get("name"))
         for k in totals: totals[k]+=int(suite.get(k,"0"))
     require(any(n.endswith("AutoRokiR216Test") for n in suites),"New regression suite absent")
-    require(totals["tests"]>=410 and not any(totals[k] for k in ("failures","errors","skipped")),"Targeted JVM gate failed")
+    require(any(n.endswith("FlyRokiR216Test") for n in suites),"Fly reservoir regression suite absent")
+    require(totals["tests"]>=425 and not any(totals[k] for k in ("failures","errors","skipped")),"Targeted JVM gate failed")
     report={"candidate_sha":sha,"run_id":str(run_id),"version":"1.2.105","version_code":216,"channel":"experimental",
             "targeted_jvm":{"totals":totals,"suites":suites},"functional_checks":{"full_jvm":"not_run","lint":"not_run","emulator":"not_run","physical_device":"not_run","ui":"not_run"},"apks":[],
             "validation":{"status":"TARGETED_JVM_ONLY","thermal_measurement":"not_run"}}
