@@ -330,6 +330,9 @@ class TunnelService : VpnService() {
                 com.vlesscardvpn.core.ServerChoice.measuredSpeed(st.state(it.first),network,System.currentTimeMillis()) } else emptyList()
             val downloadLatencies = used.map { st.state(it.first).realMs }
             connectPhase = "config"
+            if(com.vlesscardvpn.tor.TorRoutePolicy.active(settings)) {
+                com.vlesscardvpn.tor.TorCard.requireOwnedOrFree()
+            }
             val config = XrayConfigBuilder.vpnConfig(used, settings, bdPort, socks, set.ports,
                 listen = if (proxy && settings.lanShare) "0.0.0.0" else "127.0.0.1", httpPort = if (proxy) settings.httpPort else null, warpHop = warpHop,
                 heavy = XrayConfigBuilder.heavyOf(used.map { if (automatic) com.vlesscardvpn.core.ServerChoice.measuredSpeed(st.state(it.first),network,System.currentTimeMillis()) else st.state(it.first).kbps },
