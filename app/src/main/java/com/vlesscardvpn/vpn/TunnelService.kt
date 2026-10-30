@@ -966,14 +966,16 @@ class TunnelService : VpnService() {
     private fun watchdog() {
         if (watchJob?.isActive == true) return
         watchJob = scope.launch {
-            var miss = 0; var dnsMiss = 0; var stall = 0; var telegramMiss = 0; var telegramSlow = 0
+            var miss = 0; var dnsMiss = 0; var stall = 0; var telegramMiss = 0; var telegramSlow = 0; var telegramUnstable = 0
             var offline = false
             var servicePending = Store.state.value.settings.mode == Mode.AUTO &&
                 com.vlesscardvpn.core.ConnectionPassport.state.value.telegram.value != true
             var stats = TProxyService.stats()
             while (Tunnel.status.value.state == Tunnel.State.CONNECTED) {
                 // wait 45 s (10 s offline), but check right away when the screen turns back on — that's when apps are opened
-                val period = if (offline) 10_000L else if (miss > 0 || dnsMiss > 0 || telegramMiss > 0 || telegramSlow > 0 || servicePending && Store.state.value.settings.mode == Mode.AUTO && usedChain==null && !usedTorRoute) 3_000L else com.vlesscardvpn.core.PhonePower.refresh(this@TunnelService).healthyMs
+                val stabilityPending = Store.state.value.settings.mode == Mode.AUTO && usedChain==null && !usedTorRoute &&
+                    com.vlesscardvpn.core.TelegramStability.summary(android.os.SystemClock.elapsedRealtime()).attempted < 3
+                val period = if (offline) 10_000L else if (stabilityPending || telegramUnstable > 0 || miss > 0 || dnsMiss > 0 || telegramMiss > 0 || telegramSlow > 0 || servicePending && Store.state.value.settings.mode == Mode.AUTO && usedChain==null && !usedTorRoute) 3_000L else com.vlesscardvpn.core.PhonePower.refresh(this@TunnelService).healthyMs
                 if (asleep()) {
                     // Quiet-screen mode suspends on a screen event, not a minute polling timer.
                     do { screenSignals.receive() } while (asleep())
@@ -1007,6 +1009,12 @@ class TunnelService : VpnService() {
                 if(checkTelegram) com.vlesscardvpn.core.TelegramStability.record(live.tgOk,live.tgMs,"$network/$handle/${auth.port}/${chainEpoch.get()}")
                 if (ok && checkTelegram) {
                     telegramSlow = com.vlesscardvpn.core.AutoLatencyPolicy.slowStreak(telegramSlow,live)
+                    val stability = com.vlesscardvpn.core.TelegramStability.summary(android.os.SystemClock.elapsedRealtime())
+                    telegramUnstable = if(stability.stable==false && live.tgOk==true) (telegramUnstable+1).coerceAtMost(3) else 0
+                    if(telegramUnstable>=3 && !com.vlesscardvpn.core.SessionHold.active() &&
+                        !com.vlesscardvpn.core.PhonePower.isVoiceCallActive(this@TunnelService)) {
+                        optimizeSoon(); telegramUnstable=0 // Compare reserves; never tear down a call for probe variance alone.
+                    }
                     val wasFailing = telegramMiss > 0 || servicePending
                     servicePending = live.tgOk != true
                     telegramMiss = when (live.tgOk) { true -> 0; false -> telegramMiss + 1; null -> telegramMiss }
