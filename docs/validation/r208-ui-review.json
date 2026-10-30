@@ -1,0 +1,196 @@
+{
+  "passed": true,
+  "source_sha": "47e041d9108c6774ecf1d3fccf6b58a7e40d6801",
+  "screenshots": [
+    {
+      "file": "background-deferred.png",
+      "sha256": "dd875f897709784f1c65828eb3c14eedb412d4745cda77f62abcdf59d3a3ae81"
+    },
+    {
+      "file": "background-finished.png",
+      "sha256": "6d755c73d47b75909477f127ce2161aae71d31db91c63ccf7d622480b76a97c6"
+    },
+    {
+      "file": "background-power.png",
+      "sha256": "db6217df176cc4df6ef1e72620ece0354b3dc4d323eef8bac26d03932394a03d"
+    },
+    {
+      "file": "background-running.png",
+      "sha256": "a491ec9eafccdcb00a416250e9db5fd1eed48517561d15bd2fcda8f78b1cffdd"
+    },
+    {
+      "file": "connected.png",
+      "sha256": "96af9e905e24bd1ab147a0153846839c9913fde7937ebcee013372f6fd1ebe6b"
+    },
+    {
+      "file": "error.png",
+      "sha256": "94da53121bc13d859ba7779c48462dc3c06ac4d8363e73663106caa31798243d"
+    },
+    {
+      "file": "idle-dark.png",
+      "sha256": "9339980b410fd35f6be6f97febed2ce2f147f92d23d4de3fcff5396a753fd21d"
+    },
+    {
+      "file": "idle-light.png",
+      "sha256": "89ec8c845856c782a139a8bef6c3900b559768aab5c43ce90d939f6753c14fc5"
+    },
+    {
+      "file": "large-narrow.png",
+      "sha256": "8c129a32547ba1cc739699aa7df8e5e76f8b5a4d36a9289fbfcb9e1b38e7ff6f"
+    },
+    {
+      "file": "latency-dark.png",
+      "sha256": "ec527417b15a564f3f7c32974976b881912dfdf1229d8a5dfca522e004a89349"
+    },
+    {
+      "file": "latency-large.png",
+      "sha256": "6070a3f95eb67375a070f4b23a664ad61146d560ffa512361c26f1d48945cec2"
+    },
+    {
+      "file": "latency-light.png",
+      "sha256": "6e896ae4f11b5c430e0c054a184948ca9da94b1557623505135cf9ef516d076b"
+    },
+    {
+      "file": "maintenance-confirm.png",
+      "sha256": "f0b957e518f88ffd136217db8c1d659eb6748f4279955c99ec093971ff859a32"
+    },
+    {
+      "file": "maintenance-preview.png",
+      "sha256": "4d37038d231b1da925cb8f52ebd20bf21a98210444f22cba0a690f3f9b5dc3b5"
+    },
+    {
+      "file": "maintenance-result.png",
+      "sha256": "9ee1d9be613d4690aeb19151881f9c86678c03c18731c8d54238320ed841e733"
+    },
+    {
+      "file": "manual-progress-large.png",
+      "sha256": "eb3325ef01476cd4e842fe76073f387ab336f519b77fae298eb5b3d9ceea55f8"
+    },
+    {
+      "file": "manual-progress.png",
+      "sha256": "1d5ad63f837e92984f1806fb6ed9131f60fa66bec0b458c5c343871fac3478e8"
+    },
+    {
+      "file": "network-recovery.png",
+      "sha256": "ac1b566c216a327cecf430a72ebadcd29ecee50943091b06e592625f26eaeaaa"
+    },
+    {
+      "file": "partial.png",
+      "sha256": "9da3c6be992a93d9ea2fb71e1cc5aee5b5dee1d47a2012df09b9f6e8b0942c12"
+    },
+    {
+      "file": "ru-geo-large.png",
+      "sha256": "1dc474a691d84647ce593a7b57dab643942afa79311a86c02843519e37a595f4"
+    },
+    {
+      "file": "ru-geo-off.png",
+      "sha256": "19d82944ad7dd177dd0d0e6f61cf413730b7fdf69ec05ed95a96cf51b3142291"
+    },
+    {
+      "file": "ru-geo-on.png",
+      "sha256": "3c073ee5e5857e2a5b6b0ac400a1fd5571e5cf804e782146d78b4a8bf9958500"
+    },
+    {
+      "file": "ru-large.png",
+      "sha256": "84c01b8cf12ff69f796a42684edaa61623227e9567b42546c507ea4df2577308"
+    },
+    {
+      "file": "ru-off.png",
+      "sha256": "71a3d4988640c8d1e57f3d3ea1a768a3103a843fc98bef8e04f6017746bdbe3e"
+    },
+    {
+      "file": "ru-on.png",
+      "sha256": "edff213b6de6d6f56bec1c0f006dbc5841c54299da52d9a315d111140458e4ab"
+    },
+    {
+      "file": "ru-tor.png",
+      "sha256": "bbb94a32e6d19e74be2fe6a2dbde09198412637afbfbf9d4497a41df6bc07f5b"
+    },
+    {
+      "file": "search-progress.png",
+      "sha256": "cda66851b540724ab766cb24458c826bd38d26a2b7507ba21deadbc6b2c8c167"
+    },
+    {
+      "file": "searching.png",
+      "sha256": "0f5e3a9ed0cd4045e92465a1b6318cc05e50b4b066cb20c1f83651bf4d1968da"
+    },
+    {
+      "file": "services.png",
+      "sha256": "7f3eba792b8687ecaceadffd944f5abee96ccbac68ed206912ad79a5f63ead53"
+    },
+    {
+      "file": "stability-stable.png",
+      "sha256": "3345931b0def183b31caae6f6b90ff15f70b4af03ec4efb0759cb74fc1588211"
+    },
+    {
+      "file": "stability-unstable.png",
+      "sha256": "ca0cf2716f274a5b24f01871ce1bcd72e7729cc976c1219b77ea8fa904b68a18"
+    },
+    {
+      "file": "telegram-fresh-failure.png",
+      "sha256": "ae73339d4fcb99450688ae4339efa027b3802aa6c9da885962b4adb55ac5f089"
+    },
+    {
+      "file": "telegram-fresh-unknown.png",
+      "sha256": "d6dd8d235303d243453ff9a50ef8d89148e8e061dc7bdc499aae6dbd8ff6464f"
+    },
+    {
+      "file": "tor-country-large.png",
+      "sha256": "52105265e0eb7e062118f86666352d5ad7e056d4060cdd1d96bfeaa86a840794"
+    },
+    {
+      "file": "tor-country-unknown.png",
+      "sha256": "a3cd939411e0cdbd9d79c41af6b005e673510671c234207604bceff10f3c618b"
+    },
+    {
+      "file": "tor-country.png",
+      "sha256": "36f29c7776c9f15dd729e8e82c44de9f232d1bac184790f5f0d4442d76b52a0a"
+    },
+    {
+      "file": "tor-preferences-large.png",
+      "sha256": "8d5dbed686b44b503456506962f18a965dcf7a07c3220a5d751c9f1bb3511449"
+    },
+    {
+      "file": "tor-preferences.png",
+      "sha256": "ed320f0cdd2bedb1ae82c73c31dbe3a564251133c48c8bc6d99eed5689f791c0"
+    },
+    {
+      "file": "tor-required-dark.png",
+      "sha256": "33231fa6343119753f9d8dc342f021bfa239fb9d5645239c9735bea0ea862f40"
+    },
+    {
+      "file": "tor-required-large.png",
+      "sha256": "c3fb0144c1ee7b2ced9337e491a2cf15ada750727b81526e5b0f40375cb0438f"
+    },
+    {
+      "file": "tor-required-light.png",
+      "sha256": "98f2264198b8617ec3f730fbbfcd6bdfc0dc84f979a1b7239adee720783b96bb"
+    },
+    {
+      "file": "wait-backoff.png",
+      "sha256": "8e3fb29068b5edfc0a073a8f96fa7b3cb825ca2a98d755f0025952c6728497ce"
+    },
+    {
+      "file": "wait-catalog.png",
+      "sha256": "d49ab7bab208d92505828cf085d330cde6030216ae92b8f42f2de2d6b86ff964"
+    },
+    {
+      "file": "wait-offline.png",
+      "sha256": "3637d10c073494a6e8e3270c2d418ddf5f496b6dae9e435bd15ce698b0515271"
+    }
+  ],
+  "reviewed_at": "2026-10-30T11:25:21.436015+00:00",
+  "method": "39 final PNGs visually reviewed via ten labelled contact sheets; five new final Telegram/Tor PNGs viewed individually. All 44 downloaded PNG SHA256 hashes matched the final Android report.",
+  "observations": [
+    "Connected/error/search/recovery/partial and background states have legible controls and limited local-probe wording.",
+    "Fresh Telegram failure displays red no response; fresh unknown displays not checked, with no stale green Telegram success. Data-centre response is explicitly not proof of account/app/call or full TUN health.",
+    "Tor bridge controls and refresh/privacy wording are legible in dark/light themes. Empty obfs4 count is a deliberate fixture, not a claim of working bridges. Large font wraps Auto-update heading mid-word but remains readable; lower controls require scrolling.",
+    "RU direct controls on/off and Tor exclusion wording, provider/DNS visibility warnings and Karing revision are legible. Enlarged geo capture is an intentional scrolled footer viewport.",
+    "Manual progress, stability stable/unstable, latency entry, Tor country/preferences, maintenance confirmation/result and large-font states reviewed. Cropped card continuations are scroll viewports, not full-page captures.",
+    "Instrumentation screenshot version 1.0.8 is not evidence of final signed release version."
+  ],
+  "limits": [
+    "Synthetic UI states and emulator/native regressions only; not authenticated Telegram/Discord calls, real mobile carrier/DPI, full app TUN or physical Tor bootstrap verification.",
+    "Configurable service-check profiles and comparative Tor-specific upstream/reserve ranking are not implemented in this hotfix."
+  ]
+}
