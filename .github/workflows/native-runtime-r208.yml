@@ -116,3 +116,5 @@ jobs:
 # Full unchanged rerun after isolated controlled-fixture TLS timeout.
 
 # Worker-isolated TLS fixture; all 596 runtime assertions retained.
+
+# UI harness opens advanced Tor controls before scrolling to bridge choices.
