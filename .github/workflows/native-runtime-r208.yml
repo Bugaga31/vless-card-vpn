@@ -118,3 +118,5 @@ jobs:
 # Worker-isolated TLS fixture; all 596 runtime assertions retained.
 
 # UI harness opens advanced Tor controls before scrolling to bridge choices.
+
+# Scroll/tap only visible expander bounds; require expanded-state label.
