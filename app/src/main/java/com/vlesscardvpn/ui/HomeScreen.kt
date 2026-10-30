@@ -41,7 +41,7 @@ import androidx.lifecycle.repeatOnLifecycle
 import androidx.compose.ui.platform.LocalLifecycleOwner
 
 @Composable
-fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () -> Unit, onConnectFound:()->Unit = onConnect) {
+fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () -> Unit, onConnectFound:()->Unit = onConnect, openWatson:()->Unit = {}) {
     val status by Tunnel.status.collectAsState()
     val lifecycleOwner = LocalLifecycleOwner.current
     // Only settings and a small summary: the home screen does not redraw for every server result of a check.
@@ -124,6 +124,7 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
         val on = status.state == Tunnel.State.CONNECTED
         val busy = status.state == Tunnel.State.CONNECTING
         val color = when { on && status.checkOk == false -> Warn; on && status.checkOk == null -> Accent; on -> Good; busy -> Accent; else -> MaterialTheme.colorScheme.primary }
+        WatsonEntry(openWatson)
         FoundRoutesCard(onConnectFound)
         ConnectionOverview(status, cfg.hideServerNames, if(cfg.torAll) "Tor через VLESS" else if(cfg.mode==Mode.AUTO) "Авто" else "Выбранные серверы") {
             PowerButton(on, busy, color) { if (on || busy) onDisconnect() else onConnect() }
