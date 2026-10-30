@@ -2054,6 +2054,8 @@ object Actions {
         val settings = Store.state.value.settings
         val network = Net.key(app)
         val handle = Net.underlying(app)?.toString()
+        val session = Tunnel.status.value.since
+        val route = Tunnel.status.value.route
         suspend fun series(sample: suspend () -> LinkStabilityPolicy.Sample): LinkStabilityPolicy.Summary {
             val probes = mutableListOf<LinkStabilityPolicy.Sample>()
             repeat(3) {
@@ -2082,13 +2084,14 @@ object Actions {
             DiagnosticSeries(control.await(),youtube.await(),telegram.await(),whatsapp.await(),discord.await(),voiceUdp.await())
         }
         step(total, total)
-        if (Tunnel.socks != auth || Net.key(app)!=network || Net.underlying(app)?.toString()!=handle)
+        if (Tunnel.socks != auth || Tunnel.status.value.since!=session || Tunnel.status.value.route!=route ||
+            Net.key(app)!=network || Net.underlying(app)?.toString()!=handle)
             return@launch "Маршрут или сеть изменились во время проверки — результат отброшен."
         val udp = if(settings.blockStun) "Не проверено: STUN заблокирован настройкой приватности; защита не отключалась."
             else results.udp?.let(LinkStabilityPolicy::label) ?: "Не проверено"
         val details = "HTTPS: ${if(results.control) "ответ получен" else "нет ответа"} · YouTube: ${results.youtube} · WhatsApp: ${results.whatsapp}\n" +
             "Telegram · MTProto: ${LinkStabilityPolicy.label(results.telegram)}\n" +
-            "Telegram · звонки: сигнализация — ${LinkStabilityPolicy.label(results.telegram)}; общий UDP/STUN — $udp\n" +
+            "Telegram · звонки: доступность MTProto — ${LinkStabilityPolicy.label(results.telegram)}; общий UDP/STUN — $udp\n" +
             "Discord · звонки: API — ${LinkStabilityPolicy.label(results.discord)}; общий UDP/STUN — $udp\n" +
             "UDP/STUN — одна общая транспортная проба, не отдельные медиасерверы Telegram/Discord. Это не RTP-джиттер и не проверка реального звонка или аккаунта."
         val servicesOk = results.control && results.youtube && results.whatsapp && results.telegram.stable==true && results.discord.stable==true
