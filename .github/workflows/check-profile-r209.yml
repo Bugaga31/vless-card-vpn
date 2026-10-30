@@ -23,7 +23,7 @@ jobs:
         run: |
           set -euo pipefail
           base64 -d tools/patches/check-profile-r209.patch.gz.b64 | gzip -d > "$RUNNER_TEMP/check-profile-r209.patch"
-          echo '09575474d0d6006daa4ba222bd2b2e5c8b6d292a106556698398e6751c96cd08  '"$RUNNER_TEMP/check-profile-r209.patch" | sha256sum -c -
+          echo '225218735e3b9353a34c44dbc7a570aa46fb2e5f7c79dd386f43ace56ed45baa  '"$RUNNER_TEMP/check-profile-r209.patch" | sha256sum -c -
           git fetch --quiet --no-tags origin 4166bc2957050caed3cb3583ba9879720def3c37
           git restore --source 4166bc2957050caed3cb3583ba9879720def3c37 -- app/src/main app/src/test app/build.gradle.kts
           git apply --check "$RUNNER_TEMP/check-profile-r209.patch"
