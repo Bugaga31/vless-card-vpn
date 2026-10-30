@@ -34,6 +34,16 @@ object ConnectionPassport {
         val merged=com.vlesscardvpn.health.ModuleEvidencePolicy.merge(old?.assessment,old?.sampledAt.orEmpty(),measured,now)
         modules.value=ModuleFrame(merged.assessment,now,merged.sampledAt)
     }
+    /** Missing Tor circuit is unknown service evidence, never a cached green DC result. */
+    @Synchronized fun torPending() {
+        val now=SystemClock.elapsedRealtime()
+        val old=modules.value
+        val measured=listOf(com.vlesscardvpn.health.HealthModule.HTTPS,com.vlesscardvpn.health.HealthModule.TELEGRAM,
+            com.vlesscardvpn.health.HealthModule.YOUTUBE).map {com.vlesscardvpn.health.ModuleObservation(it,com.vlesscardvpn.health.ModuleStatus.UNKNOWN)}
+        val merged=com.vlesscardvpn.health.ModuleEvidencePolicy.merge(old?.assessment,old?.sampledAt.orEmpty(),measured,now)
+        modules.value=ModuleFrame(merged.assessment,now,merged.sampledAt)
+        state.value=state.value.copy(https=Check(null,now),telegram=Check(null,now),youtube=Check(null,now))
+    }
     private fun check(v: Boolean?) = Check(v,SystemClock.elapsedRealtime())
     @Synchronized fun clear() { state.value = Snapshot(); modules.value=null; TelegramStability.clear(); ConnectionHistory.boundary() }
     @Synchronized fun full(https: Boolean, dns: Boolean?, telegram: Boolean?, youtube: Boolean?) {
