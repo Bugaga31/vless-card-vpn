@@ -23,7 +23,7 @@ jobs:
         run: |
           set -euo pipefail
           base64 -d tools/patches/stability-r206.patch.gz.b64 | gzip -d > "$RUNNER_TEMP/stability-r206.patch"
-          echo 'd8253710c2cf0998cb20d2844300984b86c5cb72b37c9a641cb1172d476e31d6  '"$RUNNER_TEMP/stability-r206.patch" | sha256sum -c -
+          echo 'a9af92fcf8db8eb5f85edf8810d0c6feb46f124919a9d5ef617375f5a0da8992  '"$RUNNER_TEMP/stability-r206.patch" | sha256sum -c -
           git fetch --quiet --no-tags origin fa5d2df0048938008e1cd18417858776e99d635b
           git restore --source fa5d2df0048938008e1cd18417858776e99d635b -- app/src/main app/src/test app/build.gradle.kts
           git apply --check "$RUNNER_TEMP/stability-r206.patch"
