@@ -128,22 +128,33 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
             PowerButton(on, busy, color) { if (on || busy) onDisconnect() else onConnect() }
         }
         val slowOffer by SlowRouteConsent.offer.collectAsState()
-        var confirmSlow by remember {mutableStateOf(false)}
-        if(busy && slowOffer!=null) {
+        val foundCount by SlowRouteConsent.count.collectAsState()
+        var confirmSlow by remember {mutableStateOf<SlowRouteConsent.Offer?>(null)}
+        LaunchedEffect(busy,cfg.mode) {
+            if(!busy || cfg.mode!=Mode.AUTO) confirmSlow=null
+            if(busy && cfg.mode==Mode.AUTO) while(true) {
+                SlowRouteConsent.expose()
+                kotlinx.coroutines.delay(1000)
+            }
+        }
+        if(busy && cfg.mode==Mode.AUTO && slowOffer!=null && foundCount>0) {
             val candidate=slowOffer!!
             Card(Modifier.fillMaxWidth().padding(top=8.dp)) {
                 Column(Modifier.padding(12.dp)) {
-                    Text("Сервер в заданном пределе пока не найден. Лучший проверенный ответ: ${candidate.ms} мс, предел ${candidate.limit} мс.")
-                    Text("Выбранные сервисные проверки прошли. Это не гарантия работы всех приложений через TUN.")
-                    TextButton(onClick={confirmSlow=true}) {Text("Продолжить")}
+                    Text("Найдено проверенных серверов: $foundCount. Лучший ответ: ${candidate.ms} мс при пределе ${candidate.limit} мс.")
+                    Text("Можно подключиться сейчас, не дожидаясь остальных. Выбранные сервисные проверки прошли; полный путь приложений через TUN этим не подтверждён.")
+                    Button(onClick={confirmSlow=candidate},modifier=Modifier.fillMaxWidth()) {
+                        Text("Подключиться к найденным ($foundCount)")
+                    }
                 }
             }
         }
-        if(confirmSlow && busy && slowOffer!=null) AlertDialog(onDismissRequest={confirmSlow=false},
+        val confirmed=confirmSlow
+        if(confirmed!=null && busy && cfg.mode==Mode.AUTO) AlertDialog(onDismissRequest={confirmSlow=null},
             title={Text("Подключиться с большей задержкой?")},
-            text={Text("Ответ ${slowOffer!!.ms} мс при пределе ${slowOffer!!.limit} мс. Разрешение только для этого сервера и этой VPN-сессии; настройки не изменятся.")},
-            confirmButton={TextButton(onClick={confirmSlow=false;Actions.acceptSlowRoute {onConnect()}}){Text("Всё равно подключиться")}},
-            dismissButton={TextButton(onClick={confirmSlow=false;SlowRouteConsent.hide()}){Text("Продолжить поиск")}})
+            text={Text("Выберу один проверенный сервер: ${confirmed.ms} мс при пределе ${confirmed.limit} мс. Разрешение только для этого сервера и этой VPN-сессии; настройки не изменятся. Перед запуском повторно проверю свежесть результата.")},
+            confirmButton={TextButton(onClick={confirmSlow=null;Actions.acceptSlowRoute(confirmed) {onConnect()}}){Text("Всё равно подключиться")}},
+            dismissButton={TextButton(onClick={confirmSlow=null}){Text("Продолжить поиск")}})
         val torExit by com.vlesscardvpn.core.TorExitStatus.state.collectAsState()
         if(on && torExit.active) TorExitCountryCard(torExit)
         val backgroundStatus by com.vlesscardvpn.core.BackgroundOptimization.status.collectAsState()
