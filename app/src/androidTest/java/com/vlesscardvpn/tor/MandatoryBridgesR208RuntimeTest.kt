@@ -17,4 +17,14 @@ class MandatoryBridgesR208RuntimeTest {
     @Test fun unsupportedBridgeDoesNotRemainSelectable() {assertEquals("obfs4",TorConnectionPolicy.bridged(Settings(torAll=true,torBridge="unknown")).torBridge)}
     @Test fun runtimeMigratesLegacyNone() {assertEquals("obfs4",TorConnectionPolicy.runtime(Settings(torAll=true)).torBridge)}
     @Test fun manualTransportRetained() {assertEquals("webtunnel",TorConnectionPolicy.bridged(Settings(torAll=true,torBridge="webtunnel")).torBridge)}
+    @Test fun occupiedUnownedListenerRejectedBeforeRouting() {
+        java.net.ServerSocket(0,1,java.net.InetAddress.getByName("127.0.0.1")).use { listener ->
+            try {TorCard.requireOwnedOrFree(listener.localPort);fail("Unowned Tor listener was accepted")}
+            catch(expected:IllegalStateException) {assertTrue(expected.message.orEmpty().contains("внешним"))}
+        }
+    }
+    @Test fun unusedListenerCanStartLaterBehindVless() {
+        val port=java.net.ServerSocket(0,1,java.net.InetAddress.getByName("127.0.0.1")).use {it.localPort}
+        TorCard.requireOwnedOrFree(port)
+    }
 }
