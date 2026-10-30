@@ -66,16 +66,19 @@ class EvidenceUiR208Test {
     }
     assertTrue("Tor advanced expander must open; bounds=$lastBounds; labels=${labels(ins.uiAutomation.rootInActiveWindow)}",clicked)
     for(i in 0 until 20) {
-     if(labels(ins.uiAutomation.rootInActiveWindow).any {"Обязательные мосты" in it}) break
+     if(labels(ins.uiAutomation.rootInActiveWindow).any {"корректных мостов obfs4" in it}) break
      shell("input swipe ${dm.widthPixels/2} ${dm.heightPixels*4/5} ${dm.widthPixels/2} ${dm.heightPixels/4} 300")
      ins.waitForIdleSync();Thread.sleep(150)
     }
    }
-   val expected=if(tor) "Обязательные мосты" else if(unknown) "Не проверено" else "Нет ответа"
+   val expected=if(tor) "корректных мостов obfs4" else if(unknown) "Не проверено" else "Нет ответа"
    val end=android.os.SystemClock.elapsedRealtime()+8000
    while(labels(ins.uiAutomation.rootInActiveWindow).none {expected in it} && android.os.SystemClock.elapsedRealtime()<end) Thread.sleep(200)
    val text=labels(ins.uiAutomation.rootInActiveWindow);assertTrue("$name: $text",text.any {expected in it})
-   if(tor) assertTrue(text.none {"Без мостов · через VLESS" in it})
+   if(tor) {
+    assertTrue("Selected obfs4 bridge counter must be visible",text.any {"корректных мостов obfs4" in it})
+    assertTrue("No bridge-free choice",text.none {"Без мостов · через VLESS" in it})
+   }
    val root=File(ins.targetContext.getExternalFilesDir(null),"ui208").apply {mkdirs()}
    File(root,"$name.labels.txt").writeText(text.joinToString("\n"))
    val image=ins.uiAutomation.takeScreenshot() ?: error("No image")
