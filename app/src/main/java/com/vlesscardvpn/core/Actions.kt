@@ -426,8 +426,11 @@ object Actions {
                 onObservation?.invoke(p)
                 val speedSample = ServerChoice.acceptsSpeedSample(p.kbps, slots)
                 if (telegram && p.works) TelegramRouteMemory.record(net,s.id,st.state(s).maskFor(net),p.tgOk,System.currentTimeMillis())
+                val cooling=RouteStabilityMemory.session.cooling(net,s.id,st.state(s).maskFor(net),System.currentTimeMillis())
                 val routeReady = p.works && (st.settings.mode != Mode.AUTO ||
-                    (profile?.accepts(p,profileLimit) ?: (!telegram || AutoChecks.accepts(p))) && !RouteStabilityMemory.session.cooling(net,s.id,st.state(s).maskFor(net),System.currentTimeMillis()))
+                    (profile?.accepts(p,profileLimit) ?: (!telegram || AutoChecks.accepts(p))) && !cooling)
+                if(profile!=null && !routeReady && p.realMs>0)
+                    progress.value=progress.value.copy(message=AutoAdmissionReason.describe(p,profile,profileLimit,cooling))
                 val firstSuccess = routeReady && ok.incrementAndGet() == 1
                 if (routeReady) onSuccess?.invoke(s)
                 if (profile!=null && routeReady) warmPassed.add(s.id)
@@ -446,6 +449,11 @@ object Actions {
                         speedMask = if (speedSample) st.state(s).maskFor(net) else it.speedMask,
                         speedCheckedAt = if (speedSample) System.currentTimeMillis() else it.speedCheckedAt,
                         okCount = it.okCount + if (p.works) 1 else 0, failCount = it.failCount + if (p.works) 0 else 1)
+                }
+                // Publish committed service-proven slow candidates immediately, not after the whole native wave.
+                if(profile!=null && Tunnel.status.value.state==Tunnel.State.CONNECTING) {
+                    states.flush()
+                    SlowRouteConsent.remember(listOf(s),sampleStartedAt)
                 }
                 if (firstSuccess && onFirst != null) firstWinner.compareAndSet(null, s)
                 step(done.incrementAndGet(), variants.size)
@@ -1170,15 +1178,23 @@ object Actions {
         if (Tunnel.status.value.state == Tunnel.State.CONNECTING && Tunnel.socks == null) Tunnel.status.value = Tunnel.Status()
     }
 
-    fun acceptSlowRoute(onReady:()->Unit) {
-        if(!SlowRouteConsent.approve()) return
-        autoGeneration.incrementAndGet()
+    fun acceptSlowRoute(expected:SlowRouteConsent.Offer?=SlowRouteConsent.offer.value,onReady:()->Unit) {
+        if(!SlowRouteConsent.approve(expected)) return
+        val ticket=autoGeneration.incrementAndGet()
         val old=job;old?.cancel()
         scope.launch {
-            old?.join()
+            old?.join() // All native probe cores finish before the live VPN core starts.
+            if(autoGeneration.get()!=ticket) return@launch
             progress.value=progress.value.copy(running=false)
-            val route=Store.state.value.servers.filter {s->SlowRouteConsent.permits(s,Store.state.value.state(s),Net.key(app),System.currentTimeMillis())}
-            if(route.isNotEmpty() && selectBest(1,among=route)>0) withContext(Dispatchers.Main) {onReady()}
+            val snapshot=Store.state.value
+            val route=snapshot.servers.filter {s->SlowRouteConsent.permits(s,snapshot.state(s),Net.key(app),System.currentTimeMillis())}
+            if(route.isNotEmpty() && selectBest(1,among=route)>0) withContext(Dispatchers.Main) {
+                if(autoGeneration.get()==ticket) onReady()
+            } else {
+                SlowRouteConsent.clear()
+                Tunnel.status.value=Tunnel.Status(Tunnel.State.ERROR,"Кандидат больше не подтверждён",
+                    check="Сеть, настройки или результат проверки изменились. Запустите поиск снова.",checkOk=false)
+            }
         }
     }
 

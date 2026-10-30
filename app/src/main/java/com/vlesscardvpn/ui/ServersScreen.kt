@@ -210,7 +210,13 @@ fun ServersScreen() {
             }
         }
         itemsIndexed(list, key = { _,server -> server.id }) { index,server ->
-            ServerRow(server, app.state(server), fav = server.id in app.settings.favorites, compact=app.settings.compactServers, hidden=app.settings.hideServerNames, displayIndex=index+1, now=now,
+            val ss=app.state(server)
+            val autoLabel=if(app.settings.mode==com.vlesscardvpn.model.Mode.AUTO && ss.works)
+                com.vlesscardvpn.core.AutoReadiness.describe(server,ss,
+                    com.vlesscardvpn.core.AutoCheckProfile.of(app.settings.autoChecks),
+                    com.vlesscardvpn.core.AutoLatencyRange.safe(app.settings.autoLatencyMinMs,app.settings.autoLatencyMaxMs).max,
+                    network,now,com.vlesscardvpn.core.RouteStabilityMemory.session.cooling(network,server.id,ss.maskFor(network),now)) else ""
+            ServerRow(server, ss, fav = server.id in app.settings.favorites, compact=app.settings.compactServers, hidden=app.settings.hideServerNames, displayIndex=index+1, now=now, autoLabel=autoLabel,
                 onToggle = { Store.setState(server.id) { state -> state.copy(selected = !state.selected) } },
                 onLong = { menuFor = server })
         }
@@ -232,13 +238,14 @@ fun ServersScreen() {
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun ServerRow(s: Server, st: ServerState, fav: Boolean = false, compact:Boolean=false, hidden:Boolean=false, displayIndex:Int=0, now:Long=System.currentTimeMillis(), onToggle: () -> Unit, onLong: () -> Unit) {
+private fun ServerRow(s: Server, st: ServerState, fav: Boolean = false, compact:Boolean=false, hidden:Boolean=false, displayIndex:Int=0, now:Long=System.currentTimeMillis(), autoLabel:String="", onToggle: () -> Unit, onLong: () -> Unit) {
     Card(Modifier.fillMaxWidth().padding(vertical = 3.dp).combinedClickable(onClick = onToggle, onLongClick = onLong),
         colors = CardDefaults.cardColors(containerColor = if (st.selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface)) {
         Row(Modifier.padding(horizontal = 6.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
             Checkbox(checked = st.selected, onCheckedChange = { onToggle() })
             Column(Modifier.weight(1f)) {
                 Text((if (fav) "★ " else "") + (if(hidden) "Сервер $displayIndex" else s.name), maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.Medium, fontSize = 14.sp)
+                if(autoLabel.isNotEmpty()) Text(autoLabel,style=MaterialTheme.typography.labelSmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
                 val mask = Masks.byId(st.maskId)?.title
                 if(s.insecure) Text("TLS: проверка сертификата отключена",style=MaterialTheme.typography.labelSmall,color=Bad)
                 if(!compact) Text(ServerBrowser.age(st.checkedAt,now),style=MaterialTheme.typography.labelSmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
