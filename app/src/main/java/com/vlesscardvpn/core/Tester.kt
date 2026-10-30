@@ -150,10 +150,13 @@ object Tester {
     }
 
     /** Requests through a local SOCKS port (the tester's or the running VPN's). */
-    fun probeSocks(port: Int, testUrl: String, big: Boolean = true, youtube: Boolean = true, telegram: Boolean = youtube, attempts: Int = 2, budgetMs: Long = 0, onCall: ((okhttp3.Call) -> Unit)? = null, calls: Boolean = false, user: String = "", pass: String = "", onCancel: ((() -> Unit) -> Unit)? = null, autoChecks:AutoCheckProfile?=null): Probe {
+    fun probeSocks(port: Int, testUrl: String, big: Boolean = true, youtube: Boolean = true, telegram: Boolean = youtube, attempts: Int = 2, budgetMs: Long = 0, onCall: ((okhttp3.Call) -> Unit)? = null, calls: Boolean = false, user: String = "", pass: String = "", onCancel: ((() -> Unit) -> Unit)? = null, autoChecks:AutoCheckProfile?=null, connectivityBudgetMs:Long=0): Probe {
         val budgetDeadline = if (budgetMs > 0) System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(budgetMs.coerceAtMost(60000)) else Long.MAX_VALUE
-        fun boundedCall(client: OkHttpClient, request: Request): okhttp3.Call = client.newCall(request).also { call ->
-            if (budgetDeadline != Long.MAX_VALUE) call.timeout().timeout(TimeUnit.NANOSECONDS.toMillis((budgetDeadline-System.nanoTime()).coerceAtLeast(1)).coerceAtLeast(1),TimeUnit.MILLISECONDS)
+        fun boundedCall(client: OkHttpClient, request: Request, capMs:Long=0): okhttp3.Call = client.newCall(request).also { call ->
+            if (budgetDeadline != Long.MAX_VALUE || capMs>0) {
+                val left=if(budgetDeadline==Long.MAX_VALUE) Long.MAX_VALUE else TimeUnit.NANOSECONDS.toMillis((budgetDeadline-System.nanoTime()).coerceAtLeast(1))
+                call.timeout().timeout(FirstConnectivityBudget.remaining(left,capMs),TimeUnit.MILLISECONDS)
+            }
             onCall?.invoke(call)
         }
         val client = (if (attempts == 1) fast else base).newBuilder().apply {
@@ -185,7 +188,7 @@ object Tester {
                 if (Thread.currentThread().isInterrupted) throw java.io.InterruptedIOException("Проверка отменена")
                 val t0 = System.nanoTime()
                 runCatching {
-                    boundedCall(client,Request.Builder().url(testUrl).header("User-Agent", UA).build()).execute().use { r ->
+                    boundedCall(client,Request.Builder().url(testUrl).header("User-Agent", UA).build(),connectivityBudgetMs).execute().use { r ->
                         check(ProbeResponsePolicy.connectivity(r.code, testUrl)) { "Unexpected connectivity HTTP ${r.code}" }
                         r.body?.byteStream()?.use { it.read(ByteArray(4096)) }
                     }
@@ -464,7 +467,7 @@ object Tester {
                         val one = XrayCore.Instance("test1")
                         val p = freePorts(1)
                         val ok = runCatching { one.start(XrayConfigBuilder.testConfig(listOf(v), p, byeDpiPort, dpiPorts)) }.isSuccess && one.running
-                        try { report(idx[i], if (ok) CancellableProbe.run { bind -> probeSocks(p[0], testUrl, big = big, youtube = youtube, telegram = telegram, attempts = attempts, budgetMs = serviceBudget, onCall = { call -> bind { call.cancel() } }, calls = calls, onCancel = bind, autoChecks=autoChecks) } else Probe(0, null, null, "конфиг не принят ядром")) }
+                        try { report(idx[i], if (ok) CancellableProbe.run { bind -> probeSocks(p[0], testUrl, big = big, youtube = youtube, telegram = telegram, attempts = attempts, budgetMs = serviceBudget, onCall = { call -> bind { call.cancel() } }, calls = calls, onCancel = bind, autoChecks=autoChecks, connectivityBudgetMs=FirstConnectivityBudget.cap(foreground,autoChecks!=null)) } else Probe(0, null, null, "конфиг не принят ядром")) }
                         finally { one.stop() }
                     }
                     return@withPermit
@@ -476,7 +479,7 @@ object Tester {
                         ProbeRace.run(chunk.indices.toList(), currentLimit, stopAfter,
                             skip = { i -> skipped(idx[i]) }, staggerMs = ForegroundProbePlan.staggerMs(foreground,stopAfter),
                             probe = { i -> onStarted?.invoke(idx[i]); CancellableProbe.run { bind -> probeSocks(ports[i], testUrl, big = big, youtube = youtube, telegram = telegram,
-                                attempts = attempts, budgetMs = serviceBudget, onCall = { call -> bind { call.cancel() } }, calls = calls, onCancel = bind, autoChecks=autoChecks) } },
+                                attempts = attempts, budgetMs = serviceBudget, onCall = { call -> bind { call.cancel() } }, calls = calls, onCancel = bind, autoChecks=autoChecks, connectivityBudgetMs=FirstConnectivityBudget.cap(foreground,autoChecks!=null)) } },
                             accepted = { accepted(it) }, onEach = { i, p -> report(idx[i], p) })
                     }
                 } finally { core.stop() }
