@@ -21,6 +21,9 @@ import com.vlesscardvpn.health.HealthModule
 @Composable
 fun ConnectionOverview(status:Tunnel.Status,hideRoute:Boolean,modeLabel:String,control:@Composable ()->Unit) {
     val routeSettings by Store.settings.collectAsState()
+    val selectedEvidence by AutoCheckEvidence.frame.collectAsState()
+    val profilePending=routeSettings.mode==com.vlesscardvpn.model.Mode.AUTO && (selectedEvidence?.profile!=AutoCheckProfile.of(routeSettings.autoChecks) || selectedEvidence?.limit!=routeSettings.autoLatencyMaxMs)
+    val presented=if(profilePending && status.state==Tunnel.State.CONNECTED) status.copy(checkOk=null,check="Набор проверок изменён или ещё не измерен. Ожидаем свежие результаты…") else status
     val on=status.state==Tunnel.State.CONNECTED
     val searching=status.state==Tunnel.State.CONNECTING
     val issue=status.state==Tunnel.State.ERROR || on && status.checkOk==false
@@ -30,11 +33,11 @@ fun ConnectionOverview(status:Tunnel.Status,hideRoute:Boolean,modeLabel:String,c
         Column(Modifier.padding(16.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
             Text(if(searching) "Поиск · $modeLabel" else "Режим · $modeLabel",
                 color=tone,fontSize=14.sp,fontWeight=FontWeight.Medium)
-            Text(ConnectionPresentationPolicy.heading(status.state,status.checkOk),fontSize=22.sp,
+            Text(ConnectionPresentationPolicy.heading(presented.state,presented.checkOk),fontSize=22.sp,
                 lineHeight=27.sp,fontWeight=FontWeight.SemiBold,color=MaterialTheme.colorScheme.onSurface)
             control()
             Text(when {
-                (searching || on) && status.check.isNotBlank()->status.check
+                (searching || on) && presented.check.isNotBlank()->presented.check
                 searching->"Проверяем: ${AutoChecks.label()}. Отмена — кнопкой выше."
                 status.state==Tunnel.State.ERROR->"Серверы и настройки сохранены. Повторите поиск или откройте диагностику."
                 on && status.checkOk==false->"Туннель подключён, но не все обязательные проверки прошли. Смотрите результаты ниже."

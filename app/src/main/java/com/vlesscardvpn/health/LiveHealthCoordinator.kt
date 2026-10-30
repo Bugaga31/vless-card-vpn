@@ -13,7 +13,7 @@ object LiveHealthCoordinator {
         ModuleHealthPolicy.assess(HealthInput(probe.realMs>0,probe.realMs,probe.bigOk,
             dns,probe.tgOk,probe.tgMs,probe.ytOk),HealthRequirements(
             dns=requireDns,telegram=requireTelegram,youtube=requireYouTube,
-            strictLatency=strictLatency,rejectKnownMediaFailure=false),blocked,com.vlesscardvpn.core.AutoLatencyPolicy.MAX_MS)
+            strictLatency=strictLatency,rejectKnownMediaFailure=requireTelegram),blocked,com.vlesscardvpn.core.AutoLatencyPolicy.MAX_MS)
 
     /** Fixed schema, enum labels and nonnegative durations only. No free-form messages. */
     fun report(assessment:HealthAssessment):JSONObject = JSONObject()

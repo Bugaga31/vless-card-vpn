@@ -100,7 +100,7 @@ data class ServerState(
     val kbps: Int = 0,
     val netEvidence: Map<String, RouteEvidence> = emptyMap(),
     val speedNetwork: String = "", val speedMask: String = "", val speedCheckedAt: Long = 0,
-    val autoChecksKey: String = "",
+    val autoChecksKey: String = "", val autoChecksAt:Long=0,
     val serviceNetwork: String = "", val serviceMask: String = "", val serviceCheckedAt: Long = 0,
 ) {
     /**
@@ -119,7 +119,7 @@ data class ServerState(
     val works: Boolean get() = realMs > 0 && bigOk != false
     fun toJson(): JSONObject = JSONObject().apply {
         if (netEvidence.isNotEmpty()) put("netEvidence", JSONObject().apply { netEvidence.forEach { (k, v) -> put(k, v.toJson()) } })
-        if(autoChecksKey.isNotEmpty()) put("autoChecksKey",autoChecksKey)
+        if(autoChecksKey.isNotEmpty()) {put("autoChecksKey",autoChecksKey);put("autoChecksAt",autoChecksAt)}
         if (serviceCheckedAt > 0) { put("serviceNetwork",serviceNetwork);put("serviceMask",serviceMask);put("serviceAt",serviceCheckedAt) }
         if (speedCheckedAt > 0) { put("speedNetwork",speedNetwork);put("speedMask",speedMask);put("speedAt",speedCheckedAt) }
         if (selected) put("sel", true); put("tcp", tcpMs); put("real", realMs); bigOk?.let { put("big", it) }; ytOk?.let { put("yt", it) }
@@ -135,7 +135,7 @@ data class ServerState(
             goodMasks = o.optJSONArray("good")?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: emptyList(),
             netMasks = o.optJSONObject("net")?.let { m -> m.keys().asSequence().associateWith { m.getString(it) } } ?: emptyMap(),
             tgOk = if (o.has("tg")) o.optBoolean("tg") else null, tgMs = o.optInt("tgMs").coerceAtLeast(0), kbps = o.optInt("kbps"),
-            autoChecksKey = o.optString("autoChecksKey"),
+            autoChecksKey = o.optString("autoChecksKey"), autoChecksAt=o.optLong("autoChecksAt"),
             serviceNetwork = o.optString("serviceNetwork"), serviceMask = o.optString("serviceMask"), serviceCheckedAt = o.optLong("serviceAt"),
             speedNetwork = o.optString("speedNetwork"), speedMask = o.optString("speedMask"), speedCheckedAt = o.optLong("speedAt"),
             netEvidence = o.optJSONObject("netEvidence")?.let { m -> m.keys().asSequence().take(8).mapNotNull { k -> m.optJSONObject(k)?.let { RouteEvidence.parse(it) }?.let { k to it } }.toMap() } ?: emptyMap(),

@@ -32,10 +32,10 @@ object AutoChecks {
     fun accepts(p:Probe)=current.accepts(p,AutoLatencyPolicy.MAX_MS)
     fun key(profile:AutoCheckProfile,maxMs:Int)=profile.key+"@"+maxMs
     fun stamp(p:Probe,profile:AutoCheckProfile,maxMs:Int):String = if(profile.accepts(p,maxMs)) key(profile,maxMs) else ""
-    fun fresh(key:String,profile:AutoCheckProfile,maxMs:Int,at:Long,now:Long):Boolean =
-        key==key(profile,maxMs) && at>0 && now>=at && now-at<=5*60_000L
+    fun fresh(proof:String,profile:AutoCheckProfile,maxMs:Int,at:Long,now:Long):Boolean =
+        proof==key(profile,maxMs) && at>0 && now>=at && now-at<=5*60_000L
     fun accepts(s:com.vlesscardvpn.model.ServerState):Boolean = s.works &&
-        fresh(s.autoChecksKey,current,AutoLatencyPolicy.MAX_MS,s.serviceCheckedAt,System.currentTimeMillis())
+        fresh(s.autoChecksKey,current,AutoLatencyPolicy.MAX_MS,s.autoChecksAt,System.currentTimeMillis())
     fun label(profile:AutoCheckProfile=current):String = (listOf("HTTPS")+listOf(
         "telegram" to "Telegram", "stability" to "устойчивость Telegram", "voice" to "UDP для звонков",
         "discord" to "Discord gateway", "youtube" to "YouTube медиа").filter {it.first in profile.selected}.map {it.second}).joinToString(", ")

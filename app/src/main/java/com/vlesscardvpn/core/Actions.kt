@@ -433,7 +433,7 @@ object Actions {
                 runCatching { Brain.learn(net, s, st.state(s), p.works) }
                 states.put(s.id) {
                     if (!Net.matches(app,observed) || it.maskFor(net)!=st.state(s).maskFor(net) || it.checkedAt>sampleStartedAt) it else
-                    it.copy(autoChecksKey=if(profile!=null) p.autoChecksKey else "", netEvidence = (it.netEvidence + ((net + "|" + st.state(s).maskFor(net)) to it.evidenceFor(net).observe(p.works, p.realMs, System.currentTimeMillis()))).entries.sortedByDescending { e -> e.value.at }.take(8).associate { e -> e.toPair() }, realMs = p.realMs, bigOk = p.bigOk ?: it.bigOk?.takeIf { old -> old }, ytOk = if (profile!=null) p.ytOk else if (youtube) p.ytOk else if (telegram) null else it.ytOk, tgOk = if (profile!=null) p.tgOk else if (telegram) p.tgOk else if (youtube) null else it.tgOk, tgMs = if(profile!=null || telegram) p.tgMs else if(youtube) 0 else it.tgMs, checkedAt = System.currentTimeMillis(), kbps = if (speedSample) p.kbps else it.kbps,
+                    it.copy(autoChecksKey=if(profile!=null) p.autoChecksKey else "",autoChecksAt=if(profile!=null && p.autoChecksKey.isNotEmpty()) System.currentTimeMillis() else 0, netEvidence = (it.netEvidence + ((net + "|" + st.state(s).maskFor(net)) to it.evidenceFor(net).observe(p.works, p.realMs, System.currentTimeMillis()))).entries.sortedByDescending { e -> e.value.at }.take(8).associate { e -> e.toPair() }, realMs = p.realMs, bigOk = p.bigOk ?: it.bigOk?.takeIf { old -> old }, ytOk = if (profile!=null) p.ytOk else if (youtube) p.ytOk else if (telegram) null else it.ytOk, tgOk = if (profile!=null) p.tgOk else if (telegram) p.tgOk else if (youtube) null else it.tgOk, tgMs = if(profile!=null || telegram) p.tgMs else if(youtube) 0 else it.tgMs, checkedAt = System.currentTimeMillis(), kbps = if (speedSample) p.kbps else it.kbps,
                         serviceNetwork = if ((profile!=null || youtube || telegram) && p.works) net else it.serviceNetwork,
                         serviceMask = if ((profile!=null || youtube || telegram) && p.works) st.state(s).maskFor(net) else it.serviceMask,
                         serviceCheckedAt = if ((profile!=null || youtube || telegram) && p.works) System.currentTimeMillis() else it.serviceCheckedAt,
@@ -1740,7 +1740,7 @@ object Actions {
             if(!MaskSamplePolicy.unchanged(current,start.state(server),net)) current else {
                 committed=true
                 current.copy(maskId=mask.id,netMasks=current.netMasks+(net to mask.id),realMs=p.realMs,bigOk=null,
-                    kbps=0,speedCheckedAt=0,speedNetwork="",speedMask="",autoChecksKey=p.autoChecksKey,tgOk=p.tgOk,tgMs=p.tgMs,ytOk=null,
+                    kbps=0,speedCheckedAt=0,speedNetwork="",speedMask="",autoChecksKey=p.autoChecksKey,autoChecksAt=stamp,tgOk=p.tgOk,tgMs=p.tgMs,ytOk=p.ytOk,
                     serviceNetwork=net,serviceMask=mask.id,serviceCheckedAt=stamp,checkedAt=stamp,
                     okCount=current.okCount+1)
             }
