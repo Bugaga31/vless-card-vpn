@@ -21,6 +21,10 @@ object MaskRuntimeEvidence {
         val changed=entries!=state.value.entries
         state.value=state.value.copy(entries=entries,revision=state.value.revision+if(changed) 1 else 0)
     }
+    /** A measurement begun before a restart must not be stamped as belonging to the new core. */
+    @Synchronized fun matches(sampled:Snapshot):Boolean = sampled.config==Config.CORE_STARTED &&
+        state.value.config==Config.CORE_STARTED && state.value.epoch==sampled.epoch &&
+        state.value.revision==sampled.revision && state.value.entries.none {it.engine==Engine.UNAVAILABLE}
     @Synchronized fun tun(active:Boolean) {state.value=state.value.copy(tunActive=active)}
     @Synchronized fun stop(keepTun:Boolean,error:Boolean=false) {
         state.value=state.value.copy(epoch=state.value.epoch+1,config=if(error) Config.ERROR else Config.STOPPED,

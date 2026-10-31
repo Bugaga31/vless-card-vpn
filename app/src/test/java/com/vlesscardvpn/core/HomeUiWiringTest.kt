@@ -23,4 +23,5 @@ class HomeUiWiringTest {
         assertEquals(8,pairs.size)
         for(p in pairs) {val a=lum(p.groupValues[1].toLong(16));val b=lum(p.groupValues[2].toLong(16));assertTrue((maxOf(a,b)+.05)/(minOf(a,b)+.05)>=4.5)}
     }
+    @Test fun publicationUsesStartContextNotCompletionContext() {val s=source("vpn/TunnelService");assertEquals(2,Regex("val sampledUiRuntime=").findAll(s).count());assertEquals(2,Regex("val sampledUiNetwork=").findAll(s).count());assertEquals(2,Regex("sampledUiNetwork,sampledUiRuntime").findAll(s).count());assertTrue(source("core/AutoCheckEvidence").contains("MaskRuntimeEvidence.matches(sampledRuntime)"))}
 }

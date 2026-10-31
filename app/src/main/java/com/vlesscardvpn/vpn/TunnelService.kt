@@ -517,6 +517,8 @@ class TunnelService : VpnService() {
             val sampledTorRoute = usedTorRoute
             val attributeServers = usedChain == null && com.vlesscardvpn.tor.TorRoutePolicy.canAttributeServerEvidence(sampledTorRoute)
             val sampledCore = core
+            val sampledUiRuntime=com.vlesscardvpn.core.MaskRuntimeEvidence.state.value
+            val sampledUiNetwork=Net.observation(this@TunnelService)
             val sampledChainEpoch = chainEpoch.get()
             val profile=if(st.mode==Mode.AUTO) com.vlesscardvpn.core.AutoCheckProfile.of(st.autoChecks) else null
             val configuredLimit=com.vlesscardvpn.core.AutoLatencyPolicy.MAX_MS
@@ -583,7 +585,8 @@ class TunnelService : VpnService() {
                 moduleHealth.ready==null || selectedVerdict==null -> null
                 else -> true
             }
-            if(profile!=null) com.vlesscardvpn.core.AutoCheckEvidence.publish(profile,configuredLimit,measuredBeforeDns,Net.observation(this@TunnelService))
+            if(profile!=null && com.vlesscardvpn.core.NetworkObservation.accepts(sampledUiNetwork,Net.observation(this@TunnelService)))
+                com.vlesscardvpn.core.AutoCheckEvidence.publish(profile,configuredLimit,measuredBeforeDns,sampledUiNetwork,sampledUiRuntime)
             com.vlesscardvpn.core.ConnectionPassport.full(httpsReachable, if(st.proxyOnly || !httpsReachable) null else dnsOk, p.tgOk, p.ytOk)
             com.vlesscardvpn.core.ConnectionPassport.fullModules(moduleHealth)
             if(attributeServers && profile!=null && sampledServers.size==1) {
@@ -1069,6 +1072,8 @@ class TunnelService : VpnService() {
                 if (vpnMode && runCatching { !TProxyService.TProxyIsRunning() }.getOrDefault(false)) { hardRestart("движок VPN остановился"); break }
                 val settings = Store.state.value.settings
                 val sampledCore = core
+                val sampledUiRuntime=com.vlesscardvpn.core.MaskRuntimeEvidence.state.value
+                val sampledUiNetwork=Net.observation(this@TunnelService)
                 val sampledEpoch = chainEpoch.get()
                 val sampledTorRoute = usedTorRoute
                 val network = Net.key(this@TunnelService)
@@ -1102,7 +1107,8 @@ class TunnelService : VpnService() {
                 if(profile!=null && (com.vlesscardvpn.core.AutoChecks.current!=profile || com.vlesscardvpn.core.AutoLatencyPolicy.MAX_MS!=configuredLimit)) continue
                 val ok = live.works
                 if(profile!=null) {
-                    com.vlesscardvpn.core.AutoCheckEvidence.publish(profile,configuredLimit,live,Net.observation(this@TunnelService))
+                    if(com.vlesscardvpn.core.NetworkObservation.accepts(sampledUiNetwork,Net.observation(this@TunnelService)))
+                        com.vlesscardvpn.core.AutoCheckEvidence.publish(profile,configuredLimit,live,sampledUiNetwork,sampledUiRuntime)
                     val selectedLive=if(com.vlesscardvpn.core.SlowRouteConsent.runtime(usedServers)) live.latencyConsented() else live
                     if(profile.verdict(selectedLive,profileLimit)!=true) {
                         val cur=Tunnel.status.value
