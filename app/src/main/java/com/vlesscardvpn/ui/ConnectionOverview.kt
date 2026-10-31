@@ -48,6 +48,8 @@ fun ConnectionOverview(status:Tunnel.Status,hideRoute:Boolean,modeLabel:String,c
     Card(Modifier.fillMaxWidth().padding(top=12.dp),shape=RoundedCornerShape(24.dp),
         colors=CardDefaults.cardColors(containerColor=MaterialTheme.colorScheme.surface)) {
         Column(Modifier.padding(18.dp),verticalArrangement=Arrangement.spacedBy(14.dp)) {
+            // Keep the action above verbose headings on narrow screens with large system fonts.
+            control()
             Text("Режим · $modeLabel",style=MaterialTheme.typography.labelLarge,color=MaterialTheme.colorScheme.onSurfaceVariant)
             Text(ConnectionPresentationPolicy.heading(presentation.state,presentation.checkOk),
                 style=MaterialTheme.typography.headlineSmall,color=MaterialTheme.colorScheme.onSurface)
@@ -55,7 +57,6 @@ fun ConnectionOverview(status:Tunnel.Status,hideRoute:Boolean,modeLabel:String,c
                 Text("Последняя проба HTTPS: $ms мс"+if(current) "" else " · не текущий допуск",
                     style=MaterialTheme.typography.bodyMedium.copy(fontFeatureSettings="tnum"))
             }
-            control()
             FlowRow(horizontalArrangement=Arrangement.spacedBy(8.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
                 val verdict=when {evidence==null->HomePresentation.Verdict.NO_DATA
                     !current->HomePresentation.Verdict.STALE
