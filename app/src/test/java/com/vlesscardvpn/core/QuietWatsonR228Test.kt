@@ -32,4 +32,10 @@ class QuietWatsonR228Test {
         assertTrue(guard<s.indexOf("ConnectionPassport.full(httpsReachable"))
         assertTrue(guard<s.indexOf("LiveRouteEvidence.commit(old,p,profile"))
     }
+    @Test fun confirmedFailureStillUsesFastRetryOutsideIdleCadence() {
+        val f=java.io.File("src/main/java/com/vlesscardvpn/vpn/TunnelService.kt")
+        val s=(if(f.exists())f else java.io.File("app/"+f.path)).readText()
+        assertTrue(s.contains("if(urgent) 3_000L"))
+        assertTrue(s.contains("miss >= 2"))
+    }
 }

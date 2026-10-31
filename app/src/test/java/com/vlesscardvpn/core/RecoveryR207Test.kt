@@ -30,8 +30,8 @@ class RecoveryR207Test {
  @Test fun ecoCannotDelayAutoWatchdog(){val p=PowerPolicy.evaluate(PowerPolicy.Input(0,battery=80),PowerPolicy.Options(profile="eco"));assertEquals(60000L,VpnRecoveryPolicy.watchPeriod(p.healthyMs,true));assertFalse(p.allowed);assertTrue(p.allowReserve)}
  @Test fun saverCannotDelayAutoWatchdog(){val p=PowerPolicy.evaluate(PowerPolicy.Input(0,battery=80,saver=true),PowerPolicy.Options());assertEquals(45000L,VpnRecoveryPolicy.watchPeriod(p.healthyMs,true))}
  @Test fun nonAutoCadenceUnchanged(){assertEquals(90000L,VpnRecoveryPolicy.watchPeriod(90000,false))}
- @Test fun fasterFaultChecksRetained(){assertEquals(3000L,VpnRecoveryPolicy.watchPeriod(3000,true))}
- @Test fun invalidWatchPeriodBounded(){assertEquals(1000L,VpnRecoveryPolicy.watchPeriod(-1,true))}
+ @Test fun idleCadenceCannotBeForcedBackToThreeSeconds(){assertEquals(20000L,VpnRecoveryPolicy.watchPeriod(3000,true))}
+ @Test fun invalidWatchPeriodBounded(){assertEquals(20000L,VpnRecoveryPolicy.watchPeriod(-1,true))}
  @Test fun retryOneSecondIsNotThirtySeconds(){assertEquals(1000L,VpnRecoveryPolicy.RETRY_MS)}
  @Test fun blockedOptionalScoutRechecksInFiveSeconds(){assertEquals(5000L,VpnRecoveryPolicy.RESERVE_RETRY_MS)}
  @Test fun activeCallProtectsHealthyNotBrokenRoute(){assertTrue(VoiceCallPolicy.deferRepair(true,4));assertFalse(VoiceCallPolicy.deferRepair(true,5))}
