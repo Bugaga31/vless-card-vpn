@@ -31,4 +31,5 @@ class TpwsProfileR226Test {
     @Test fun exactEngineResolved() { val id=TpwsProfile.encode("--split-pos=1");val strategy=DpiStrategies.byId(id,Settings())!!;assertEquals(DpiEngine.TPWS,strategy.engine);assertEquals(id,strategy.id);assertTrue(strategy.argv(19090,"ya.ru").contains("--bind-addr=127.0.0.1"));assertFalse(strategy.argv(19090,"ya.ru").any { it.contains("ya.ru") }) }
     @Test fun builtinFirstBlockProfiles() { val st=DpiStrategies.BUILT_IN.filter { it.id.startsWith("TPWS#HELLO_") };assertEquals(3,st.size);st.forEach { assertTrue(valid(it.args.joinToString(" ")));assertTrue(it.args.contains("--tamper-cutoff=n2")) } }
     @Test fun titleDoesNotAffectIdentity() { val id=TpwsProfile.encode("--tlsrec=host");val a=MyMasks.fromJson(JSONObject().put("dpi",id).put("t","A"));val b=MyMasks.fromJson(JSONObject().put("dpi",id).put("t","B"));assertEquals(a.id,b.id) }
+    @Test fun originalDefaultIsPreserved() { assertEquals("BYEDPI#OOB_THEN_DISORDER",DpiStrategies.BUILT_IN.first().id) }
 }
