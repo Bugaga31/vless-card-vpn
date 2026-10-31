@@ -4,7 +4,17 @@ package com.vlesscardvpn.core
 object ServiceProbeStatus {
     fun label(required:Boolean,value:Boolean?,note:String?):String = when {
         !required -> "не выбрано"
+        value==true && note=="VOICE_AVAILABLE_LOSS" -> "✓ UDP доступен; часть ответов потеряна — качество звонка не подтверждено"
         value==true -> "✓"
+        note=="VOICE_INCOMPLETE" -> "UDP-проба не завершена; маршрут не оценён"
+        note=="VOICE_NO_RESPONSE" -> "два STUN-узла не подтвердили UDP; это не проверка реального звонка"
+        note=="VOICE_LATENCY" -> "UDP доступен, но RTT выше выбранного предела"
+        note=="IG_LOGIN" -> "Instagram требует вход/проверку; веб-доступ не подтверждён"
+        note=="IG_REDIRECT" -> "Instagram перенаправил запрос; результат неизвестен"
+        note=="IG_HTTP" -> "Instagram не выдал публичную страницу; маршрут не оценён"
+        note=="IG_FORMAT" -> "ожидаемая страница Instagram не подтверждена"
+        note=="YT_RANGE_UNSUPPORTED" -> "YouTube не подтвердил следующие участки видео; устойчивость загрузки неизвестна"
+        note=="YT_MEDIA_TRUNCATED" -> "загрузка участка видео оборвалась раньше указанного размера"
         note=="VOICE_UNKNOWN" -> "серия UDP не завершена — качество не подтверждено"
         note=="VOICE_NO_UDP" -> "STUN-узел не ответил через этот маршрут; доступность звонков не подтверждена"
         note=="VOICE_LOSS" -> "в короткой UDP-серии более 5% потерянных ответов"

@@ -16,11 +16,11 @@ import java.nio.ByteOrder
 class ServiceMediaR217Test {
     private val url = "https://rr1---sn-test.googlevideo.com/videoplayback?expire=123&sig=example"
     private fun html(extra: String = "", mime: String = "video/mp4", source: String = url) = """<script>var ytInitialPlayerResponse = {"playabilityStatus":{"status":"OK"},"streamingData":{"formats":[{"mimeType":"$mime","url":"$source"}]},"extra":"$extra"};</script>"""
-    private class FakeCall(private val req: Request, private val code: Int, private val mime: String, private val body: ByteArray) : Call {
+    private class FakeCall(private val req: Request, private val code: Int, private val mime: String, private val body: ByteArray, private val range: String? = null) : Call {
         private var cancelled = false
         override fun request() = req
         override fun execute(): Response = Response.Builder().request(req).protocol(Protocol.HTTP_1_1).code(code).message("test")
-            .header("Content-Type", mime).apply { if(code==206) header("Content-Range","bytes 0-${body.size-1}/${body.size}") }.body(body.toResponseBody(mime.toMediaType())).build()
+            .header("Content-Type", mime).apply { if(code==206) header("Content-Range",range ?: "bytes 0-${body.size-1}/${body.size}") }.body(body.toResponseBody(mime.toMediaType())).build()
         override fun enqueue(responseCallback: Callback) { throw UnsupportedOperationException() }
         override fun cancel() { cancelled = true }
         override fun isExecuted() = false
@@ -58,10 +58,13 @@ class ServiceMediaR217Test {
             when(req.url.toString()) {
                 YouTubeMediaProbe.WATCH->FakeCall(req,200,"text/html",page.toByteArray())
                 url->FakeCall(req,403,"text/html",byteArrayOf())
-                else->FakeCall(req,206,"video/mp4",ByteArray(YouTubeMediaProbe.SAMPLE_BYTES).apply{"ftyp".toByteArray().copyInto(this,4)})
+                else->{
+                    val pair=req.header("Range")!!.substringAfter("bytes=").split('-').map {it.toInt()}
+                    FakeCall(req,206,"video/mp4",ByteArray(pair[1]-pair[0]+1).apply {if(pair[0]==0) "ftyp".toByteArray().copyInto(this,4)},"bytes ${pair[0]}-${pair[1]}/1000000")
+                }
             }
         }
-        assertEquals(true,result.ok);assertEquals(listOf(YouTubeMediaProbe.WATCH,url,second),requests)
+        assertEquals(true,result.ok);assertEquals(listOf(YouTubeMediaProbe.WATCH,url,second,second,second),requests)
     }
     @Test fun consentAndAudioDoNotBecomeSuccess() {
         assertNull(YouTubeMediaProbe.check{FakeCall(it,200,"text/html","consent".toByteArray())}.ok)

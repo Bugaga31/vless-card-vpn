@@ -21,7 +21,7 @@ import java.net.ServerSocket
 import java.net.Socket
 import java.util.concurrent.TimeUnit
 
-data class Probe(val realMs: Int, val bigOk: Boolean?, val ytOk: Boolean?, val error: String = "", val tgOk: Boolean? = null, val kbps: Int = 0, val ytKbps: Int = 0, val bodyBytes: Long = 0, val bodyMs: Long = 0, val callsOk: Boolean? = null, val tgMs: Int = 0, val discordOk:Boolean?=null, val stableOk:Boolean?=null, val autoChecksKey:String="",val latencyOnlyOk:Boolean=false,val serviceNotes:Map<String,String> = emptyMap()) {
+data class Probe(val realMs: Int, val bigOk: Boolean?, val ytOk: Boolean?, val error: String = "", val tgOk: Boolean? = null, val kbps: Int = 0, val ytKbps: Int = 0, val bodyBytes: Long = 0, val bodyMs: Long = 0, val callsOk: Boolean? = null, val tgMs: Int = 0, val discordOk:Boolean?=null, val stableOk:Boolean?=null, val autoChecksKey:String="",val latencyOnlyOk:Boolean=false,val serviceNotes:Map<String,String> = emptyMap(),val instagramOk:Boolean?=null) {
     val works: Boolean get() = realMs > 0 && bigOk != false
     fun latencyConsented()=if(latencyOnlyOk) copy(stableOk=true,callsOk=true) else this
 }
@@ -192,18 +192,22 @@ object Tester {
             val voiceNote=java.util.concurrent.atomic.AtomicReference<String?>(null)
             val callF = if (autoChecks?.voice ?: calls) servicePool.submit<Boolean?> {
                 if(autoChecks?.voice==true) {
-                    val t=UdpCallProbe.train(port,user,pass,minOf(4000L,remaining()).toInt(),CallTransportPolicy.PACKETS,onCancel)
-                    val summary=CallTransportPolicy.assess(t.sent,t.rttMs,t.complete,AutoLatencyPolicy.MAX_MS)
-                    voiceNote.set("VOICE_"+summary.grade.name)
-                    relaxedCalls.set(if(!t.complete || t.sent!=CallTransportPolicy.PACKETS) null else
-                        summary.received==CallTransportPolicy.PACKETS && summary.lossPercent==0 && (summary.rttSpreadMs ?: Int.MAX_VALUE)<=40)
-                    summary.grade.let {grade->
-                        if(grade==CallTransportPolicy.Grade.UNKNOWN) null else grade==CallTransportPolicy.Grade.PASS
+                    val voiceDeadline=System.nanoTime()+TimeUnit.MILLISECONDS.toNanos(minOf(4000L,remaining()))
+                    val summary=VoiceAvailabilityProbe.check(AutoLatencyPolicy.MAX_MS,{
+                        minOf(remaining(),TimeUnit.NANOSECONDS.toMillis(voiceDeadline-System.nanoTime()).coerceAtLeast(0))
+                    }) {target,allowance->
+                        UdpCallProbe.train(port,user,pass,allowance,VoiceAvailabilityProbe.PACKETS,onCancel,target.host,target.port)
                     }
+                    voiceNote.set(summary.reason)
+                    relaxedCalls.set(summary.ignoringLatency)
+                    summary.ok
                 } else UdpCallProbe.probe(port, user, pass, minOf(1800L, remaining()).toInt(), onCancel)
             }.also { tasks += it } else null
             val discordF = if(autoChecks?.discord==true) servicePool.submit<DiscordApiProbe.Result> {
                 DiscordRouteProbe.check(mediaClient, { boundedCall(mediaClient,it) }, ::remaining, onCancel)
+            }.also {tasks+=it} else null
+            val instagramF=if(autoChecks?.instagram==true) servicePool.submit<InstagramWebProbe.Result> {
+                InstagramWebProbe.check {boundedCall(mediaClient,it)}
             }.also {tasks+=it} else null
             // Start the complete series before waiting for HTTPS. Waiting for the first
             // Telegram future consumes the same deadline, never a fresh per-service budget.
@@ -234,15 +238,17 @@ object Tester {
             if(ytF!=null && ytResult.ok==null && ytResult.reason.isNotBlank() && notes["youtube"]=="INCONCLUSIVE")
                 notes["youtube"]=ytResult.reason
             val callsOk = if (callF != null) await(callF, remaining(), null,"voice") {it!=null} else null
-            voiceNote.get()?.takeIf {callsOk!=true && notes["voice"]==null || callsOk!=true && notes["voice"]=="INCONCLUSIVE"}?.let {notes["voice"]=it}
+            voiceNote.get()?.takeIf {notes["voice"]==null || notes["voice"]=="INCONCLUSIVE"}?.let {notes["voice"]=it}
             val discordResult=await(discordF,remaining(),DiscordApiProbe.Result(null),"discord") {it.ok!=null}
             if(discordF!=null && discordResult.ok==null && discordResult.reason.isNotBlank() && notes["discord"]=="INCONCLUSIVE")
                 notes["discord"]=discordResult.reason
+            val instagramResult=await(instagramF,remaining(),InstagramWebProbe.Result(null),"instagram") {it.ok!=null}
+            if(instagramF!=null && instagramResult.ok==null && instagramResult.reason.isNotBlank() && notes["instagram"]=="INCONCLUSIVE") notes["instagram"]=instagramResult.reason
             val discordOk=discordResult.ok
             val stabilityResult=await(stabilityF,remaining(),StabilitySeriesProbe.Result(null,null,"INCONCLUSIVE"),"stability") {it.stable!=null}
             if(stabilityF!=null && stabilityResult.reason.isNotBlank() && notes["stability"] in listOf(null,"INCONCLUSIVE")) notes["stability"]=stabilityResult.reason
             val stableOk=stabilityResult.stable
-            val result=Probe(best.toInt().coerceAtLeast(1), if (bigF != null) bigResult.ok else null, ytResult.ok, tgOk = tgResult.ok, tgMs = if(tgResult.ok==true) tgResult.ms else 0, kbps = bigResult.kbps, ytKbps = ytResult.kbps, bodyBytes = bigResult.bytes, bodyMs = bigResult.ms, callsOk = callsOk, discordOk=discordOk,stableOk=stableOk,serviceNotes=notes.toMap())
+            val result=Probe(best.toInt().coerceAtLeast(1), if (bigF != null) bigResult.ok else null, ytResult.ok, tgOk = tgResult.ok, tgMs = if(tgResult.ok==true) tgResult.ms else 0, kbps = bigResult.kbps, ytKbps = ytResult.kbps, bodyBytes = bigResult.bytes, bodyMs = bigResult.ms, callsOk = callsOk, discordOk=discordOk,stableOk=stableOk,serviceNotes=notes.toMap(),instagramOk=instagramResult.ok)
             val measured=if(autoChecks!=null) LatencyOnlyProbe.proof(result,autoChecks,stabilityResult.ignoringLatency,relaxedCalls.get()) else result
             return if(autoChecks!=null) measured.copy(autoChecksKey=AutoChecks.stamp(measured,autoChecks,AutoLatencyPolicy.MAX_MS)) else measured
         } finally {

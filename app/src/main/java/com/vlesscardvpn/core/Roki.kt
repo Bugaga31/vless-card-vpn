@@ -43,5 +43,5 @@ class RokiRanker {
 object Roki {
     val session=RokiRanker()
     fun context(network:String,profile:AutoCheckProfile,limit:Int,testUrl:String)=
-        network+"|"+profile.key+"|"+limit+"|"+testUrl
+        network+"|"+AutoChecks.key(profile,limit)+"|"+limit+"|"+testUrl
 }
