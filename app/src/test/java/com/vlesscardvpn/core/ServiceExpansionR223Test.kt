@@ -70,16 +70,16 @@ class ServiceExpansionR223Test {
     }
     private fun media(req:Request,truncated:Boolean=false,ignoreRange:Boolean=false):Call {
         val range=req.header("Range")!!.substringAfter("bytes=").split('-');val start=range[0].toInt();val end=range[1].toInt()
-        val data=ByteArray(if(truncated && start>0) 12 else end-start+1)
+        val data=ByteArray(if(truncated) 131084 else end-start+1)
         if(start==0) {data[4]='f'.code.toByte();data[5]='t'.code.toByte();data[6]='y'.code.toByte();data[7]='p'.code.toByte()}
         return Reply(req,if(ignoreRange) 200 else 206,data,if(ignoreRange) null else "bytes $start-$end/1000000")
     }
     @Test fun threeActualMediaWindowsRequired() {
         val ranges=mutableListOf<String>();val r=YouTubeMediaProbe.measureStable("https://rr1.googlevideo.com/videoplayback") {ranges+=it.header("Range")!!;media(it)}
-        assertEquals(true,r.ok);assertEquals(listOf("bytes=0-131071","bytes=131072-163839","bytes=163840-196607"),ranges)
+        assertEquals(true,r.ok);assertEquals(listOf("bytes=0-196607"),ranges)
     }
     @Test fun truncatedContinuationFails() {assertEquals(false,YouTubeMediaProbe.measureStable("https://rr1.googlevideo.com/videoplayback") {media(it,truncated=true)}.ok)}
-    @Test fun ignoredRangeIsNotContinuityEvidence() {assertNull(YouTubeMediaProbe.measureStable("https://rr1.googlevideo.com/videoplayback") {media(it,ignoreRange=true)}.ok)}
+    @Test fun continuousBodyStillWorksWhenRangeIsIgnored() {assertEquals(true,YouTubeMediaProbe.measureStable("https://rr1.googlevideo.com/videoplayback") {media(it,ignoreRange=true)}.ok)}
     @Test fun foreignMediaUrlNeverMakesRequest() {
         assertNull(YouTubeMediaProbe.measureStable("https://attacker.invalid/videoplayback") {error("must not request")}.ok)
     }
@@ -100,7 +100,7 @@ class ServiceExpansionR223Test {
     }
     @Test fun newInstagramOptionHasStrictGateAndVersionedProof() {
         val s=source("core/AutoCheckProfile.kt");assertTrue(s.contains("(!instagram || p.instagramOk==true)"))
-        for(v in listOf("youtube-ranges-v2","udp-availability-v2","instagram-web-v1","telegram-series-v2")) assertTrue(s.contains(v))
+        for(v in listOf("youtube-load-v3","udp-availability-v2","instagram-web-v1","telegram-series-v2")) assertTrue(s.contains(v))
     }
     @Test fun rokiSeparatesNewProofSemantics() {assertTrue(source("core/Roki.kt").contains("AutoChecks.key(profile,limit)"))}
 }

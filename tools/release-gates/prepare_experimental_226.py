@@ -40,8 +40,8 @@ def prepare(root, sha, run_id, docs):
     require(any(n.endswith("SeriesDiagnosticsR222Test") for n in suites),"R222 series/diagnostics regressions absent")
     require(any(n.endswith("ServiceExpansionR223Test") for n in suites) and any(n.endswith("AutoProfileR223Test") for n in suites),"R223 service regressions absent")
     require(any(n.endswith("AutoRecoveryR224Test") for n in suites),"R224 background recovery regressions absent")
-    require(totals["tests"]>=711 and not any(totals[k] for k in ("failures","errors","skipped")),"Targeted JVM gate failed")
-    for name in ("HomeDataMapperTest","HomeRuntimeTest","HomeUiWiringTest","TpwsProfileR226Test"):
+    require(totals["tests"]>=731 and not any(totals[k] for k in ("failures","errors","skipped")),"Targeted JVM gate failed")
+    for name in ("HomeDataMapperTest","HomeRuntimeTest","HomeUiWiringTest","TpwsProfileR226Test","YouTubeLoadingR226Test"):
         require(any(n.endswith(name) for n in suites),"Home regression suite absent: "+name)
     ui=json.loads(Path("ui-smoke-226/summary.json").read_text())
     require(ui.get("status")=="PASS" and ui.get("debug_theme_font_cases")==6 and ui.get("signed_release_fresh_launch")==True,"UI emulator smoke failed")

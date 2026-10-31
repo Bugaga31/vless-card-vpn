@@ -235,7 +235,7 @@ object Tester {
             val tgResult = await(tgF, remaining(), TelegramProbe.Result(null,0),"telegram") {it.ok!=null}
             val bigResult = await(bigF, remaining(), BodyResult(),"payload")
             val ytResult = await(ytF, remaining(), YouTubeMediaProbe.Result(null),"youtube") {it.ok!=null}
-            if(ytF!=null && ytResult.ok==null && ytResult.reason.isNotBlank() && notes["youtube"]=="INCONCLUSIVE")
+            if(ytF!=null && ytResult.ok!=true && ytResult.reason.isNotBlank() && notes["youtube"] in listOf(null,"INCONCLUSIVE"))
                 notes["youtube"]=ytResult.reason
             val callsOk = if (callF != null) await(callF, remaining(), null,"voice") {it!=null} else null
             voiceNote.get()?.takeIf {notes["voice"]==null || notes["voice"]=="INCONCLUSIVE"}?.let {notes["voice"]=it}
