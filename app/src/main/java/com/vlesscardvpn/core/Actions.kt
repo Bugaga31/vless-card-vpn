@@ -391,7 +391,7 @@ object Actions {
 
     private suspend fun realTest(servers: List<Server>, title: String, big: Boolean = true, attempts: Int = 2, parallel: Int = 32, youtube: Boolean = true,
                                  telegram: Boolean = youtube, calls: Boolean = false, stopAfter: Int = Int.MAX_VALUE, budgetMs: Long = 0, onFirst: ((Server) -> Unit)? = null, onSuccess: ((Server) -> Unit)? = null,
-                                 batch: Int = 64, foreground: Boolean = false, onAttempt: ((Server)->Unit)? = null, onPrepared: ((Server)->Unit)? = null, onObservation: ((Probe)->Unit)? = null, onCandidateResult: ((Server,Probe,Boolean)->Unit)? = null): Int {
+                                 batch: Int = 64, foreground: Boolean = false, onAttempt: ((Server)->Unit)? = null, onPrepared: ((Server)->Unit)? = null, onObservation: ((Probe)->Unit)? = null, onCandidateResult: ((Server,Probe,Boolean,String)->Unit)? = null): Int {
         if (servers.isEmpty()) return 0
         val plan = PhonePower.refresh(app)
         val selectedParallel=ProbeConcurrencyPolicy.normalize(Store.state.value.settings.probeParallel)
@@ -437,7 +437,7 @@ object Actions {
                     (profile?.accepts(p,profileLimit) ?: (!telegram || AutoChecks.accepts(p))) && !cooling)
                 if(profile!=null && !routeReady && p.realMs>0)
                     progress.value=progress.value.copy(message=AutoAdmissionReason.describe(p,profile,profileLimit,cooling))
-                onCandidateResult?.invoke(s,p,routeReady)
+                onCandidateResult?.invoke(s,p,routeReady,if(profile!=null) AutoAdmissionReason.describe(p,profile,profileLimit,cooling) else "")
                 val firstSuccess = routeReady && ok.incrementAndGet() == 1
                 if (routeReady) onSuccess?.invoke(s)
                 if (profile!=null && routeReady) warmPassed.add(s.id)
@@ -1252,9 +1252,9 @@ object Actions {
                     if(candidates.isEmpty()) error("В «Рабочих» нет подходящих для Авто серверов")
                     // Exactly the already-found shortlist; the selected gates remain mandatory.
                     realTest(candidates,"Авто: проверяю найденные",big=true,youtube=profile.youtube,
-                        telegram=profile.telegram,calls=profile.voice,foreground=true,attempts=1,stopAfter=1,onPrepared={found.prepared(it)},onSuccess={found.verified(it)},onCandidateResult={server,probe,ready->
+                        telegram=profile.telegram,calls=profile.voice,foreground=true,attempts=1,stopAfter=1,onPrepared={found.prepared(it)},onSuccess={found.verified(it)},onCandidateResult={server,probe,ready,reason->
                             if(valid()) FoundAttemptEvidence.record(diagnosticRun,candidates.indexOfFirst {it.id==server.id}+1,
-                                HomeDataMapper.services(profile,probe,true),ready)
+                                HomeDataMapper.services(profile,probe,true),ready,reason)
                         })
                     kotlinx.coroutines.currentCoroutineContext().ensureActive()
                 }) {

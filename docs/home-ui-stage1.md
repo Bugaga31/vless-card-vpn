@@ -6,7 +6,7 @@ Base: 1.2.113 / versionCode 224 / 9c4959d6efde3ed14e13ef0283dc56815be31621. No v
 - One primary connection card; connected Disconnect action wins over background revalidation.
 - Independent test SOCKS, actual TUN descriptor, requested/configured mask, process liveness and explicit fallback display. Core accepting configuration does not prove route traversal.
 - All seven service badges use real Probe fields; UNKNOWN, absent, stale and disabled results remain distinct. Current badges require exact profile, latency limit, observed network path, runtime epoch/revision and <=90 seconds monotonic age.
-- Found routes shows historical count separately from current AutoEligibility.servicePool count. Per-attempt ordinal service observations are bounded, allowlisted and explicitly historical, not permanent admission. No raw exceptions, URLs, credentials or endpoint names are copied to new diagnostic records.
+- Found routes shows historical count separately from current AutoEligibility.servicePool count. Per-attempt ordinal service observations retain the existing AutoAdmissionReason.describe explanation (including measured latency and cooling), are bounded, allowlisted and explicitly historical, not permanent admission. No raw exceptions, URLs, credentials or endpoint names are copied to new diagnostic records.
 - Status palette follows app surface luminance (including AMOLED), with symbols/text as well as color, opaque status backgrounds, minimum 48dp controls, FlowRow wrapping and tabular numbers.
 
 ## Invariants

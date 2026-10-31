@@ -76,6 +76,7 @@ fun FoundRoutesCard(onConnectFound:()->Unit) {
                 }
                 if(details) attempt.candidates.forEach {candidate->
                     Text("Кандидат ${candidate.ordinal}: "+if(candidate.ready) "прошёл проверку этой попытки" else "нет строгого допуска этой попытки",style=MaterialTheme.typography.titleSmall)
+                    if(candidate.reason.isNotBlank()) Text(candidate.reason,style=MaterialTheme.typography.bodyMedium)
                     HomeServiceChips(candidate.services)
                 }
                 Text("Это история последней попытки, не текущий допуск. Непроверенные кандидаты не считаются нерабочими.",style=MaterialTheme.typography.bodySmall)

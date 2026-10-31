@@ -1,5 +1,6 @@
 package com.vlesscardvpn.core
 
+import com.vlesscardvpn.xray.Masks
 import android.content.Context
 import android.os.Build
 import com.vlesscardvpn.model.Settings
