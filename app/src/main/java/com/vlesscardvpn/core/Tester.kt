@@ -183,22 +183,8 @@ object Tester {
                     TimeUnit.NANOSECONDS.toMillis((budgetDeadline-System.nanoTime()).coerceAtLeast(1)).coerceAtLeast(1)
                 TelegramProbe.measure(port,minOf(maxOf(3000L,AutoLatencyPolicy.MAX_MS.toLong()+100L),left),onCancel)
             }.also {tasks+=it} else null
-            var best = Long.MAX_VALUE; var err = ""
-            repeat(attempts.coerceIn(1, 3)) {
-                if (Thread.currentThread().isInterrupted) throw java.io.InterruptedIOException("Проверка отменена")
-                val t0 = System.nanoTime()
-                runCatching {
-                    boundedCall(client,Request.Builder().url(testUrl).header("User-Agent", UA).build(),connectivityBudgetMs).execute().use { r ->
-                        check(ProbeResponsePolicy.connectivity(r.code, testUrl)) { "Unexpected connectivity HTTP ${r.code}" }
-                        r.body?.byteStream()?.use { it.read(ByteArray(4096)) }
-                    }
-                    best = minOf(best, (System.nanoTime() - t0) / 1_000_000)
-                }.onFailure { err = Errors.human(it) }
-            }
-            if (best == Long.MAX_VALUE) return Probe(0, null, null, err)
             val deadline = if (budgetDeadline == Long.MAX_VALUE) System.nanoTime() + TimeUnit.SECONDS.toNanos(40) else budgetDeadline
             fun remaining() = TimeUnit.NANOSECONDS.toMillis((deadline - System.nanoTime()).coerceAtLeast(1)).coerceAtLeast(1)
-            val bigF = if (big) servicePool.submit<BodyResult> { bigDownload(client,budgetDeadline,onCall) }.also { tasks += it } else null
             val ytF = if (autoChecks?.youtube ?: youtube) servicePool.submit<YouTubeMediaProbe.Result> {
                 YouTubeMediaProbe.check { boundedCall(mediaClient, it) }
             }.also { tasks += it } else null
@@ -216,8 +202,22 @@ object Tester {
                 } else UdpCallProbe.probe(port, user, pass, minOf(1800L, remaining()).toInt(), onCancel)
             }.also { tasks += it } else null
             val discordF = if(autoChecks?.discord==true) servicePool.submit<DiscordApiProbe.Result> {
-                DiscordApiProbe.check { boundedCall(client,it) }
+                DiscordRouteProbe.check(mediaClient, { boundedCall(mediaClient,it) }, ::remaining, onCancel)
             }.also {tasks+=it} else null
+            var best = Long.MAX_VALUE; var err = ""
+            repeat(attempts.coerceIn(1, 3)) {
+                if (Thread.currentThread().isInterrupted) throw java.io.InterruptedIOException("Проверка отменена")
+                val t0 = System.nanoTime()
+                runCatching {
+                    boundedCall(client,Request.Builder().url(testUrl).header("User-Agent", UA).build(),connectivityBudgetMs).execute().use { r ->
+                        check(ProbeResponsePolicy.connectivity(r.code, testUrl)) { "Unexpected connectivity HTTP ${r.code}" }
+                        r.body?.byteStream()?.use { it.read(ByteArray(4096)) }
+                    }
+                    best = minOf(best, (System.nanoTime() - t0) / 1_000_000)
+                }.onFailure { err = Errors.human(it) }
+            }
+            if (best == Long.MAX_VALUE) return Probe(0, null, null, err)
+            val bigF = if (big) servicePool.submit<BodyResult> { bigDownload(client,budgetDeadline,onCall) }.also { tasks += it } else null
             val tgResult = await(tgF, remaining(), TelegramProbe.Result(null,0),"telegram") {it.ok!=null}
             val stabilityF = if(autoChecks?.stability==true) tgExecutor.submit<Boolean?> {
                 val samples=mutableListOf(LinkStabilityPolicy.Sample(tgResult.ok,tgResult.ms))
@@ -246,7 +246,7 @@ object Tester {
             ProbeTasks.cancel(tasks)
             isolated?.close()
             // Private dispatcher/pool: cancellation cannot cancel another probe or the live VPN's HTTP calls.
-            client.dispatcher.cancelAll(); client.connectionPool.evictAll()
+            client.dispatcher.cancelAll(); client.connectionPool.evictAll(); client.dispatcher.executorService.shutdown()
         }
     }
 
@@ -530,7 +530,7 @@ object Tester {
         val client = mediaClient(port)
         val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(6)
         return try { YouTubeMediaProbe.check { mediaCall(client, it, deadline) } }
-        finally { client.dispatcher.cancelAll(); client.connectionPool.evictAll() }
+        finally { client.dispatcher.cancelAll(); client.connectionPool.evictAll(); client.dispatcher.executorService.shutdown() }
     }
 
     /** Compare the same signed video and sample size, never two HTML pages. No stored media URLs. */

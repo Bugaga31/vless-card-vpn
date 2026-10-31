@@ -30,7 +30,7 @@ data class AutoCheckProfile(val selected:Set<String>) {
 object AutoChecks {
     val current get()=AutoCheckProfile.of(Store.state.value.settings.autoChecks)
     fun accepts(p:Probe)=current.accepts(p,AutoLatencyPolicy.MAX_MS)
-    fun key(profile:AutoCheckProfile,maxMs:Int)=profile.key+"@"+maxMs
+    fun key(profile:AutoCheckProfile,maxMs:Int)=profile.key+"@"+maxMs+if(profile.discord) "|discord-hello-v1" else ""
     fun stamp(p:Probe,profile:AutoCheckProfile,maxMs:Int):String = when {
         profile.accepts(p,maxMs)->key(profile,maxMs)
         (profile.accepts(p,Int.MAX_VALUE) || p.latencyOnlyOk && profile.accepts(p.latencyConsented(),Int.MAX_VALUE))->key(profile,Int.MAX_VALUE)

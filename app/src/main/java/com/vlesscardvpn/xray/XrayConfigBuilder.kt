@@ -420,7 +420,7 @@ object XrayConfigBuilder {
         val ins = JSONArray(); val outs = JSONArray(); val rules = JSONArray()
         variants.forEachIndexed { i, (s, m) ->
             ins.put(JSONObject().put("tag", "t$i").put("listen", "127.0.0.1").put("port", ports[i]).put("protocol", "socks")
-                .put("settings", JSONObject().put("auth", "noauth").put("udp", false)))
+                .put("settings", JSONObject().put("auth", "noauth").put("udp", true).put("ip", "127.0.0.1")))
             outs.put(outbound(s, "v$i", resolveMask(m, byeDpiPort, dpiPorts)))
             rules.put(JSONObject().put("inboundTag", arr("t$i")).put("outboundTag", "v$i"))
         }
