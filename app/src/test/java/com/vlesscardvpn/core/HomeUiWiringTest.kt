@@ -25,5 +25,5 @@ class HomeUiWiringTest {
     }
     @Test fun publicationUsesStartContextNotCompletionContext() {val s=source("vpn/TunnelService");assertEquals(2,Regex("val sampledUiRuntime=").findAll(s).count());assertEquals(2,Regex("val sampledUiNetwork=").findAll(s).count());assertEquals(2,Regex("sampledUiNetwork,sampledUiRuntime").findAll(s).count());assertTrue(source("core/AutoCheckEvidence").contains("MaskRuntimeEvidence.matches(sampledRuntime)"))}
     @Test fun requestedMaskIsCapturedBeforeSafeFallback() {val s=source("vpn/TunnelService");assertTrue(s.contains("requestedMasks[srv.id]=requested"));assertTrue(s.indexOf("requestedMasks[srv.id]=requested")<s.indexOf("srv to if (safeMasks) null else requested"));assertFalse(s.contains("if(safeMasks) Masks.byId(st.state(server).maskFor(network))"))}
-    @Test fun primaryControlPrecedesVerboseHeroHeading() {val s=source("ui/ConnectionOverview");assertTrue(s.indexOf("control()")<s.indexOf("Text(ConnectionPresentationPolicy.heading"));assertTrue(s.indexOf("control()")<s.indexOf("Text("Режим · ${'$'}modeLabel""))}
+    @Test fun primaryControlPrecedesVerboseHeroHeading() {val s=source("ui/ConnectionOverview");assertTrue(s.indexOf("control()")<s.indexOf("Text(ConnectionPresentationPolicy.heading"));assertTrue(s.indexOf("control()")<s.indexOf("Режим ·"))}
 }
