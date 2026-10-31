@@ -23,7 +23,7 @@ class AutomaticWorkR226Test {
     @Test fun chargeChangesInvalidateLearningWindow() {assertFalse(PhoneForecastPolicy.cleanWindow(false,true,false));assertFalse(PhoneForecastPolicy.cleanWindow(true,false,false))}
     @Test fun explicitSearchInvalidatesLearningWindow() {assertFalse(PhoneForecastPolicy.cleanWindow(true,true,true));assertTrue(PhoneForecastPolicy.cleanWindow(false,false,false))}
     private val server=Server("fixture","vless","node.example.test",443,"fixture",security="tls",sni="peer.example.test")
-    @Test fun boundedServerRotationAdvances() {val all=(0..5).map {server.copy(id="s$it")};assertEquals(listOf("s0","s1"),AutoMaskSearchPolicy.candidates(all,0).map {it.id});assertEquals(listOf("s2","s3"),AutoMaskSearchPolicy.candidates(all,1).map {it.id});assertEquals(2,AutoMaskSearchPolicy.candidates(all,Int.MAX_VALUE).size)}
+    @Test fun boundedServerRotationAdvances() {val all=(0..5).map {server.copy(port=443+it)};assertEquals(all.take(2).map {it.id},AutoMaskSearchPolicy.candidates(all,0).map {it.id});assertEquals(all.drop(2).take(2).map {it.id},AutoMaskSearchPolicy.candidates(all,1).map {it.id});assertEquals(2,AutoMaskSearchPolicy.candidates(all,Int.MAX_VALUE).size)}
     @Test fun emptyPoolIsSafe() {assertTrue(AutoMaskSearchPolicy.candidates(emptyList(),0).isEmpty())}
     @Test fun unsupportedServerGetsNoTlsTrials() {assertTrue(AutoMaskSearchPolicy.pool(server.copy(protocol="wireguard"),"",Settings()){true}.isEmpty());assertTrue(AutoMaskSearchPolicy.pool(server.copy(security=""),"",Settings()){true}.isEmpty())}
     @Test fun automaticPoolIncludesNewTpwsProfiles() {val p=AutoMaskSearchPolicy.pool(server,"",Settings()){true};assertTrue(p.any {it.dpi=="TPWS#HELLO_RECORD"});assertTrue(p.any {it.id=="chrome.hello.fast"})}
