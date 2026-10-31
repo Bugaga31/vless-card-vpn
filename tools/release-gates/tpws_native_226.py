@@ -36,10 +36,17 @@ with tempfile.TemporaryDirectory() as td:
  clientctx=ssl.create_default_context(cafile=str(cert));rows=[]
  if a.adb:
   cmd('adb','wait-for-device');cmd('adb','install','-r','-g','app/build/outputs/apk/debug/app-universal-debug.apk')
-  text=cmd('adb','shell','pm','path',PKG);assert 'package:' in text
-  dump=cmd('adb','shell','dumpsys','package',PKG)
-  import re
-  m=re.search(r'nativeLibraryDir=(\S+)',dump);assert m,'Missing installed native library directory';lib=m.group(1)+'/libtpws.so'
+  text=cmd('adb','shell','pm','path',PKG)
+  apkpaths=[line.removeprefix('package:') for line in text.splitlines() if line.startswith('package:')]
+  assert len(apkpaths)==1 and apkpaths[0].endswith('/base.apk'),'Unexpected installed APK paths'
+  # API33 dumpsys can omit nativeLibraryDir. Inspect the actual extracted package
+  # library subtree instead of inferring an ABI directory or copying a host binary.
+  nativeRoot=str(Path(apkpaths[0]).parent/'lib')
+  matches=cmd('adb','shell','run-as',PKG,'find',nativeRoot,'-name','libtpws.so').splitlines()
+  assert len(matches)==1 and matches[0].startswith(nativeRoot+'/'),'Missing/ambiguous installed tpws: '+repr(matches)
+  lib=matches[0]
+  cmd('adb','shell','run-as',PKG,'test','-x',lib)
+  print('Using actual installed native library:',lib,flush=True)
  for i,(name,args) in enumerate(profiles):
   listener=socket.socket();listener.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1);listener.bind(('0.0.0.0' if a.adb else '127.0.0.1',0));listener.listen();listener.settimeout(15);port=listener.getsockname()[1]
   state={};err=[]
