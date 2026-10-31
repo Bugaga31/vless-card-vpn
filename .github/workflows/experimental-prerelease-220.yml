@@ -1,0 +1,78 @@
+name: Publish verified 1.2.109 experimental
+on:
+  push:
+    branches: ['experiment/prerelease-220-release']
+    paths: ['.github/workflows/experimental-prerelease-220.yml']
+permissions:
+  contents: read
+concurrency:
+  group: publish-verified-220
+  cancel-in-progress: false
+jobs:
+  publish:
+    if: github.repository == 'Bugaga31/vless-card-vpn'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      actions: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      CANDIDATE_SHA: f066b3ffef358e51252100349c379f520e1053d6
+    steps:
+      - name: Require successful original source/build run
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api repos/$GITHUB_REPOSITORY/actions/runs/41146714740 > run.json
+          gh api repos/$GITHUB_REPOSITORY/actions/runs/41146714740/jobs > jobs.json
+          python3 - <<'PY'
+          import json
+          r=json.load(open('run.json'));j=json.load(open('jobs.json'))
+          assert r['conclusion']=='success' and r['head_branch']=='experiment/prerelease-220-release'
+          assert r['head_sha']=='8c2ecc5fca6b9b1de3d7f1df65dc2c8215b979b3'
+          assert all(any(x['name']==n and x['conclusion']=='success' for x in j['jobs']) for n in ('source','build'))
+          PY
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: beta-apk
+          path: release
+          run-id: 41146714740
+          github-token: ${{ github.token }}
+      - name: Verify frozen source, tests, package and APK hashes
+        shell: python
+        run: |
+          import hashlib,json,pathlib,os,zipfile
+          p=pathlib.Path('release');r=json.loads((p/'verification.json').read_text())
+          assert r['candidate_sha']==os.environ['CANDIDATE_SHA']
+          assert str(r['run_id'])=='41146714740' and r['version']=='1.2.109' and r['version_code']==220
+          t=r['targeted_jvm']['totals']
+          assert t['tests']>=487 and all(t[k]==0 for k in ('failures','errors','skipped'))
+          suites=r['targeted_jvm']['suites']
+          assert all(any(s.endswith(n) for s in suites) for n in ('ServiceErrorsR220Test','UiReadabilityR220Test','AssistantIsolationR220Test'))
+          expected={'VLESS-Card-Beta-1.2.109-experimental.apk','VLESS-Card-Beta-1.2.109-experimental-arm64.apk'}
+          assert {a['file'] for a in r['apks']}==expected
+          cert='3b9f1771645de07cb01b2303a868363e97cfa8d3ca4d6079dae307066f4f1e6b'
+          for a in r['apks']:
+              assert a['certificate_sha256'].lower()==cert
+              assert "name='com.vlesscardvpn.beta2'" in a['package'] and "versionCode='220'" in a['package']
+              f=p/a['file'];assert hashlib.sha256(f.read_bytes()).hexdigest()==a['sha256']
+              with zipfile.ZipFile(f) as z: assert z.testzip() is None
+          print(json.dumps({'sha':r['candidate_sha'],'targeted_jvm':t,'apks':r['apks']},indent=2))
+      - name: Publish approved prerelease with APKs (not latest stable)
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG=beta-v1.2.109-experimental
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo 'Release already exists; refusing to overwrite'; exit 1
+          fi
+          gh release create "$TAG" \
+            release/VLESS-Card-Beta-1.2.109-experimental.apk \
+            release/VLESS-Card-Beta-1.2.109-experimental-arm64.apk \
+            release/SHA256SUMS-Beta.txt release/verification.json \
+            --repo "$GITHUB_REPOSITORY" --target "$CANDIDATE_SHA" --draft --prerelease --latest=false \
+            --title 'VLESS Card 1.2.109 · Experimental — читаемый интерфейс и сервисные проверки' \
+            --notes-file release/notes-experimental.md
+          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --prerelease --latest=false
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json url,isDraft,isPrerelease,assets

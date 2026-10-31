@@ -69,6 +69,8 @@ fun AppUi(onConnect: () -> Unit, onDisconnect: () -> Unit, onConnectFound:()->Un
         if (sea) OceanBackground(theme.oceanMotion && !theme.reducedMotion)
         Scaffold(
             containerColor = if (sea) Color.Transparent else scheme.background,
+            // Transparent ocean is not a ColorScheme surface: do not inherit black.
+            contentColor = scheme.onBackground,
             bottomBar = {
                 // Keep five accessible targets without splitting Russian words on narrow screens.
                 val compact = LocalConfiguration.current.screenWidthDp < 360 || LocalDensity.current.fontScale > 1.2f

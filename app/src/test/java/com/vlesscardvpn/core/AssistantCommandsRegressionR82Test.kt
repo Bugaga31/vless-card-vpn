@@ -57,7 +57,7 @@ class R85Test {
         val e = com.vlesscardvpn.core.Assistant.effects(stats)
         assertTrue(e.toString(), e.first().first.contains("дробление") && e.first().second > 0.5)
         val a = com.vlesscardvpn.core.Assistant.answer("что режут в моей сети?", f(stats))
-        assertTrue(a.text, a.text.contains("Помогает: дробление") && a.text.contains("явно режут"))
+        assertTrue(a.text, a.text.contains("Помогает: дробление") && a.text.contains("не доказывает блокировку DPI"))
         assertTrue(com.vlesscardvpn.core.Assistant.answer("какие маски лучше", f(stats)).text.contains("прошла 4 из 4"))
         assertTrue(com.vlesscardvpn.core.Assistant.answer("что режут", f(emptyMap())).text.contains("мало знаю"))
     }
