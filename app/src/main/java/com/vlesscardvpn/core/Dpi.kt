@@ -108,6 +108,9 @@ object DpiStrategies {
         bye("MASK_FAKE", "маскировка фейк-SNI", "--disorder", "1", "--fake", "-1", "--ttl", "8", "--fake-sni", S, "--fake-tls-mod", "orig"),
         bye("MASK_FAKE_RAND", "маскировка + случайный TLS", "--fake", "-1", "--ttl", "8", "--fake-sni", S, "--fake-tls-mod", "rand,orig"),
         tpws("MSS", "малый MSS", "--mss=88", "--split-pos=1"),
+        tpws("HELLO_RECORD", "TLS-запись + мягкий split · первый блок", "--tlsrec=sniext+1", "--split-pos=1,midsld", "--tamper-cutoff=n2"),
+        tpws("HELLO_MULTISPLIT", "границы SNI + disorder · первый блок", "--split-pos=1,host,midsld,endhost", "--disorder=tls", "--tamper-cutoff=n2"),
+        tpws("HELLO_MID_RECORD", "TLS-запись в середине домена · первый блок", "--tlsrec=midsld", "--split-pos=1", "--tamper-cutoff=n2"),
         // VLESS Card × Xray-core: TCP fragmentation of the ClientHello inside the app (no extra binary, works on any ABI).
         XRAY_LADDER,
         xr("DUST", "пыль Hello 1-5 байт", "packets=tlshello", "length=1-5", "delay=0-1"),
@@ -121,6 +124,7 @@ object DpiStrategies {
 
     fun byId(id: String?, s: Settings): DpiStrategy? = when {
         id == null || id == "" || id == Settings.DPI_AUTO -> null
+        id.startsWith(TpwsProfile.PREFIX) -> TpwsProfile.decode(id)?.let { DpiStrategy(id, "zapret tpws · свой профиль", DpiEngine.TPWS, it) }
         id == CUSTOM_ID -> custom(s.byeDpiArgs, s.byeDpiSni)
         id.startsWith(DpiEvo.PREFIX) -> DpiEvo.decode(id)
         else -> BUILT_IN.firstOrNull { it.id == id }

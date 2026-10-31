@@ -12,7 +12,9 @@ object YouTubeMediaProbe {
     const val WATCH = "https://www.youtube.com/watch?v=jNQXAC9IVRw"
     const val SAMPLE_BYTES = 131072
     internal const val MAX_PAGE_BYTES = 2 * 1048576
-    const val PROOF_PREFS = "youtube_media_proof_v1"
+    const val PROOF_PREFS = "youtube_media_proof_v2"
+    const val STABLE_BYTES = SAMPLE_BYTES + 2 * 32768
+    internal const val USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
     data class Result(val ok: Boolean?, val kbps: Int = 0,val reason:String="")
     data class Discovery(val url:String?,val reason:String="",val alternatives:List<String> = emptyList())
 
@@ -108,7 +110,7 @@ object YouTubeMediaProbe {
 
     fun discover(call:(Request)->Call):String? = discoverDetailed(call).url
     fun discoverDetailed(call:(Request)->Call):Discovery = try {
-        call(Request.Builder().url(WATCH).header("User-Agent", "Mozilla/5.0").build()).execute().use { r ->
+        call(Request.Builder().url(WATCH).header("User-Agent", USER_AGENT).build()).execute().use { r ->
             if(r.code!=200) return Discovery(null,"YT_HTTP")
             if(!r.header("Content-Type").orEmpty().startsWith("text/html",true)) return Discovery(null,"YT_FORMAT")
             val input=r.body?.byteStream() ?: return Discovery(null,"YT_FORMAT")
@@ -130,41 +132,65 @@ object YouTubeMediaProbe {
     } catch(_:java.net.SocketTimeoutException) {Discovery(null,"TIMEOUT")}
       catch(_:Exception) {Discovery(null,if(Thread.currentThread().isInterrupted) "CANCELLED" else "ERROR")}
 
-    /** Caller disables redirects and bounds the call by the shared probe deadline. */
-    fun measure(url: String, call: (Request) -> Call): Result {
-        if (!allowedUrl(url)) return Result(null)
-        val start = System.nanoTime()
-        return try {
-            call(Request.Builder().url(url).header("Range", "bytes=0-${SAMPLE_BYTES - 1}")
-                .header("Accept-Encoding", "identity").build()).execute().use { r ->
-                // Signed URL expiry, consent and rate limiting are not route failures.
-                if (r.code !in listOf(200, 206)) return Result(null,reason="YT_HTTP")
-                if (!r.header("Content-Type").orEmpty().startsWith("video/", true)) return Result(null,reason="YT_FORMAT")
-                if (!TransferProof.rangeValid(r.code,r.header("Content-Range"),SAMPLE_BYTES)) return Result(false)
-                if (!r.header("Content-Encoding").isNullOrBlank() && !r.header("Content-Encoding").equals("identity",true)) return Result(null)
-                val input = r.body?.byteStream() ?: return Result(null)
-                val header=ByteArray(12);var headerSize=0
-                while(headerSize<header.size) {
-                    if(Thread.currentThread().isInterrupted) return Result(null)
-                    val n=input.read(header,headerSize,header.size-headerSize)
-                    if(n<=0) return Result(false)
-                    headerSize+=n
+    /** Same bounded download path for comparison (128 KiB) and loading (192 KiB).
+     * An HTTP 200 that ignores Range can prove sequential loading on this body;
+     * reopening it at a nonzero offset would incorrectly test Range support instead.
+     */
+    fun measure(url:String,call:(Request)->Call):Result = measureWindows(url,listOf(SAMPLE_BYTES),call)
+
+    private fun measureWindows(url:String,windows:List<Int>,call:(Request)->Call):Result {
+        if(!allowedUrl(url)) return Result(null,reason="YT_FORMAT")
+        val totalRequired=windows.sum()
+        var current=url
+        var redirects=0
+        var started=System.nanoTime()
+        try {
+            while(true) {
+                if(Thread.currentThread().isInterrupted) return Result(null,reason="CANCELLED")
+                val response=call(Request.Builder().url(current)
+                    .header("Range","bytes=0-${totalRequired-1}")
+                    .header("Accept-Encoding","identity")
+                    .header("User-Agent",USER_AGENT).header("Referer",WATCH).build()).execute()
+                response.use { r ->
+                    if(r.code in setOf(301,302,303,307,308)) {
+                        val next=r.header("Location")?.let {current.toHttpUrlOrNull()?.resolve(it)?.toString()}
+                        if(redirects>=2 || next==null || !allowedUrl(next)) return Result(null,reason="YT_REDIRECT")
+                        current=next;redirects++
+                    } else {
+                        if(r.code==429) return Result(null,reason="YT_RATE_LIMITED")
+                        if(r.code in setOf(403,410)) return Result(null,reason="YT_MEDIA_RESTRICTED")
+                        if(r.code !in listOf(200,206)) return Result(null,reason="YT_HTTP")
+                        if(!r.header("Content-Type").orEmpty().startsWith("video/",true)) return Result(null,reason="YT_FORMAT")
+                        if(!TransferProof.rangeValid(r.code,r.header("Content-Range"),totalRequired)) return Result(false,reason="YT_RANGE_INVALID")
+                        if(!r.header("Content-Encoding").orEmpty().let {it.isEmpty() || it.equals("identity",true)}) return Result(null,reason="YT_FORMAT")
+                        val input=r.body?.byteStream() ?: return Result(null,reason="YT_FORMAT")
+                        val buf=ByteArray(16384);val prefix=ByteArray(12);var prefixSize=0
+                        var slowest=Int.MAX_VALUE
+                        for(size in windows) {
+                            var got=0
+                            while(got<size) {
+                                if(Thread.currentThread().isInterrupted) return Result(null,reason="CANCELLED")
+                                val n=input.read(buf,0,minOf(buf.size,size-got))
+                                if(n<=0) return Result(false,reason="YT_MEDIA_TRUNCATED")
+                                if(prefixSize<prefix.size) {
+                                    val count=minOf(n,prefix.size-prefixSize)
+                                    buf.copyInto(prefix,prefixSize,0,count);prefixSize+=count
+                                    if(prefixSize==prefix.size && !TransferProof.videoHeader(prefix,r.header("Content-Type").orEmpty()))
+                                        return Result(false,reason="YT_CONTAINER_INVALID")
+                                }
+                                got+=n
+                            }
+                            val now=System.nanoTime()
+                            slowest=minOf(slowest,TransferProof.rate(got,now-started));started=now
+                        }
+                        return Result(true,slowest,reason="YT_MEDIA_LOADED")
+                    }
                 }
-                if(!TransferProof.videoHeader(header,r.header("Content-Type").orEmpty())) return Result(false)
-                var total = headerSize; val buf = ByteArray(16384)
-                while (total < SAMPLE_BYTES) {
-                    if (Thread.currentThread().isInterrupted) return Result(null)
-                    val n = input.read(buf, 0, minOf(buf.size, SAMPLE_BYTES - total))
-                    if (n < 0) return Result(false)
-                    total += n
-                }
-                val ms = ((System.nanoTime() - start) / 1000000).coerceAtLeast(1)
-                Result(true, (total * 8L / ms).toInt().coerceAtLeast(1))
             }
-         } catch (_: java.io.InterruptedIOException) {
-            Result(null,reason=if(Thread.currentThread().isInterrupted) "CANCELLED" else "TIMEOUT")
-        } catch (_: Exception) {
-            Result(null,reason=if(Thread.currentThread().isInterrupted) "CANCELLED" else "ERROR")
+        } catch(_:java.io.InterruptedIOException) {
+            return Result(null,reason=if(Thread.currentThread().isInterrupted) "CANCELLED" else "TIMEOUT")
+        } catch(_:Exception) {
+            return Result(null,reason=if(Thread.currentThread().isInterrupted) "CANCELLED" else "ERROR")
         }
     }
 
@@ -175,39 +201,8 @@ object YouTubeMediaProbe {
         val total=m.groupValues[3].toLongOrNull() ?: return false
         return a==offset.toLong() && b==offset.toLong()+size-1 && total>b
     }
-    /** Three successive media windows; finite loading continuity, not a playback/codec guarantee. */
-    fun measureStable(url:String,call:(Request)->Call):Result {
-        val first=measure(url,call)
-        if(first.ok!=true) return first
-        var slowest=first.kbps
-        val size=32768
-        for(offset in listOf(SAMPLE_BYTES,SAMPLE_BYTES+size)) {
-            if(Thread.currentThread().isInterrupted) return Result(null,reason="CANCELLED")
-            val start=System.nanoTime()
-            try {
-                call(Request.Builder().url(url).header("Range","bytes=$offset-${offset+size-1}")
-                    .header("Accept-Encoding","identity").build()).execute().use {r->
-                    if(r.code!=206) return Result(null,reason="YT_RANGE_UNSUPPORTED")
-                    if(!r.header("Content-Type").orEmpty().startsWith("video/",true) ||
-                        !continuationRange(r.header("Content-Range"),offset,size) ||
-                        !r.header("Content-Encoding").orEmpty().let {it.isEmpty() || it.equals("identity",true)})
-                        return Result(null,reason="YT_RANGE_UNSUPPORTED")
-                    val input=r.body?.byteStream() ?: return Result(null,reason="YT_FORMAT")
-                    val buf=ByteArray(8192);var got=0
-                    while(got<size) {
-                        if(Thread.currentThread().isInterrupted) return Result(null,reason="CANCELLED")
-                        val n=input.read(buf,0,minOf(buf.size,size-got))
-                        if(n<0) return Result(false,reason="YT_MEDIA_TRUNCATED")
-                        if(n>0) got+=n
-                    }
-                    val ms=((System.nanoTime()-start)/1000000).coerceAtLeast(1)
-                    slowest=minOf(slowest,(got*8L/ms).toInt().coerceAtLeast(1))
-                }
-            } catch(_:java.io.InterruptedIOException) {return Result(null,reason=if(Thread.currentThread().isInterrupted) "CANCELLED" else "TIMEOUT")}
-              catch(_:Exception) {return Result(null,reason=if(Thread.currentThread().isInterrupted) "CANCELLED" else "ERROR")}
-        }
-        return Result(true,slowest)
-    }
+    /** Three sequential body windows in ONE response. Not a decoder/player or long-term playback proof. */
+    fun measureStable(url:String,call:(Request)->Call):Result = measureWindows(url,listOf(SAMPLE_BYTES,32768,32768),call)
 
     fun check(call:(Request)->Call):Result {
         val discovery=discoverDetailed(call)

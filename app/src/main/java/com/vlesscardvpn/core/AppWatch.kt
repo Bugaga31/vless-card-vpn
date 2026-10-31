@@ -95,7 +95,7 @@ object AppWatch {
     /** Native apps are not tested by opening their marketing/web pages. */
     private fun serviceAnswer(g: Guard, port: Int): Pair<Boolean?, String> = when {
         g.title.startsWith("Telegram") -> TelegramProbe.check(port) to "MTProto"
-        g.title.startsWith("YouTube") -> Tester.youtubeMedia(port).ok to "видеоданные"
+        g.title.startsWith("YouTube") -> Tester.youtubeAccess(port).ok to "веб-доступ YouTube"
         else -> Tester.site(g.url, port).let { it.answers to it.result }
     }
 

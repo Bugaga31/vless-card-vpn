@@ -186,7 +186,7 @@ object Tester {
             val deadline = if (budgetDeadline == Long.MAX_VALUE) System.nanoTime() + TimeUnit.SECONDS.toNanos(40) else budgetDeadline
             fun remaining() = TimeUnit.NANOSECONDS.toMillis((deadline - System.nanoTime()).coerceAtLeast(1)).coerceAtLeast(1)
             val ytF = if (autoChecks?.youtube ?: youtube) servicePool.submit<YouTubeMediaProbe.Result> {
-                YouTubeMediaProbe.check { boundedCall(mediaClient, it) }
+                YouTubeAccessProbe.check { boundedCall(mediaClient, it) }
             }.also { tasks += it } else null
             val relaxedCalls=java.util.concurrent.atomic.AtomicReference<Boolean?>(null)
             val voiceNote=java.util.concurrent.atomic.AtomicReference<String?>(null)
@@ -235,7 +235,7 @@ object Tester {
             val tgResult = await(tgF, remaining(), TelegramProbe.Result(null,0),"telegram") {it.ok!=null}
             val bigResult = await(bigF, remaining(), BodyResult(),"payload")
             val ytResult = await(ytF, remaining(), YouTubeMediaProbe.Result(null),"youtube") {it.ok!=null}
-            if(ytF!=null && ytResult.ok==null && ytResult.reason.isNotBlank() && notes["youtube"]=="INCONCLUSIVE")
+            if(ytF!=null && ytResult.reason.isNotBlank() && notes["youtube"] in listOf(null,"INCONCLUSIVE"))
                 notes["youtube"]=ytResult.reason
             val callsOk = if (callF != null) await(callF, remaining(), null,"voice") {it!=null} else null
             voiceNote.get()?.takeIf {notes["voice"]==null || notes["voice"]=="INCONCLUSIVE"}?.let {notes["voice"]=it}
@@ -533,6 +533,13 @@ object Tester {
 
     private fun mediaCall(client: OkHttpClient, request: Request, deadline: Long): okhttp3.Call = client.newCall(request).also {
         it.timeout().timeout(TimeUnit.NANOSECONDS.toMillis((deadline - System.nanoTime()).coerceAtLeast(1)).coerceAtLeast(1), TimeUnit.MILLISECONDS)
+    }
+
+    fun youtubeAccess(port:Int):YouTubeMediaProbe.Result {
+        val client=mediaClient(port)
+        val deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(6)
+        return try {YouTubeAccessProbe.check {mediaCall(client,it,deadline)}}
+        finally {client.dispatcher.cancelAll();client.connectionPool.evictAll();client.dispatcher.executorService.shutdown()}
     }
 
     fun youtubeMedia(port: Int): YouTubeMediaProbe.Result {

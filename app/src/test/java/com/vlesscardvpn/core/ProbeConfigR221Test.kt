@@ -34,7 +34,7 @@ class ProbeConfigR221Test {
         val connect=method.indexOf("var best = Long.MAX_VALUE")
         for(name in listOf("val ytF =","val callF =","val discordF =")) assertTrue(name,method.indexOf(name) in 0 until connect)
         assertTrue(method.contains("DiscordRouteProbe.check(mediaClient"))
-        assertTrue(method.contains("YouTubeMediaProbe.check { boundedCall(mediaClient"))
+        assertTrue(method.contains("YouTubeAccessProbe.check { boundedCall(mediaClient"))
         assertTrue(method.contains("System.nanoTime()).coerceAtLeast(1)"))
     }
 }

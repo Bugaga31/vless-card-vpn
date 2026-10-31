@@ -64,7 +64,7 @@ class ServiceMediaR217Test {
                 }
             }
         }
-        assertEquals(true,result.ok);assertEquals(listOf(YouTubeMediaProbe.WATCH,url,second,second,second),requests)
+        assertEquals(true,result.ok);assertEquals(listOf(YouTubeMediaProbe.WATCH,url,second),requests)
     }
     @Test fun consentAndAudioDoNotBecomeSuccess() {
         assertNull(YouTubeMediaProbe.check{FakeCall(it,200,"text/html","consent".toByteArray())}.ok)

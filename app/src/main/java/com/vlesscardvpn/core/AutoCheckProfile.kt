@@ -32,7 +32,7 @@ object AutoChecks {
     val current get()=AutoCheckProfile.of(Store.state.value.settings.autoChecks)
     fun accepts(p:Probe)=current.accepts(p,AutoLatencyPolicy.MAX_MS)
     fun key(profile:AutoCheckProfile,maxMs:Int)=profile.key+"@"+maxMs+(if(profile.discord) "|discord-hello-v1" else "")+
-        (if(profile.youtube) "|youtube-ranges-v2" else "")+(if(profile.voice) "|udp-availability-v2" else "")+
+        (if(profile.youtube) "|youtube-access-v4" else "")+(if(profile.voice) "|udp-availability-v2" else "")+
         (if(profile.stability) "|telegram-series-v2" else "")+(if(profile.instagram) "|instagram-web-v1" else "")
     fun stamp(p:Probe,profile:AutoCheckProfile,maxMs:Int):String = when {
         profile.accepts(p,maxMs)->key(profile,maxMs)
@@ -50,5 +50,5 @@ object AutoChecks {
     }
     fun label(profile:AutoCheckProfile=current):String = (listOf("HTTPS")+listOf(
         "telegram" to "Telegram", "stability" to "устойчивость Telegram", "voice" to "UDP для звонков",
-        "discord" to "Discord gateway", "youtube" to "YouTube загрузка видео", "instagram" to "Instagram веб-доступ").filter {it.first in profile.selected}.map {it.second}).joinToString(", ")
+        "discord" to "Discord gateway", "youtube" to "YouTube веб-доступ", "instagram" to "Instagram веб-доступ").filter {it.first in profile.selected}.map {it.second}).joinToString(", ")
 }
