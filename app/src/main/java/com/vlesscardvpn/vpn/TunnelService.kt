@@ -639,6 +639,16 @@ class TunnelService : VpnService() {
                 repairTelegramRoute()
                 return@launch
             }
+            // A full selected service can fail while HTTPS is alive. Repair this exact route,
+            // not only Telegram; UNKNOWN and unselected services never trigger this path.
+            if (p.works && profile!=null && st.autoHeal && usedChain==null && !usedTorRoute &&
+                com.vlesscardvpn.core.RequiredServiceRecovery.failed(profile,p)) {
+                val callActive=com.vlesscardvpn.core.PhonePower.isVoiceCallActive(this@TunnelService)
+                if (!callActive) {
+                    recoverServerRoute()
+                    return@launch
+                }
+            }
             if (!p.works && lastSoft && Store.state.value.settings.autoHeal) {
                 // a fresh Xray sometimes needs a moment: look again in 3 s before rebuilding the whole VPN
                 // (every rebuild makes browsers show «нет сети» for a second — it must not happen by mistake)
@@ -1072,7 +1082,7 @@ class TunnelService : VpnService() {
                 val quietAuto=com.vlesscardvpn.core.VpnRecoveryPolicy.healthOnly(asleep(),autoWatch)
                 val urgent=miss>0 || dnsMiss>0 || !quietAuto && (telegramUnstable>0 || telegramMiss>0 || telegramSlow>0 || stabilityPending || servicePending && autoWatch && usedChain==null && !usedTorRoute)
                 val period = if(offline) 10_000L else if(urgent) 3_000L else
-                    com.vlesscardvpn.core.VpnRecoveryPolicy.watchPeriod(com.vlesscardvpn.core.PhonePower.refresh(this@TunnelService).healthyMs,autoWatch,quietAuto)
+                    com.vlesscardvpn.core.VpnRecoveryPolicy.watchPeriod(com.vlesscardvpn.core.PhonePower.refresh(this@TunnelService).healthyMs,autoWatch,asleep())
                 if (com.vlesscardvpn.core.VpnRecoveryPolicy.pauseWatchdog(asleep(),autoWatch)) {
                     // Manual mode retains its quiet-screen policy. Auto must keep failure detection.
                     do { screenSignals.receive() } while (com.vlesscardvpn.core.VpnRecoveryPolicy.pauseWatchdog(asleep(),Store.state.value.settings.mode==Mode.AUTO))
@@ -1118,7 +1128,7 @@ class TunnelService : VpnService() {
                     !(settings.torRouting && "telegram" in settings.services) && usedChain == null
                 val live = com.vlesscardvpn.core.CancellableProbe.run { bind ->
                     Tester.probeSocks(port, settings.testUrl, big = false, youtube = false, telegram = checkTelegram,
-                        attempts = 1, budgetMs = 6500L, onCall = { call -> bind { call.cancel() } }, onCancel = bind, autoChecks=profile,user=auth.user,pass=auth.pass)
+                        attempts = 1, budgetMs = if(healthOnly) 3500L else 6500L, onCall = { call -> bind { call.cancel() } }, onCancel = bind, autoChecks=profile,user=auth.user,pass=auth.pass)
                 }
                 if (core !== sampledCore || chainEpoch.get()!=sampledEpoch || usedTorRoute!=sampledTorRoute ||
                     Tunnel.socks != auth || Net.key(this@TunnelService) != network ||
@@ -1356,7 +1366,7 @@ class TunnelService : VpnService() {
                 }
                 val sampledCore=core;val auth=Tunnel.socks
                 val level = if (attempt == 0) 1 else 3
-                val found = try { Store.busy { Actions.autoRescue(usedServers, level, attempted=attempted) } }
+                val found = try { Store.busy { Actions.autoRescue(usedServers, level, attempted=attempted, onStep={healStatus("Восстановление: $it")}) } }
                     catch(e:kotlinx.coroutines.CancellationException) {throw e}
                     catch(e:Exception) {Log.w(TAG,"Auto recovery failed",e);0}
                 kotlinx.coroutines.currentCoroutineContext().ensureActive()

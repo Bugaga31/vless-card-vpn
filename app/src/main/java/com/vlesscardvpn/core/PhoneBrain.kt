@@ -24,6 +24,9 @@ object PhoneBrain {
     val validation = MutableStateFlow("Будущие прогнозы ещё не оценены")
     fun reduceOptionalWork(now:Long)=PhoneForecastPolicy.fresh(forecastAt,now)
     private var enabled = false
+    @Synchronized fun invalidateWindow() {
+        pending=null; forecastAt=0L; previousTemp=0.0
+    }
     @Synchronized fun reset(ctx: Context) {
         forecastAudit=PhoneForecastAudit();flyForecastAudit=PhoneForecastAudit();validation.value="Будущие прогнозы ещё не оценены"
         forecastAt=0L; model = PhoneLearning(); fly = FlyPhoneLearning(); pending = null; previousTemp = 0.0; last = -60000
