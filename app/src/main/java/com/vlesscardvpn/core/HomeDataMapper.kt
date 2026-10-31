@@ -14,7 +14,7 @@ object HomeDataMapper {
             chip("https","HTTPS",true,probe?.let {if(it.realMs<0) null else it.works}),
             chip("telegram","Telegram",profile.telegram,probe?.tgOk),
             chip("stability","Устойчивость TG",profile.stability,probe?.stableOk),
-            chip("youtube","YouTube · видео",profile.youtube,probe?.ytOk),
+            chip("youtube","YouTube · доступ",profile.youtube,probe?.ytOk),
             chip("discord","Discord · gateway",profile.discord,probe?.discordOk),
             chip("voice","Звонки · UDP",profile.voice,probe?.callsOk),
             chip("instagram","Instagram · веб",profile.instagram,probe?.instagramOk))

@@ -21,6 +21,14 @@ object HomePresentation {
     /** No arbitrary exception, endpoint, URL or user label is rendered as a diagnostic. */
     fun note(code:String?):String = when(code) {
         "TIMEOUT"->"Истёк срок проверки"; "CANCELLED"->"Проверка отменена"; "ERROR"->"Ошибка проверки"
+        "YT_ACCESS_OK"->"YouTube отвечает; видео не проверялось"
+        "YT_ACCESS_HTTP"->"YouTube не подтвердил HTTP-доступ"
+        "YT_ACCESS_REDIRECT"->"Запрос YouTube перенаправлен"
+        "YT_RATE_LIMITED"->"YouTube ограничил частоту запросов"
+        "YT_MEDIA_RESTRICTED"->"Видеоссылка ограничена или истекла"
+        "YT_REDIRECT"->"Перенаправление видео не подтверждено"
+        "YT_RANGE_INVALID"->"Неверный диапазон видеоданных"
+        "YT_CONTAINER_INVALID"->"Контейнер видео не подтверждён"
         "YT_LOGIN_REQUIRED"->"YouTube требует вход или проверку пользователя"
         "YT_SIGNATURE_UNSUPPORTED"->"Подпись видеоссылки пока не поддерживается"
         "YT_UNPLAYABLE"->"Сервис не разрешил тестовое видео"

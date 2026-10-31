@@ -5,6 +5,7 @@ object ServiceProbeStatus {
     fun label(required:Boolean,value:Boolean?,note:String?):String = when {
         !required -> "не выбрано"
         value==true && note=="VOICE_AVAILABLE_LOSS" -> "✓ UDP доступен; часть ответов потеряна — качество звонка не подтверждено"
+        value==true && note=="YT_ACCESS_OK" -> "✓ YouTube отвечает; воспроизведение видео не проверялось"
         value==true -> "✓"
         note=="VOICE_INCOMPLETE" -> "UDP-проба не завершена; маршрут не оценён"
         note=="VOICE_NO_RESPONSE" -> "два STUN-узла не подтвердили UDP; это не проверка реального звонка"
@@ -13,6 +14,8 @@ object ServiceProbeStatus {
         note=="IG_REDIRECT" -> "Instagram перенаправил запрос; результат неизвестен"
         note=="IG_HTTP" -> "Instagram не выдал публичную страницу; маршрут не оценён"
         note=="IG_FORMAT" -> "ожидаемая страница Instagram не подтверждена"
+        note=="YT_ACCESS_HTTP" -> "YouTube не подтвердил HTTP-доступ; это не диагноз блокировки VPN"
+        note=="YT_ACCESS_REDIRECT" -> "YouTube перенаправил запрос; веб-доступ не подтверждён"
         note=="YT_RANGE_UNSUPPORTED" -> "YouTube не подтвердил следующие участки видео; устойчивость загрузки неизвестна"
         note=="YT_MEDIA_TRUNCATED" -> "загрузка участка видео оборвалась раньше указанного размера"
         note=="VOICE_UNKNOWN" -> "серия UDP не завершена — качество не подтверждено"

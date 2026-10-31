@@ -35,7 +35,7 @@ object DeviceCoach {
             if (mi.totalMem > 0) 1.0 - mi.availMem.toDouble() / mi.totalMem else -1.0, mi.lowMemory, active)
         val snapshot = DeviceAdvice.Snapshot(signals, mi.availMem, mi.totalMem, disk.availableBytes,
             disk.totalBytes, bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY), pm.isPowerSaveMode)
-        val predict = PhoneBrain.update(ctx, signals, Store.settings.value.phoneLearning)
+        val predict = PhoneBrain.update(ctx, signals, Store.settings.value.phoneLearning, Actions.progress.value.running)
         state.value = snapshot; advice.value = DeviceAdvice.tips(snapshot, predict)
         phone.value = runCatching { PhoneInfo.collect(ctx) }.getOrNull()
         at = now; bytes = total

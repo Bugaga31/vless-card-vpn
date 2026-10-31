@@ -32,7 +32,7 @@ fun AutoCheckSettings() {
         Text("ROKI · эксперимент на подграфе FlyWire. Учится на завершённых проверках этой сессии и меняет только порядок кандидатов после 8 результатов. Не целый мозг мухи; неизвестные проверки не разрешает.",style=MaterialTheme.typography.bodyMedium)
         Text("HTTPS проверяется всегда. Выбранные проверки обязательны для нового сервера и резервов.",style=MaterialTheme.typography.bodyMedium)
         listOf("telegram" to "Telegram · ответ дата-центра", "stability" to "Telegram · устойчивость серии",
-            "voice" to "Звонки · доступность UDP", "discord" to "Discord · gateway", "youtube" to "YouTube · загрузка видео", "instagram" to "Instagram · веб-доступ").forEach {(id,title)->
+            "voice" to "Звонки · доступность UDP", "discord" to "Discord · gateway", "youtube" to "YouTube · веб-доступ", "instagram" to "Instagram · веб-доступ").forEach {(id,title)->
             Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) {
                 Text(title,Modifier.weight(1f))
                 Switch(modifier=Modifier.semantics {contentDescription="Авто: $title"},checked=id in selected,onCheckedChange={on->Store.update {state->
@@ -42,6 +42,6 @@ fun AutoCheckSettings() {
             }
         }
         Text("Сохранение автоматическое. Текущее соединение не обрывается; новые настройки учитываются со следующей проверки. Старые резервы должны пройти новый набор проверок.",style=MaterialTheme.typography.bodyMedium)
-        Text("Устойчивость включает три ответа Telegram даже при выключенном первом переключателе. Discord — публичный API и WebSocket HELLO через тот же SOCKS; не вход в аккаунт и не голосовой канал. Звонки — короткая UDP-серия через этот SOCKS с запасной STUN-целью; доступность транспорта, не реальный звонок и не оценка кодека/TURN. Через Tor UDP не поддерживается: для Tor отключите UDP-проверку. YouTube загружает начало и два следующих участка видео (192 КиБ на успешную медиапробу, плюс страница); короткая устойчивость загрузки, не всё воспроизведение. Instagram — только публичная веб-страница, не лента/Reels/аккаунт. STUN-сервисы Google/Cloudflare видят запросы с выхода VPN.",style=MaterialTheme.typography.bodyMedium)
+        Text("Устойчивость включает три ответа Telegram даже при выключенном первом переключателе. Discord — публичный API и WebSocket HELLO через тот же SOCKS; не вход в аккаунт и не голосовой канал. Звонки — короткая UDP-серия через этот SOCKS с запасной STUN-целью; доступность транспорта, не реальный звонок и не оценка кодека/TURN. Через Tor UDP не поддерживается: для Tor отключите UDP-проверку. YouTube — один короткий HTTPS-запрос generate_204 через тот же SOCKS: ожидается ответ 204, без скачивания видео. Подтверждает веб-доступ, не воспроизведение, аккаунт или скорость. Instagram — только публичная веб-страница, не лента/Reels/аккаунт. STUN-сервисы Google/Cloudflare видят запросы с выхода VPN.",style=MaterialTheme.typography.bodyMedium)
     }
 }

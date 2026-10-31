@@ -6,7 +6,7 @@ object PowerPolicy {
         val saver: Boolean = false, val screen: Boolean = true, val temp: Double = 0.0,
         val thermal: Int = -1, val metered: Boolean = false, val dataSaver: Boolean = false,
         val activeTraffic: Boolean = false, val lowMemory: Boolean = false, val gaming: Boolean = false,
-        val recentLag: Boolean = false, val voiceCall: Boolean = false)
+        val recentLag: Boolean = false, val voiceCall: Boolean = false, val predictedPressure: Boolean = false)
     data class Options(val profile: String = "balanced", val threshold: Int = 20,
         val quietScreen: Boolean = true, val chargeOnly: Boolean = false,
         val wifiOnly: Boolean = true, val protectTraffic: Boolean = true, val autoCool: Boolean = true)
@@ -36,6 +36,7 @@ object PowerPolicy {
             i.gaming -> "Игровая сессия: фоновые улучшения приостановлены"
             i.saver -> "Системная экономия энергии"
             low -> "Низкий заряд батареи"
+            i.predictedPressure -> "ВАТСОН: прогноз нагрузки — необязательный фон приостановлен"
             i.now < pauseUntil -> "Пауза улучшений: ${(pauseUntil - i.now + 59999) / 60000} мин"
             i.dataSaver -> "Системная экономия трафика"
             o.wifiOnly && i.metered -> "Ожидание Wi-Fi: фоновые проверки не расходуют мобильный трафик"
@@ -46,14 +47,14 @@ object PowerPolicy {
             else -> "Готов к фоновым улучшениям"
         }
         val activeProtected = i.voiceCall || o.protectTraffic && i.activeTraffic
-        val pressure = hot || i.lowMemory || i.gaming || i.recentLag || i.saver || low || i.voiceCall || eco || (!i.screen && !chargeWork) || i.dataSaver || (o.wifiOnly && i.metered) || o.chargeOnly && !i.charging || activeProtected
+        val pressure = i.predictedPressure || hot || i.lowMemory || i.gaming || i.recentLag || i.saver || low || i.voiceCall || eco || (!i.screen && !chargeWork) || i.dataSaver || (o.wifiOnly && i.metered) || o.chargeOnly && !i.charging || activeProtected
         val tcp = if (hot || i.lowMemory || i.gaming || i.voiceCall) 2 else if (eco) 8 else if (pressure) 16 else if (o.profile == "fast") 128 else 64
         // Nominal capacity; ProbeConcurrencyPolicy applies the stored user ceiling (default 5).
         val real = if (i.voiceCall) 1 else if (pressure) 2 else 10
-        val allowLight = !eco && !hot && !i.lowMemory && !i.gaming && !i.recentLag && !i.saver && !low && !i.voiceCall && i.now >= pauseUntil && !(!i.screen && o.quietScreen && !chargeWork) && !i.dataSaver && !(o.wifiOnly && i.metered) && !(o.chargeOnly && !i.charging) && !(o.protectTraffic && i.activeTraffic)
+        val allowLight = !i.predictedPressure && !eco && !hot && !i.lowMemory && !i.gaming && !i.recentLag && !i.saver && !low && !i.voiceCall && i.now >= pauseUntil && !(!i.screen && o.quietScreen && !chargeWork) && !i.dataSaver && !(o.wifiOnly && i.metered) && !(o.chargeOnly && !i.charging) && !(o.protectTraffic && i.activeTraffic)
         // Auto may maintain a tiny reserve in eco/saver, not run heavy speed downloads.
         // Explicit quiet-screen/data/Wi-Fi/charging/hold and safety restrictions still win.
-        val reserve = !hot && !i.lowMemory && !i.gaming && !i.recentLag && !low && !i.voiceCall &&
+        val reserve = !i.predictedPressure && !hot && !i.lowMemory && !i.gaming && !i.recentLag && !low && !i.voiceCall &&
             i.now >= pauseUntil && !i.dataSaver && !(o.wifiOnly && i.metered) &&
             !(o.chargeOnly && !i.charging) && !(!i.screen && o.quietScreen) && !activeProtected
         return Plan(Memory(low, hot, since), reason == "Готов к фоновым улучшениям", reason,

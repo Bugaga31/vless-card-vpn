@@ -1660,11 +1660,11 @@ object Actions {
             }
             // A separate small budget: a slow native wave/source cannot silently starve mask rescue.
             // Probe reachable alternatives before costly mask evolution; no TCP-positive prerequisite.
-            if (continuous && !started.started && round % 3 == 0 && sameNetwork()) {
+            if (continuous && !started.started && sameNetwork()) {
                 val st = Store.state.value
-                val candidates = ServerChoice.diverse(preferred(st,st.servers).filter {
+                val candidates = AutoMaskSearchPolicy.candidates(ServerChoice.diverse(preferred(st,st.servers).filter {
                     it.id in attempted && !st.state(it).works
-                }.sortedBy { if(st.state(it).tcpMs>0) 0 else 1 },2)
+                }.sortedBy { if(st.state(it).tcpMs>0) 0 else 1 },64),round)
                 quickMaskRescue(candidates,net,handle)?.let(firstReady)
             }
             if (sameNetwork()) fresh().firstOrNull()?.let(firstReady)
@@ -1836,34 +1836,44 @@ object Actions {
         if(start.settings.mode!=Mode.AUTO) return null
         val expected=candidates.associate {it.id to start.state(it).maskFor(net)}
         val pinned=pinCertificates(candidates.take(2))
-        val lab=start.settings.experimentalMaskLab
+        val profile=AutoChecks.current
+        val profileLimit=AutoLatencyPolicy.MAX_MS
+        val memoryContext=net+"|"+AutoChecks.key(profile,profileLimit)
+        val engine=DpiProxy(app)
         val trialStarted=android.os.SystemClock.elapsedRealtime()
-        val variants=pinned.flatMap {s->
-            val available=MaskWarmStart.trials(s,expected[s.id].orEmpty(),start.settings,if(lab) 8 else 2)
-            val ids=if(lab) MaskExperiment.memory.choose(net,network,s.id,available.map {it.id},trialStarted) else available.map {it.id}
-            ids.mapNotNull {id->available.firstOrNull {it.id==id}}.map{s to it}
+        val proposed=pinned.flatMap {server->
+            val available=AutoMaskSearchPolicy.pool(server,expected[server.id].orEmpty(),start.settings,engine::available)
+            val ids=MaskExperiment.memory.choose(memoryContext,network,server.id,available.map {it.id},trialStarted)
+            ids.mapNotNull {id->available.firstOrNull {it.id==id}}.map {server to it}
         }
+        if(proposed.isEmpty()) return null
+        val (own,port)=dpiForTests(proposed.map {it.second})
+        try {
+        val variants=proposed.filter {AutoMaskSearchPolicy.engineReady(it.second,own.ports) {id->own.runtimeEngine(id).second}}
         if(variants.isEmpty() || Net.key(app)!=net || Net.underlying(app)?.toString()!=network) return null
         val winner=java.util.concurrent.atomic.AtomicReference<Pair<Int,Probe>?>(null)
-        progress.value=progress.value.copy(title="Авто: лёгкая маскировка Hello",message="До двух серверов · лёгкий Hello; HTTPS и Telegram MTProto ≤${AutoLatencyPolicy.MAX_MS} мс")
-        if(lab) variants.forEach {(server,mask)->MaskExperiment.memory.schedule(net,network,server.id,mask.id,trialStarted)}
-        kotlinx.coroutines.withTimeoutOrNull(3800L) {
-            Tester.real(variants,start.settings.testUrl,null,youtube=false,telegram=true,requireTelegram=true,autoChecks=AutoChecks.current,
-                foreground=true,batch=4,parallel=4,attempts=1,big=false,stopAfter=1,budgetMs=3500L) {i,p->
-                if(lab && p!=Tester.SKIPPED && Net.key(app)==net && Net.underlying(app)?.toString()==network) {
+        progress.value=progress.value.copy(title="Авто: сервер + маскировка",message="До двух серверов и двух масок на сервер · только совместимые профили · все выбранные проверки")
+        variants.forEach {(server,mask)->MaskExperiment.memory.schedule(memoryContext,network,server.id,mask.id,trialStarted)}
+        kotlinx.coroutines.withTimeoutOrNull(7500L) {
+            Tester.real(variants,start.settings.testUrl,port,own.ports,youtube=profile.youtube,telegram=profile.telegram,requireTelegram=profile.telegram,autoChecks=profile,
+                foreground=true,batch=4,parallel=4,attempts=1,big=false,stopAfter=1,budgetMs=6500L) {i,p->
+                if(p!=Tester.SKIPPED && AutoChecks.current==profile && AutoLatencyPolicy.MAX_MS==profileLimit && Net.key(app)==net && Net.underlying(app)?.toString()==network) {
                     val (server,mask)=variants[i]
-                    MaskExperiment.memory.observe(net,network,server.id,mask.id,trialStarted,
-                        android.os.SystemClock.elapsedRealtime(),MaskExperiment.verdict(p),
-                        if(AutoChecks.accepts(p)) maxOf(p.realMs,p.tgMs) else null)
+                    val verdict=if(p.works) profile.verdict(p,profileLimit) else null
+                    MaskExperiment.memory.observe(memoryContext,network,server.id,mask.id,trialStarted,
+                        android.os.SystemClock.elapsedRealtime(),verdict,
+                        if(profile.accepts(p,profileLimit)) maxOf(p.realMs,p.tgMs) else null)
+                    Roki.session.observe(Roki.context(net,profile,profileLimit,start.settings.testUrl),start.state(server),verdict)
                 }
                 if(AutoChecks.accepts(p)) winner.compareAndSet(null,i to p)
             }
         }
         kotlinx.coroutines.currentCoroutineContext().ensureActive()
         if(Net.key(app)!=net || Net.underlying(app)?.toString()!=network) return null
-        if(Store.state.value.settings.mode!=Mode.AUTO || lab && !Store.state.value.settings.experimentalMaskLab) return null
+        if(Store.state.value.settings.mode!=Mode.AUTO || AutoChecks.current!=profile || AutoLatencyPolicy.MAX_MS!=profileLimit) return null
         val (index,p)=winner.get() ?: return null
         val (server,mask)=variants[index]
+        if(!AutoMaskSearchPolicy.engineReady(mask,own.ports) {id->own.runtimeEngine(id).second}) return null
         val stamp=System.currentTimeMillis()
         var committed=false
         Store.setState(server.id) {current->
@@ -1878,6 +1888,7 @@ object Actions {
         if(!committed) return null
         Store.recordMasks(net,listOf(mask.id to true))
         return server
+        } finally {own.close()}
     }
 
     private suspend fun chooseCompared(candidates: List<Server>, onReady: ((Server) -> Unit)?,
@@ -2249,7 +2260,7 @@ object Actions {
         }
         val results = coroutineScope {
             val control = async(Bg.io) { Tester.site(settings.testUrl, auth.port).answers }
-            val youtube = async(Bg.io) { Tester.youtubeMedia(auth.port).ok == true }
+            val youtube = async(Bg.io) { Tester.youtubeAccess(auth.port).ok == true }
             val telegram = async(Bg.io) { series {
                 CancellableProbe.run { bind -> TelegramProbe.measure(auth.port,3100,bind) }.let { LinkStabilityPolicy.Sample(it.ok,it.ms) }
             } }

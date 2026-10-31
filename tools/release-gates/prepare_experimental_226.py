@@ -40,15 +40,15 @@ def prepare(root, sha, run_id, docs):
     require(any(n.endswith("SeriesDiagnosticsR222Test") for n in suites),"R222 series/diagnostics regressions absent")
     require(any(n.endswith("ServiceExpansionR223Test") for n in suites) and any(n.endswith("AutoProfileR223Test") for n in suites),"R223 service regressions absent")
     require(any(n.endswith("AutoRecoveryR224Test") for n in suites),"R224 background recovery regressions absent")
-    require(totals["tests"]>=731 and not any(totals[k] for k in ("failures","errors","skipped")),"Targeted JVM gate failed")
-    for name in ("HomeDataMapperTest","HomeRuntimeTest","HomeUiWiringTest","TpwsProfileR226Test","YouTubeLoadingR226Test"):
+    require(totals["tests"]>=766 and not any(totals[k] for k in ("failures","errors","skipped")),"Targeted JVM gate failed")
+    for name in ("HomeDataMapperTest","HomeRuntimeTest","HomeUiWiringTest","TpwsProfileR226Test","YouTubeLoadingR226Test","YouTubeAccessR226Test","AutomaticWorkR226Test"):
         require(any(n.endswith(name) for n in suites),"Home regression suite absent: "+name)
     ui=json.loads(Path("ui-smoke-226/summary.json").read_text())
     require(ui.get("status")=="PASS" and ui.get("debug_theme_font_cases")==6 and ui.get("signed_release_fresh_launch")==True,"UI emulator smoke failed")
     native=json.loads(Path("tpws-native-226/summary.json").read_text())
     require(native.get("status")=="PASS" and native.get("platform")=="android-api33-x86_64" and len(native.get("cases",[]))==4,"Real Android tpws fixture failed")
     report={"candidate_sha":sha,"run_id":str(run_id),"version":"1.2.115","version_code":226,"channel":"experimental",
-            "targeted_jvm":{"totals":totals,"suites":suites},"tpws_native":native,"ui_smoke":ui,"functional_checks":{"full_jvm":"not_run","lint":"not_run","emulator":"API33_DISCONNECTED_HOME_ONLY","physical_device":"not_run","ui":"six_debug_theme_font_cases_and_signed_release_launch"},"apks":[],
+            "targeted_jvm":{"totals":totals,"suites":suites},"tpws_native":native,"ui_smoke":ui,"functional_checks":{"full_jvm":"not_run","lint":"not_run","emulator":"API33_DISCONNECTED_HOME_ONLY","physical_device":"not_run","youtube_auto_gate":"single_http_204_access_not_playback","phone_forecast":"optional_work_only_not_battery_measured","ui":"six_debug_theme_font_cases_and_signed_release_launch"},"apks":[],
             "validation":{"status":"TARGETED_JVM_ONLY","thermal_measurement":"not_run"}}
     sums = []
     for old_name, new_name in expected.items():

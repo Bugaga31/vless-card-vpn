@@ -100,7 +100,7 @@ class ServiceExpansionR223Test {
     }
     @Test fun newInstagramOptionHasStrictGateAndVersionedProof() {
         val s=source("core/AutoCheckProfile.kt");assertTrue(s.contains("(!instagram || p.instagramOk==true)"))
-        for(v in listOf("youtube-load-v3","udp-availability-v2","instagram-web-v1","telegram-series-v2")) assertTrue(s.contains(v))
+        for(v in listOf("youtube-access-v4","udp-availability-v2","instagram-web-v1","telegram-series-v2")) assertTrue(s.contains(v))
     }
     @Test fun rokiSeparatesNewProofSemantics() {assertTrue(source("core/Roki.kt").contains("AutoChecks.key(profile,limit)"))}
 }
