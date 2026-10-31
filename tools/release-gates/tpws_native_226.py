@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Real tpws + local certificate-verified TLS fixture. Not an operator/DPI or TUN test."""
-import argparse,hashlib,json,os,socket,ssl,struct,subprocess,tempfile,threading,time
+import argparse,hashlib,json,os,shlex,socket,ssl,struct,subprocess,tempfile,threading,time
 from pathlib import Path
 P=argparse.ArgumentParser();P.add_argument('--binary');P.add_argument('--adb',action='store_true');P.add_argument('--out',default='tpws-native-226');a=P.parse_args()
 out=Path(a.out);out.mkdir(parents=True,exist_ok=True)
@@ -80,7 +80,10 @@ with tempfile.TemporaryDirectory() as td:
   base=['--socks','--bind-addr=127.0.0.1',f'--port={proxyport}','--maxconn=8']
   if a.adb:
    cmd('adb','forward',f'tcp:{proxyport}',f'tcp:{proxyport}')
-   proc=subprocess.Popen(['adb','shell','run-as',PKG,'env','VCVPN_TPWS_ALLOW_LOCAL=1',lib,*base,*args],stdout=log,stderr=log)
+   # Android install paths contain '='. env misreads the executable as an
+   # assignment; shell exec preserves the actual package executable and argv.
+   remote=shlex.join(['run-as',PKG,'sh','-c','export VCVPN_TPWS_ALLOW_LOCAL=1; exec "$@"','tpws-fixture',lib,*base,*args])
+   proc=subprocess.Popen(['adb','shell',remote],stdout=log,stderr=log)
   else:
    assert a.binary;proc=subprocess.Popen([a.binary,*base,*args],env=env,stdout=log,stderr=log)
   try:
