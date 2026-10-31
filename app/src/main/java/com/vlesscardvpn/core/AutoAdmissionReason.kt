@@ -8,8 +8,7 @@ object AutoAdmissionReason {
         else if(p.realMs>maxMs) why+="HTTPS выше предела $maxMs мс"
         if(p.bigOk==false) why+="передача данных не прошла"
         fun gate(name:String,value:Boolean?,id:String) {
-            if(value!=true) why+=name+if(value==false) " — проверка не прошла" else
-                " — "+ServiceProbeStatus.label(true,null,p.serviceNotes[id])
+            if(value!=true) why+=name+" — "+ServiceProbeStatus.label(true,value,p.serviceNotes[id])
         }
         if(profile.telegram) {
             gate("Telegram",p.tgOk,"telegram")
