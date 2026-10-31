@@ -63,7 +63,8 @@ class FirstConnectivityR219Test {
         }
     }
     @Test fun onlyForegroundAutoGetsShortFirstRequest() {
-        assertEquals(2500L,FirstConnectivityBudget.cap(true,true))
+        assertEquals(3100L,FirstConnectivityBudget.cap(true,true))
+        assertEquals(2500L,FirstConnectivityBudget.cap(true,true,800))
         assertEquals(0L,FirstConnectivityBudget.cap(false,true))
         assertEquals(0L,FirstConnectivityBudget.cap(true,false))
     }

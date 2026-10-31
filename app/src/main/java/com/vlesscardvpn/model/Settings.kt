@@ -21,7 +21,7 @@ data class Settings(
     val autoChecks: Set<String> = com.vlesscardvpn.core.AutoCheckProfile.defaults,
     val probeParallel: Int = com.vlesscardvpn.core.ProbeConcurrencyPolicy.DEFAULT,
     val autoLatencyMinMs: Int = 100,
-    val autoLatencyMaxMs: Int = 800,
+    val autoLatencyMaxMs: Int = com.vlesscardvpn.core.AutoLatencyRange.DEFAULT_MAX,
     val ruDirect: Boolean = false,
     val ruWhitelist: Boolean = true,
     val ruAllDirect: Boolean = false,
@@ -182,7 +182,7 @@ data class Settings(
     fun toJson(): JSONObject = JSONObject().put("mode", mode.name).put("balance", balance.name).put("socksPort", socksPort)
         .put("autoChecks", JSONArray(autoChecks.sorted()))
         .put("probeParallel", com.vlesscardvpn.core.ProbeConcurrencyPolicy.normalize(probeParallel))
-        .put("autoLatencyMinMs", autoLatencyMinMs).put("autoLatencyMaxMs", autoLatencyMaxMs).put("autoLatencyPresetVersion", 213)
+        .put("autoLatencyMinMs", autoLatencyMinMs).put("autoLatencyMaxMs", autoLatencyMaxMs).put("autoLatencyPresetVersion", com.vlesscardvpn.core.AutoLatencyRange.PRESET_VERSION)
         .put("ruAllDirect", ruAllDirect).put("ruWhitelist", ruWhitelist).put("ruDirect", ruDirect).put("blockAds", blockAds).put("blockTrackers", blockTrackers).put("byeDpiArgs", byeDpiArgs).put("byeDpiSni", byeDpiSni)
         .put("hybridDomains", JSONArray(hybridDomains)).put("testUrl", testUrl).put("dnsUrl", dnsUrl).put("dnsAuto", dnsAuto)
         .put("subscriptions", JSONArray(subscriptions))
@@ -242,8 +242,8 @@ data class Settings(
         fun mirrors(url: String): List<String> = Subs.mirrors(url)
         fun fromJson(o: JSONObject): Settings {
             val d = Settings()
-            val latency = if(o.optInt("autoLatencyPresetVersion",0)<213) com.vlesscardvpn.core.AutoLatencyRange.Range()
-                else com.vlesscardvpn.core.AutoLatencyRange.safe(o.optInt("autoLatencyMinMs",100),o.optInt("autoLatencyMaxMs",800))
+            val latency = if(o.optInt("autoLatencyPresetVersion",0)<com.vlesscardvpn.core.AutoLatencyRange.PRESET_VERSION) com.vlesscardvpn.core.AutoLatencyRange.Range()
+                else com.vlesscardvpn.core.AutoLatencyRange.safe(o.optInt("autoLatencyMinMs",100),o.optInt("autoLatencyMaxMs",com.vlesscardvpn.core.AutoLatencyRange.DEFAULT_MAX))
             fun list(k: String, def: List<String>) = o.optJSONArray(k)?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: def
             return Settings(
                 mode = runCatching { Mode.valueOf(o.getString("mode")) }.getOrDefault(d.mode),

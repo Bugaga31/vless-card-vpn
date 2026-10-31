@@ -2,7 +2,8 @@ package com.vlesscardvpn.core
 
 /** User target: the upper bound is a gate; faster-than-target replies are welcome. */
 object AutoLatencyRange {
-    const val DEFAULT_MAX = 800
+    const val DEFAULT_MAX = 3000
+    const val PRESET_VERSION = 227
     const val DEFAULT_MIN = 100
     const val LIMIT = 3000
     data class Range(val min: Int = DEFAULT_MIN, val max: Int = DEFAULT_MAX) {

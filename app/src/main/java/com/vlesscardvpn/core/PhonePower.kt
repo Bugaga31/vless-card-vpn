@@ -9,6 +9,7 @@ import android.os.BatteryManager
 import android.os.PowerManager
 import android.os.SystemClock
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.launch
 
 /** One shared sampler: no wakelock, no private data, no settings rewritten by thermal protection. */
 object PhonePower {
@@ -19,21 +20,30 @@ object PhonePower {
     private var sampledAt = -10000L
     private var dirty = true
     private var bytes = -1L
-    private var pauseUntil = 0L
+    @Volatile private var pauseUntil = 0L
     private var lagUntil = 0L
     private var started = false
     private var modeListener: Any? = null
     private val events = android.os.Handler(android.os.Looper.getMainLooper())
-    private var eventRefresh: Runnable? = null
+    private val refreshRequests = kotlinx.coroutines.channels.Channel<Context>(kotlinx.coroutines.channels.Channel.CONFLATED)
+    private val sampler = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO)
+    init {
+        sampler.launch {
+            for (ctx in refreshRequests) {
+                synchronized(this@PhonePower) { dirty = true }
+                runCatching { refreshBlocking(ctx) }
+            }
+        }
+    }
+    /** UI reads the latest plan; binder/sensor work is serialized off the main thread. */
+    fun requestRefresh(ctx: Context) { refreshRequests.trySend(ctx.applicationContext) }
     /** Process lifetime observer: immediate screen/thermal updates, coalesced battery broadcasts. */
     @Synchronized fun start(ctx: Context) {
         if (started) return
         started = true
         val app = ctx.applicationContext
         fun changed() {
-            synchronized(this) { dirty = true }
-            if (eventRefresh == null) eventRefresh = Runnable { runCatching { refresh(app) } }
-            events.removeCallbacks(eventRefresh!!); events.post(eventRefresh!!)
+            requestRefresh(app)
         }
         val filter = android.content.IntentFilter(android.content.Intent.ACTION_SCREEN_OFF).apply {
             addAction(android.content.Intent.ACTION_SCREEN_ON)
@@ -47,7 +57,6 @@ object PhonePower {
         if (android.os.Build.VERSION.SDK_INT >= 31) runCatching {
             val audio = app.getSystemService(AudioManager::class.java)
             val listener = AudioManager.OnModeChangedListener { mode ->
-                synchronized(this) { dirty = true }
                 changed()
             }
             modeListener = listener
@@ -59,12 +68,19 @@ object PhonePower {
         }
         changed()
     }
-    @Synchronized fun pause(minutes: Int) { pauseUntil = SystemClock.elapsedRealtime() + minutes.coerceIn(1, 60) * 60000L }
-    @Synchronized fun resume() { pauseUntil = 0 }
+    fun pause(minutes: Int) { pauseUntil = SystemClock.elapsedRealtime() + minutes.coerceIn(1, 60) * 60000L }
+    fun resume() { pauseUntil = 0 }
     fun isVoiceCallActive(ctx: Context): Boolean = runCatching {
         VoiceCallPolicy.active((ctx.getSystemService(Context.AUDIO_SERVICE) as AudioManager).mode)
     }.getOrDefault(false)
-    @Synchronized fun refresh(ctx: Context): PowerPolicy.Plan {
+    fun refresh(ctx: Context): PowerPolicy.Plan {
+        if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) {
+            requestRefresh(ctx)
+            return state.value
+        }
+        return refreshBlocking(ctx)
+    }
+    @Synchronized private fun refreshBlocking(ctx: Context): PowerPolicy.Plan {
         val now = SystemClock.elapsedRealtime()
         val voiceCall = isVoiceCallActive(ctx)
         if (sample.voiceCall != voiceCall) dirty = true

@@ -30,6 +30,7 @@ fun OceanBackground(motion: Boolean) {
     val owner = LocalLifecycleOwner.current
     var foreground by remember { mutableStateOf(owner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) }
     var eligible by remember { mutableStateOf(false) }
+    val searching by com.vlesscardvpn.core.Actions.running.collectAsState()
     val phase = remember { mutableStateOf(0.0) }
     val paths = remember { List(4) { Path() } }
     val colours = remember { listOf(Color(0xFF0B2536), Color(0xFF0B3042), Color(0xFF0C3948), Color(0xFF104252)) }
@@ -61,8 +62,8 @@ fun OceanBackground(motion: Boolean) {
             if (thermalListener != null && android.os.Build.VERSION.SDK_INT >= 29) runCatching { pm.removeThermalStatusListener(thermalListener) }
             owner.lifecycle.removeObserver(observer); runCatching { ctx.unregisterReceiver(receiver) }; runCatching { ctx.contentResolver.unregisterContentObserver(scaleObserver) } }
     }
-    LaunchedEffect(eligible, foreground) {
-        if (!eligible || !foreground) return@LaunchedEffect
+    LaunchedEffect(eligible, foreground, searching) {
+        if (!eligible || !foreground || searching) return@LaunchedEffect
         var previous = 0L
         while (true) {
             kotlinx.coroutines.delay(OceanPolicy.FRAME_MS)
