@@ -221,7 +221,7 @@ fun SettingsScreen() {
             listOf(10, 20, 30).forEach { n -> FilterChip(selected = s.batteryThreshold == n,
                 onClick = { set { it.copy(batteryThreshold = n) } }, label = { Text("Заряд ≤ $n%") }) }
         }
-        Toggle("Тихо с выключенным экраном", "Необязательные задачи спят; при включении экрана связь проверяется снова. Не зависит от крупных пакетов", s.quietScreen) { v -> set { it.copy(quietScreen = v) } }
+        Toggle("Тихо с выключенным экраном", "Необязательные задачи спят. В Авто проверка живости и восстановление продолжаются без загрузки видео; при включении экрана — полная перепроверка", s.quietScreen) { v -> set { it.copy(quietScreen = v) } }
         Toggle("Улучшения только на зарядке", "Поиск более быстрых серверов и эволюция ждут зарядку. Восстановление связи — всегда", s.chargeOnly) { v -> set { it.copy(chargeOnly = v) } }
         Toggle("Фоновые улучшения без тарификации", "Не тратить мобильный трафик на необязательные проверки; системная экономия трафика учитывается всегда", s.wifiMaintenance) { v -> set { it.copy(wifiMaintenance = v) } }
         Toggle("Не мешать активному трафику", "Отложить фоновые тесты при потоке свыше 40 КБ/с. Это оценка трафика, а не распознавание звонков", s.protectActiveTraffic) { v -> set { it.copy(protectActiveTraffic = v) } }

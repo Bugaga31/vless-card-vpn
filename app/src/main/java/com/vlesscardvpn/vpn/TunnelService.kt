@@ -1022,18 +1022,22 @@ class TunnelService : VpnService() {
                 val stabilityPending = "stability" in watchSettings.autoChecks && watchSettings.mode == Mode.AUTO && usedChain==null && !usedTorRoute && !watchSettings.torAll &&
                     !(watchSettings.torRouting && "telegram" in watchSettings.services) &&
                     com.vlesscardvpn.core.TelegramStability.summary(android.os.SystemClock.elapsedRealtime()).attempted < 3
-                val period = if (offline) 10_000L else if (stabilityPending || telegramUnstable > 0 || miss > 0 || dnsMiss > 0 || telegramMiss > 0 || telegramSlow > 0 || servicePending && Store.state.value.settings.mode == Mode.AUTO && usedChain==null && !usedTorRoute) 3_000L else com.vlesscardvpn.core.VpnRecoveryPolicy.watchPeriod(com.vlesscardvpn.core.PhonePower.refresh(this@TunnelService).healthyMs, watchSettings.mode==Mode.AUTO)
-                if (asleep()) {
-                    // Quiet-screen mode suspends on a screen event, not a minute polling timer.
-                    do { screenSignals.receive() } while (asleep())
+                val autoWatch=watchSettings.mode==Mode.AUTO
+                val quietAuto=com.vlesscardvpn.core.VpnRecoveryPolicy.healthOnly(asleep(),autoWatch)
+                val urgent=miss>0 || dnsMiss>0 || !quietAuto && (telegramUnstable>0 || telegramMiss>0 || telegramSlow>0 || stabilityPending || servicePending && autoWatch && usedChain==null && !usedTorRoute)
+                val period = if(offline) 10_000L else if(urgent) 3_000L else
+                    com.vlesscardvpn.core.VpnRecoveryPolicy.watchPeriod(com.vlesscardvpn.core.PhonePower.refresh(this@TunnelService).healthyMs,autoWatch,quietAuto)
+                if (com.vlesscardvpn.core.VpnRecoveryPolicy.pauseWatchdog(asleep(),autoWatch)) {
+                    // Manual mode retains its quiet-screen policy. Auto must keep failure detection.
+                    do { screenSignals.receive() } while (com.vlesscardvpn.core.VpnRecoveryPolicy.pauseWatchdog(asleep(),Store.state.value.settings.mode==Mode.AUTO))
                     delay(1500)
                 } else {
                     val screenEvent = kotlinx.coroutines.withTimeoutOrNull(period) { screenSignals.receive(); true } == true
-                    if (asleep()) continue
+                    if (com.vlesscardvpn.core.VpnRecoveryPolicy.pauseWatchdog(asleep(),autoWatch)) continue
                     if (screenEvent) delay(1500)
                 }
                 com.vlesscardvpn.core.Traffic.tick()
-                if (healJob?.isActive == true || asleep()) continue
+                if (healJob?.isActive == true || com.vlesscardvpn.core.VpnRecoveryPolicy.pauseWatchdog(asleep(),autoWatch)) continue
                 val auth = Tunnel.socks ?: break
                 val port = auth.port
                 val vpnMode = true
@@ -1056,7 +1060,10 @@ class TunnelService : VpnService() {
                     continue
                 }
                 if(sampledTorRoute && Tunnel.status.value.checkOk!=true) verifySoon(0)
-                val profile=if(settings.mode==Mode.AUTO) com.vlesscardvpn.core.AutoCheckProfile.of(settings.autoChecks) else null
+                // Sleeping Auto samples liveness only: no repeated video/Instagram/voice downloads,
+                // no new full-profile evidence or reserve permission from a light HTTPS response.
+                val healthOnly=com.vlesscardvpn.core.VpnRecoveryPolicy.healthOnly(asleep(),settings.mode==Mode.AUTO)
+                val profile=if(settings.mode==Mode.AUTO && !healthOnly) com.vlesscardvpn.core.AutoCheckProfile.of(settings.autoChecks) else null
                 val configuredLimit=com.vlesscardvpn.core.AutoLatencyPolicy.MAX_MS
                 val profileLimit=com.vlesscardvpn.core.SlowRouteConsent.runtimeLimit(usedServers)
                 val checkTelegram = profile?.telegram==true && !settings.torAll &&
@@ -1098,7 +1105,7 @@ class TunnelService : VpnService() {
                 }
                 com.vlesscardvpn.core.ConnectionPassport.light(ok,live.tgOk,checkTelegram)
                 com.vlesscardvpn.core.ConnectionPassport.lightModules(live,checkTelegram,
-                    settings.mode==Mode.AUTO && usedChain==null && !sampledTorRoute && !com.vlesscardvpn.core.SlowRouteConsent.runtime(usedServers))
+                    profile!=null && usedChain==null && !sampledTorRoute && !com.vlesscardvpn.core.SlowRouteConsent.runtime(usedServers))
                 // Never leave a healthy heading after a fresh failure/unknown Telegram result.
                 if(!ok || checkTelegram && live.tgOk!=true) {
                     val cur=Tunnel.status.value
