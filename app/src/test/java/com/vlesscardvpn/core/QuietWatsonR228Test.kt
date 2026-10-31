@@ -5,7 +5,7 @@ import org.junit.Test
 import java.io.File
 
 class QuietWatsonR228Test {
-    @Test fun successfulFullCheckNotRepeatedEveryTick() {val p=PeriodicServicePolicy();assertTrue(p.due("route",0));p.completed("route",100,true);for(t in listOf(101L,1100L,20100L,80000L))assertFalse(p.due("route",t));assertTrue(p.due("route",90100))}
+    @Test fun successfulFullCheckNotRepeatedEveryTick() {val p=PeriodicServicePolicy();assertTrue(p.due("route",0));p.completed("route",100,true);for(t in listOf(101L,1100L,20100L,80000L))assertFalse(p.due("route",t));assertFalse(p.due("route",90100))}
     @Test fun changedNetworkMaskProfileOrCoreInvalidatesLease() {val p=PeriodicServicePolicy();p.completed("core1/net1/mask1/profile1",100,true);for(k in listOf("core2/net1/mask1/profile1","core1/net2/mask1/profile1","core1/net1/mask2/profile1","core1/net1/mask1/profile2"))assertTrue(p.due(k,101))}
     @Test fun failureAndUnknownDoNotBusyLoop() {val p=PeriodicServicePolicy();p.completed("route",100,false);assertFalse(p.due("route",3100));assertTrue(p.due("route",30100))}
     @Test fun runningWorkIsCoalescedAndClockRollbackRechecks() {val p=PeriodicServicePolicy();assertFalse(p.due("x",0,true));p.completed("x",100,true);assertTrue(p.due("x",99))}
@@ -21,7 +21,7 @@ class QuietWatsonR228Test {
     @Test fun forecastAuditScoresFutureOutcomesNotTrainingAccuracy() {val p=PhoneForecastAudit();assertNull(p.brier);p.observe(.8,true);assertEquals(.04,p.brier!!,.000001);p.observe(.2,false);assertEquals(2,p.samples);assertEquals(.04,p.brier!!,.000001)}
     @Test fun invalidPredictionsDoNotBecomeTrainingEvidence() {val p=PhoneForecastAudit();for(x in listOf(Double.NaN,Double.POSITIVE_INFINITY,-.1,1.1))p.observe(x,true);assertEquals(0,p.samples)}
     private fun source(n:String)=listOf(File("src/main/java/com/vlesscardvpn/$n"),File("app/src/main/java/com/vlesscardvpn/$n")).first{it.exists()}.readText()
-    @Test fun fullCheckIsLeasedAndSuccessNoticeNeedsFullVerdict() {val s=source("vpn/TunnelService.kt");assertTrue(s.contains("serviceLease.due(serviceCheckKey()"));assertTrue(s.contains("serviceLease.completed(sampledServiceKey"));assertTrue(s.contains("recoveryAlert.recovered(liveHealthy==true)"));assertTrue(s.contains("if(settings.mode==Mode.AUTO && !asleep()) verifySoon(0)"))}
+    @Test fun fullCheckIsLeasedAndSuccessNoticeNeedsFullVerdict() {val s=source("vpn/TunnelService.kt");assertTrue(s.contains("serviceLease.due(serviceCheckKey()"));assertTrue(s.contains("serviceLease.completed(sampledServiceKey"));assertTrue(s.contains("recoveryAlert.recovered(liveHealthy==true)"));assertTrue(s.contains("serviceLease.contextChanged(serviceCheckKey())"))}
     @Test fun notificationsHonorPermissionQuietAndDnd() {val s=source("vpn/TunnelService.kt");assertTrue(s.contains("POST_NOTIFICATIONS"));assertTrue(s.contains("areNotificationsEnabled()"));assertTrue(s.contains("val audible=sound && !quiet"));assertTrue(s.contains("NotificationManager.IMPORTANCE_LOW"));assertFalse(s.contains("setBypassDnd(true)"));assertFalse(s.contains("setFullScreenIntent"))}
     @Test fun auditComesBeforeTrainingAndDoesNotControlVpn() {val s=source("core/PhoneBrain.kt");assertTrue(s.indexOf("forecastAudit.observe")<s.indexOf("model.train(it,label)"));assertTrue(s.contains("flyForecastAudit.observe"));assertFalse(s.contains("TunnelService"));assertFalse(s.contains("Store.update"))}
     @Test fun contextGuardPrecedesEveryFullProofPublication() {

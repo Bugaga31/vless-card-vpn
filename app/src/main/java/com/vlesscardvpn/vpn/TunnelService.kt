@@ -518,8 +518,8 @@ class TunnelService : VpnService() {
             com.vlesscardvpn.core.AutoLatencyPolicy.MAX_MS,com.vlesscardvpn.core.SlowRouteConsent.runtime(usedServers),
             usedServers.map {it.id},usedVariants.map {it.second?.id},runtime.epoch,runtime.revision).joinToString("|")
     }
-    private fun verifySoon(delayMs: Long) {
-        if(!serviceLease.due(serviceCheckKey(),android.os.SystemClock.elapsedRealtime(),checkJob?.isActive==true)) return
+    private fun verifySoon(delayMs: Long, suspectedFailure:Boolean=false) {
+        if(!serviceLease.due(serviceCheckKey(),android.os.SystemClock.elapsedRealtime(),checkJob?.isActive==true,suspectedFailure)) return
         checkJob = scope.launch {
             delay(delayMs)
             val st = Store.state.value.settings
@@ -1144,8 +1144,9 @@ class TunnelService : VpnService() {
                         Tunnel.status.value=cur.copy(check="Не все выбранные проверки подтверждены. Смотрите результаты ниже.",checkOk=profile.verdict(selectedLive,profileLimit))
                     }
                 }
-                // A full check runs only on lease expiry/context change, never every liveness tick.
-                if(settings.mode==Mode.AUTO && !asleep()) verifySoon(0)
+                // Age alone never starts a new full-service test on a connected route.
+                // A changed network/profile/engine still requires its own new evidence.
+                if(settings.mode==Mode.AUTO && serviceLease.contextChanged(serviceCheckKey())) verifySoon(0)
                 val qualityPlan=com.vlesscardvpn.core.PhonePower.refresh(this@TunnelService)
                 if(com.vlesscardvpn.core.RouteStabilityMemory.mayAttribute(checkTelegram,usedServers.size,qualityPlan) && (ok || Actions.online())) {
                     val server=usedServers.single()
@@ -1264,10 +1265,9 @@ class TunnelService : VpnService() {
                 val suspicious=old!=null && current!=null && old.size>=4 && current.size>=4 && current[1]-old[1]>=4096 && current[3]==old[3]
                 windows=if(suspicious) windows+1 else 0
                 when(com.vlesscardvpn.core.ReserveScoutPolicy.next(windows,Actions.warmReserveCount(usedServers))) {
-                    com.vlesscardvpn.core.ReserveScoutPolicy.Action.PREPARE -> try {Actions.prepareStandby(usedServers)}
-                        catch(e:kotlinx.coroutines.CancellationException) {throw e}
-                        catch(e:Exception) {Log.w(TAG,"Reserve preparation failed",e)}
-                    com.vlesscardvpn.core.ReserveScoutPolicy.Action.VERIFY -> {windows=0;verifySoon(0)}
+                    // A healthy connection is not a reason to keep testing more servers.
+                    com.vlesscardvpn.core.ReserveScoutPolicy.Action.PREPARE -> Unit
+                    com.vlesscardvpn.core.ReserveScoutPolicy.Action.VERIFY -> {windows=0;verifySoon(0,suspectedFailure=true)}
                     com.vlesscardvpn.core.ReserveScoutPolicy.Action.KEEP -> Unit
                 }
                 // This scout never selects a route. Full verification/watchdog owns confirmed-failure recovery.

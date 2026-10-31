@@ -44,7 +44,8 @@ fun ConnectionOverview(status:Tunnel.Status,hideRoute:Boolean,modeLabel:String,c
         }
     }
     val on=status.state==Tunnel.State.CONNECTED
-    val presentation=if(on && !current) status.copy(checkOk=null) else status
+    // Expired proof is shown as STALE below, not as an imaginary running check.
+    val presentation=status
     Card(Modifier.fillMaxWidth().padding(top=12.dp),shape=RoundedCornerShape(24.dp),
         colors=CardDefaults.cardColors(containerColor=MaterialTheme.colorScheme.surface)) {
         Column(Modifier.padding(18.dp),verticalArrangement=Arrangement.spacedBy(14.dp)) {
