@@ -8,7 +8,7 @@ Full definitive failures of selected YouTube/Discord/voice/Instagram/stability n
 
 Home overview precedes updater/clipboard banners; current status and selected-service chips precede verbose runtime explanations. Disconnect remains first. Screen reader polite live region. Test SOCKS and TUN remain separate.
 
-Watson: 15s lightweight advice under pressure, 60s visible normal/120s quiet normal; heavy app inventory only while visible and optional work allowed. Search entry invalidates future training window. Training still requires real future measurements and existing readiness, never grants tunnel/admission authority. No claim of charging/cooling/battery improvement measured on owner device.
+Watson: 15s lightweight advice while visible under pressure, 60s visible normal/120s while UI hidden (also under pressure; no extra idle wakeups); heavy app inventory only while visible and optional work allowed. Search entry invalidates future training window. Training still requires real future measurements and existing readiness, never grants tunnel/admission authority. No claim of charging/cooling/battery improvement measured on owner device.
 
 ROKI: mixed-outcome gate (at least eight defined results and two of each class); stable bounded insertion with 0.08 confidence margin. Unknown/cancelled not trained. Retains every candidate and exploration order for near ties. No model change can make a failed service pass. Existing compatible measured-mask exploration and reserve selection remain enabled.
 
