@@ -124,11 +124,17 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
         val on = status.state == Tunnel.State.CONNECTED
         val busy = status.state == Tunnel.State.CONNECTING
         val color = when { on && status.checkOk == false -> Warn; on && status.checkOk == null -> Accent; on -> Good; busy -> Accent; else -> MaterialTheme.colorScheme.primary }
-        WatsonEntry(openWatson)
-        FoundRoutesCard(onConnectFound)
         ConnectionOverview(status, cfg.hideServerNames, if(cfg.torAll) "Tor через VLESS" else if(cfg.mode==Mode.AUTO) "Авто" else "Выбранные серверы") {
-            PowerButton(on, busy, color) { if (on || busy) onDisconnect() else onConnect() }
+            val action=com.vlesscardvpn.core.HomePresentation.action(on,busy)
+            Button(onClick={if(action==com.vlesscardvpn.core.HomePresentation.Action.CONNECT) onConnect() else onDisconnect()},
+                modifier=Modifier.fillMaxWidth().heightIn(min=56.dp),contentPadding=PaddingValues(16.dp)) {
+                Text(when(action) {com.vlesscardvpn.core.HomePresentation.Action.CONNECT->"Подключить"
+                    com.vlesscardvpn.core.HomePresentation.Action.CANCEL->"Отменить"
+                    com.vlesscardvpn.core.HomePresentation.Action.DISCONNECT->"Отключить"},style=MaterialTheme.typography.titleMedium)
+            }
         }
+        FoundRoutesCard(onConnectFound)
+        WatsonEntry(openWatson)
         val torExit by com.vlesscardvpn.core.TorExitStatus.state.collectAsState()
         if(on && torExit.active) TorExitCountryCard(torExit)
         val backgroundStatus by com.vlesscardvpn.core.BackgroundOptimization.status.collectAsState()
@@ -138,7 +144,7 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
         if (busy) LiveProgress(stop = false) { it.running }
         if (cloudStatus.isNotBlank()) Text(cloudStatus,style=MaterialTheme.typography.bodySmall,
             color=MaterialTheme.colorScheme.onSurfaceVariant,modifier=Modifier.fillMaxWidth().padding(top=8.dp))
-        if(on) ServiceHealthCard()
+        if(on && cfg.mode!=Mode.AUTO) ServiceHealthCard()
         val pausedUntil by Tunnel.pausedUntil.collectAsState()
         val ctx = androidx.compose.ui.platform.LocalContext.current
         if (status.state == Tunnel.State.CONNECTED) {

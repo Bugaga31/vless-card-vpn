@@ -282,6 +282,13 @@ class DpiSet(private val context: Context) : AutoCloseable {
         }
     }
 
+    /** Process liveness only; listener readiness was checked during native startup. Not route proof. */
+    fun runtimeEngine(id:String): Pair<String,Boolean> {
+        val port=if(id==Masks.CURRENT_DPI) currentPort else ports[id]
+        val p=procs.firstOrNull {port!=null && it.port==port}
+        return (p?.strategy?.engine?.title ?: "DPI") to (p?.alive==true)
+    }
+    var onRuntimeChange:(()->Unit)?=null
     private var watch: kotlinx.coroutines.Job? = null
 
     /** Every 2 s: a crashed ByeDPI / zapret process is restarted on its port (logged for the e2e and diagnostics). */
@@ -290,13 +297,18 @@ class DpiSet(private val context: Context) : AutoCloseable {
         watch = scope.launch(Dispatchers.IO) {
             while (isActive) {
                 delay(2000)
-                for (p in procs.toList()) if (!p.alive && p.reviveIfDead())
-                    android.util.Log.i("E2E", "dpi engine revived: ${p.strategy?.id} port=${p.port} times=${p.revived}")
+                onRuntimeChange?.invoke()
+                for (p in procs.toList()) if (!p.alive) {
+                    // Invalidate observations before restarting, not after returning to green.
+                    onRuntimeChange?.invoke()
+                    if (p.reviveIfDead()) android.util.Log.i("E2E", "dpi engine revived: ${p.strategy?.id} port=${p.port} times=${p.revived}")
+                }
+                onRuntimeChange?.invoke()
             }
         }
     }
 
-    override fun close() { watch?.cancel(); watch = null; procs.forEach { it.close() }; procs.clear(); ports.clear(); currentPort = null; current = null }
+    override fun close() { onRuntimeChange=null; watch?.cancel(); watch = null; procs.forEach { it.close() }; procs.clear(); ports.clear(); currentPort = null; current = null }
 }
 
 /**

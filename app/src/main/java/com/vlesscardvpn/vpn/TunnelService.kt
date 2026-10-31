@@ -239,6 +239,7 @@ class TunnelService : VpnService() {
         val prev = Tunnel.status.value
         Tunnel.status.value = if (keepTun && prev.state == Tunnel.State.CONNECTED) prev.copy(check = "Переподключаюсь без разрыва VPN…", checkOk = null)
             else Tunnel.Status(Tunnel.State.CONNECTING, "Подключение…")
+        val maskEpoch=com.vlesscardvpn.core.MaskRuntimeEvidence.begin()
         var connectPhase = "init"
         try {
             kotlinx.coroutines.withContext(Dispatchers.IO) { XrayCore.init(this@TunnelService) }
@@ -305,6 +306,8 @@ class TunnelService : VpnService() {
                 val id = com.vlesscardvpn.core.AutoRoutePolicy.launchMask(automatic, rotate, mine, pool) { it.random() }
                 srv to if (safeMasks) null else Masks.byId(id)
             }
+            val requestedMasks=withMasks.associate { (server,mask) -> server.id to
+                (if(safeMasks) Masks.byId(st.state(server).maskFor(network)) else mask) }
             val needCurrent = withMasks.any { it.second?.dpi == Masks.CURRENT_DPI }
             val fixed = Masks.strategies(withMasks.map { it.second }) - Masks.CURRENT_DPI
             connectPhase = "dpi"
@@ -346,6 +349,26 @@ class TunnelService : VpnService() {
             connectPhase = "core"
             c.start(config)
             check(c.running) { "Xray не запустился: ${c.lastStatus}" }
+            fun maskEntries()=used.map { (server,mask) ->
+                val requested=requestedMasks[server.id]
+                val effective=XrayConfigBuilder.resolveMask(mask,bdPort,set.ports)
+                val engine=effective?.takeIf {it.viaByeDpi}?.let {set.runtimeEngine(it.dpi)}
+                com.vlesscardvpn.core.MaskRuntimeEvidence.Entry(
+                    requested?.id,effective?.id?.takeIf {effective==requested},
+                    requested?.title ?: "Профиль ссылки",effective?.title ?: "Профиль ссылки",
+                    engine?.first ?: if(effective?.packets?.isNotEmpty()==true) "Xray FinalMask" else "Встроенный Xray",
+                    when {engine==null->com.vlesscardvpn.core.MaskRuntimeEvidence.Engine.NOT_REQUIRED
+                        engine.second->com.vlesscardvpn.core.MaskRuntimeEvidence.Engine.RUNNING
+                        else->com.vlesscardvpn.core.MaskRuntimeEvidence.Engine.UNAVAILABLE},requested!=effective)
+            }
+            com.vlesscardvpn.core.MaskRuntimeEvidence.started(maskEpoch,maskEntries(),proxy)
+            set.onRuntimeChange=runtimeChange@{
+                if(com.vlesscardvpn.core.MaskRuntimeEvidence.state.value.epoch!=maskEpoch) return@runtimeChange
+                val entries=maskEntries()
+                if(entries.any {it.engine==com.vlesscardvpn.core.MaskRuntimeEvidence.Engine.UNAVAILABLE})
+                    com.vlesscardvpn.core.AutoCheckEvidence.clear()
+                com.vlesscardvpn.core.MaskRuntimeEvidence.engines(maskEpoch,entries)
+            }
             usedServers = used.map { it.first }; usedVariants=used
             usedChain = measuredChain?.choice
             usedTorRoute = com.vlesscardvpn.tor.TorRoutePolicy.active(settings) || measuredChain?.choice?.chain?.layout?.tor == true
@@ -355,6 +378,7 @@ class TunnelService : VpnService() {
             Log.i("E2E", "socks port=${socks.port} auth=${socks.auth} dpi=${dpiLabel.ifEmpty { "-" }} fixed=${set.ports.keys} mode=${settings.mode} services=${settings.services} proxy=$proxy")
             connectPhase = "tun"
             if (!proxy && !keepTun) startTun(settings, socks)
+            com.vlesscardvpn.core.MaskRuntimeEvidence.tun(tun!=null)
 
             val auto = com.vlesscardvpn.tor.TorConnectionPolicy.needsAutoSearch(st.settings)
             var route = if (selected.size == 1) selected[0].name else "${selected.size} серверов · ${settings.balance.title.lowercase()}"
@@ -559,7 +583,7 @@ class TunnelService : VpnService() {
                 moduleHealth.ready==null || selectedVerdict==null -> null
                 else -> true
             }
-            if(profile!=null) com.vlesscardvpn.core.AutoCheckEvidence.publish(profile,configuredLimit,measuredBeforeDns)
+            if(profile!=null) com.vlesscardvpn.core.AutoCheckEvidence.publish(profile,configuredLimit,measuredBeforeDns,Net.observation(this@TunnelService))
             com.vlesscardvpn.core.ConnectionPassport.full(httpsReachable, if(st.proxyOnly || !httpsReachable) null else dnsOk, p.tgOk, p.ytOk)
             com.vlesscardvpn.core.ConnectionPassport.fullModules(moduleHealth)
             if(attributeServers && profile!=null && sampledServers.size==1) {
@@ -1078,7 +1102,7 @@ class TunnelService : VpnService() {
                 if(profile!=null && (com.vlesscardvpn.core.AutoChecks.current!=profile || com.vlesscardvpn.core.AutoLatencyPolicy.MAX_MS!=configuredLimit)) continue
                 val ok = live.works
                 if(profile!=null) {
-                    com.vlesscardvpn.core.AutoCheckEvidence.publish(profile,configuredLimit,live)
+                    com.vlesscardvpn.core.AutoCheckEvidence.publish(profile,configuredLimit,live,Net.observation(this@TunnelService))
                     val selectedLive=if(com.vlesscardvpn.core.SlowRouteConsent.runtime(usedServers)) live.latencyConsented() else live
                     if(profile.verdict(selectedLive,profileLimit)!=true) {
                         val cur=Tunnel.status.value
@@ -1471,6 +1495,7 @@ class TunnelService : VpnService() {
             networkRefreshJob?.cancel(); networkSignal.incrementAndGet(); networkRefreshWindow.reset(); handoff.reset()
         }
         if (!keepTun) TProxyService.stop()
+        com.vlesscardvpn.core.MaskRuntimeEvidence.stop(keepTun,error?.isNotEmpty()==true)
         core?.stop(); core = null; Tunnel.wireguardKeys = emptySet()
         dpi?.close(); dpi = null; Tunnel.byeDpiPort = null
         if (!keepTun) { Tunnel.socks = null; runCatching { tun?.close() }; tun = null }

@@ -18,39 +18,81 @@ import androidx.compose.ui.platform.LocalLifecycleOwner
 import com.vlesscardvpn.core.*
 import com.vlesscardvpn.health.HealthModule
 
+@OptIn(ExperimentalLayoutApi::class,ExperimentalMaterial3Api::class)
 @Composable
 fun ConnectionOverview(status:Tunnel.Status,hideRoute:Boolean,modeLabel:String,control:@Composable ()->Unit) {
-    val routeSettings by Store.settings.collectAsState()
-    val selectedEvidence by AutoCheckEvidence.frame.collectAsState()
-    val profilePending=routeSettings.mode==com.vlesscardvpn.model.Mode.AUTO && (selectedEvidence?.profile!=AutoCheckProfile.of(routeSettings.autoChecks) || selectedEvidence?.limit!=routeSettings.autoLatencyMaxMs || selectedEvidence?.let {android.os.SystemClock.elapsedRealtime()<it.at || android.os.SystemClock.elapsedRealtime()-it.at>90_000L}==true)
-    val presented=if(profilePending && status.state==Tunnel.State.CONNECTED) status.copy(checkOk=null,check="Набор проверок изменён или ещё не измерен. Ожидаем свежие результаты…") else status
+    val settings by Store.settings.collectAsState()
+    val evidence by AutoCheckEvidence.frame.collectAsState()
+    val runtime by MaskRuntimeEvidence.state.collectAsState()
+    val owner=LocalLifecycleOwner.current
+    val ctx=androidx.compose.ui.platform.LocalContext.current
+    var now by remember {mutableLongStateOf(android.os.SystemClock.elapsedRealtime())}
+    LaunchedEffect(owner) {owner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+        while(true) {now=android.os.SystemClock.elapsedRealtime();kotlinx.coroutines.delay(1000)}
+    }}
+    val profile=AutoCheckProfile.of(settings.autoChecks)
+    val current=evidence?.let {e->HomeDataMapper.proofCurrent(e.profile==profile,e.limit==settings.autoLatencyMaxMs,
+        e.at,now,NetworkObservation.accepts(e.network,Net.observation(ctx)),e.runtimeEpoch==runtime.epoch,
+        e.runtimeRevision==runtime.revision,runtime.config==MaskRuntimeEvidence.Config.CORE_STARTED,
+        runtime.entries.none {it.engine==MaskRuntimeEvidence.Engine.UNAVAILABLE})}==true
+    var showProfile by remember {mutableStateOf(false)}
+    if(showProfile) ModalBottomSheet(onDismissRequest={showProfile=false}) {
+        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(20.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
+            Text("Профиль проверок Авто",style=MaterialTheme.typography.titleLarge)
+            AutoCheckSettings();HorizontalDivider();AutoLatencySettings()
+            TextButton(onClick={showProfile=false},modifier=Modifier.fillMaxWidth().heightIn(min=48.dp)) {Text("Готово")}
+        }
+    }
     val on=status.state==Tunnel.State.CONNECTED
-    val searching=status.state==Tunnel.State.CONNECTING
-    val issue=presented.state==Tunnel.State.ERROR || on && presented.checkOk==false
-    val tone=when {issue->Warn;on && presented.checkOk==true->Good;else->Accent}
-    Card(Modifier.fillMaxWidth().padding(top=12.dp),shape=RoundedCornerShape(12.dp),
+    val presentation=if(on && !current) status.copy(checkOk=null) else status
+    Card(Modifier.fillMaxWidth().padding(top=12.dp),shape=RoundedCornerShape(24.dp),
         colors=CardDefaults.cardColors(containerColor=MaterialTheme.colorScheme.surface)) {
-        Column(Modifier.padding(16.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
-            Text(if(searching) "Поиск · $modeLabel" else "Режим · $modeLabel",
-                color=tone,fontSize=14.sp,fontWeight=FontWeight.Medium)
-            Text(ConnectionPresentationPolicy.heading(presented.state,presented.checkOk),fontSize=22.sp,
-                lineHeight=27.sp,fontWeight=FontWeight.SemiBold,color=MaterialTheme.colorScheme.onSurface)
+        Column(Modifier.padding(18.dp),verticalArrangement=Arrangement.spacedBy(14.dp)) {
+            Text("Режим · $modeLabel",style=MaterialTheme.typography.labelLarge,color=MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(ConnectionPresentationPolicy.heading(presentation.state,presentation.checkOk),
+                style=MaterialTheme.typography.headlineSmall,color=MaterialTheme.colorScheme.onSurface)
             control()
-            Text(when {
-                (searching || on) && presented.check.isNotBlank()->presented.check
-                searching->"Проверяем: ${AutoChecks.label()}. Отмена — кнопкой выше."
-                status.state==Tunnel.State.ERROR->"Серверы и настройки сохранены. Повторите поиск или откройте диагностику."
-                on && status.checkOk==false->"Туннель подключён, но не все обязательные проверки прошли. Смотрите результаты ниже."
-                on && status.checkOk==null->"Туннель запущен. Доступность сервисов ещё проверяется."
-                on->"Локальные пробы подтвердили маршрут. Доступность аккаунтов и звонков проверяется отдельно."
-                else->"Проверки: ${AutoChecks.label()}. Допуск ответа до ${AutoLatencyPolicy.MAX_MS} мс."
-            },fontSize=15.sp,lineHeight=22.sp,color=MaterialTheme.colorScheme.onSurfaceVariant)
-            if(status.message.isNotBlank()) Text(status.message,fontSize=14.sp,
-                color=if(status.state==Tunnel.State.ERROR) Bad else MaterialTheme.colorScheme.onSurfaceVariant)
-            HorizontalDivider(color=MaterialTheme.colorScheme.outline.copy(alpha=.3f))
-            Text(if(routeSettings.torAll) "RU-исключения выключены · Всё через Tor" else if(routeSettings.ruAllDirect) "RU-домены и IPv4: напрямую · после переподключения" else if(routeSettings.ruWhitelist) "RU-список: напрямую · после переподключения" else "RU-список: через VPN",fontSize=14.sp,color=MaterialTheme.colorScheme.onSurfaceVariant)
-            if(status.route.isNotBlank()) Text(if(hideRoute) "Имена маршрута скрыты" else status.route,
-                fontSize=14.sp,color=MaterialTheme.colorScheme.onSurfaceVariant)
+            FlowRow(horizontalArrangement=Arrangement.spacedBy(8.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
+                val verdict=when {evidence==null->HomePresentation.Verdict.NO_DATA
+                    !current->HomePresentation.Verdict.STALE
+                    else->when(profile.verdict(evidence!!.probe,settings.autoLatencyMaxMs)) {
+                        true->HomePresentation.Verdict.PASS;false->HomePresentation.Verdict.FAIL;null->HomePresentation.Verdict.UNKNOWN}}
+                HomeStatusPill("${verdict.symbol} Тестовый SOCKS: ${verdict.label}",verdict)
+                HomeStatusPill(if(runtime.tunActive) "● Системный TUN создан" else if(runtime.proxyOnly && on)
+                    "— Только локальный прокси, без TUN" else "— Системный TUN не подтверждён",
+                    if(runtime.tunActive) HomePresentation.Verdict.PASS else HomePresentation.Verdict.NO_DATA)
+            }
+            Text("TUN и проверочный SOCKS — разные контуры. Эти статусы не подтверждают трафик каждого приложения или реальный звонок.",
+                style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
+            if(status.route.isNotBlank()) Text(if(hideRoute) "Имена маршрута скрыты" else status.route,style=MaterialTheme.typography.titleMedium)
+            Text("Маска · "+when(runtime.config) {
+                MaskRuntimeEvidence.Config.NO_DATA->"нет runtime-данных"
+                MaskRuntimeEvidence.Config.PREPARING->"подготовка конфигурации"
+                MaskRuntimeEvidence.Config.CORE_STARTED->"ядро запущено с конфигурацией"
+                MaskRuntimeEvidence.Config.STOPPED->"ядро остановлено"
+                MaskRuntimeEvidence.Config.ERROR->"ошибка запуска"
+            },style=MaterialTheme.typography.titleSmall)
+            runtime.entries.forEachIndexed {i,entry->
+                Text("${i+1}. Запрошена: ${entry.requestedTitle}; в конфиге: ${entry.configuredTitle}",style=MaterialTheme.typography.bodyMedium)
+                HomeStatusPill(when(entry.engine) {
+                    MaskRuntimeEvidence.Engine.NOT_REQUIRED->"— ${entry.engineName}: внешний процесс не требуется"
+                    MaskRuntimeEvidence.Engine.RUNNING->"● ${entry.engineName}: процесс активен"
+                    MaskRuntimeEvidence.Engine.UNAVAILABLE->"✕ ${entry.engineName}: процесс не подтверждён"
+                    MaskRuntimeEvidence.Engine.STOPPED->"— ${entry.engineName}: остановлен"
+                },if(entry.engine==MaskRuntimeEvidence.Engine.UNAVAILABLE) HomePresentation.Verdict.FAIL else HomePresentation.Verdict.NO_DATA)
+                if(entry.fallback) HomeStatusPill("! Fallback: запрошенные параметры маски изменены; это не прямой обход VPN",HomePresentation.Verdict.UNKNOWN)
+            }
+            OutlinedButton(onClick={showProfile=true},modifier=Modifier.fillMaxWidth().heightIn(min=48.dp)) {
+                Text("Профиль Авто: ${AutoChecks.label(profile)} · до ${settings.autoLatencyMaxMs} мс · ${ProbeConcurrencyPolicy.normalize(settings.probeParallel)} проб",style=MaterialTheme.typography.bodyMedium)
+            }
+            if(settings.mode==com.vlesscardvpn.model.Mode.AUTO) {
+                HomeServiceChips(HomeDataMapper.services(profile,evidence?.probe,current))
+                Text("Показаны результаты локальных проб; истёкший или изменённый контекст не считается текущим успехом.",style=MaterialTheme.typography.bodySmall)
+            }
+            Text(if(settings.torAll) "RU-исключения выключены · Всё через Tor" else if(settings.ruAllDirect)
+                "RU-домены и IPv4: напрямую · после переподключения" else if(settings.ruWhitelist)
+                "RU-список: напрямую · после переподключения" else "RU-список: через VPN",style=MaterialTheme.typography.bodySmall)
+            if(status.state==Tunnel.State.ERROR || status.checkOk==false) Text("Маршрут требует проверки. Причины — в диагностике; это не доказательство блокировки провайдером.",style=MaterialTheme.typography.bodyMedium)
         }
     }
 }
