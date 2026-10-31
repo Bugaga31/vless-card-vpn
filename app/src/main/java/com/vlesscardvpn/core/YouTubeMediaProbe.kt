@@ -168,13 +168,54 @@ object YouTubeMediaProbe {
         }
     }
 
+    internal fun continuationRange(value:String?,offset:Int,size:Int):Boolean {
+        val m=Regex("bytes (\\d+)-(\\d+)/(\\d+)").matchEntire(value.orEmpty()) ?: return false
+        val a=m.groupValues[1].toLongOrNull() ?: return false
+        val b=m.groupValues[2].toLongOrNull() ?: return false
+        val total=m.groupValues[3].toLongOrNull() ?: return false
+        return a==offset.toLong() && b==offset.toLong()+size-1 && total>b
+    }
+    /** Three successive media windows; finite loading continuity, not a playback/codec guarantee. */
+    fun measureStable(url:String,call:(Request)->Call):Result {
+        val first=measure(url,call)
+        if(first.ok!=true) return first
+        var slowest=first.kbps
+        val size=32768
+        for(offset in listOf(SAMPLE_BYTES,SAMPLE_BYTES+size)) {
+            if(Thread.currentThread().isInterrupted) return Result(null,reason="CANCELLED")
+            val start=System.nanoTime()
+            try {
+                call(Request.Builder().url(url).header("Range","bytes=$offset-${offset+size-1}")
+                    .header("Accept-Encoding","identity").build()).execute().use {r->
+                    if(r.code!=206) return Result(null,reason="YT_RANGE_UNSUPPORTED")
+                    if(!r.header("Content-Type").orEmpty().startsWith("video/",true) ||
+                        !continuationRange(r.header("Content-Range"),offset,size) ||
+                        !r.header("Content-Encoding").orEmpty().let {it.isEmpty() || it.equals("identity",true)})
+                        return Result(null,reason="YT_RANGE_UNSUPPORTED")
+                    val input=r.body?.byteStream() ?: return Result(null,reason="YT_FORMAT")
+                    val buf=ByteArray(8192);var got=0
+                    while(got<size) {
+                        if(Thread.currentThread().isInterrupted) return Result(null,reason="CANCELLED")
+                        val n=input.read(buf,0,minOf(buf.size,size-got))
+                        if(n<0) return Result(false,reason="YT_MEDIA_TRUNCATED")
+                        if(n>0) got+=n
+                    }
+                    val ms=((System.nanoTime()-start)/1000000).coerceAtLeast(1)
+                    slowest=minOf(slowest,(got*8L/ms).toInt().coerceAtLeast(1))
+                }
+            } catch(_:java.io.InterruptedIOException) {return Result(null,reason=if(Thread.currentThread().isInterrupted) "CANCELLED" else "TIMEOUT")}
+              catch(_:Exception) {return Result(null,reason=if(Thread.currentThread().isInterrupted) "CANCELLED" else "ERROR")}
+        }
+        return Result(true,slowest)
+    }
+
     fun check(call:(Request)->Call):Result {
         val discovery=discoverDetailed(call)
         val first=discovery.url ?: return Result(null,reason=discovery.reason)
         var last=Result(null,reason=discovery.reason)
         for(url in (listOf(first)+discovery.alternatives).distinct().take(3)) {
             if(Thread.currentThread().isInterrupted) return Result(null,reason="CANCELLED")
-            last=measure(url,call)
+            last=measureStable(url,call)
             if(last.ok==true || last.reason in setOf("TIMEOUT","CANCELLED")) return last
         }
         return last

@@ -16,6 +16,7 @@ object AutoAdmissionReason {
             else if(p.tgOk==true && p.tgMs>maxMs) why+="Telegram ${p.tgMs} мс выше предела $maxMs мс"
         }
         if(profile.youtube) gate("YouTube",p.ytOk,"youtube")
+        if(profile.instagram) gate("Instagram",p.instagramOk,"instagram")
         if(profile.discord) gate("Discord",p.discordOk,"discord")
         if(profile.stability) gate("Устойчивость",p.stableOk,"stability")
         if(profile.voice) gate("UDP для звонков",p.callsOk,"voice")

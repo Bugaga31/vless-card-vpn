@@ -89,7 +89,7 @@ class SeriesDiagnosticsR222Test {
         val f=listOf(File("src/main/java/com/vlesscardvpn/core/Tester.kt"),File("app/src/main/java/com/vlesscardvpn/core/Tester.kt")).first {it.exists()}
         val method=f.readText().substringAfter("    fun probeSocks(").substringBefore("    // Media downloads")
         assertTrue(method.indexOf("val stabilityF =") in 0 until method.indexOf("var best = Long.MAX_VALUE"))
-        assertTrue(method.contains("StabilitySeriesProbe.collect"));assertTrue(method.contains("voiceNote.set(\"VOICE_\""))
-        assertTrue(method.contains("grade==CallTransportPolicy.Grade.PASS"))
+        assertTrue(method.contains("StabilitySeriesProbe.collect"));assertTrue(method.contains("VoiceAvailabilityProbe.check"))
+        assertTrue(method.contains("relaxedCalls.set(summary.ignoringLatency)"))
     }
 }

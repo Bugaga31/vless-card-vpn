@@ -66,7 +66,8 @@ object UdpCallProbe {
     fun voiceTrain(socksPort:Int,user:String="",pass:String="",onCancel:((()->Unit)->Unit)?=null):Train =
         train(socksPort,user,pass,4000,CallTransportPolicy.PACKETS,onCancel)
 
-    internal fun train(socksPort:Int,user:String,pass:String,budgetMs:Int,count:Int,onCancel:((()->Unit)->Unit)?):Train {
+    internal fun train(socksPort:Int,user:String,pass:String,budgetMs:Int,count:Int,onCancel:((()->Unit)->Unit)?,host:String=HOST,targetPort:Int=PORT):Train {
+        require(count in 1..CallTransportPolicy.PACKETS && host.isNotBlank() && targetPort in 1..65535)
         val started = System.nanoTime()
         val deadline = started + TimeUnit.MILLISECONDS.toNanos(budgetMs.coerceIn(1, 5000).toLong())
         var udp: DatagramSocket? = null
@@ -140,7 +141,7 @@ object UdpCallProbe {
                 val nextSend=trainStart + TimeUnit.MILLISECONDS.toNanos(sent*CallTransportPolicy.INTERVAL_MS)
                 if(sent<count && now>=nextSend) {
                     if(now-nextSend>TimeUnit.MILLISECONDS.toNanos(100)) timingReliable=false
-                    val request=socksUdpFrame(HOST,PORT,bindingRequest(transactionIds[sent]))
+                    val request=socksUdpFrame(host,targetPort,bindingRequest(transactionIds[sent]))
                     sentAt[sent]=System.nanoTime()
                     udp.send(DatagramPacket(request,request.size,relay,relayPort))
                     sent++

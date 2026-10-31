@@ -62,6 +62,9 @@ object ByeDpiArgs {
     /** Returns normalized long-form argv (e.g. "--disorder", "1"), or failure with a Russian message. */
     fun parse(line: String, mask: String = DEFAULT_MASK): Result<List<String>> = runCatching {
         require(line.length <= MAX_LENGTH) { "Слишком длинная строка" }
+        require(!Regex("(^|\\s)(?:nfqws2?|winws2?)(?:\\.exe)?(?:\\s|$)|--(?:dpi-desync|lua-init|lua-desync|wf-tcp|wf-udp|filter-tcp|filter-udp)").containsMatchIn(line)) {
+            "Это стратегия zapret/zapret2, не ByeDPI. Аргументы разных движков несовместимы; профиль не применён"
+        }
         val domain = maskDomain(mask)
         val tokens = tokenize(line.trim().removePrefix("ciadpi").removePrefix("byedpi").trim())
         require(tokens.isNotEmpty()) { "Пустая стратегия" }
@@ -107,7 +110,7 @@ object ByeDpiArgs {
     /** Accepted but risky options, shown under the editor. */
     fun warnings(args: List<String>): List<String> = buildList {
         if ("--md5sig" in args) add("-S (md5sig) не поддерживается ядром многих Android-телефонов: соединения могут не открываться")
-        if ("--fake" in args && "--ttl" !in args && "--md5sig" !in args) add("Фейк без -t: используется TTL 8")
+        if ("--fake" in args && "--ttl" !in args && "--md5sig" !in args) add("Фейк без -t: используется TTL 8; это не измерение пути — слишком большой TTL может доставить фейк серверу и сломать соединение")
         if ("--fake-sni" in args && args.zipWithNext().none { (k, v) -> k == "--fake-tls-mod" && 'o' in v })
             add("Без -Qo фейк-SNI может не подставиться в короткий ClientHello")
     }
