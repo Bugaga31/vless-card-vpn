@@ -84,13 +84,6 @@ class MainActivity : ComponentActivity() {
         com.vlesscardvpn.core.Updater.schedule(this)
         com.vlesscardvpn.core.Updater.check(ctx = this)
         lifecycleScope.launch {
-            repeatOnLifecycle(Lifecycle.State.STARTED) {
-                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                    while (true) { runCatching { com.vlesscardvpn.core.DeviceCoach.sample(applicationContext) }; kotlinx.coroutines.delay(60000) }
-                }
-            }
-        }
-        lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.RESUMED) {
                 com.vlesscardvpn.core.Tunnel.status.collect { offerVpnBatteryExemption() }
             }

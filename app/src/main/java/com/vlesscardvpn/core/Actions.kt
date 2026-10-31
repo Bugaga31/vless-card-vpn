@@ -44,17 +44,22 @@ object Actions {
         .stateIn(scope, kotlinx.coroutines.flow.SharingStarted.Eagerly, false)
     private var job: Job? = null
     private lateinit var app: Context
+    private var initialized = false
     private val probeMemory = ProbeMemory()
     private var requestedSourceJob: Job? = null
     private var requestedSourceAttempt = -60000L
 
-    fun init(context: Context) {
+    @Synchronized fun init(context: Context) {
+        if (initialized) return
         app = context.applicationContext
         SlowRouteConsent.init(app)
         maybeLoadRequestedSource()
         runCatching { Brain.load(app) } // load before the first probe can initialize fresh weights
         // 1.0.81–1.0.83 left a mask neural network and maybe a 0.5–1.8 GB language model on the phone: removed, space freed
-        runCatching { java.io.File(app.filesDir, "mask_brain.json").delete(); java.io.File(app.filesDir, "llm").deleteRecursively() }
+        scope.launch(Bg.io) {
+            runCatching { java.io.File(app.filesDir, "mask_brain.json").delete(); java.io.File(app.filesDir, "llm").deleteRecursively() }
+        }
+        initialized = true
     }
 
     fun cancelForNetworkChange() {
@@ -1651,11 +1656,15 @@ object Actions {
         try {
             // Fetch immediately, alongside cached-catalog probes. First useful source wins;
             // one blocked subscription cannot hold the connect button for all other sources.
+            var nativeCohorts = 0
             kotlinx.coroutines.withTimeoutOrNull(AutoDiscoveryPolicy.FIRST_CONNECT_MS) {
                 ForegroundDiscoveryPump.run(batches, cached = { sourceWindow() },
-                    keepGoing = { !started.started && sameNetwork() },
+                    keepGoing = { !started.started && sameNetwork() && (!continuous || nativeCohorts == 0) },
                     usable = { it.id !in attempted && AutoEligibility.vlessServer(it) }) { batch ->
-                    notes += quickTest(sourceWindow(batch), firstReady, attempted, firstWaveOnly = true, allowMaskRescue = false, statistics = statistics)
+                    val ranked = sourceWindow(batch)
+                    val cohort = if (continuous) ranked.take(AutomaticCoachPolicy.nativeCohortSize(Store.state.value.settings.probeParallel)) else ranked
+                    nativeCohorts++
+                    notes += quickTest(cohort, firstReady, attempted, firstWaveOnly = true, allowMaskRescue = false, statistics = statistics)
                 }
             }
             // A separate small budget: a slow native wave/source cannot silently starve mask rescue.

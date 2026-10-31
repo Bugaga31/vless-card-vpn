@@ -9,8 +9,8 @@ class AutoLatencyR185Test {
         assertTrue(AutoLatencyPolicy.accepts(sample(1,1)))
     }
     @Test fun slowHttpsAndSlowTelegramAreBothRejected() {
-        assertFalse(AutoLatencyPolicy.accepts(sample(1001,50)))
-        assertFalse(AutoLatencyPolicy.accepts(sample(50,1001)))
+        assertFalse(AutoLatencyPolicy.accepts(sample(3001,50)))
+        assertFalse(AutoLatencyPolicy.accepts(sample(50,3001)))
     }
     @Test fun unknownTimingAndUnknownServiceNeverSatisfyStrictAuto() {
         assertFalse(AutoLatencyPolicy.accepts(sample(tg=0)))
@@ -22,14 +22,14 @@ class AutoLatencyR185Test {
     }
     @Test fun noHistoricalServiceSuccessWithoutTimingIsEligible() {
         val s=ServerState(autoChecksKey=AutoChecks.key(AutoChecks.current,AutoLatencyPolicy.MAX_MS),autoChecksAt=1000,realMs=100,tgOk=true,serviceNetwork="wifi",serviceMask="",serviceCheckedAt=1000)
-        assertTrue(AutoEligibility.servicePool(listOf(s),{it},"wifi",1001).isEmpty())
-        assertEquals(listOf(s.copy(tgMs=500)),AutoEligibility.servicePool(listOf(s.copy(tgMs=500)),{it},"wifi",1001))
+        assertTrue(AutoEligibility.servicePool(listOf(s),{it},"wifi",3001).isEmpty())
+        assertEquals(listOf(s.copy(tgMs=500)),AutoEligibility.servicePool(listOf(s.copy(tgMs=500)),{it},"wifi",3001))
     }
     @Test fun timingCannotCrossNetworksMasksOrExpiration() {
         val s=ServerState(realMs=100,tgOk=true,tgMs=100,serviceNetwork="wifi",serviceMask="",serviceCheckedAt=1000)
-        assertTrue(AutoEligibility.servicePool(listOf(s),{it},"cell",1001).isEmpty())
-        assertTrue(AutoEligibility.servicePool(listOf(s.copy(maskId="chrome.hello.fast")),{it},"wifi",1001).isEmpty())
-        assertTrue(AutoEligibility.servicePool(listOf(s),{it},"wifi",301001).isEmpty())
+        assertTrue(AutoEligibility.servicePool(listOf(s),{it},"cell",3001).isEmpty())
+        assertTrue(AutoEligibility.servicePool(listOf(s.copy(maskId="chrome.hello.fast")),{it},"wifi",3001).isEmpty())
+        assertTrue(AutoEligibility.servicePool(listOf(s),{it},"wifi",303001).isEmpty())
     }
     @Test fun latencySurvivesRoundTripButLegacyRemainsUnknown() {
         val s=ServerState(realMs=100,tgOk=true,tgMs=333)
@@ -43,9 +43,9 @@ class AutoLatencyR185Test {
         assertEquals(0,AutoHandoffPolicy.resetRuntime(old,"cell").tgMs)
     }
     @Test fun threeConfirmedSlowSamplesAreNeededAndUnknownBreaksStreak() {
-        assertEquals(1,AutoLatencyPolicy.slowStreak(0,sample(tg=1200)))
-        assertEquals(2,AutoLatencyPolicy.slowStreak(1,sample(tg=1200)))
-        assertEquals(3,AutoLatencyPolicy.slowStreak(2,sample(tg=1200)))
+        assertEquals(1,AutoLatencyPolicy.slowStreak(0,sample(tg=3200)))
+        assertEquals(2,AutoLatencyPolicy.slowStreak(1,sample(tg=3200)))
+        assertEquals(3,AutoLatencyPolicy.slowStreak(2,sample(tg=3200)))
         assertEquals(0,AutoLatencyPolicy.slowStreak(2,sample()))
         assertEquals(0,AutoLatencyPolicy.slowStreak(2,sample().copy(tgOk=null)))
     }

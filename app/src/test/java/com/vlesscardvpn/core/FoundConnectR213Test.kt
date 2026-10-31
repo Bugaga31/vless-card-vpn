@@ -10,24 +10,24 @@ import org.junit.Test
 
 class FoundConnectR213Test {
     private fun server(n:Int)=Server("fixture$n","vless","192.0.2.$n",443,"fixture$n")
-    @Test fun ownerPreset100to800IsDefault() {
-        assertEquals(AutoLatencyRange.Range(100,800),AutoLatencyRange.Range())
-        assertEquals(100,Settings().autoLatencyMinMs);assertEquals(800,Settings().autoLatencyMaxMs)
+    @Test fun ownerPreset100to3000IsDefault() {
+        assertEquals(AutoLatencyRange.Range(100,3000),AutoLatencyRange.Range())
+        assertEquals(100,Settings().autoLatencyMinMs);assertEquals(3000,Settings().autoLatencyMaxMs)
     }
     @Test fun legacySaved1000IsMigratedOnce() {
         val s=Settings.fromJson(JSONObject("{\"autoLatencyMinMs\":1,\"autoLatencyMaxMs\":1000}"))
-        assertEquals(100,s.autoLatencyMinMs);assertEquals(800,s.autoLatencyMaxMs)
+        assertEquals(100,s.autoLatencyMinMs);assertEquals(3000,s.autoLatencyMaxMs)
     }
     @Test fun customRangeAfterMigrationSurvivesReload() {
         val s=Settings(autoLatencyMinMs=50,autoLatencyMaxMs=1200)
         val r=Settings.fromJson(s.toJson());assertEquals(50,r.autoLatencyMinMs);assertEquals(1200,r.autoLatencyMaxMs)
     }
     @Test fun presetSurvivesRoundTrip() {
-        val r=Settings.fromJson(Settings().toJson());assertEquals(100,r.autoLatencyMinMs);assertEquals(800,r.autoLatencyMaxMs)
+        val r=Settings.fromJson(Settings().toJson());assertEquals(100,r.autoLatencyMinMs);assertEquals(3000,r.autoLatencyMaxMs)
     }
-    @Test fun latency578And800AreAcceptedAnd801NotAutomatic() {
+    @Test fun latency578And3000AreAcceptedAnd3001NotAutomatic() {
         val r=AutoLatencyRange.Range();assertTrue(r.accepts(true,578,true,578))
-        assertTrue(r.accepts(true,800,true,800));assertFalse(r.accepts(true,801,true,578))
+        assertTrue(r.accepts(true,3000,true,3000));assertFalse(r.accepts(true,3001,true,578))
     }
     @Test fun fasterThan100IsNotExcluded() {assertTrue(AutoLatencyRange.Range().accepts(true,1,true,20))}
     @Test fun presetDoesNotAdmitFailedBodyOrUnknownTelegram() {

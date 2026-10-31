@@ -12,6 +12,12 @@ import android.os.PowerManager
 import android.os.StatFs
 import android.os.SystemClock
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
 
 /** Root-free advisor. It cannot kill other apps or attribute battery/CPU usage to them. */
 object DeviceCoach {
@@ -21,7 +27,36 @@ object DeviceCoach {
     private var bytes = -1L
     private var at = -1L
     private const val JOB = 13401
-    @Synchronized fun sample(ctx: Context) {
+    private var inventoryAt = -1L
+    private val automaticStarted = java.util.concurrent.atomic.AtomicBoolean(false)
+    private val visible = MutableStateFlow(false)
+    private val automaticScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO)
+    /** Active while UI, VPN or explicit search is alive; the optional out-of-app Job remains opt-in. */
+    fun startAutomatic(app: android.app.Application) {
+        if (!automaticStarted.compareAndSet(false, true)) return
+        app.registerActivityLifecycleCallbacks(object : android.app.Application.ActivityLifecycleCallbacks {
+            private var count = 0
+            override fun onActivityStarted(a: android.app.Activity) { count++; visible.value = count > 0 }
+            override fun onActivityStopped(a: android.app.Activity) { count = (count - 1).coerceAtLeast(0); visible.value = count > 0 }
+            override fun onActivityCreated(a: android.app.Activity, b: android.os.Bundle?) {}
+            override fun onActivityResumed(a: android.app.Activity) {}
+            override fun onActivityPaused(a: android.app.Activity) {}
+            override fun onActivitySaveInstanceState(a: android.app.Activity, b: android.os.Bundle) {}
+            override fun onActivityDestroyed(a: android.app.Activity) {}
+        })
+        automaticScope.launch {
+            combine(visible, Tunnel.status.map { it.state == Tunnel.State.CONNECTED || it.state == Tunnel.State.CONNECTING }, Actions.running) {
+                ui, vpn, search -> AutomaticCoachPolicy.active(ui, vpn, search)
+            }.distinctUntilChanged().collectLatest { active ->
+                if (active) while (true) {
+                    runCatching { sample(app, includePhoneInfo = visible.value) }
+                    PhonePower.requestRefresh(app)
+                    delay(AutomaticCoachPolicy.SAMPLE_MS)
+                }
+            }
+        }
+    }
+    @Synchronized fun sample(ctx: Context, includePhoneInfo: Boolean = true) {
         val now = SystemClock.elapsedRealtime()
         if (at >= 0 && now - at < 10000) return
         val mi = ActivityManager.MemoryInfo().also { (ctx.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager).getMemoryInfo(it) }
@@ -37,7 +72,10 @@ object DeviceCoach {
             disk.totalBytes, bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY), pm.isPowerSaveMode)
         val predict = PhoneBrain.update(ctx, signals, Store.settings.value.phoneLearning, Actions.progress.value.running)
         state.value = snapshot; advice.value = DeviceAdvice.tips(snapshot, predict)
-        phone.value = runCatching { PhoneInfo.collect(ctx) }.getOrNull()
+        if (AutomaticCoachPolicy.inventoryDue(includePhoneInfo, now, inventoryAt)) {
+            phone.value = runCatching { PhoneInfo.collect(ctx) }.getOrNull()
+            inventoryAt = now
+        }
         at = now; bytes = total
     }
     fun backgroundEnabled(ctx: Context) = ctx.getSharedPreferences("phone_coach", 0).getBoolean("background", false)

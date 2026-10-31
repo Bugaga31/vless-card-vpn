@@ -17,9 +17,9 @@ fun AutoLatencySettings() {
     Column(verticalArrangement=Arrangement.spacedBy(8.dp)) {
         Text("Допуск задержки в Авто",style=MaterialTheme.typography.titleMedium)
         OutlinedTextField(value=text,onValueChange={text=it.take(24)},singleLine=true,
-            label={Text("До, мс или диапазон: 100–800")},isError=parsed==null,
+            label={Text("До, мс или диапазон: 100–3000")},isError=parsed==null,
             supportingText={Text(if(parsed==null) "Число или диапазон от 1 до 3000 мс; начало не больше конца."
-                else "По умолчанию 100–800 мс. Верхняя граница обязательна; ответы быстрее начала диапазона тоже принимаются.")},
+                else "По умолчанию 100–3000 мс. Верхняя граница обязательна; ответы быстрее начала диапазона тоже принимаются.")},
             modifier=Modifier.fillMaxWidth())
         Button(onClick={parsed?.let { range -> Store.update {it.copy(settings=it.settings.copy(autoLatencyMinMs=range.min,autoLatencyMaxMs=range.max))} }},enabled=parsed!=null) {Text("Сохранить допуск")}
         Text("Это время ответа HTTPS и Telegram MTProto, не ICMP-пинг. Смена допуска сама по себе не обрывает подключение. Стабильность оценивается по серии проб, не по одному ответу.",style=MaterialTheme.typography.bodySmall)
