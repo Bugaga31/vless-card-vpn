@@ -1,6 +1,9 @@
 package com.vlesscardvpn.xray
 
 import com.vlesscardvpn.model.Base64
+import com.vlesscardvpn.core.TpwsProfile
+import com.vlesscardvpn.core.DpiStrategies
+import com.vlesscardvpn.core.DpiEngine
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -32,7 +35,7 @@ object MyMasks {
             if (m.noise.isNotEmpty()) put("n", m.noise)
             if (m.noiseJson.isNotEmpty()) put("nj", m.noiseJson)
             if (m.hop.isNotEmpty()) put("h", m.hop)
-            if (m.dpi == Masks.CURRENT_DPI) put("dpi", m.dpi)
+            if (m.dpi == Masks.CURRENT_DPI || m.dpi.startsWith("TPWS#")) put("dpi", m.dpi)
             if (m.sni.isNotEmpty()) put("sni", m.sni)
             if (m.alpn.isNotEmpty()) put("alpn", m.alpn)
             if (m.mss > 0) put("mss", m.mss)
@@ -74,7 +77,14 @@ object MyMasks {
         }
         val hop = o.optString("h")
         require(hop.isEmpty() || hop == Masks.HOP_LOCAL || hop == Masks.HOP_WARP) { "Неизвестный режим смены порта" }
-        val dpi = o.optString("dpi").takeIf { it == Masks.CURRENT_DPI }.orEmpty()
+        val dpi = o.optString("dpi")
+        require(dpi.isEmpty() || dpi == Masks.CURRENT_DPI || TpwsProfile.decode(dpi) != null ||
+            DpiStrategies.BUILT_IN.any { it.id == dpi && it.engine == DpiEngine.TPWS }) {
+            "Неизвестный профиль DPI: нужен текущий движок или проверенный профиль tpws"
+        }
+        require(dpi.isEmpty() || dpi == Masks.CURRENT_DPI || packets.isEmpty()) {
+            "Фиксированный tpws и Xray-дробление не смешиваются: выберите один движок"
+        }
         require(dpi.isEmpty() || (noise.isEmpty() && nj.isEmpty() && hop.isEmpty())) {
             "Локальный TCP-движок DPI нельзя соединять с UDP-шумом или сменой портов"
         }

@@ -84,6 +84,9 @@ object DpiStrategies {
 
     /** Order: what ByeByeDPI users report working most often first; TTL fakes (break near servers) last. */
     val BUILT_IN: List<DpiStrategy> = listOf(
+        tpws("HELLO_RECORD", "TLS-запись + мягкий split · первый блок", "--tlsrec=sniext+1", "--split-pos=1,midsld", "--tamper-cutoff=n2"),
+        tpws("HELLO_MULTISPLIT", "границы SNI + disorder · первый блок", "--split-pos=1,host,midsld,endhost", "--disorder=tls", "--tamper-cutoff=n2"),
+        tpws("HELLO_MID_RECORD", "TLS-запись в середине домена · первый блок", "--tlsrec=midsld", "--split-pos=1", "--tamper-cutoff=n2"),
         bye("OOB_THEN_DISORDER", "авто: OOB → порядок", "--oob", "1", "--auto=torst", "--disorder", "1"),
         CASCADE,
         bye("DISORDER", "обратный порядок", "--disorder", "1"),
@@ -121,6 +124,7 @@ object DpiStrategies {
 
     fun byId(id: String?, s: Settings): DpiStrategy? = when {
         id == null || id == "" || id == Settings.DPI_AUTO -> null
+        id.startsWith(TpwsProfile.PREFIX) -> TpwsProfile.decode(id)?.let { DpiStrategy(id, "zapret tpws · свой профиль", DpiEngine.TPWS, it) }
         id == CUSTOM_ID -> custom(s.byeDpiArgs, s.byeDpiSni)
         id.startsWith(DpiEvo.PREFIX) -> DpiEvo.decode(id)
         else -> BUILT_IN.firstOrNull { it.id == id }
