@@ -40,7 +40,7 @@ def prepare(root, sha, run_id, docs):
     require(any(n.endswith("SeriesDiagnosticsR222Test") for n in suites),"R222 series/diagnostics regressions absent")
     require(any(n.endswith("ServiceExpansionR223Test") for n in suites) and any(n.endswith("AutoProfileR223Test") for n in suites),"R223 service regressions absent")
     require(any(n.endswith("AutoRecoveryR224Test") for n in suites),"R224 background recovery regressions absent")
-    require(totals["tests"]>=687 and not any(totals[k] for k in ("failures","errors","skipped")),"Targeted JVM gate failed")
+    require(totals["tests"]>=688 and not any(totals[k] for k in ("failures","errors","skipped")),"Targeted JVM gate failed")
     for name in ("HomeDataMapperTest","HomeRuntimeTest","HomeUiWiringTest"):
         require(any(n.endswith(name) for n in suites),"Home regression suite absent: "+name)
     ui=json.loads(Path("ui-smoke-225/summary.json").read_text())

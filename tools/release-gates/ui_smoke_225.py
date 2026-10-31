@@ -31,6 +31,7 @@ def tap(n):
 
 def home(name):
     root=dump(name)
+    picture(name)
     button=target(root,lambda t:t=="Подключить")
     assert button is not None,"Connect not visible: "+name
     b=bounds(button);assert b[2]-b[0]>=96 and b[3]-b[1]>=96,"Control smaller than 48dp: "+name
