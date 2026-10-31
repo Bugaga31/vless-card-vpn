@@ -42,6 +42,6 @@ fun AutoCheckSettings() {
             }
         }
         Text("Сохранение автоматическое. Текущее соединение не обрывается; новые настройки учитываются со следующей проверки. Старые резервы должны пройти новый набор проверок.",style=MaterialTheme.typography.bodyMedium)
-        Text("Устойчивость включает три ответа Telegram даже при выключенном первом переключателе. Discord — ответ публичного gateway API, не вход в аккаунт. Звонки — серия STUN через этот SOCKS, не реальный звонок Telegram/Discord. Через Tor UDP не поддерживается: для Tor отключите UDP-проверку. YouTube использует небольшой объём видеотрафика. STUN-сервис Google видит запросы с выхода VPN.",style=MaterialTheme.typography.bodyMedium)
+        Text("Устойчивость включает три ответа Telegram даже при выключенном первом переключателе. Discord — публичный API и WebSocket HELLO через тот же SOCKS; не вход в аккаунт и не голосовой канал. Звонки — серия STUN через этот SOCKS, не реальный звонок Telegram/Discord. Через Tor UDP не поддерживается: для Tor отключите UDP-проверку. YouTube использует небольшой объём видеотрафика. STUN-сервис Google видит запросы с выхода VPN.",style=MaterialTheme.typography.bodyMedium)
     }
 }

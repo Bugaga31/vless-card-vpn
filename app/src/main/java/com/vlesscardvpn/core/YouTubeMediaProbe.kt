@@ -11,6 +11,7 @@ import org.json.JSONObject
 object YouTubeMediaProbe {
     const val WATCH = "https://www.youtube.com/watch?v=jNQXAC9IVRw"
     const val SAMPLE_BYTES = 131072
+    internal const val MAX_PAGE_BYTES = 2 * 1048576
     const val PROOF_PREFS = "youtube_media_proof_v1"
     data class Result(val ok: Boolean?, val kbps: Int = 0,val reason:String="")
     data class Discovery(val url:String?,val reason:String="",val alternatives:List<String> = emptyList())
@@ -24,7 +25,7 @@ object YouTubeMediaProbe {
 
     /** Balanced JSON scanner: braces inside strings must not terminate the player response. */
     internal fun playerJson(html: String): String? {
-        if (html.length > 1048576) return null
+        if (html.length > MAX_PAGE_BYTES) return null
         val marker = html.indexOf("ytInitialPlayerResponse")
         if (marker < 0) return null
         val begin = html.indexOf('{', marker)
@@ -42,6 +43,15 @@ object YouTubeMediaProbe {
         }
         return null
     }
+
+    internal fun discoveryReason(html:String):String = runCatching {
+        val root=JSONObject(playerJson(html) ?: return "YT_NO_DIRECT_MEDIA")
+        when(root.optJSONObject("playabilityStatus")?.optString("status")) {
+            "LOGIN_REQUIRED" -> "YT_LOGIN_REQUIRED"
+            "UNPLAYABLE", "ERROR", "LIVE_STREAM_OFFLINE" -> "YT_UNPLAYABLE"
+            else -> "YT_NO_DIRECT_MEDIA"
+        }
+    }.getOrDefault("YT_NO_DIRECT_MEDIA")
 
     internal fun mediaUrl(html:String):String? = mediaUrls(html).firstOrNull()
     internal fun mediaUrls(html:String):List<String> = runCatching {
@@ -91,14 +101,19 @@ object YouTubeMediaProbe {
             if(!r.header("Content-Type").orEmpty().startsWith("text/html",true)) return Discovery(null,"YT_FORMAT")
             val input=r.body?.byteStream() ?: return Discovery(null,"YT_FORMAT")
             val out=java.io.ByteArrayOutputStream();val buf=ByteArray(8192)
-            while(out.size()<1048576) {
+            while(out.size()<MAX_PAGE_BYTES) {
                 if(Thread.currentThread().isInterrupted) return Discovery(null,"CANCELLED")
-                val n=input.read(buf,0,minOf(buf.size,1048576-out.size()))
+                val n=input.read(buf,0,minOf(buf.size,MAX_PAGE_BYTES-out.size()))
                 if(n<0) break
                 out.write(buf,0,n)
-                if(out.size()%32768<8192) mediaUrls(out.toString("UTF-8")).takeIf {it.isNotEmpty()}?.let {return Discovery(it.first(),alternatives=it.drop(1))}
+                if(out.size()%32768<8192) {
+                    val page=out.toString("UTF-8")
+                    mediaUrls(page).takeIf {it.isNotEmpty()}?.let {return Discovery(it.first(),alternatives=it.drop(1))}
+                    // A complete denied/unsupported player cannot gain media from later unrelated HTML.
+                    if(playerJson(page)!=null) return Discovery(null,discoveryReason(page))
+                }
             }
-            mediaUrls(out.toString("UTF-8")).takeIf {it.isNotEmpty()}?.let {Discovery(it.first(),alternatives=it.drop(1))} ?: Discovery(null,"YT_NO_DIRECT_MEDIA")
+            mediaUrls(out.toString("UTF-8")).takeIf {it.isNotEmpty()}?.let {Discovery(it.first(),alternatives=it.drop(1))} ?: Discovery(null,discoveryReason(out.toString("UTF-8")))
         }
     } catch(_:java.net.SocketTimeoutException) {Discovery(null,"TIMEOUT")}
       catch(_:Exception) {Discovery(null,if(Thread.currentThread().isInterrupted) "CANCELLED" else "ERROR")}
