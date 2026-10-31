@@ -195,7 +195,7 @@ object XrayConfigBuilder {
     fun dpiTag(dpi: String): String = if (dpi.isEmpty() || dpi == Masks.CURRENT_DPI) BYEDPI_TAG else "dpi-" + dpi.replace(Regex("[^A-Za-z0-9_]"), "_")
 
     /** Masks whose engine is not running fall back to the current one, or to direct. */
-    private fun resolveMask(m: Mask?, cur: Int?, ports: Map<String, Int>): Mask? = when {
+    fun resolveMask(m: Mask?, cur: Int?, ports: Map<String, Int>): Mask? = when {
         m == null || !m.viaByeDpi -> m
         m.dpi == Masks.CURRENT_DPI -> if (cur != null) m else m.copy(dpi = "")
         ports.containsKey(m.dpi) -> m

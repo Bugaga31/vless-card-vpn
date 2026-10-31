@@ -391,7 +391,7 @@ object Actions {
 
     private suspend fun realTest(servers: List<Server>, title: String, big: Boolean = true, attempts: Int = 2, parallel: Int = 32, youtube: Boolean = true,
                                  telegram: Boolean = youtube, calls: Boolean = false, stopAfter: Int = Int.MAX_VALUE, budgetMs: Long = 0, onFirst: ((Server) -> Unit)? = null, onSuccess: ((Server) -> Unit)? = null,
-                                 batch: Int = 64, foreground: Boolean = false, onAttempt: ((Server)->Unit)? = null, onPrepared: ((Server)->Unit)? = null, onObservation: ((Probe)->Unit)? = null): Int {
+                                 batch: Int = 64, foreground: Boolean = false, onAttempt: ((Server)->Unit)? = null, onPrepared: ((Server)->Unit)? = null, onObservation: ((Probe)->Unit)? = null, onCandidateResult: ((Server,Probe,Boolean,String)->Unit)? = null): Int {
         if (servers.isEmpty()) return 0
         val plan = PhonePower.refresh(app)
         val selectedParallel=ProbeConcurrencyPolicy.normalize(Store.state.value.settings.probeParallel)
@@ -437,6 +437,7 @@ object Actions {
                     (profile?.accepts(p,profileLimit) ?: (!telegram || AutoChecks.accepts(p))) && !cooling)
                 if(profile!=null && !routeReady && p.realMs>0)
                     progress.value=progress.value.copy(message=AutoAdmissionReason.describe(p,profile,profileLimit,cooling))
+                onCandidateResult?.invoke(s,p,routeReady,if(profile!=null) AutoAdmissionReason.describe(p,profile,profileLimit,cooling) else "")
                 val firstSuccess = routeReady && ok.incrementAndGet() == 1
                 if (routeReady) onSuccess?.invoke(s)
                 if (profile!=null && routeReady) warmPassed.add(s.id)
@@ -1216,6 +1217,7 @@ object Actions {
         val next=scope.launch(start=kotlinx.coroutines.CoroutineStart.LAZY) {
             old?.join()
             if(autoGeneration.get()!=ticket) return@launch
+            val diagnosticRun=FoundAttemptEvidence.begin()
             progress.value=Progress("Авто: подключаю найденные",running=true)
             Tunnel.status.value=Tunnel.Status(Tunnel.State.CONNECTING,"Проверяю найденные…",check="Без нового поиска по каталогу")
             try {
@@ -1250,12 +1252,15 @@ object Actions {
                     if(candidates.isEmpty()) error("В «Рабочих» нет подходящих для Авто серверов")
                     // Exactly the already-found shortlist; the selected gates remain mandatory.
                     realTest(candidates,"Авто: проверяю найденные",big=true,youtube=profile.youtube,
-                        telegram=profile.telegram,calls=profile.voice,foreground=true,attempts=1,stopAfter=1,onPrepared={found.prepared(it)},onSuccess={found.verified(it)})
+                        telegram=profile.telegram,calls=profile.voice,foreground=true,attempts=1,stopAfter=1,onPrepared={found.prepared(it)},onSuccess={found.verified(it)},onCandidateResult={server,probe,ready,reason->
+                            if(valid()) FoundAttemptEvidence.record(diagnosticRun,candidates.indexOfFirst {it.id==server.id}+1,
+                                HomeDataMapper.services(profile,probe,true),ready,reason)
+                        })
                     kotlinx.coroutines.currentCoroutineContext().ensureActive()
                 }) {
-                    FoundConnectSequence.Result.READY->return@launch
-                    FoundConnectSequence.Result.STALE->error("Сеть или настройки изменились. Повторите подключение к найденным")
-                    FoundConnectSequence.Result.NONE->Unit
+                    FoundConnectSequence.Result.READY->{FoundAttemptEvidence.finish(diagnosticRun,FoundAttemptEvidence.Outcome.READY);return@launch}
+                    FoundConnectSequence.Result.STALE->{FoundAttemptEvidence.finish(diagnosticRun,FoundAttemptEvidence.Outcome.STALE);error("Сеть или настройки изменились. Повторите подключение к найденным")}
+                    FoundConnectSequence.Result.NONE->FoundAttemptEvidence.finish(diagnosticRun,FoundAttemptEvidence.Outcome.NONE)
                 }
                 SlowRouteConsent.remember(found.current(Store.state.value.servers),0)
                 val reason=if(SlowRouteConsent.offer.value!=null)
@@ -1264,7 +1269,11 @@ object Actions {
                 Tunnel.status.value=Tunnel.Status(Tunnel.State.ERROR,"Найденные пока не допущены",check=reason,checkOk=false)
                 progress.value=progress.value.copy(message=reason)
             } catch(e:Exception) {
-                if(e is kotlinx.coroutines.CancellationException) throw e
+                if(e is kotlinx.coroutines.CancellationException) {
+                    FoundAttemptEvidence.finish(diagnosticRun,FoundAttemptEvidence.Outcome.CANCELLED);throw e
+                }
+                if(FoundAttemptEvidence.state.value.outcome!=FoundAttemptEvidence.Outcome.STALE)
+                    FoundAttemptEvidence.finish(diagnosticRun,FoundAttemptEvidence.Outcome.ERROR)
                 if(autoGeneration.get()==ticket) {
                     val reason=Errors.human(e)
                     Tunnel.status.value=Tunnel.Status(Tunnel.State.ERROR,"Не удалось подключить найденные",check=reason,checkOk=false)
