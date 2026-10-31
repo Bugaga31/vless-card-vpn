@@ -294,6 +294,7 @@ class TunnelService : VpnService() {
             selected = Actions.pinCertificates(com.vlesscardvpn.core.AutoEligibility.launchPool(selected, automatic))
             usedServers = selected
             val rotate = settings.rotateMasks
+            val requestedMasks=mutableMapOf<String,com.vlesscardvpn.xray.Mask?>()
             val withMasks = measuredChain?.choice?.let { choice ->
                 choice.server?.let { server -> listOf(server to if(choice.chain.layout == com.vlesscardvpn.core.AutoChainSelection.Layout.DPI_SERVER)
                     (choice.mask ?: com.vlesscardvpn.xray.Mask("auto-chain-dpi","Auto DPI","")).copy(dpi=choice.dpiStrategy) else choice.mask) } ?: emptyList()
@@ -304,10 +305,12 @@ class TunnelService : VpnService() {
                 val limit = Masks.byId(mine)?.let { Masks.cost(it) } ?: 0
                 val pool = (ss.goodMasks + mine).filter { it.isNotEmpty() && (Masks.byId(it)?.let { m -> Masks.cost(m) } ?: 0) <= limit }
                 val id = com.vlesscardvpn.core.AutoRoutePolicy.launchMask(automatic, rotate, mine, pool) { it.random() }
-                srv to if (safeMasks) null else Masks.byId(id)
+                val requested=Masks.byId(id)
+                requestedMasks[srv.id]=requested
+                srv to if (safeMasks) null else requested
             }
-            val requestedMasks=withMasks.associate { (server,mask) -> server.id to
-                (if(safeMasks) Masks.byId(st.state(server).maskFor(network)) else mask) }
+            // Chain paths already carry their precise requested variant; never infer it from names or stored defaults.
+            withMasks.forEach { (server,mask) -> if(server.id !in requestedMasks) requestedMasks[server.id]=mask }
             val needCurrent = withMasks.any { it.second?.dpi == Masks.CURRENT_DPI }
             val fixed = Masks.strategies(withMasks.map { it.second }) - Masks.CURRENT_DPI
             connectPhase = "dpi"
