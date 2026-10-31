@@ -20,4 +20,6 @@ Existing on-device future-label learning is augmented by predict-before-training
 ## Limits and validation
 Ordinary Android permissions do not provide control of charging current or physical cooling. Optional workload reduction may reduce this application's contribution to power and heat; no charging-speed or battery-life percentage is claimed. No killing other applications, deleting foreign data, root/accessibility abuse, transport/SNI/crypto substitution or silent VPN optimization.
 
-18 local JVM regressions passed before Android CI. Android compilation and broader targeted tests must pass before describing the change as verified. Real-device sound, Doze, charging, heat, battery and TUN recovery still need device testing. Installed APK remains unchanged until a separately built and signed release is published.
+19 local JVM regressions passed before Android CI. Android compilation and broader targeted tests must pass before describing the change as verified. Real-device sound, Doze, charging, heat, battery and TUN recovery still need device testing. Installed APK remains unchanged until a separately built and signed release is published.
+
+Follow-up: reject a changed full runtime/context key before any proof/passport/store publication. Recovery text covers partial service failures without falsely claiming that all connectivity is lost. Initial CI 41227931554 cancelled intentionally before this follow-up; not a successful check.

@@ -24,4 +24,12 @@ class QuietWatsonR228Test {
     @Test fun fullCheckIsLeasedAndSuccessNoticeNeedsFullVerdict() {val s=source("vpn/TunnelService.kt");assertTrue(s.contains("serviceLease.due(serviceCheckKey()"));assertTrue(s.contains("serviceLease.completed(sampledServiceKey"));assertTrue(s.contains("recoveryAlert.recovered(liveHealthy==true)"));assertTrue(s.contains("if(settings.mode==Mode.AUTO && !asleep()) verifySoon(0)"))}
     @Test fun notificationsHonorPermissionQuietAndDnd() {val s=source("vpn/TunnelService.kt");assertTrue(s.contains("POST_NOTIFICATIONS"));assertTrue(s.contains("areNotificationsEnabled()"));assertTrue(s.contains("val audible=sound && !quiet"));assertTrue(s.contains("NotificationManager.IMPORTANCE_LOW"));assertFalse(s.contains("setBypassDnd(true)"));assertFalse(s.contains("setFullScreenIntent"))}
     @Test fun auditComesBeforeTrainingAndDoesNotControlVpn() {val s=source("core/PhoneBrain.kt");assertTrue(s.indexOf("forecastAudit.observe")<s.indexOf("model.train(it,label)"));assertTrue(s.contains("flyForecastAudit.observe"));assertFalse(s.contains("TunnelService"));assertFalse(s.contains("Store.update"))}
+    @Test fun contextGuardPrecedesEveryFullProofPublication() {
+        val s=java.io.File("src/main/java/com/vlesscardvpn/vpn/TunnelService.kt").let {if(it.exists())it else java.io.File("app/"+it.path)}.readText()
+        val guard=s.indexOf("if(serviceCheckKey()!=sampledServiceKey) return@launch")
+        assertTrue(guard>=0)
+        assertTrue(guard<s.indexOf("AutoCheckEvidence.publish(profile,configuredLimit"))
+        assertTrue(guard<s.indexOf("ConnectionPassport.full(httpsReachable"))
+        assertTrue(guard<s.indexOf("LiveRouteEvidence.commit(old,p,profile"))
+    }
 }

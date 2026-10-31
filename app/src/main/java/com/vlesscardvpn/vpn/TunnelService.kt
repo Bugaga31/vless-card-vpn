@@ -601,6 +601,7 @@ class TunnelService : VpnService() {
                 moduleHealth.ready==null || selectedVerdict==null -> null
                 else -> true
             }
+            if(serviceCheckKey()!=sampledServiceKey) return@launch
             if(profile!=null && com.vlesscardvpn.core.NetworkObservation.accepts(sampledUiNetwork,Net.observation(this@TunnelService)))
                 com.vlesscardvpn.core.AutoCheckEvidence.publish(profile,configuredLimit,measuredBeforeDns,sampledUiNetwork,sampledUiRuntime)
             com.vlesscardvpn.core.ConnectionPassport.full(httpsReachable, if(st.proxyOnly || !httpsReachable) null else dnsOk, p.tgOk, p.ytOk)
@@ -610,7 +611,6 @@ class TunnelService : VpnService() {
                 val mask=usedVariants.firstOrNull {it.first.id==server.id}?.second?.id ?: Store.state.value.state(server).maskFor(sampledNet)
                 Store.setState(server.id) {old->com.vlesscardvpn.core.LiveRouteEvidence.commit(old,p,profile,sampledNet,mask,sampleStarted,System.currentTimeMillis())}
             }
-            if(serviceCheckKey()!=sampledServiceKey) return@launch
             serviceLease.completed(sampledServiceKey,android.os.SystemClock.elapsedRealtime(),liveHealthy==true)
             if(recoveryAlert.recovered(liveHealthy==true)) recoveryNotice("Соединение восстановлено",false)
             Tunnel.status.value = cur.copy(check = text + (if(com.vlesscardvpn.core.SlowRouteConsent.runtime(usedServers)) " · повышенная задержка разрешена вами для этой сессии" else ""), checkOk = liveHealthy)
@@ -1579,7 +1579,7 @@ class TunnelService : VpnService() {
     private fun recoveryStarted() {
         val alert=recoveryAlert.begin(android.os.SystemClock.elapsedRealtime())
         if(alert!=com.vlesscardvpn.core.RecoveryAlertPolicy.Alert.NONE)
-            recoveryNotice("Связь потеряна — ищу рабочий маршрут и переподключаю VPN",alert==com.vlesscardvpn.core.RecoveryAlertPolicy.Alert.SOUND)
+            recoveryNotice("Проблема соединения — ищу рабочий маршрут и переподключаю VPN",alert==com.vlesscardvpn.core.RecoveryAlertPolicy.Alert.SOUND)
     }
     /** Best effort: OS notification permissions, channel settings and Do Not Disturb are respected. */
     private fun recoveryNotice(text:String,sound:Boolean) {
