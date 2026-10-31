@@ -50,6 +50,14 @@ fun ConnectionOverview(status:Tunnel.Status,hideRoute:Boolean,modeLabel:String,c
         Column(Modifier.padding(18.dp),verticalArrangement=Arrangement.spacedBy(14.dp)) {
             // Keep the action above verbose headings on narrow screens with large system fonts.
             control()
+            if(status.check.isNotBlank()) Text(status.check,
+                style=MaterialTheme.typography.bodyMedium,
+                color=when(status.checkOk) {true->MaterialTheme.colorScheme.primary
+                    false->MaterialTheme.colorScheme.error;null->MaterialTheme.colorScheme.onSurfaceVariant},
+                modifier=Modifier.semantics {liveRegion=LiveRegionMode.Polite})
+            if(settings.mode==com.vlesscardvpn.model.Mode.AUTO) {
+                HomeServiceChips(HomeDataMapper.services(profile,evidence?.probe,current))
+            }
             Text("Режим · $modeLabel",style=MaterialTheme.typography.labelLarge,color=MaterialTheme.colorScheme.onSurfaceVariant)
             Text(ConnectionPresentationPolicy.heading(presentation.state,presentation.checkOk),
                 style=MaterialTheme.typography.headlineSmall,color=MaterialTheme.colorScheme.onSurface)
@@ -91,7 +99,6 @@ fun ConnectionOverview(status:Tunnel.Status,hideRoute:Boolean,modeLabel:String,c
                 Text("Профиль Авто: ${AutoChecks.label(profile)} · до ${settings.autoLatencyMaxMs} мс · ${ProbeConcurrencyPolicy.normalize(settings.probeParallel)} проб",style=MaterialTheme.typography.bodyMedium)
             }
             if(settings.mode==com.vlesscardvpn.model.Mode.AUTO) {
-                HomeServiceChips(HomeDataMapper.services(profile,evidence?.probe,current))
                 Text("Показаны результаты локальных проб; истёкший или изменённый контекст не считается текущим успехом.",style=MaterialTheme.typography.bodySmall)
             }
             Text(if(settings.torAll) "RU-исключения выключены · Всё через Tor" else if(settings.ruAllDirect)

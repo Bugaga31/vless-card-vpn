@@ -97,6 +97,19 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
                 Text(if (compact) "На одной волне · Xray" else "Связь на одной волне", fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
+        fun reconnect() { if (status.state == Tunnel.State.CONNECTED) onConnect() }
+        val on = status.state == Tunnel.State.CONNECTED
+        val busy = status.state == Tunnel.State.CONNECTING
+        val color = when { on && status.checkOk == false -> Warn; on && status.checkOk == null -> Accent; on -> Good; busy -> Accent; else -> MaterialTheme.colorScheme.primary }
+        ConnectionOverview(status, cfg.hideServerNames, if(cfg.torAll) "Tor через VLESS" else if(cfg.mode==Mode.AUTO) "Авто" else "Выбранные серверы") {
+            val action=com.vlesscardvpn.core.HomePresentation.action(on,busy)
+            Button(onClick={if(action==com.vlesscardvpn.core.HomePresentation.Action.CONNECT) onConnect() else onDisconnect()},
+                modifier=Modifier.fillMaxWidth().heightIn(min=56.dp),contentPadding=PaddingValues(16.dp)) {
+                Text(when(action) {com.vlesscardvpn.core.HomePresentation.Action.CONNECT->"Подключить"
+                    com.vlesscardvpn.core.HomePresentation.Action.CANCEL->"Отменить"
+                    com.vlesscardvpn.core.HomePresentation.Action.DISCONNECT->"Отключить"},style=MaterialTheme.typography.titleMedium)
+            }
+        }
         Text("${BuildConfig.VERSION_NAME} · " + if (cfg.stealthSocks) "Локальный прокси защищён паролем" else "SOCKS 127.0.0.1:${cfg.socksPort}",
             modifier = Modifier.fillMaxWidth(), fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
         val upd by com.vlesscardvpn.core.Updater.state.collectAsState()
@@ -118,19 +131,6 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
                     TextButton(onClick = { Actions.clipOffer.value = null }) { Text("Нет") }
                     Button(onClick = { Actions.clipOffer.value = null; android.widget.Toast.makeText(hctx, Actions.importAny(text), android.widget.Toast.LENGTH_LONG).show() }) { Text("Добавить") }
                 }
-            }
-        }
-        fun reconnect() { if (status.state == Tunnel.State.CONNECTED) onConnect() }
-        val on = status.state == Tunnel.State.CONNECTED
-        val busy = status.state == Tunnel.State.CONNECTING
-        val color = when { on && status.checkOk == false -> Warn; on && status.checkOk == null -> Accent; on -> Good; busy -> Accent; else -> MaterialTheme.colorScheme.primary }
-        ConnectionOverview(status, cfg.hideServerNames, if(cfg.torAll) "Tor через VLESS" else if(cfg.mode==Mode.AUTO) "Авто" else "Выбранные серверы") {
-            val action=com.vlesscardvpn.core.HomePresentation.action(on,busy)
-            Button(onClick={if(action==com.vlesscardvpn.core.HomePresentation.Action.CONNECT) onConnect() else onDisconnect()},
-                modifier=Modifier.fillMaxWidth().heightIn(min=56.dp),contentPadding=PaddingValues(16.dp)) {
-                Text(when(action) {com.vlesscardvpn.core.HomePresentation.Action.CONNECT->"Подключить"
-                    com.vlesscardvpn.core.HomePresentation.Action.CANCEL->"Отменить"
-                    com.vlesscardvpn.core.HomePresentation.Action.DISCONNECT->"Отключить"},style=MaterialTheme.typography.titleMedium)
             }
         }
         FoundRoutesCard(onConnectFound)
@@ -179,8 +179,6 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
         } else if (status.state == Tunnel.State.ERROR) {
             TextButton(onClick = { Actions.fixAll { onConnect() } }, enabled = !working) { Text("Починить и подключить") }
         }
-        if (status.check.isNotEmpty()) Text(status.check, color = when (status.checkOk) { true -> Good; false -> Bad; null -> MaterialTheme.colorScheme.onSurfaceVariant },
-            fontSize = 14.sp, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 6.dp))
         Spacer(Modifier.height(20.dp))
         var opts by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
         Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {

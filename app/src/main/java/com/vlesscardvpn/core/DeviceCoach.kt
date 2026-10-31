@@ -45,13 +45,19 @@ object DeviceCoach {
             override fun onActivityDestroyed(a: android.app.Activity) {}
         })
         automaticScope.launch {
+            Actions.running.collectLatest { searching ->
+                if(searching) PhoneBrain.invalidateWindow()
+            }
+        }
+        automaticScope.launch {
             combine(visible, Tunnel.status.map { it.state == Tunnel.State.CONNECTED || it.state == Tunnel.State.CONNECTING }, Actions.running) {
                 ui, vpn, search -> AutomaticCoachPolicy.active(ui, vpn, search)
             }.distinctUntilChanged().collectLatest { active ->
                 if (active) while (true) {
-                    runCatching { sample(app, includePhoneInfo = visible.value) }
+                    val plan=PhonePower.refresh(app)
+                    runCatching { sample(app, includePhoneInfo = visible.value && plan.allowLight) }
                     PhonePower.requestRefresh(app)
-                    delay(AutomaticCoachPolicy.SAMPLE_MS)
+                    delay(AutomaticCoachPolicy.sampleDelay(visible.value,!plan.allowLight))
                 }
             }
         }

@@ -4,6 +4,7 @@ package com.vlesscardvpn.core
 object AutomaticCoachPolicy {
     const val SAMPLE_MS = 60_000L
     const val INVENTORY_MS = 180_000L
+    fun sampleDelay(visible:Boolean,pressure:Boolean)=when {pressure->15_000L;visible->SAMPLE_MS;else->120_000L}
     fun active(uiVisible: Boolean, vpnActive: Boolean, searching: Boolean) = uiVisible || vpnActive || searching
     fun inventoryDue(visible: Boolean, now: Long, last: Long) = visible && (last < 0 || now < last || now - last >= INVENTORY_MS)
     /** First failed native cohort is followed by bounded mask trials, not six native batches. */
