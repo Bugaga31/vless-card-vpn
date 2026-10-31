@@ -9,11 +9,11 @@ class AutoRecoveryR224Test {
     @Test fun awakeAutoDoesNotPause() {assertFalse(VpnRecoveryPolicy.pauseWatchdog(false,true))}
     @Test fun awakeManualDoesNotPause() {assertFalse(VpnRecoveryPolicy.pauseWatchdog(false,false))}
     @Test fun quietAutoUsesOnlyLightLiveness() {assertTrue(VpnRecoveryPolicy.healthOnly(true,true))}
-    @Test fun awakeAutoKeepsFullSelectedChecks() {assertFalse(VpnRecoveryPolicy.healthOnly(false,true))}
+    @Test fun awakeAutoUsesLightLiveness() {assertTrue(VpnRecoveryPolicy.healthOnly(false,true))}
     @Test fun manualDoesNotGainAutoHealthMode() {assertFalse(VpnRecoveryPolicy.healthOnly(true,false))}
-    @Test fun quietCadenceIsFinite() {assertEquals(10000L,VpnRecoveryPolicy.watchPeriod(120000,true,true))}
-    @Test fun awakeCadenceDoesNotRegress() {assertEquals(5000L,VpnRecoveryPolicy.watchPeriod(120000,true))}
-    @Test fun fastAwakeCadenceRetained() {assertEquals(3000L,VpnRecoveryPolicy.watchPeriod(3000,true))}
+    @Test fun quietCadenceIsFinite() {assertEquals(30000L,VpnRecoveryPolicy.watchPeriod(120000,true,true))}
+    @Test fun awakeCadenceDoesNotRegress() {assertEquals(60000L,VpnRecoveryPolicy.watchPeriod(120000,true))}
+    @Test fun fastAwakeCadenceRetained() {assertEquals(20000L,VpnRecoveryPolicy.watchPeriod(3000,true))}
     @Test fun manualCadenceUnchanged() {assertEquals(120000L,VpnRecoveryPolicy.watchPeriod(120000,false,true))}
     @Test fun recoveryRetryRemainsOneSecond() {assertEquals(1000L,VpnRecoveryPolicy.RETRY_MS)}
     private fun watchdog():String {

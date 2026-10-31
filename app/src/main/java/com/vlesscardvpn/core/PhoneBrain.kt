@@ -17,9 +17,15 @@ object PhoneBrain {
     private var pendingAt = 0L
     @Volatile private var forecastAt=0L
     private var pendingCharging=false
+    private var pendingForecast=.5
+    private var pendingFlyForecast=.5
+    private var flyForecastAudit=PhoneForecastAudit()
+    private var forecastAudit=PhoneForecastAudit()
+    val validation = MutableStateFlow("Будущие прогнозы ещё не оценены")
     fun reduceOptionalWork(now:Long)=PhoneForecastPolicy.fresh(forecastAt,now)
     private var enabled = false
     @Synchronized fun reset(ctx: Context) {
+        forecastAudit=PhoneForecastAudit();flyForecastAudit=PhoneForecastAudit();validation.value="Будущие прогнозы ещё не оценены"
         forecastAt=0L; model = PhoneLearning(); fly = FlyPhoneLearning(); pending = null; previousTemp = 0.0; last = -60000
         LocalSecrets.deletePhoneModel(ctx); loaded = true; storageOk = true; saveFailed = false; status.value = "Опыт модели удалён"
     }
@@ -45,12 +51,17 @@ object PhoneBrain {
             // Train only on a future label ~one minute later, never across sleep/process gaps.
             pending?.takeIf { i.now - pendingAt in 60000..180000 }?.let {
                 val label=i.temp >= 39 || i.thermal >= 2 || i.lowMemory
+                forecastAudit.observe(pendingForecast,label)
+                flyForecastAudit.observe(pendingFlyForecast,label)
+                validation.value="Последующая проверка прогноза: ${forecastAudit.samples} наблюдений · Brier ML/Fly ${"%.3f".format(java.util.Locale.ROOT,forecastAudit.brier)}/${"%.3f".format(java.util.Locale.ROOT,flyForecastAudit.brier)} (меньше лучше); это не замер экономии батареи"
                 model.train(it,label)
                 runCatching {fly.train(it,label)}
                 if (model.samples % 10 == 0) saveFailed = runCatching { LocalSecrets.writePhoneModel(ctx, "WATSON_FLY_1\n"+model.encode()+"\n"+fly.encode()) }.isFailure
             }
             val temp = if (i.temp > 0) i.temp else 30.0
             pending = PhoneLearning.features(i.copy(temp = temp), previousTemp.takeIf { it > 0 } ?: temp)
+            pendingForecast=model.predict(pending!!)
+            pendingFlyForecast=runCatching {fly.predict(pending!!)}.getOrDefault(.5)
             previousTemp = temp; pendingAt = i.now; pendingCharging=i.charging; last = i.now
         }
         val risk = pending?.let { model.predict(it) } ?: 0.0

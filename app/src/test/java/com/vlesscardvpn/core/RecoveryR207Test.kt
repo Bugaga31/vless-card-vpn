@@ -27,8 +27,8 @@ class RecoveryR207Test {
  @Test fun boundedToTwenty(){val m=WarmReserveMemory();val all=(0..20).map {a.copy(address="s$it.invalid")};all.forEach {m.record(path,it,"m","https://check.invalid",1000)};val got=get(m,s=all);assertEquals(20,got.size);assertFalse(all.first() in got)}
  @Test fun repeatedProofDoesNotGrowPool(){val m=memory();repeat(30){m.record(path,a,"m","https://check.invalid",1000)};assertEquals(1,get(m).size)}
  @Test fun refreshedProofGetsNewDeadline(){val m=memory();m.record(path,a,"m","https://check.invalid",50000);assertEquals(listOf(a),get(m,at=100000))}
- @Test fun ecoCannotDelayAutoWatchdog(){val p=PowerPolicy.evaluate(PowerPolicy.Input(0,battery=80),PowerPolicy.Options(profile="eco"));assertEquals(5000L,VpnRecoveryPolicy.watchPeriod(p.healthyMs,true));assertFalse(p.allowed);assertTrue(p.allowReserve)}
- @Test fun saverCannotDelayAutoWatchdog(){val p=PowerPolicy.evaluate(PowerPolicy.Input(0,battery=80,saver=true),PowerPolicy.Options());assertEquals(5000L,VpnRecoveryPolicy.watchPeriod(p.healthyMs,true))}
+ @Test fun ecoCannotDelayAutoWatchdog(){val p=PowerPolicy.evaluate(PowerPolicy.Input(0,battery=80),PowerPolicy.Options(profile="eco"));assertEquals(60000L,VpnRecoveryPolicy.watchPeriod(p.healthyMs,true));assertFalse(p.allowed);assertTrue(p.allowReserve)}
+ @Test fun saverCannotDelayAutoWatchdog(){val p=PowerPolicy.evaluate(PowerPolicy.Input(0,battery=80,saver=true),PowerPolicy.Options());assertEquals(45000L,VpnRecoveryPolicy.watchPeriod(p.healthyMs,true))}
  @Test fun nonAutoCadenceUnchanged(){assertEquals(90000L,VpnRecoveryPolicy.watchPeriod(90000,false))}
  @Test fun fasterFaultChecksRetained(){assertEquals(3000L,VpnRecoveryPolicy.watchPeriod(3000,true))}
  @Test fun invalidWatchPeriodBounded(){assertEquals(1000L,VpnRecoveryPolicy.watchPeriod(-1,true))}

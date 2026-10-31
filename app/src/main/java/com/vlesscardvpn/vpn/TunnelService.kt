@@ -211,6 +211,8 @@ class TunnelService : VpnService() {
     }
 
     override fun onDestroy() {
+        recoveryAlert.clear()
+        runCatching {getSystemService(NotificationManager::class.java).cancel(RECOVERY_NOTIFICATION)}
         cancelChainSearch()
         screenReceiver?.let { runCatching { unregisterReceiver(it) } }; screenReceiver = null
         if (Tunnel.status.value.state == Tunnel.State.CONNECTED) runCatching { com.vlesscardvpn.core.Traffic.tick() }
@@ -506,13 +508,24 @@ class TunnelService : VpnService() {
     }
 
     /** End-to-end check through the running chain (app → 127.0.0.1:socks → Xray → server → internet). */
+    private val serviceLease=com.vlesscardvpn.core.PeriodicServicePolicy()
+    private val recoveryAlert=com.vlesscardvpn.core.RecoveryAlertPolicy()
+    private fun serviceCheckKey():String {
+        val s=Store.state.value.settings
+        val runtime=com.vlesscardvpn.core.MaskRuntimeEvidence.state.value
+        return listOf(System.identityHashCode(core),chainEpoch.get(),Tunnel.socks?.port,
+            Net.key(this),Net.underlying(this)?.toString(),s.testUrl,s.mode,s.autoChecks.sorted(),
+            com.vlesscardvpn.core.AutoLatencyPolicy.MAX_MS,com.vlesscardvpn.core.SlowRouteConsent.runtime(usedServers),
+            usedServers.map {it.id},usedVariants.map {it.second?.id},runtime.epoch,runtime.revision).joinToString("|")
+    }
     private fun verifySoon(delayMs: Long) {
-        checkJob?.cancel()
+        if(!serviceLease.due(serviceCheckKey(),android.os.SystemClock.elapsedRealtime(),checkJob?.isActive==true)) return
         checkJob = scope.launch {
             delay(delayMs)
             val st = Store.state.value.settings
             val auth = Tunnel.socks ?: return@launch
             val port = auth.port
+            val sampledServiceKey=serviceCheckKey()
             val sampledNet = Net.key(this@TunnelService)
             val sampledHandle = Net.underlying(this@TunnelService)?.toString()
             val sampledServers = usedServers.toList()
@@ -597,6 +610,9 @@ class TunnelService : VpnService() {
                 val mask=usedVariants.firstOrNull {it.first.id==server.id}?.second?.id ?: Store.state.value.state(server).maskFor(sampledNet)
                 Store.setState(server.id) {old->com.vlesscardvpn.core.LiveRouteEvidence.commit(old,p,profile,sampledNet,mask,sampleStarted,System.currentTimeMillis())}
             }
+            if(serviceCheckKey()!=sampledServiceKey) return@launch
+            serviceLease.completed(sampledServiceKey,android.os.SystemClock.elapsedRealtime(),liveHealthy==true)
+            if(recoveryAlert.recovered(liveHealthy==true)) recoveryNotice("Соединение восстановлено",false)
             Tunnel.status.value = cur.copy(check = text + (if(com.vlesscardvpn.core.SlowRouteConsent.runtime(usedServers)) " · повышенная задержка разрешена вами для этой сессии" else ""), checkOk = liveHealthy)
             if (attributeServers) runCatching { val stv = Store.state.value; com.vlesscardvpn.core.Brain.lived(sampledNet, sampledServers, { stv.state(it) }, p.works); com.vlesscardvpn.core.Brain.save(this@TunnelService) }
             Log.i("E2E", "check ok=${p.works} ms=${p.realMs} big=${p.bigOk} yt=${p.ytOk} tg=${p.tgOk} err=${p.error} warp=$warp dns=$dnsOk")
@@ -1117,9 +1133,9 @@ class TunnelService : VpnService() {
                         val cur=Tunnel.status.value
                         Tunnel.status.value=cur.copy(check="Не все выбранные проверки подтверждены. Смотрите результаты ниже.",checkOk=profile.verdict(selectedLive,profileLimit))
                     }
-                    // Refresh the full module model as the selected profile can change on a live tunnel.
-                    verifySoon(0)
                 }
+                // A full check runs only on lease expiry/context change, never every liveness tick.
+                if(settings.mode==Mode.AUTO && !asleep()) verifySoon(0)
                 val qualityPlan=com.vlesscardvpn.core.PhonePower.refresh(this@TunnelService)
                 if(com.vlesscardvpn.core.RouteStabilityMemory.mayAttribute(checkTelegram,usedServers.size,qualityPlan) && (ok || Actions.online())) {
                     val server=usedServers.single()
@@ -1260,6 +1276,7 @@ class TunnelService : VpnService() {
         val now = System.currentTimeMillis()
         if (!force && now - lastHard < 5 * 60_000L) { heal(); return } // twice in 5 min: restarting doesn't help — heal (masks, servers)
         lastHard = now
+        recoveryStarted()
         Log.i("E2E", "watchdog: hard restart — $why")
         val cur = Tunnel.status.value
         if (cur.state == Tunnel.State.CONNECTED) Tunnel.status.value = cur.copy(check = "Сам переподключаюсь: $why", checkOk = null)
@@ -1297,7 +1314,10 @@ class TunnelService : VpnService() {
             if (found > 0) lock.withLock {
                 if (core === sampledCore && Tunnel.socks == auth && Net.key(this@TunnelService) == network &&
                     Net.underlying(this@TunnelService)?.toString() == handle &&
-                    !com.vlesscardvpn.core.PhonePower.isVoiceCallActive(this@TunnelService)) connect(soft = true)
+                    !com.vlesscardvpn.core.PhonePower.isVoiceCallActive(this@TunnelService)) {
+                    recoveryStarted()
+                    connect(soft = true)
+                }
             } else {
                 val cur = Tunnel.status.value
                 Tunnel.status.value = cur.copy(check = "HTTPS есть, Telegram пока не подтверждён. Рабочий резерв не найден; повторю поиск автоматически", checkOk = false)
@@ -1313,6 +1333,7 @@ class TunnelService : VpnService() {
 
     private fun recoverServerRoute() {
         if (recoveryJob?.isActive == true || tun == null || Tunnel.socks == null) return
+        recoveryStarted()
         recoveryJob = scope.launch {
             var attempt = 0
             val attempted=mutableSetOf<String>()
@@ -1551,6 +1572,39 @@ class TunnelService : VpnService() {
                 rx = r2; tx = t2x; t = now
                 runCatching { foreground("↓ ${Actions.mbps(down)} ↑ ${Actions.mbps(up)} · $route") }
             }
+        }
+    }
+
+    private val RECOVERY_NOTIFICATION=22802
+    private fun recoveryStarted() {
+        val alert=recoveryAlert.begin(android.os.SystemClock.elapsedRealtime())
+        if(alert!=com.vlesscardvpn.core.RecoveryAlertPolicy.Alert.NONE)
+            recoveryNotice("Связь потеряна — ищу рабочий маршрут и переподключаю VPN",alert==com.vlesscardvpn.core.RecoveryAlertPolicy.Alert.SOUND)
+    }
+    /** Best effort: OS notification permissions, channel settings and Do Not Disturb are respected. */
+    private fun recoveryNotice(text:String,sound:Boolean) {
+        runCatching {
+            val nm=getSystemService(NotificationManager::class.java)
+            if(!nm.areNotificationsEnabled()) return
+            if(Build.VERSION.SDK_INT>=33 && checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS)!=android.content.pm.PackageManager.PERMISSION_GRANTED) return
+            val quiet=Store.state.value.settings.quietNotification
+            val audible=sound && !quiet
+            val channel=if(audible) "vpn-recovery-alerts-v1" else "vpn-recovery-status-v1"
+            if(Build.VERSION.SDK_INT>=26) {
+                val ch=NotificationChannel(channel,if(audible) "Сбой VPN со звуком" else "Состояние восстановления VPN",if(audible) NotificationManager.IMPORTANCE_HIGH else NotificationManager.IMPORTANCE_LOW)
+                ch.description="Уведомления об эпизоде восстановления, не о каждой проверке сервера"
+                ch.setSound(if(audible) android.media.RingtoneManager.getDefaultUri(android.media.RingtoneManager.TYPE_NOTIFICATION) else null,
+                    android.media.AudioAttributes.Builder().setUsage(android.media.AudioAttributes.USAGE_NOTIFICATION).build())
+                nm.createNotificationChannel(ch)
+            }
+            val open=PendingIntent.getActivity(this,0,Intent(this,MainActivity::class.java),PendingIntent.FLAG_IMMUTABLE)
+            val builder=(if(Build.VERSION.SDK_INT>=26) Notification.Builder(this,channel) else @Suppress("DEPRECATION") Notification.Builder(this))
+                .setSmallIcon(android.R.drawable.ic_lock_lock).setContentTitle(if(quiet) "Синхронизация" else "VLESS Card")
+                .setContentText(text).setStyle(Notification.BigTextStyle().bigText(text)).setContentIntent(open)
+                .setVisibility(Notification.VISIBILITY_PRIVATE).setAutoCancel(true).setOnlyAlertOnce(!sound || quiet)
+                .setCategory(Notification.CATEGORY_STATUS)
+            if(Build.VERSION.SDK_INT<26 && sound && !quiet) builder.setDefaults(Notification.DEFAULT_SOUND)
+            nm.notify(RECOVERY_NOTIFICATION,builder.build())
         }
     }
 
