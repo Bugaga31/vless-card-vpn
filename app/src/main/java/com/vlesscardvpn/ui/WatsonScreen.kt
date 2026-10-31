@@ -47,6 +47,8 @@ fun WatsonScreen(openPhone:()->Unit) {
     val evidence by AutoCheckEvidence.frame.collectAsState()
     val tunnel by Tunnel.status.collectAsState()
     val phoneStatus by PhoneBrain.status.collectAsState()
+    val forecastValidation by PhoneBrain.validation.collectAsState()
+    val automaticPower by PhonePower.state.collectAsState()
     val tips by DeviceCoach.advice.collectAsState()
     LaunchedEffect(Unit) {withContext(Dispatchers.IO) {runCatching {DeviceCoach.sample(ctx)}}}
     var apps by remember {mutableStateOf<WatsonApps.Snapshot?>(null)}
@@ -72,6 +74,14 @@ fun WatsonScreen(openPhone:()->Unit) {
             confirm=false;message="Прямые RU-исключения выключены в настройках. Переподключите VPN для применения."
         }){Text("Отключить исключения")}},dismissButton={TextButton(onClick={confirm=false}){Text("Отмена")}})
     LazyColumn(Modifier.fillMaxSize().padding(horizontal=16.dp),verticalArrangement=Arrangement.spacedBy(12.dp),contentPadding=PaddingValues(vertical=16.dp)) {
+        item {
+            Column(verticalArrangement=Arrangement.spacedBy(6.dp)) {
+                Text("ВАТСОН · автоматическая экономия",style=MaterialTheme.typography.titleMedium)
+                Text(automaticPower.reason,style=MaterialTheme.typography.bodyMedium)
+                Text(forecastValidation,style=MaterialTheme.typography.bodySmall)
+                Text("Ограничивается только необязательная работа приложения. Ток зарядки, температура и экономия заряда не гарантируются; VPN и явный поиск сохраняются.",style=MaterialTheme.typography.bodySmall)
+            }
+        }
         item {Row(horizontalArrangement=Arrangement.spacedBy(12.dp)) {
             WatsonCat()
             Column(Modifier.weight(1f)) {Text("ВАТСОН",style=MaterialTheme.typography.headlineMedium)

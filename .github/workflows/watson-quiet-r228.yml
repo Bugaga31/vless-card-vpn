@@ -1,0 +1,80 @@
+name: Quiet checks and automatic Watson R228 (verification only)
+on:
+  push:
+    branches: ['experiment/watson-quiet-r228']
+permissions:
+  contents: read
+concurrency:
+  group: watson-quiet-r228
+  cancel-in-progress: true
+jobs:
+  source:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      sha: ${{ steps.source.outputs.sha }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+      - id: source
+        shell: python
+        run: |
+          import base64,gzip,json,pathlib,subprocess,os,hashlib
+          assert os.environ['GITHUB_REF']=='refs/heads/experiment/watson-quiet-r228'
+          subprocess.run(['git','merge-base','--is-ancestor','338a6d0b34155ce2109c235b06dcb987b91dcea7','HEAD'],check=True)
+          p=json.loads(gzip.decompress(base64.b64decode('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')))
+          if not all(pathlib.Path(n).exists() and pathlib.Path(n).read_text()==c for n,c in p['files'].items()):
+              for n,want in p['base'].items():
+                  f=pathlib.Path(n)
+                  assert (hashlib.sha256(f.read_bytes()).hexdigest() if f.exists() else None)==want, 'Concurrent source change: '+n
+              for n,c in p['files'].items():
+                  f=pathlib.Path(n);f.parent.mkdir(parents=True,exist_ok=True);f.write_text(c)
+              subprocess.run(['git','add',*p['files']],check=True)
+              subprocess.run(['git','-c','user.name=github-actions[bot]','-c','user.email=41898282+github-actions[bot]@users.noreply.github.com','commit','-m','fix: quiet service checks, automatic Watson and recovery alerts [skip ci]'],check=True)
+              subprocess.run(['git','push','origin','HEAD:experiment/watson-quiet-r228'],check=True)
+          sha=subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip()
+          with open(os.environ['GITHUB_OUTPUT'],'a') as f:f.write('sha='+sha+'\n')
+  verify:
+    needs: source
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ needs.source.outputs.sha }}
+          persist-credentials: false
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407
+        with:
+          packages: platform-tools platforms;android-34 build-tools;34.0.0
+          log-accepted-android-sdk-licenses: false
+      - uses: gradle/actions/setup-gradle@d9c87d481d55275bb5441eef3fe0e46805f9ef70
+      - name: Restore native libraries
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: |
+            app/build/generated/byedpi
+            app/build/generated/hev
+            app/build/generated/byedpi-cache.json
+            app/build/generated/hev-cache.json
+          key: native-${{ runner.os }}-${{ runner.arch }}-ndk27.2.12479018-api24-all-${{ hashFiles('native/**', 'app/build.gradle.kts') }}
+      - name: Install pinned NDK
+        run: sdkmanager 'ndk;27.2.12479018'
+      - name: Android compilation and targeted regressions
+        run: |
+          export GITHUB_RUN_NUMBER=228
+          chmod +x gradlew
+          ./gradlew -PbetaPreview=true -PemulatorAbis=true --no-daemon --max-workers=2 :app:compileDebugKotlin :app:testDebugUnitTest --tests "*QuietWatsonR228Test" --tests "*ResponsiveAutoR227Test" --tests "*LatencyMigrationR227Test" --tests "*AutomaticWorkR226Test" --tests "*YouTubeAccessR226Test" --tests "*YouTubeLoadingR226Test" --tests "*TpwsProfileR226Test" --tests "*HomeDataMapperTest" --tests "*HomeRuntimeTest" --tests "*HomeUiWiringTest" --tests "*AutoRecoveryR224Test" --tests "*RecoveryR207Test" --tests "*ServiceExpansionR223Test" --tests "*AutoProfileR223Test" --tests "*ByeDpiArgsTest" --tests "*SeriesDiagnosticsR222Test" --tests "*ServiceTransportR221Test" --tests "*ProbeConfigR221Test" --tests "*CallQualityR206Test" --tests "*UdpCallProbeR174Test" --tests "*ServiceErrorsR220Test" --tests "*UiReadabilityR220Test" --tests "*AssistantIsolationR220Test" --tests "*R84Test" --tests "*R85Test" --tests "*FirstConnectivityR219Test" --tests "*AutoFreshR218Test" --tests "*WatsonAutoR217Test" --tests "*ServiceMediaR217Test" --tests "*FlyRokiR216Test" --tests "*AutoRokiR216Test" --tests "*WatsonR215Test" --tests "*RequiredServicesR214Test" --tests "*TelegramSocksProbeTest" --tests "*ServiceMediaProbeTest" --tests "*ExperienceR187Test" --tests "*TorBridgeCatalogR163Test" --tests "*MandatoryBridgesR208Test" --tests "*FoundPresetR213Test" --tests "*FoundConnectR213Test" --tests "*FoundRouteR212Test" --tests "*RouteStabilityR206Test" --tests "*FastConnectR211Test" --tests "*ProbeConcurrencyR210Test" --tests "*SearchPacingR200Test" --tests "*SubscriptionQueueR199Test" --tests "*AutoLatencyR185Test" --tests "*AutoCampaignR175Test" --tests "*ForegroundAutoR176Test" --tests "*PoolLatencyR203Test" --tests "*PhoneRuntimePolicyTest" --tests "*PowerRoutingR192Test" --tests "*AutoCheckProfileR209Test" --tests "*PowerPolicy*"
+      - name: Save test reports (not an APK release)
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: r228-targeted-test-reports
+          path: |
+            app/build/test-results/testDebugUnitTest
+            app/build/reports/tests/testDebugUnitTest
