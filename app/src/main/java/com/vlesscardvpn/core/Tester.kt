@@ -189,11 +189,12 @@ object Tester {
                 YouTubeMediaProbe.check { boundedCall(mediaClient, it) }
             }.also { tasks += it } else null
             val relaxedCalls=java.util.concurrent.atomic.AtomicReference<Boolean?>(null)
-            val relaxedStable=java.util.concurrent.atomic.AtomicReference<Boolean?>(null)
+            val voiceNote=java.util.concurrent.atomic.AtomicReference<String?>(null)
             val callF = if (autoChecks?.voice ?: calls) servicePool.submit<Boolean?> {
                 if(autoChecks?.voice==true) {
                     val t=UdpCallProbe.train(port,user,pass,minOf(4000L,remaining()).toInt(),CallTransportPolicy.PACKETS,onCancel)
                     val summary=CallTransportPolicy.assess(t.sent,t.rttMs,t.complete,AutoLatencyPolicy.MAX_MS)
+                    voiceNote.set("VOICE_"+summary.grade.name)
                     relaxedCalls.set(if(!t.complete || t.sent!=CallTransportPolicy.PACKETS) null else
                         summary.received==CallTransportPolicy.PACKETS && summary.lossPercent==0 && (summary.rttSpreadMs ?: Int.MAX_VALUE)<=40)
                     summary.grade.let {grade->
@@ -203,6 +204,15 @@ object Tester {
             }.also { tasks += it } else null
             val discordF = if(autoChecks?.discord==true) servicePool.submit<DiscordApiProbe.Result> {
                 DiscordRouteProbe.check(mediaClient, { boundedCall(mediaClient,it) }, ::remaining, onCancel)
+            }.also {tasks+=it} else null
+            // Start the complete series before waiting for HTTPS. Waiting for the first
+            // Telegram future consumes the same deadline, never a fresh per-service budget.
+            val stabilityF = if(autoChecks?.stability==true) tgExecutor.submit<StabilitySeriesProbe.Result> {
+                val first=ProbeTasks.await(tgF,remaining(),TelegramProbe.Result(null,0))
+                StabilitySeriesProbe.collect(LinkStabilityPolicy.Sample(first.ok,first.ms),::remaining,AutoLatencyPolicy.MAX_MS) { allowance ->
+                    val x=TelegramProbe.measure(port,allowance,onCancel)
+                    LinkStabilityPolicy.Sample(x.ok,x.ms)
+                }
             }.also {tasks+=it} else null
             var best = Long.MAX_VALUE; var err = ""
             repeat(attempts.coerceIn(1, 3)) {
@@ -219,28 +229,21 @@ object Tester {
             if (best == Long.MAX_VALUE) return Probe(0, null, null, err)
             val bigF = if (big) servicePool.submit<BodyResult> { bigDownload(client,budgetDeadline,onCall) }.also { tasks += it } else null
             val tgResult = await(tgF, remaining(), TelegramProbe.Result(null,0),"telegram") {it.ok!=null}
-            val stabilityF = if(autoChecks?.stability==true) tgExecutor.submit<Boolean?> {
-                val samples=mutableListOf(LinkStabilityPolicy.Sample(tgResult.ok,tgResult.ms))
-                repeat(2) {
-                    if(remaining()<50) return@submit null
-                    val x=TelegramProbe.measure(port,minOf(2000L,remaining()),onCancel)
-                    samples+=LinkStabilityPolicy.Sample(x.ok,x.ms)
-                }
-                relaxedStable.set(LinkStabilityPolicy.summarize(samples,Int.MAX_VALUE).stable)
-                LinkStabilityPolicy.summarize(samples,AutoLatencyPolicy.MAX_MS).stable
-            }.also {tasks+=it} else null
             val bigResult = await(bigF, remaining(), BodyResult(),"payload")
             val ytResult = await(ytF, remaining(), YouTubeMediaProbe.Result(null),"youtube") {it.ok!=null}
             if(ytF!=null && ytResult.ok==null && ytResult.reason.isNotBlank() && notes["youtube"]=="INCONCLUSIVE")
                 notes["youtube"]=ytResult.reason
             val callsOk = if (callF != null) await(callF, remaining(), null,"voice") {it!=null} else null
+            voiceNote.get()?.takeIf {callsOk!=true && notes["voice"]==null || callsOk!=true && notes["voice"]=="INCONCLUSIVE"}?.let {notes["voice"]=it}
             val discordResult=await(discordF,remaining(),DiscordApiProbe.Result(null),"discord") {it.ok!=null}
             if(discordF!=null && discordResult.ok==null && discordResult.reason.isNotBlank() && notes["discord"]=="INCONCLUSIVE")
                 notes["discord"]=discordResult.reason
             val discordOk=discordResult.ok
-            val stableOk=await(stabilityF,remaining(),null,"stability") {it!=null}
+            val stabilityResult=await(stabilityF,remaining(),StabilitySeriesProbe.Result(null,null,"INCONCLUSIVE"),"stability") {it.stable!=null}
+            if(stabilityF!=null && stabilityResult.reason.isNotBlank() && notes["stability"] in listOf(null,"INCONCLUSIVE")) notes["stability"]=stabilityResult.reason
+            val stableOk=stabilityResult.stable
             val result=Probe(best.toInt().coerceAtLeast(1), if (bigF != null) bigResult.ok else null, ytResult.ok, tgOk = tgResult.ok, tgMs = if(tgResult.ok==true) tgResult.ms else 0, kbps = bigResult.kbps, ytKbps = ytResult.kbps, bodyBytes = bigResult.bytes, bodyMs = bigResult.ms, callsOk = callsOk, discordOk=discordOk,stableOk=stableOk,serviceNotes=notes.toMap())
-            val measured=if(autoChecks!=null) LatencyOnlyProbe.proof(result,autoChecks,relaxedStable.get(),relaxedCalls.get()) else result
+            val measured=if(autoChecks!=null) LatencyOnlyProbe.proof(result,autoChecks,stabilityResult.ignoringLatency,relaxedCalls.get()) else result
             return if(autoChecks!=null) measured.copy(autoChecksKey=AutoChecks.stamp(measured,autoChecks,AutoLatencyPolicy.MAX_MS)) else measured
         } finally {
             ProbeTasks.cancel(tasks)

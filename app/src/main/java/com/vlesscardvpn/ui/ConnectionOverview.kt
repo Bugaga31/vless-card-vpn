@@ -94,7 +94,7 @@ fun ServiceHealthCard() {
                 listOf("stability" to "Telegram · устойчивость серии", "voice" to "Звонки · UDP-транспорт", "discord" to "Discord · gateway").forEach {(id,title)->
                     val value=when(id) {"stability"->evidence?.probe?.stableOk; "voice"->evidence?.probe?.callsOk; else->evidence?.probe?.discordOk}
                     Text(title,fontSize=14.sp,fontWeight=FontWeight.Medium)
-                    Text(if(id !in profile.selected) "Отключено в Авто" else when(value) {true->"Локальная проверка пройдена";false->"Проверка не пройдена";null->"Обязательная проверка: "+ProbeTaskNotes.label(evidence?.probe?.serviceNotes?.get(id))},fontSize=14.sp,
+                    Text(if(id !in profile.selected) "Отключено в Авто" else when(value) {true->"Локальная проверка пройдена";false->ServiceProbeStatus.label(true,false,evidence?.probe?.serviceNotes?.get(id));null->"Обязательная проверка: "+ProbeTaskNotes.label(evidence?.probe?.serviceNotes?.get(id))},fontSize=14.sp,
                         color=if(id in profile.selected && value==false) Warn else MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             } else {

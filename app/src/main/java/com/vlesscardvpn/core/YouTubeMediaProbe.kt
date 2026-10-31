@@ -49,7 +49,19 @@ object YouTubeMediaProbe {
         when(root.optJSONObject("playabilityStatus")?.optString("status")) {
             "LOGIN_REQUIRED" -> "YT_LOGIN_REQUIRED"
             "UNPLAYABLE", "ERROR", "LIVE_STREAM_OFFLINE" -> "YT_UNPLAYABLE"
-            else -> "YT_NO_DIRECT_MEDIA"
+            else -> {
+                val streams=root.optJSONObject("streamingData")
+                val encrypted=listOf("formats","adaptiveFormats").any {key->
+                    val formats=streams?.optJSONArray(key)
+                    (0 until (formats?.length() ?: 0)).any {i->
+                        val f=formats?.optJSONObject(i)
+                        f?.optString("mimeType").orEmpty().startsWith("video/") &&
+                            f?.optString("url").orEmpty().isBlank() &&
+                            f?.optString("signatureCipher",f.optString("cipher")).orEmpty().split('&').any {it.substringBefore('=')=="s"}
+                    }
+                }
+                if(encrypted) "YT_SIGNATURE_UNSUPPORTED" else "YT_NO_DIRECT_MEDIA"
+            }
         }
     }.getOrDefault("YT_NO_DIRECT_MEDIA")
 
