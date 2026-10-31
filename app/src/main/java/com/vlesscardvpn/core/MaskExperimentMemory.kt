@@ -52,7 +52,7 @@ object MaskExperiment {
     fun verdict(p:Probe):Boolean? = if(!p.works || p.tgOk==true && !AutoLatencyPolicy.accepts(p)) null else p.tgOk
     fun report():org.json.JSONObject {
         val c=memory.counts()
-        return org.json.JSONObject().put("scope","session_hello_probe_trials_not_dpi_resistance")
-            .put("selection","bounded_ewma_plus_exploration").put("max_variants_per_server",2).put("scheduled",c[0]).put("confirmed",c[1]).put("rejected_mtproto",c[2]).put("unknown",c[3]).put("entries",c[4])
+        return org.json.JSONObject().put("scope","session_compatible_mask_route_trials_not_dpi_resistance")
+            .put("selection","bounded_ewma_plus_exploration").put("max_variants_per_server",2).put("scheduled",c[0]).put("confirmed",c[1]).put("rejected_profile",c[2]).put("unknown",c[3]).put("entries",c[4])
     }
 }
