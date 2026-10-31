@@ -8,14 +8,14 @@ import org.junit.Test
 
 class FastConnectR211Test {
     private val profile=AutoCheckProfile.of(AutoCheckProfile.allowed)
-    private val probe=Probe(1800,null,true,tgOk=true,tgMs=1600,callsOk=true,discordOk=true,stableOk=true)
+    private val probe=Probe(1800,null,true,tgOk=true,tgMs=1600,callsOk=true,discordOk=true,stableOk=true,instagramOk=true)
     private val server=Server("fixture","vless","192.0.2.1",443,"fixture")
     private val path=NetworkHandoff.Snapshot("handle","wifi","revision")
     private fun state()=ServerState(realMs=1800,tgOk=true,tgMs=1600,ytOk=true,checkedAt=100,
         autoChecksKey=AutoChecks.key(profile,Int.MAX_VALUE),autoChecksAt=100,serviceNetwork="wifi",serviceMask="",serviceCheckedAt=100)
     private fun offer()=SlowRouteConsent.Offer(server,path,"",profile,1000,"https://example.test",100,1800)
     @Test fun slowProofIsNotStrictAdmission() {val key=AutoChecks.stamp(probe,profile,1000);assertEquals(AutoChecks.key(profile,Int.MAX_VALUE),key);assertFalse(AutoChecks.fresh(key,profile,1000,100,101))}
-    @Test fun eachSelectedServiceStillMandatory() {for(p in listOf(probe.copy(tgOk=false),probe.copy(tgOk=null),probe.copy(ytOk=false),probe.copy(discordOk=false),probe.copy(discordOk=null),probe.copy(stableOk=false),probe.copy(callsOk=false),probe.copy(realMs=0))) assertEquals("",AutoChecks.stamp(p,profile,1000))}
+    @Test fun eachSelectedServiceStillMandatory() {for(p in listOf(probe.copy(tgOk=false),probe.copy(tgOk=null),probe.copy(ytOk=false),probe.copy(discordOk=false),probe.copy(discordOk=null),probe.copy(instagramOk=false),probe.copy(instagramOk=null),probe.copy(stableOk=false),probe.copy(callsOk=false),probe.copy(realMs=0))) assertEquals("",AutoChecks.stamp(p,profile,1000))}
     @Test fun slowCandidateRequiresFreshSelectedProof() {assertTrue(SlowRoutePolicy.measured(state(),profile,1000,"wifi",101));assertFalse(SlowRoutePolicy.measured(state().copy(autoChecksKey=""),profile,1000,"wifi",101))}
     @Test fun oldAndFutureAndOtherNetworkCandidatesRejected() {for(now in listOf(99L,300101L)) assertFalse(SlowRoutePolicy.measured(state(),profile,1000,"wifi",now));assertFalse(SlowRoutePolicy.measured(state(),profile,1000,"cell",101))}
     @Test fun unknownMaskCannotReuseOffer() {assertFalse(SlowRoutePolicy.measured(state().copy(maskId="new"),profile,1000,"wifi",101))}
@@ -40,6 +40,7 @@ class FastConnectR211Test {
         assertFalse(LatencyOnlyProbe.proof(slow,profile,false,true).latencyOnlyOk)
         assertFalse(LatencyOnlyProbe.proof(slow,profile,true,false).latencyOnlyOk)
         assertFalse(LatencyOnlyProbe.proof(slow.copy(discordOk=null),profile,true,true).latencyOnlyOk)
+        assertFalse(LatencyOnlyProbe.proof(slow.copy(instagramOk=null),profile,true,true).latencyOnlyOk)
     }
     @Test fun ignoringLatencyStillRejectsMissingTelegramRepliesAndLargeSpread() {
         assertEquals(false,LinkStabilityPolicy.summarize(listOf(LinkStabilityPolicy.Sample(true,1800),LinkStabilityPolicy.Sample(false,0),LinkStabilityPolicy.Sample(true,1800)),Int.MAX_VALUE).stable)

@@ -46,7 +46,7 @@ class FoundRouteR212Test {
         val server=com.vlesscardvpn.model.Server("fixture","vless","192.0.2.1",443,"fixture")
         val ready=state().copy(realMs=578,tgMs=578,autoChecksKey=AutoChecks.key(profile,1000))
         assertEquals("Проверки Авто пройдены",AutoReadiness.describe(server,ready,profile,1000,"wifi",101))
-        assertTrue(profile.accepts(Probe(578,null,true,tgOk=true,tgMs=578,stableOk=true,callsOk=true,discordOk=true),1000))
+        assertTrue(profile.accepts(Probe(578,null,true,tgOk=true,tgMs=578,stableOk=true,callsOk=true,discordOk=true,instagramOk=true),1000))
     }
     @Test fun httpsHistoryDoesNotPretendToBeFreshSelectedServiceProof() {
         val server=com.vlesscardvpn.model.Server("fixture","vless","192.0.2.1",443,"fixture")

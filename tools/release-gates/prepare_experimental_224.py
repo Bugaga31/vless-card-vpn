@@ -40,7 +40,7 @@ def prepare(root, sha, run_id, docs):
     require(any(n.endswith("SeriesDiagnosticsR222Test") for n in suites),"R222 series/diagnostics regressions absent")
     require(any(n.endswith("ServiceExpansionR223Test") for n in suites) and any(n.endswith("AutoProfileR223Test") for n in suites),"R223 service regressions absent")
     require(any(n.endswith("AutoRecoveryR224Test") for n in suites),"R224 background recovery regressions absent")
-    require(totals["tests"]>=598 and not any(totals[k] for k in ("failures","errors","skipped")),"Targeted JVM gate failed")
+    require(totals["tests"]>=601 and not any(totals[k] for k in ("failures","errors","skipped")),"Targeted JVM gate failed")
     report={"candidate_sha":sha,"run_id":str(run_id),"version":"1.2.113","version_code":224,"channel":"experimental",
             "targeted_jvm":{"totals":totals,"suites":suites},"functional_checks":{"full_jvm":"not_run","lint":"not_run","emulator":"not_run","physical_device":"not_run","ui":"not_run"},"apks":[],
             "validation":{"status":"TARGETED_JVM_ONLY","thermal_measurement":"not_run"}}

@@ -20,4 +20,20 @@ class AutoProfileR223Test {
         assertFalse(AutoCheckProfile.of(setOf("instagram","voice")).accepts(p.latencyConsented(),Int.MAX_VALUE))
     }
     @Test fun defaultsDoNotSilentlyEnableNewWebService() {assertFalse("instagram" in AutoCheckProfile.defaults)}
+    @Test fun allSelectedProfileRequiresAnActualInstagramResult() {
+        val profile=AutoCheckProfile.of(AutoCheckProfile.allowed)
+        val p=Probe(578,null,true,tgOk=true,tgMs=578,stableOk=true,callsOk=true,discordOk=true,instagramOk=true)
+        assertTrue(profile.accepts(p,800));assertFalse(profile.accepts(p.copy(instagramOk=null),800));assertFalse(profile.accepts(p.copy(instagramOk=false),800))
+    }
+    @Test fun completeSlowAllSelectedProofCanOfferConsent() {
+        val profile=AutoCheckProfile.of(AutoCheckProfile.allowed)
+        val p=Probe(1800,null,true,tgOk=true,tgMs=1600,stableOk=true,callsOk=true,discordOk=true,instagramOk=true)
+        assertEquals(AutoChecks.key(profile,Int.MAX_VALUE),AutoChecks.stamp(p,profile,800))
+        assertFalse(AutoChecks.fresh(AutoChecks.stamp(p,profile,800),profile,800,100,101))
+    }
+    @Test fun missingInstagramCannotCreateASlowProof() {
+        val profile=AutoCheckProfile.of(AutoCheckProfile.allowed)
+        val p=Probe(1800,null,true,tgOk=true,tgMs=1600,stableOk=true,callsOk=true,discordOk=true)
+        assertEquals("",AutoChecks.stamp(p,profile,800));assertEquals("",AutoChecks.stamp(p.copy(instagramOk=false),profile,800))
+    }
 }
