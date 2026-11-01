@@ -23,6 +23,18 @@ class ChainProbeConfigTest {
         assertEquals("chain-dpi",out.getJSONObject(0).getJSONObject("streamSettings").getJSONObject("sockopt").getString("dialerProxy"))
         assertEquals(19053,out.getJSONObject(1).getJSONObject("settings").getJSONArray("servers").getJSONObject(0).getInt("port"))
     }
+    @Test fun `inner UDP uses authenticated VLESS stream never direct or DPI outbound`() {
+        val v=JSONObject("""{"protocol":"vless","settings":{"vnext":[{"address":"fixture.invalid","port":443,"users":[{"id":"fixture"}]}]},"streamSettings":{"network":"tcp"}}""")
+        for (layout in listOf(Layout.SERVER, Layout.DPI_SERVER)) {
+            val x=JSONObject(ChainProbeConfig.build(c(layout),19050,v,dpiPort=19053))
+            assertTrue(x.getJSONArray("inbounds").getJSONObject(0).getJSONObject("settings").getBoolean("udp"))
+            val rule=x.getJSONObject("routing").getJSONArray("rules").getJSONObject(0)
+            assertEquals("udp",rule.getString("network"));assertEquals("chain-main",rule.getString("outboundTag"))
+        }
+        val tor=JSONObject(ChainProbeConfig.build(c(Layout.TOR_SERVER),19050,v,torPort=19052))
+        assertFalse(tor.getJSONArray("inbounds").getJSONObject(0).getJSONObject("settings").getBoolean("udp"))
+        assertEquals("chain-block",tor.getJSONObject("routing").getJSONArray("rules").getJSONObject(0).getString("outboundTag"))
+    }
     @Test fun `source outbound is not mutated`() {val s=server();val before=s.toString();ChainProbeConfig.build(c(Layout.TOR_SERVER),19050,s,19052);assertEquals(before,s.toString())}
     @Test fun `endpoint and credentials unchanged`() {val s=server();val x=JSONObject(ChainProbeConfig.build(c(Layout.TOR_SERVER),19050,s,19052));assertEquals(s.getJSONObject("settings").toString(),x.getJSONArray("outbounds").getJSONObject(0).getJSONObject("settings").toString())}
     @Test fun `no freedom outbound or direct fallback`() {ChainProbeConfig.implemented.forEach {layout -> val x=config(layout);val out=x.getJSONArray("outbounds");for(i in 0 until out.length())assertNotEquals("freedom",out.getJSONObject(i).getString("protocol"));assertFalse(x.getJSONArray("inbounds").getJSONObject(0).getJSONObject("settings").getBoolean("udp"))}}

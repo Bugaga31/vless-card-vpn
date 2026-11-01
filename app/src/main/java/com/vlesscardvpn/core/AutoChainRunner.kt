@@ -53,7 +53,8 @@ object AutoChainRunner {
                 val pool=candidates.distinctBy { it.chain.id }.filter {cooldown.allowed(it.chain,networkKey,elapsed())}.take(AutoChainSelection.MAX_CANDIDATES)
                 val index=pool.associateBy { it.chain.id }; val samples=HashMap<String,Sample>()
                 val result=AutoChainSelection.select(pool.map {it.chain},
-                    AutoChainSelection.Capabilities(ChainProbeConfig.implemented, s.torAuto, torReady),
+                    AutoChainSelection.Capabilities(ChainProbeConfig.implemented, s.torAuto, torReady,
+                        requiresUdp = AutoCheckProfile.of(s.autoChecks).voice),
                     AutoChainSwitchPolicy.purpose(s.autoChainPurpose),elapsed,generation,onTrial={chain,sample,at ->
                         cooldown.record(chain,networkKey,at,
                             success=sample!=null && AutoChainSelection.eligible(sample,chain,epoch,at),
@@ -83,6 +84,8 @@ object AutoChainRunner {
                                     val budget=(remainingMs-(elapsed()-started)).coerceAtLeast(1)
                                     Tester.probeSocks(port,s.testUrl,big=true,youtube=true,attempts=1,budgetMs=budget,onCall={call->bind {call.cancel()}},onCancel=bind,autoChecks=AutoCheckProfile.of(s.autoChecks))
                                 }
+                                if (com.vlesscardvpn.BuildConfig.DEBUG) android.util.Log.i("E2E",
+                                    "chain sample https=${p.works} body=${p.bigOk} bytes=${p.bodyBytes} ms=${p.bodyMs} telegram=${p.tgOk} stability=${p.stableOk} voice=${p.callsOk} discord=${p.discordOk} youtube=${p.ytOk}")
                                 fun status(v:Boolean?)=when(v){true->Verdict.PASS;false->Verdict.FAIL;null->Verdict.UNKNOWN}
                                 val sampled=Sample(chain.id,epoch,elapsed(),if(p.works && p.bigOk==true && AutoCheckProfile.of(s.autoChecks).accepts(p,s.autoLatencyMaxMs))Verdict.PASS else Verdict.FAIL,
                                     if(AutoCheckProfile.of(s.autoChecks).telegram) status(p.tgOk) else Verdict.PASS,if(AutoCheckProfile.of(s.autoChecks).youtube) status(p.ytOk) else Verdict.PASS,p.bigOk==true,p.bodyBytes,p.bodyMs,p.realMs.toLong(),country,youtubeKbps=p.ytKbps)

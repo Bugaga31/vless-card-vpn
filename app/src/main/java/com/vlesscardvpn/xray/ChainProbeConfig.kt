@@ -21,6 +21,9 @@ object ChainProbeConfig {
         if (chain.layout.dpi) require(dpiPort != null && dpiPort in 1024..65535 && dpiPort != listenPort)
         require(!(chain.layout.tor || chain.layout.dpi) || !chain.layout.server || chain.tcpServer) { "TCP server required" }
         require(chain.serverExitAllowed) { "Disallowed server exit" }
+        // Inner UDP over VLESS/VMess/Trojan remains inside the authenticated stream.
+        // It is NOT UDP sent to the local TCP-only DPI listener. Tor never supports it.
+        val innerUdp = !chain.layout.tor && serverOutbound?.optString("protocol") in setOf("vless", "vmess", "trojan")
         val outbounds = JSONArray()
         val main = if (serverOutbound != null) {
             JSONObject(serverOutbound.toString()).apply {
@@ -45,10 +48,10 @@ object ChainProbeConfig {
         return JSONObject().put("log", JSONObject().put("loglevel", "error"))
             .put("inbounds", JSONArray().put(JSONObject().put("tag", "chain-in").put("listen", "127.0.0.1")
                 .put("port", listenPort).put("protocol", "socks")
-                .put("settings", JSONObject().put("auth", "noauth").put("udp", false))))
+                .put("settings", JSONObject().put("auth", "noauth").put("udp", innerUdp))))
             .put("outbounds", outbounds)
             .put("routing", JSONObject().put("domainStrategy", "AsIs").put("rules", JSONArray()
-                .put(JSONObject().put("type", "field").put("network", "udp").put("outboundTag", "chain-block"))
+                .put(JSONObject().put("type", "field").put("network", "udp").put("outboundTag", if (innerUdp) "chain-main" else "chain-block"))
                 .put(JSONObject().put("type", "field").put("inboundTag", JSONArray().put("chain-in")).put("outboundTag", "chain-main"))))
             .toString()
     }
