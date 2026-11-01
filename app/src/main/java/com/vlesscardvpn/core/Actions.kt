@@ -1850,7 +1850,7 @@ object Actions {
         val pinned=pinCertificates(candidates.take(2))
         val profile=AutoChecks.current
         val profileLimit=AutoLatencyPolicy.MAX_MS
-        val memoryContext=net+"|"+AutoChecks.key(profile,profileLimit)
+        val memoryContext=Roki.context(net,profile,profileLimit,start.settings.testUrl)
         val engine=DpiProxy(app)
         val trialStarted=android.os.SystemClock.elapsedRealtime()
         val alternatives=pinned.map {server->
@@ -1862,37 +1862,48 @@ object Actions {
         val proposed:List<Pair<Server,com.vlesscardvpn.xray.Mask?>> = if(includeCurrent)
             RecoveryWavePolicy.arrange(current,alternatives,start.settings.probeParallel)
                 .filter {(server,mask)->mask!=null || expected[server.id].isNullOrEmpty()}
-            else alternatives.flatten()
+            else RecoveryWavePolicy.alternatives(alternatives,start.settings.probeParallel)
         if(proposed.isEmpty()) return null
         val (own,port)=dpiForTests(proposed.map {it.second})
         try {
         fun engineReady(mask:com.vlesscardvpn.xray.Mask?):Boolean = mask==null ||
             if(mask.dpi==Masks.CURRENT_DPI) own.currentPort!=null && own.runtimeEngine(mask.dpi).second
             else AutoMaskSearchPolicy.engineReady(mask,own.ports) {id->own.runtimeEngine(id).second}
-        val variants=proposed.filter {engineReady(it.second)}
-        if(variants.isEmpty() || Net.key(app)!=net || Net.underlying(app)?.toString()!=network) return null
+        val variants=proposed.filter {engineReady(it.second) && MaskTrialFence.serverUnchanged(it.first,Store.state.value.servers)}
+        if(variants.isEmpty() || Net.key(app)!=net || Net.underlying(app)?.toString()!=network ||
+            !MaskTrialFence.settingsUnchanged(start.settings,Store.state.value.settings)) return null
         val winner=java.util.concurrent.atomic.AtomicReference<Pair<Int,Probe>?>(null)
         progress.value=progress.value.copy(title="Авто: сервер + маскировка",message="До двух серверов · текущие и запомненные совместимые маски · все выбранные проверки")
-        variants.forEach {(server,mask)->if(mask!=null && mask.id!=expected[server.id])
-            MaskExperiment.memory.schedule(memoryContext,network,server.id,mask.id,trialStarted)}
-        val slots=if(includeCurrent) ProbeConcurrencyPolicy.normalize(start.settings.probeParallel) else 4
-        kotlinx.coroutines.withTimeoutOrNull(if(includeCurrent) RecoveryWavePolicy.budgetMs(variants.size,slots) else 7500L) {
+        // Queued/skipped variants have not run. Do not cool them or train on them.
+        val started=java.util.concurrent.ConcurrentHashMap<Int,Long>()
+        val slots=ProbeConcurrencyPolicy.normalize(start.settings.probeParallel)
+        kotlinx.coroutines.withTimeoutOrNull(RecoveryWavePolicy.budgetMs(variants.size,slots)) {
             Tester.real(variants,start.settings.testUrl,port,own.ports,youtube=profile.youtube,telegram=profile.telegram,requireTelegram=profile.telegram,autoChecks=profile,
-                foreground=true,batch=slots,parallel=slots,attempts=1,big=false,stopAfter=1,budgetMs=6500L) {i,p->
-                if(p!=Tester.SKIPPED && AutoChecks.current==profile && AutoLatencyPolicy.MAX_MS==profileLimit && Net.key(app)==net && Net.underlying(app)?.toString()==network) {
+                foreground=true,batch=slots,parallel=slots,attempts=1,big=false,stopAfter=1,budgetMs=6500L,
+                onStarted={i->
+                    val (server,mask)=variants[i]
+                    val at=android.os.SystemClock.elapsedRealtime()
+                    started[i]=at
+                    if(mask!=null && mask.id!=expected[server.id])
+                        MaskExperiment.memory.schedule(memoryContext,network,server.id,mask.id,at)
+                }) {i,p->
+                if(p!=Tester.SKIPPED && started.containsKey(i) && AutoChecks.current==profile && AutoLatencyPolicy.MAX_MS==profileLimit &&
+                    Net.key(app)==net && Net.underlying(app)?.toString()==network &&
+                    MaskTrialFence.settingsUnchanged(start.settings,Store.state.value.settings) &&
+                    MaskTrialFence.serverUnchanged(variants[i].first,Store.state.value.servers)) {
                     val (server,mask)=variants[i]
                     val verdict=if(p.works) profile.verdict(p,profileLimit) else null
-                    if(mask!=null && mask.id!=expected[server.id]) MaskExperiment.memory.observe(memoryContext,network,server.id,mask.id,trialStarted,
+                    if(mask!=null && mask.id!=expected[server.id]) MaskExperiment.memory.observe(memoryContext,network,server.id,mask.id,started.getValue(i),
                         android.os.SystemClock.elapsedRealtime(),verdict,
                         if(profile.accepts(p,profileLimit)) maxOf(p.realMs,p.tgMs) else null)
                     Roki.session.observe(Roki.context(net,profile,profileLimit,start.settings.testUrl),start.state(server),verdict)
+                    if(AutoChecks.accepts(p)) winner.compareAndSet(null,i to p)
                 }
-                if(AutoChecks.accepts(p)) winner.compareAndSet(null,i to p)
             }
         }
         kotlinx.coroutines.currentCoroutineContext().ensureActive()
         if(Net.key(app)!=net || Net.underlying(app)?.toString()!=network) return null
-        if(Store.state.value.settings.mode!=Mode.AUTO || AutoChecks.current!=profile || AutoLatencyPolicy.MAX_MS!=profileLimit) return null
+        if(!MaskTrialFence.settingsUnchanged(start.settings,Store.state.value.settings) || AutoChecks.current!=profile || AutoLatencyPolicy.MAX_MS!=profileLimit) return null
         val (index,p)=winner.get() ?: return null
         val (server,mask)=variants[index]
         if(!engineReady(mask)) return null
@@ -1902,7 +1913,9 @@ object Actions {
         Store.update {state->
             committed=false
             val current=state.state(server)
-            if(!MaskSamplePolicy.unchanged(current,start.state(server),net)) state else {
+            if(!MaskTrialFence.settingsUnchanged(start.settings,state.settings) ||
+                !MaskTrialFence.serverUnchanged(server,state.servers) ||
+                !MaskSamplePolicy.unchanged(current,start.state(server),net)) state else {
                 val generated=mask!=null && mask.auto && Masks.byId(maskId)==null
                 if(generated && !AutoMaskEvolution.enabled(state.settings)) return@update state
                 val stored=if(generated) AutoMaskEvolution.retain(state.settings.autoMasks,mask!!,
