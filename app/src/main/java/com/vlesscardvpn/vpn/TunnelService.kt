@@ -1081,7 +1081,7 @@ class TunnelService : VpnService() {
                 val autoWatch=watchSettings.mode==Mode.AUTO
                 val quietAuto=com.vlesscardvpn.core.VpnRecoveryPolicy.healthOnly(asleep(),autoWatch)
                 val urgent=miss>0 || dnsMiss>0 || !quietAuto && (telegramUnstable>0 || telegramMiss>0 || telegramSlow>0 || stabilityPending || servicePending && autoWatch && usedChain==null && !usedTorRoute)
-                val period = if(offline) 10_000L else if(urgent) 3_000L else
+                val period = if(offline) 10_000L else if(urgent) com.vlesscardvpn.core.RecoveryWavePolicy.confirmDelayMs(autoWatch) else
                     com.vlesscardvpn.core.VpnRecoveryPolicy.watchPeriod(com.vlesscardvpn.core.PhonePower.refresh(this@TunnelService).healthyMs,autoWatch,asleep())
                 if (com.vlesscardvpn.core.VpnRecoveryPolicy.pauseWatchdog(asleep(),autoWatch)) {
                     // Manual mode retains its quiet-screen policy. Auto must keep failure detection.
