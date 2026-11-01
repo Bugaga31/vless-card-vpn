@@ -9,3 +9,8 @@ Base: published 1.2.122 / 8cc9764580c347e99a745fca5a76600f4e7cf4ce.
 - Existing strict HTTP, cancellation, no-range and foreign-final-URL tests retained. Expectations for explicitly changed reasons/cadence updated, not admission predicates.
 
 No tunnel/watchdog/probe concurrency or routing settings are changed. No device battery percentage, charging acceleration, TSPU result or trained model claim is made. Local focused JVM tests do not substitute full Android CI or physical-device power measurement. This is not a published APK.
+
+## Recovery detector follow-up
+A confirmed Auto transport failure previously requested recoverServerRoute and unconditionally exited the watchdog. That request can be ignored while a different service repair owns recoveryJob. The detector now stays alive, skips duplicate network probes during active repair, and can retry when the owner completes. This is an identified lifecycle hazard, not proof of the exact failure on the owner's phone. The live heading now explicitly says HTTP access, not YouTube video.
+
+Local focused suites: 34 JVM tests passed before recovery follow-up; three additional source/label regression tests added. Full seven-job Android/build/mask CI is required; no auto publication is configured.

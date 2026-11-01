@@ -593,7 +593,7 @@ class TunnelService : VpnService() {
             if (Tunnel.status.value.state != Tunnel.State.CONNECTED || core !== sampledCore ||
                 chainEpoch.get()!=sampledChainEpoch || Tunnel.socks!=auth ||
                 Net.key(this@TunnelService) != sampledNet || Net.underlying(this@TunnelService)?.toString() != sampledHandle) return@launch
-            val text = if(chainExitRejected) "Выход Tor не подтверждён или недопустим — возвращаюсь к проверенному Auto" else if (p.realMs > 0) "HTTPS · ${p.realMs} мс · Видео YouTube: ${com.vlesscardvpn.core.ServiceProbeStatus.label(profile?.youtube ?: Tunnel.ytViaDpi,p.ytOk,p.serviceNotes["youtube"])} · Telegram MTProto: ${if(p.tgOk==true && (profile?.telegram ?: true)) "${p.tgMs} мс" else com.vlesscardvpn.core.ServiceProbeStatus.label(profile?.telegram ?: true,p.tgOk,p.serviceNotes["telegram"])}$warp"
+            val text = if(chainExitRejected) "Выход Tor не подтверждён или недопустим — возвращаюсь к проверенному Auto" else if (p.realMs > 0) "HTTPS · ${p.realMs} мс · YouTube · HTTP-доступ (не видео): ${com.vlesscardvpn.core.ServiceProbeStatus.label(profile?.youtube ?: Tunnel.ytViaDpi,p.ytOk,p.serviceNotes["youtube"])} · Telegram MTProto: ${if(p.tgOk==true && (profile?.telegram ?: true)) "${p.tgMs} мс" else com.vlesscardvpn.core.ServiceProbeStatus.label(profile?.telegram ?: true,p.tgOk,p.serviceNotes["telegram"])}$warp"
                 else "Нет ответа через выбранный маршрут (${p.error}). " + if (st.mode == Mode.AUTO && st.autoHeal) "Ищу рабочий вариант сам…" else "Проверьте серверы или включите маскировку."
             // Module supervisor owns health aggregation; this service owns lifecycle/recovery.
             // Preserve the HTTPS measurement even if the separate DNS module fails.
@@ -1115,7 +1115,7 @@ class TunnelService : VpnService() {
                     if (screenEvent) delay(1500)
                 }
                 com.vlesscardvpn.core.Traffic.tick()
-                if (healJob?.isActive == true || com.vlesscardvpn.core.VpnRecoveryPolicy.pauseWatchdog(asleep(),autoWatch)) continue
+                if (healJob?.isActive == true || recoveryJob?.isActive == true || com.vlesscardvpn.core.VpnRecoveryPolicy.pauseWatchdog(asleep(),autoWatch)) continue
                 val auth = Tunnel.socks ?: break
                 val port = auth.port
                 val vpnMode = true
@@ -1241,8 +1241,13 @@ class TunnelService : VpnService() {
                     Log.i("E2E", "watchdog: connection lost")
                     val cur = Tunnel.status.value
                     Tunnel.status.value = cur.copy(check = "Связь пропала — проверяю резервный маршрут…", checkOk = false)
-                    if(settings.mode==Mode.AUTO && usedChain==null && !usedTorRoute) recoverServerRoute()
-                    else hardRestart("сервер перестал отвечать")
+                    if(settings.mode==Mode.AUTO && usedChain==null && !usedTorRoute) {
+                        // Recovery may already be owned by a service repair job, or fail before
+                        // launching. Never retire the only detector merely because it was requested.
+                        recoverServerRoute()
+                        continue
+                    }
+                    hardRestart("сервер перестал отвечать")
                     break
                 }
                 if (ok && vpnMode) {

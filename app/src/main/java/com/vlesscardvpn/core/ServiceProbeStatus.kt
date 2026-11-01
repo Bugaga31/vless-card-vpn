@@ -14,6 +14,8 @@ object ServiceProbeStatus {
         note=="IG_REDIRECT" -> "Instagram перенаправил запрос; результат неизвестен"
         note=="IG_HTTP" -> "Instagram не выдал публичную страницу; маршрут не оценён"
         note=="IG_FORMAT" -> "ожидаемая страница Instagram не подтверждена"
+        note=="YT_ACCESS_RESTRICTED" -> "YouTube ограничил доступ (403/451); видео и маршрут не подтверждены"
+        note=="YT_SERVICE_UNAVAILABLE" -> "YouTube вернул ошибку сервиса (5xx); подтверждения доступа нет"
         note=="YT_ACCESS_HTTP" -> "YouTube не подтвердил HTTP-доступ; это не диагноз блокировки VPN"
         note=="YT_ACCESS_REDIRECT" -> "YouTube перенаправил запрос; веб-доступ не подтверждён"
         note=="YT_RANGE_UNSUPPORTED" -> "YouTube не подтвердил следующие участки видео; устойчивость загрузки неизвестна"
