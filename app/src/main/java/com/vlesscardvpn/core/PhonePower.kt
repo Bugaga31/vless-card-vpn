@@ -48,10 +48,18 @@ object PhonePower {
         val filter = android.content.IntentFilter(android.content.Intent.ACTION_SCREEN_OFF).apply {
             addAction(android.content.Intent.ACTION_SCREEN_ON)
             addAction(android.content.Intent.ACTION_BATTERY_CHANGED)
+            addAction(android.content.Intent.ACTION_POWER_CONNECTED)
+            addAction(android.content.Intent.ACTION_POWER_DISCONNECTED)
             addAction(PowerManager.ACTION_POWER_SAVE_MODE_CHANGED)
         }
         val receiver = object : android.content.BroadcastReceiver() {
-            override fun onReceive(c: Context?, i: android.content.Intent?) { changed() }
+            override fun onReceive(c: Context?, i: android.content.Intent?) {
+                // A plug/unplug/plug cycle between minute samples is not a clean heat label.
+                // No Store edits, tunnel restart, mask changes or probe-limit changes.
+                if (i?.action == android.content.Intent.ACTION_POWER_CONNECTED ||
+                    i?.action == android.content.Intent.ACTION_POWER_DISCONNECTED) PhoneBrain.invalidateWindow()
+                changed()
+            }
         }
         runCatching { app.registerReceiver(receiver, filter) }
         if (android.os.Build.VERSION.SDK_INT >= 31) runCatching {

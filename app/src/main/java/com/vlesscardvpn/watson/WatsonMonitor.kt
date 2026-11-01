@@ -21,6 +21,7 @@ object WatsonMonitor {
     private val generation = AtomicLong(0)
     private var completedGeneration = -1L
     private var lastAt = -1L
+    private var lastAttemptAt = -1L
     private val mutex = Mutex()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val requests = Channel<Unit>(Channel.CONFLATED)
@@ -48,7 +49,7 @@ object WatsonMonitor {
                 if (!enabled) {
                     scheduler.cancel(JOB_ID)
                     mutex.lock()
-                    try { _snapshot.value = null; lastAt = -1; completedGeneration = -1
+                    try { _snapshot.value = null; lastAt = -1; lastAttemptAt = -1; completedGeneration = -1
                         _status.value = "Автоаудит выключен" } finally { mutex.unlock() }
                 } else {
                     val scheduled = runCatching {
@@ -60,7 +61,12 @@ object WatsonMonitor {
                     _status.value = if (scheduled) "Автоаудит включён · фон по расписанию Android"
                         else "Автоаудит включён · фоновое расписание недоступно"
                     requestRefresh()
-                    for (request in requests) refresh(app)
+                    for (request in requests) {
+                        // Batch installer/package broadcast bursts without polling or changing VPN work.
+                        delay(WatsonAuditPolicy.COALESCE_MS)
+                        while (requests.tryReceive().isSuccess) { /* coalesce */ }
+                        refresh(app)
+                    }
                 }
             }
         }
@@ -78,10 +84,19 @@ object WatsonMonitor {
             val now = SystemClock.elapsedRealtime()
             val ticket = generation.get()
             if (!force && !WatsonAuditPolicy.due(now, lastAt, ticket, completedGeneration)) return
+            if (!WatsonAuditPolicy.attemptDue(now, lastAttemptAt, force)) return
+            lastAttemptAt = now
             _status.value = "Локальный аудит разрешений…"
-            val result = WatsonApps.scan(ctx) { allowed(ctx) }
+            val result = withTimeout(WatsonAuditPolicy.SCAN_BUDGET_MS) {
+                WatsonApps.scan(ctx) { allowed(ctx) }
+            }
             currentCoroutineContext().ensureActive()
             if (!allowed(ctx)) throw CancellationException("Optional audit deferred")
+            if (!WatsonAuditPolicy.publishable(ticket, generation.get())) {
+                _status.value = "Приложения изменились во время аудита · снимок требует обновления"
+                requestRefresh()
+                return
+            }
             _snapshot.value = result
             lastAt = SystemClock.elapsedRealtime(); completedGeneration = ticket
             _status.value = if (result.incomplete) "Аудит частичный · безопасность неизвестна"

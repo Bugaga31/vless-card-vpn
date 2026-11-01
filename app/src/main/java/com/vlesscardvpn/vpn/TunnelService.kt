@@ -384,6 +384,13 @@ class TunnelService : VpnService() {
             Log.i("E2E", "socks port=${socks.port} auth=${socks.auth} dpi=${dpiLabel.ifEmpty { "-" }} fixed=${set.ports.keys} mode=${settings.mode} services=${settings.services} proxy=$proxy")
             connectPhase = "tun"
             if (!proxy && !keepTun) startTun(settings, socks)
+            if (!proxy && keepTun) {
+                // The old local SOCKS sessions belong to the stopped Xray instance. Keeping
+                // hev alive leaves application keep-alives/UDP associations on that old route.
+                // Rebuild the userspace bridge, not the Android VPN interface: no direct fallback.
+                TProxyService.resume(filesDir, checkNotNull(tun))
+                if (BuildConfig.DEBUG) Log.i("E2E", "bridge resumed keepTun=true")
+            }
             com.vlesscardvpn.core.MaskRuntimeEvidence.tun(tun!=null)
 
             val auto = com.vlesscardvpn.tor.TorConnectionPolicy.needsAutoSearch(st.settings)
@@ -1580,7 +1587,9 @@ class TunnelService : VpnService() {
             netCallback = null; curNet = null
             networkRefreshJob?.cancel(); networkSignal.incrementAndGet(); networkRefreshWindow.reset(); handoff.reset()
         }
-        if (!keepTun) TProxyService.stop()
+        // Always dispose sessions tied to the old SOCKS core, including soft recovery.
+        // stop() joins the native worker; only the VpnService owns/closes the retained TUN fd.
+        TProxyService.stop()
         com.vlesscardvpn.core.MaskRuntimeEvidence.stop(keepTun,error?.isNotEmpty()==true)
         core?.stop(); core = null; Tunnel.wireguardKeys = emptySet()
         dpi?.close(); dpi = null; Tunnel.byeDpiPort = null
