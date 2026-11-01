@@ -54,3 +54,8 @@ write(f"{out}/auto-eight.json",pool,[],{},mode="AUTO",autoUpdateSubs=False,lastS
 # Live chain regression uses the production measurement gates, not mocked service PASS.
 write(f"{out}/auto-chain.json", [reality,dead], [], {}, mode="AUTO", dpiStrategy="TPWS#SPLIT_DISORDER", autoUpdateSubs=False, lastSubRefresh=4102444800000, autoChainSearch=True, torAuto=False)
 write(f"{out}/mass-check.json", [dict(reality, name=f"e2e-check-{i}", port=8443 if i == 0 else 18000 + i) for i in range(128)], [], {})
+
+# Recovery regression: only HTTPS selected, isolated from public subscription/ranker policy.
+# quietScreen/wifiOnly remain enabled to cover reliability outside optimizer permission.
+write(f"{out}/background-reserve.json", [reality,ws,xhttp], [], {}, mode="AUTO", autoChecks=[],
+      autoChainSearch=False, torAuto=False, quietScreen=True, wifiMaintenance=True)

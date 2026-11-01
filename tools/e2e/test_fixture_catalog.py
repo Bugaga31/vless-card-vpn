@@ -40,4 +40,30 @@ class FixtureCatalogTest(unittest.TestCase):
             self.assertEqual(list(range(18001,18128)),[s['port'] for s in mass['servers'][1:]])
             self.assertEqual([],mass['e2e_select'])
 
+    def test_background_recovery_has_separate_primary_and_spare_ports(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            c=self.generate(Path(tmp))['background-reserve.json']
+            self.assertEqual({8443,8444,8447},{s['port'] for s in c['servers']})
+            self.assertEqual('AUTO',c['settings']['mode'])
+            self.assertTrue(c['settings']['quietScreen'])
+            self.assertTrue(c['settings']['wifiMaintenance'])
+            self.assertEqual([],c['settings']['autoChecks'])
+            self.assertFalse(c['settings']['autoChainSearch'])
+
+    def test_public_cloud_disabled_before_first_app_launch(self):
+        script=Path(__file__).parents[1].joinpath('e2e-android.sh').read_text()
+        disable=script.index('> shared_prefs/report.xml')
+        launch=script.index('adb shell am start -W -n $PKG/.MainActivity')
+        self.assertLess(disable,launch)
+        self.assertIn('value=',script[:disable])
+        self.assertIn('false',script[max(0,disable-150):disable])
+
+    def test_background_proof_cannot_pass_on_foreign_exit_or_after_failure(self):
+        script=Path(__file__).parents[1].joinpath('e2e-android.sh').read_text()
+        block=script.split('BACKGROUND_FAILS=$FAILS')[1].split('# Production runner')[0]
+        self.assertIn('case "$NEXT" in 8443|8444|8447)',block)
+        self.assertIn('[ "$FAILS" -eq "$BACKGROUND_FAILS" ]',block)
+        self.assertIn('okprobe "$R"',block)
+        self.assertIn('replacement server saw no authenticated traffic',block)
+
 if __name__=='__main__':unittest.main()

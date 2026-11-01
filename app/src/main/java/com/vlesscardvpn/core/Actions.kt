@@ -428,7 +428,7 @@ object Actions {
             }) { i, p ->
                 if (p == Tester.SKIPPED) return@real
                 // Do not train the old profile with a result completed after Wi-Fi/cellular handoff.
-                if (!Net.matches(app,observed) || profile!=null && (AutoChecks.current!=profile || AutoLatencyPolicy.MAX_MS!=profileLimit)) return@real
+                if (!Net.matches(app,observed) || profile!=null && (!MaskTrialFence.settingsUnchanged(st.settings,Store.state.value.settings) || AutoChecks.current!=profile || AutoLatencyPolicy.MAX_MS!=profileLimit)) return@real
                 val s = variants[i].first
                 if(s !in Store.state.value.servers) return@real
                 if(Store.state.value.state(s).maskFor(net)!=st.state(s).maskFor(net)) return@real
@@ -454,7 +454,7 @@ object Actions {
                 if(profile!=null) runCatching { Roki.session.observe(Roki.context(net,profile,profileLimit,st.settings.testUrl),
                     st.state(s),profile.verdict(p,profileLimit),Thread.currentThread().isInterrupted) }
                 states.put(s.id) {
-                    if (s !in Store.state.value.servers || !Net.matches(app,observed) || it.maskFor(net)!=st.state(s).maskFor(net) || !ProbePublication.unchangedExceptPing(it,st.state(s))) it else
+                    if (s !in Store.state.value.servers || !Net.matches(app,observed) || profile!=null && !MaskTrialFence.settingsUnchanged(st.settings,Store.state.value.settings) || it.maskFor(net)!=st.state(s).maskFor(net) || !ProbePublication.unchangedExceptPing(it,st.state(s))) it else
                     it.copy(autoChecksKey=if(profile!=null) p.autoChecksKey else "",autoChecksAt=if(profile!=null && p.autoChecksKey.isNotEmpty()) System.currentTimeMillis() else 0, netEvidence = (it.netEvidence + ((net + "|" + st.state(s).maskFor(net)) to it.evidenceFor(net).observe(p.works, p.realMs, System.currentTimeMillis()))).entries.sortedByDescending { e -> e.value.at }.take(8).associate { e -> e.toPair() }, realMs = p.realMs, bigOk = p.bigOk ?: it.bigOk?.takeIf { old -> old }, ytOk = if (profile!=null) p.ytOk else if (youtube) p.ytOk else if (telegram) null else it.ytOk, tgOk = if (profile!=null) p.tgOk else if (telegram) p.tgOk else if (youtube) null else it.tgOk, tgMs = if(profile!=null || telegram) p.tgMs else if(youtube) 0 else it.tgMs, checkedAt = System.currentTimeMillis(), kbps = if (speedSample) p.kbps else it.kbps,
                         serviceNetwork = if ((profile!=null || youtube || telegram) && p.works) net else it.serviceNetwork,
                         serviceMask = if ((profile!=null || youtube || telegram) && p.works) st.state(s).maskFor(net) else it.serviceMask,
@@ -473,7 +473,7 @@ object Actions {
                 step(done.incrementAndGet(), variants.size)
             }
         } finally { own?.close(); states.flush(); runCatching { Brain.save(app) } }
-        if (Net.matches(app,observed)) {
+        if (Net.matches(app,observed) && (profile==null || MaskTrialFence.settingsUnchanged(st.settings,Store.state.value.settings))) {
             val committed = Store.state.value
             pinned.filter { it.id in warmPassed && committed.servers.contains(it) }.forEach { s ->
                 val x=committed.state(s)
@@ -2061,14 +2061,15 @@ object Actions {
 
     /** Find a VERIFIED spare while the existing TUN stays up. Selection changes only after returning success. */
     suspend fun prepareStandby(used: List<Server>): Server? {
-        if (job?.isActive == true) return null
+        if (job?.isActive == true) { reserveStatus.value="Резервы: ожидаю завершения пользовательского поиска"; return null }
         val plan=PhonePower.refresh(app)
-        if(!BackgroundReservePolicy.mayProbe(Store.state.value.settings.mode==Mode.AUTO,plan)) return null
+        if(!StandbyPreparationPolicy.mayPrepare(Store.state.value.settings.mode==Mode.AUTO,plan)) {
+            reserveStatus.value="Резервы: подготовка отложена на время звонка или перегрева"; return null
+        }
         val st = Store.state.value; val ids = used.map { it.id }.toSet(); val net = Net.key(app)
-        if(!ReserveBudget.take(net+"|"+Net.underlying(app)?.toString(),android.os.SystemClock.elapsedRealtime(),refillMs=1000L)) return null
         val stamp=System.currentTimeMillis()
         val warm = warmReserveCount(used)
-        if (warm>=3) return null
+        if (warm>=StandbyPreparationPolicy.TARGET) { reserveStatus.value="Резервы: готовы $warm"; return null }
         val observation=Net.observation(app) ?: return null
         val cached=WarmReserveMemory.session.candidates(observation,st.servers,{st.state(it).maskFor(net)},st.settings.testUrl,
             android.os.SystemClock.elapsedRealtime()).mapTo(HashSet()) {it.id}
@@ -2082,17 +2083,25 @@ object Actions {
         val total = pool.sumOf { st.state(it).evidenceFor(net).checks.coerceIn(0, 10000) }.coerceAtMost(1_000_000)
         val ranked = AdaptiveRouteRank.order(pool,{st.state(it)},net,now,{CloudSpeed.prior(it)})
         val exploit = ServerChoice.diverse(ranked, 5)
-        // One exploration slot, only for background verification; never an unverified live switch.
         val explore = pool.filter { s -> exploit.none { it.id == s.id } }.maxByOrNull {
             ServerChoice.blended(CloudSpeed.prior(it), st.state(it).evidenceFor(net), now) +
                 .08 * ServerChoice.exploration(st.state(it).evidenceFor(net).checks, total)
         }
-        val candidates = (exploit + listOfNotNull(explore)).take(BackgroundReservePolicy.candidates(plan).coerceAtMost(6))
+        val candidates = (exploit + listOfNotNull(explore)).take(6)
+        if(candidates.isEmpty()) {reserveStatus.value="Резервы: готовы $warm · нет дополнительных кандидатов в текущем каталоге";return null}
         var found: Server? = null
         val previous = progress.value
-        try { realTest(candidates,"Фоновый запасной маршрут",big=false,youtube=false,telegram=st.settings.mode==Mode.AUTO,attempts=1,stopAfter=1,
-            budgetMs=ConnectPolicy.QUICK_BUDGET_MS,onFirst={ found=it }) }
-        finally { progress.value=previous }
+        reserveStatus.value="Резервы: готовы $warm · проверяю запасной маршрут"
+        try {
+            kotlinx.coroutines.withTimeoutOrNull(StandbyPreparationPolicy.PASS_TIMEOUT_MS) {
+                realTest(candidates,"Подготовка резерва",big=false,youtube=false,telegram=true,attempts=1,stopAfter=1,
+                    budgetMs=ConnectPolicy.QUICK_BUDGET_MS,onFirst={ found=it })
+            }
+        } finally {
+            // An explicit search may have started while this bounded background pass was finishing.
+            if(job?.isActive!=true) progress.value=previous
+            reserveStatus.value="Резервы: готовы ${warmReserveCount(used)} · проверены выбранные сервисы; активный маршрут не менялся"
+        }
         return found
     }
 
