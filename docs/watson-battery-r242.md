@@ -17,3 +17,6 @@ Local focused suites: 34 JVM tests passed before recovery follow-up; three addit
 
 ## Full CI blocker: pinned upstream artifact moved
 Run 41350694064 failed before JVM/Android tests: fetchTor received FileNotFoundException from dist.torproject.org for pinned 15.0.26. The official archive serves the same version. A transfer-error-only archive fallback is added; SHA-256 pins, native extraction, ABI requirements and version are unchanged. A checksum mismatch remains fatal. No test gate is waived.
+
+## Remaining Android 29 gate — not waived
+Run 41351924435 built successfully after archive fallback, but API29 single-route Activity recreation gate failed. The bounded log shows a physical-network refresh 56ms after first Xray return, before the Activity restored events; only one start command was logged. This is not established as command replay or an owner-phone reproduction. DEBUG-only handoff deltas now expose boolean handle/profile/path/presence changes, without raw identifiers or weakening any reconnect/test predicate. The prior failure remains red and this is not a release.

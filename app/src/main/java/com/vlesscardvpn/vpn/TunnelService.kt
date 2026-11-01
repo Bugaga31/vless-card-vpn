@@ -1511,6 +1511,7 @@ class TunnelService : VpnService() {
             val profile = network?.let { Net.key(this@TunnelService, it) }
             val snapshot = network?.let { NetworkHandoff.Snapshot(it.toString(), profile!!, Net.pathRevision(this@TunnelService,it)) }
             val change = handoff.update(snapshot) ?: return@launch
+            if (BuildConfig.DEBUG) Log.i("E2E", "handoff delta handle=${change.handleChanged} profile=${change.profileChanged} path=${change.pathChanged} presence=${change.presenceChanged} state=${Tunnel.status.value.state}")
             // Carry endpoints only as unverified candidate hints, never their old-network samples.
             val previousCandidates=(usedServers+chainReserves.candidateServers()).distinctBy {it.id}.take(8)
             cancelChainSearch()
