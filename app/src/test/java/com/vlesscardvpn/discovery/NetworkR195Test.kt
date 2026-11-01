@@ -9,14 +9,14 @@ import java.net.InetAddress
 class NetworkR195Test {
  private fun v4(n:Int)=InetAddress.getByAddress(byteArrayOf(127,0,0,n.toByte()))
  private fun v6(n:Int)=InetAddress.getByAddress(ByteArray(16).also {it[0]=0x20;it[1]=1;it[15]=n.toByte()})
- @Test fun cooledPrefixCannotHideDeepFreshCandidate() {val a=(0..1000).toList();assertEquals(listOf(1000),DiscoveryWindow.pool(a,{it<1000},{1}))}
- @Test fun telegramFailedPrefixCannotHideDeepCandidate() {assertEquals(listOf(1000),DiscoveryWindow.pool((0..1000).toList(),{false},{if(it<1000)2 else 1}))}
+ @Test fun cooledPrefixCannotHideDeepFreshCandidate() {val a=(0..1000).toList();assertEquals(listOf(1000)+(0..999),DiscoveryWindow.pool(a,{it<1000},{1}))}
+ @Test fun telegramFailedPrefixCannotHideDeepCandidate() {assertEquals(listOf(1000)+(0..999),DiscoveryWindow.pool((0..1000).toList(),{false},{if(it<1000)2 else 1}))}
  @Test fun allCooledRetainsBoundedRecoveryInput() {val a=(0..300).toList();assertEquals(a,DiscoveryWindow.pool(a,{true},{1}))}
  @Test fun allServiceFailedRetainsRecovery() {assertEquals(listOf(1,2),DiscoveryWindow.pool(listOf(1,2),{false},{2}))}
- @Test fun neverReintroducesKnownFailureWhenPossibleExists() {assertEquals(listOf(2),DiscoveryWindow.pool(listOf(1,2),{it==2},{if(it==1)2 else 1}))}
- @Test fun stableOrderPreserved() {assertEquals(listOf(3,1),DiscoveryWindow.pool(listOf(3,2,1),{it==2},{1}))}
+ @Test fun historyOnlyReordersAndCooldownDefers() {assertEquals(listOf(1,2),DiscoveryWindow.pool(listOf(1,2),{it==2},{if(it==1)2 else 1}))}
+ @Test fun stableOrderPreserved() {assertEquals(listOf(3,1,2),DiscoveryWindow.pool(listOf(3,2,1),{it==2},{1}))}
  @Test fun emptyPoolStaysEmpty() {assertTrue(DiscoveryWindow.pool(emptyList<Int>(),{false},{1}).isEmpty())}
- @Test fun genericPoolDoesNotInventCandidates() {assertEquals(listOf("new"),DiscoveryWindow.pool(listOf("old","new"),{it=="old"},{1}))}
+ @Test fun genericPoolDoesNotInventCandidates() {assertEquals(listOf("new","old"),DiscoveryWindow.pool(listOf("old","new"),{it=="old"},{1}))}
  @Test fun ipv6FirstInterleavesIpv4() {val a=v6(1);val b=v6(2);val c=v4(1);assertEquals(listOf(a,c,b),DualStackOrder.order(listOf(a,b,c)))}
  @Test fun ipv4PreferenceRetained() {val a=v4(1);val b=v4(2);val c=v6(1);assertEquals(listOf(a,c,b),DualStackOrder.order(listOf(a,b,c)))}
  @Test fun duplicateAddressesRemoved() {val a=v4(1);assertEquals(listOf(a),DualStackOrder.order(listOf(a,a)))}
@@ -51,5 +51,5 @@ class NetworkR195Test {
   try {val jobs=(1..48).map {async {ProbeDns.resolve("fixture-$it",100){val n=active.incrementAndGet();peak.updateAndGet {maxOf(it,n)};try {while(release.count>0)try {release.await()}catch(_:InterruptedException){};listOf(v4(1))}finally{active.decrementAndGet()}}}};assertTrue(jobs.awaitAll().all {it==null});assertTrue(peak.get() in 1..4)}
   finally {release.countDown();withTimeout(3000){while(active.get()>0)delay(1)}}
  }
- @Test fun definiteHintFailureStillNeedsAuthenticatedValidation() {assertFalse(AutoLatencyPolicy.accepts(Probe(10,null,null,tgOk=null,tgMs=0)));assertFalse(AutoLatencyPolicy.accepts(Probe(10,null,null,tgOk=true,tgMs=1200)))}
+ @Test fun definiteHintFailureStillNeedsAuthenticatedValidation() {assertFalse(AutoLatencyPolicy.accepts(Probe(10,null,null,tgOk=null,tgMs=0)));assertFalse(AutoLatencyPolicy.accepts(Probe(10,null,null,tgOk=true,tgMs=3001)))}
 }

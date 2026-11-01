@@ -146,10 +146,11 @@ fun WatsonScreen(openPhone:()->Unit) {
             Text(auditStatus, style=MaterialTheme.typography.bodyMedium)
             Button(onClick={scope.launch {
                 scanning=true;message=""
-                try {withContext(Dispatchers.IO){
-                    if (Store.settings.value.automaticSecurityAudit) WatsonMonitor.refresh(ctx, force=true)
-                    else manualApps=WatsonApps.scan(ctx)
-                };expanded=emptySet()}
+                try {val manual=withContext(Dispatchers.IO){
+                    if (Store.settings.value.automaticSecurityAudit) { WatsonMonitor.refresh(ctx, force=true); null }
+                    else WatsonApps.scan(ctx)
+                }; if (!Store.settings.value.automaticSecurityAudit) manualApps=manual
+                    expanded=emptySet()}
                 catch(e:CancellationException){throw e}
                 catch(_:Exception){message="Аудит не завершён. Безопасность приложений неизвестна."}
                 finally {scanning=false}

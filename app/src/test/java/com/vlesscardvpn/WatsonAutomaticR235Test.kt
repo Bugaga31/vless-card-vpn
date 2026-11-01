@@ -21,6 +21,12 @@ class WatsonAutomaticR235Test {
     @Test fun userSearchAlwaysWins() { assertFalse(P.allowed(true,true,false,true)) }
     @Test fun thermalOrBatteryPressureDefers() { assertFalse(P.allowed(true,false,false,false)) }
     @Test fun gamingDefers() { assertFalse(P.allowed(true,false,true,true)) }
+    @Test fun everyResourceCombinationHonorsUserSearchAndOptOut() {
+        for(enabled in listOf(false,true)) for(searching in listOf(false,true))
+            for(gaming in listOf(false,true)) for(light in listOf(false,true)) {
+                assertEquals(enabled && !searching && !gaming && light, P.allowed(enabled,searching,gaming,light))
+            }
+    }
     @Test fun safeWindowAllowed() { assertTrue(P.allowed(true,false,false,true)) }
     @Test fun currentDefaultLatencyStillStrict() {
         assertEquals(3000, AutoLatencyPolicy.MAX_MS)

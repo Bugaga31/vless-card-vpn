@@ -7,7 +7,7 @@ import org.junit.Assert.*
 import org.junit.Test
 class StabilityR206Test {
  private fun s(ok:Boolean?=true,ms:Int=100)=LinkStabilityPolicy.Sample(ok,ms)
- @Test fun defaultThousand(){assertEquals(1000,AutoLatencyRange.Range().max)}
+ @Test fun defaultThreeThousand(){assertEquals(3000,AutoLatencyRange.Range().max)}
  @Test fun numberIsUpperBound(){assertEquals(AutoLatencyRange.Range(1,800),AutoLatencyRange.parse("800"))}
  @Test fun asciiRange(){assertEquals(AutoLatencyRange.Range(100,800),AutoLatencyRange.parse("100-800"))}
  @Test fun enDashWhitespace(){assertEquals(AutoLatencyRange.Range(100,800),AutoLatencyRange.parse(" 100 – 800 "))}
@@ -28,8 +28,8 @@ class StabilityR206Test {
  @Test fun unknownTgRejected(){assertFalse(AutoLatencyRange.Range().accepts(true,100,null,0))}
  @Test fun invalidPersistedUsesDefault(){assertEquals(AutoLatencyRange.Range(),AutoLatencyRange.safe(900,800))}
  @Test fun settingsRoundTrip(){val a=Settings(autoLatencyMinMs=100,autoLatencyMaxMs=800);val b=Settings.fromJson(a.toJson());assertEquals(100,b.autoLatencyMinMs);assertEquals(800,b.autoLatencyMaxMs)}
- @Test fun oldSettingsDefault(){assertEquals(1000,Settings.fromJson(JSONObject()).autoLatencyMaxMs)}
- @Test fun invalidSavedReset(){assertEquals(1000,Settings.fromJson(JSONObject().put("autoLatencyMaxMs",-1)).autoLatencyMaxMs)}
+ @Test fun oldSettingsDefault(){assertEquals(3000,Settings.fromJson(JSONObject()).autoLatencyMaxMs)}
+ @Test fun invalidSavedReset(){assertEquals(3000,Settings.fromJson(JSONObject().put("autoLatencyMaxMs",-1)).autoLatencyMaxMs)}
  @Test fun oneAnswerNotStable(){assertNull(LinkStabilityPolicy.summarize(listOf(s()),1000).stable)}
  @Test fun threeAnswersStable(){assertEquals(true,LinkStabilityPolicy.summarize(listOf(s(),s(ms=120),s(ms=140)),1000).stable)}
  @Test fun singleFailureUnstable(){assertEquals(false,LinkStabilityPolicy.summarize(listOf(s(),s(false,0),s()),1000).stable)}

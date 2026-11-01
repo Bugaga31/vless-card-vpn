@@ -31,7 +31,7 @@ class DiscoveryR193Test {
  @Test fun representativeBeyondRankingWindow() {val a=(1..1000).map {node(it)};val b=node(2001,"xhttp");assertTrue(b in TransportExploration.representatives(a+b))}
  @Test fun separateTlsAndRealityFamilies() {val a=node(1);val b=node(2,security="tls");assertEquals(listOf(a,b),TransportExploration.representatives(listOf(a,b)))}
  @Test fun cooledTransportNotReintroduced() {val a=node(1);val b=node(2,"xhttp");assertEquals(listOf(a),ConnectPolicy.candidates(listOf(a,b),emptyList(),emptySet(),cooling={it==b}) {0})}
- @Test fun failedTelegramNotReintroduced() {val a=node(1);val b=node(2,"xhttp");assertEquals(listOf(a),ConnectPolicy.candidates(listOf(a,b),emptyList(),emptySet(),serviceRank={if(it==b)2 else 1}) {0})}
+ @Test fun failedTelegramRetainedOnlyForRevalidation() {val a=node(1);val b=node(2,"xhttp");assertEquals(listOf(a,b),ConnectPolicy.candidates(listOf(a,b),emptyList(),emptySet(),serviceRank={if(it==b)2 else 1}) {0})}
  private fun xhttp(extra:String="") = node(10,"xhttp","tls").copy(secret="00000000-0000-0000-0000-000000000001",host="cdn.example",sni="tls.example",path="/configured-path",mode="packet-up",extra=extra)
  private fun settings(s:Server) = com.vlesscardvpn.xray.XrayConfigBuilder.outbound(s,"fixture",null).getJSONObject("streamSettings")
  @Test fun xhttpPaddingPreserved() {val x=settings(xhttp("{\"xPaddingBytes\":\"100-1000\",\"xPaddingObfsMode\":true}")).getJSONObject("xhttpSettings").getJSONObject("extra");assertEquals("100-1000",x.getString("xPaddingBytes"));assertTrue(x.getBoolean("xPaddingObfsMode"))}

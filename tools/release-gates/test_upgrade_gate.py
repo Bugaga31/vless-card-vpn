@@ -31,11 +31,12 @@ elif args and args[0]=='install':print('Success')
             return result.returncode,events.read_text() if events.exists() else '',result.stdout
     def test_all_published_baselines_are_required(self):
         rc,events,out=self.run_gate();self.assertEqual(0,rc,out)
-        self.assertEqual(3,events.count('adb install -r'))
-        for version in ('1.2.50','1.2.55','1.2.56'):
+        self.assertEqual(4,events.count('adb install -r'))
+        for version in ('1.2.50','1.2.55','1.2.56','1.2.118'):
             self.assertIn('baseline-'+version+'.apk',events)
             self.assertIn('Published '+version+' -> signed versionCode 167 upgrade: PASS',out)
         self.assertIn('b4a319c1753ae28761cba62e1ea3df40167116c6a946b160643a35dc1afdb7c1',events)
+        self.assertIn('3e994e4004beeaf0cc6cef04d3c4fa9e1b4e48c0bf58cc0af541cf1553af713e',events)
     def test_checksum_failure_stops_before_install(self):
         rc,events,_=self.run_gate('hash');self.assertNotEqual(0,rc);self.assertNotIn('adb install',events)
     def test_failed_upgrade_cannot_continue_or_claim_pass(self):

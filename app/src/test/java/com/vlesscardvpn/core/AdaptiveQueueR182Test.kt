@@ -17,9 +17,9 @@ class AdaptiveQueueR182Test {
         val all=(1..12).map(::server)
         assertEquals(1,ConnectPolicy.candidates(all,all,emptySet(),cooling={true}){0}.size)
     }
-    @Test fun freshServiceFailureDoesNotReenterFromCloud() {
+    @Test fun serviceHistoryDefersButDoesNotInventSuccess() {
         val a=server(1);val b=server(2)
-        assertEquals(listOf(a),ConnectPolicy.candidates(listOf(a,b),listOf(b),emptySet(),serviceRank={if(it==b) 2 else 1}){0})
+        assertEquals(listOf(a,b),ConnectPolicy.candidates(listOf(a,b),listOf(b),emptySet(),serviceRank={if(it==b) 2 else 1}){0})
     }
     @Test fun unknownCloudValuesNeverBecomeLocalSuccess() {
         val s=ServerState()

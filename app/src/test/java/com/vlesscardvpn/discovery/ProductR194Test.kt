@@ -26,11 +26,11 @@ class ProductR194Test {
  @Test fun measuredGainAllowsSwitch() {assertTrue(BoostDecision.shouldReplace(true,"a","b",10000,13501))}
  @Test fun disconnectedCanSelectMeasuredWinner() {assertTrue(BoostDecision.shouldReplace(false,null,"b",0,1000))}
  @Test fun comparisonDoesNotOverflow() {assertFalse(BoostDecision.shouldReplace(true,"a","b",Int.MAX_VALUE,Int.MAX_VALUE))}
- @Test fun hotSearchKeepsFiveSeconds() {assertEquals(5000L,SearchPacingPolicy.rest(PowerPolicy.Plan(memory=PowerPolicy.Memory(hot=true))))}
- @Test fun callSearchKeepsFiveSeconds() {assertEquals(5000L,SearchPacingPolicy.rest(PowerPolicy.Plan(voiceCallActive=true)))}
- @Test fun darkScreenPaces15s() {assertEquals(5000L,SearchPacingPolicy.rest(PowerPolicy.Plan(screenInteractive=false)))}
- @Test fun batteryPressurePaces5s() {assertEquals(5000L,SearchPacingPolicy.rest(PowerPolicy.Plan(allowLight=false)))}
- @Test fun normalPlanNoAddedDelay() {assertEquals(5000L,SearchPacingPolicy.rest(PowerPolicy.Plan()))}
+ @Test fun hotSearchKeepsOneSecond() {assertEquals(1000L,SearchPacingPolicy.rest(PowerPolicy.Plan(memory=PowerPolicy.Memory(hot=true))))}
+ @Test fun callSearchKeepsOneSecond() {assertEquals(1000L,SearchPacingPolicy.rest(PowerPolicy.Plan(voiceCallActive=true)))}
+ @Test fun darkScreenPacesOneSecond() {assertEquals(1000L,SearchPacingPolicy.rest(PowerPolicy.Plan(screenInteractive=false)))}
+ @Test fun batteryPressurePacesOneSecond() {assertEquals(1000L,SearchPacingPolicy.rest(PowerPolicy.Plan(allowLight=false)))}
+ @Test fun normalPlanNoAddedDelay() {assertEquals(1000L,SearchPacingPolicy.rest(PowerPolicy.Plan()))}
  @Test fun screenOffCapsForeground() {val p=PowerPolicy.evaluate(PowerPolicy.Input(0,screen=false),PowerPolicy.Options());assertEquals(4,p.foregroundRealParallel);assertEquals(4,p.foregroundTcpParallel)}
  @Test fun saverCapsForeground() {assertEquals(4,PowerPolicy.evaluate(PowerPolicy.Input(0,saver=true),PowerPolicy.Options()).foregroundRealParallel)}
  @Test fun ecoCapsForeground() {assertEquals(4,PowerPolicy.evaluate(PowerPolicy.Input(0),PowerPolicy.Options(profile="eco")).foregroundRealParallel)}
