@@ -12,7 +12,7 @@ class FastRecoveryR230Test {
     private fun source(n:String)=listOf(File("src/main/java/com/vlesscardvpn/$n"),File("app/src/main/java/com/vlesscardvpn/$n")).first{it.exists()}.readText()
     @Test fun activeDetectorIsBoundedAndNotEverySecond() {for(v in listOf(-1L,1000L,10000L,120000L))assertTrue(VpnRecoveryPolicy.watchPeriod(v,true) in 10000L..15000L)}
     @Test fun quietDetectorRemainsFiniteAndLight() {assertEquals(20000L,VpnRecoveryPolicy.watchPeriod(120000,true,true));assertTrue(VpnRecoveryPolicy.healthOnly(true,true))}
-    @Test fun urgentPathRetainsTwoMissesAndFastRetry() {val s=source("vpn/TunnelService.kt");assertTrue(s.contains("if(urgent) 3_000L"));assertTrue(s.contains("miss >= 2"));assertEquals(1000L,VpnRecoveryPolicy.RETRY_MS)}
+    @Test fun urgentPathRetainsTwoMissesAndFastRetry() {val s=source("vpn/TunnelService.kt");assertTrue(s.contains("RecoveryWavePolicy.confirmDelayMs(autoWatch)"));assertTrue(s.contains("miss >= 2"));assertEquals(1000L,VpnRecoveryPolicy.RETRY_MS)}
     @Test fun lightDoesNotMeanScreenOff() {val s=source("vpn/TunnelService.kt");assertTrue(s.contains("healthyMs,autoWatch,asleep()"));assertFalse(s.contains("healthyMs,autoWatch,quietAuto"))}
     @Test fun lightProbeHasOwnBoundedBudget() {assertTrue(source("vpn/TunnelService.kt").contains("budgetMs = if(healthOnly) 3500L else 6500L"))}
     @Test fun selectedYoutubeFailureRecovers() {assertTrue(RequiredServiceRecovery.failed(profile("youtube"),good.copy(ytOk=false)))}

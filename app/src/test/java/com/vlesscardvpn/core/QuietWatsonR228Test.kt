@@ -35,7 +35,9 @@ class QuietWatsonR228Test {
     @Test fun confirmedFailureStillUsesFastRetryOutsideIdleCadence() {
         val f=java.io.File("src/main/java/com/vlesscardvpn/vpn/TunnelService.kt")
         val s=(if(f.exists())f else java.io.File("app/"+f.path)).readText()
-        assertTrue(s.contains("if(urgent) 3_000L"))
+        assertTrue(s.contains("RecoveryWavePolicy.confirmDelayMs(autoWatch)"))
+        assertEquals(1000L,RecoveryWavePolicy.confirmDelayMs(true))
+        assertEquals(3000L,RecoveryWavePolicy.confirmDelayMs(false))
         assertTrue(s.contains("miss >= 2"))
     }
 }
