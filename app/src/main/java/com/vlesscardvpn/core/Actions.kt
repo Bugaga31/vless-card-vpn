@@ -1842,7 +1842,7 @@ object Actions {
         Store.setState(server.id) { ServerChoice.invalidateSpeed(it, net, at) }
     }
 
-    /** Fast rescue after the first native batch failed. No download, source refresh, mutation or full mask sweep. */
+    /** Fast rescue after the first native batch failed. No download, source refresh or full mask sweep; bounded Hello evolution is opt-in. */
     private suspend fun quickMaskRescue(candidates:List<Server>, net:String, network:String?, includeCurrent:Boolean=false):Server? {
         val start=Store.state.value
         if(start.settings.mode!=Mode.AUTO) return null
@@ -1899,13 +1899,21 @@ object Actions {
         val maskId=mask?.id.orEmpty()
         val stamp=System.currentTimeMillis()
         var committed=false
-        Store.setState(server.id) {current->
-            if(!MaskSamplePolicy.unchanged(current,start.state(server),net)) current else {
+        Store.update {state->
+            committed=false
+            val current=state.state(server)
+            if(!MaskSamplePolicy.unchanged(current,start.state(server),net)) state else {
+                val generated=mask!=null && mask.auto && Masks.byId(maskId)==null
+                if(generated && !AutoMaskEvolution.enabled(state.settings)) return@update state
+                val stored=if(generated) AutoMaskEvolution.retain(state.settings.autoMasks,mask!!,
+                    state.states.values.flatMap {listOf(it.maskId)+it.netMasks.values}.toSet()) else state.settings.autoMasks
+                if(generated && MaskLab.load(stored).none {it.id==maskId}) return@update state
                 committed=true
-                current.copy(maskId=maskId,netMasks=current.netMasks+(net to maskId),realMs=p.realMs,bigOk=null,
+                val adopted=current.copy(maskId=maskId,netMasks=current.netMasks+(net to maskId),realMs=p.realMs,bigOk=null,
                     kbps=0,speedCheckedAt=0,speedNetwork="",speedMask="",autoChecksKey=p.autoChecksKey,autoChecksAt=stamp,tgOk=p.tgOk,tgMs=p.tgMs,ytOk=p.ytOk,
                     serviceNetwork=net,serviceMask=maskId,serviceCheckedAt=stamp,checkedAt=stamp,
                     okCount=current.okCount+1)
+                state.copy(settings=state.settings.copy(autoMasks=stored),states=state.states+(server.id to adopted))
             }
         }
         if(!committed) return null
