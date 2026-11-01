@@ -241,6 +241,7 @@ case "$PRIMARY" in 8443|8444|8447) ;; *) fail "background: unknown primary fixtu
 if [ -n "$PRIMARY" ]; then
   CHECKS=$(logcount 'check ok=true')
   STARTS_BEFORE=$(logcount 'service command=start state=')
+  BRIDGES_BEFORE=$(logcount 'bridge resumed keepTun=true')
   BLOCKED_PORT=$PRIMARY
   sudo iptables -I INPUT -p tcp --dport "$BLOCKED_PORT" -j DROP || exit 1
   waitlog_after 'check ok=true' "$CHECKS" 150 >/dev/null || fail "background: no automatic recovery after primary blackhole"
@@ -249,6 +250,7 @@ if [ -n "$PRIMARY" ]; then
   [ "$NEXT" != "$PRIMARY" ] || fail "background: failed primary was not replaced"
   [ "$(logcount 'service command=start state=')" -eq "$STARTS_BEFORE" ] || fail "background: recovery used another hard START"
   adb shell dumpsys activity activities | grep 'mResumedActivity' | grep -q "$PKG/.MainActivity" && fail "background: MainActivity unexpectedly resumed"
+  [ "$(logcount 'bridge resumed keepTun=true')" -gt "$BRIDGES_BEFORE" ] || fail "background: userspace bridge was not renewed on retained TUN"
   R=$(probe background-recovered); okprobe "$R" || fail "background: other UID could not transfer after automatic recovery"
   c=$(grep -c "email: u$NEXT" $W/access.log || true)
   [ "$c" -gt 0 ] || fail "background: replacement server saw no authenticated traffic"
