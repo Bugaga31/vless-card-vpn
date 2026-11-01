@@ -55,8 +55,22 @@ val fetchTor by tasks.registering {
             val (name, want, libs) = spec
             if (valid(abi, libs)) continue
             val tmp = File(out, "$abi.apk.part"); tmp.parentFile.mkdirs()
-            val url = "https://dist.torproject.org/torbrowser/$torVersion/$name-$torVersion.apk"
-            uri(url).toURL().openStream().use { input -> tmp.outputStream().use { input.copyTo(it) } }
+            // Older pinned versions leave dist; the official archive retains identical bytes.
+            // Never drop pinning, substitute a newer version, or continue on checksum failure.
+            val urls = listOf(
+                "https://dist.torproject.org/torbrowser/$torVersion/$name-$torVersion.apk",
+                "https://archive.torproject.org/tor-package-archive/torbrowser/$torVersion/$name-$torVersion.apk")
+            for ((index, url) in urls.withIndex()) {
+                try {
+                    uri(url).toURL().openStream().use { input -> tmp.outputStream().use { input.copyTo(it) } }
+                } catch (error: java.io.IOException) {
+                    tmp.delete()
+                    if (index == urls.lastIndex) throw error
+                    continue
+                }
+                check(sha(tmp) == want) { "Tor Browser APK checksum mismatch for $abi" }
+                break
+            }
             check(sha(tmp) == want) { "Tor Browser APK checksum mismatch for $abi" }
             val dir = File(out, abi); dir.mkdirs()
             ZipFile(tmp).use { z ->

@@ -14,3 +14,6 @@ No tunnel/watchdog/probe concurrency or routing settings are changed. No device 
 A confirmed Auto transport failure previously requested recoverServerRoute and unconditionally exited the watchdog. That request can be ignored while a different service repair owns recoveryJob. The detector now stays alive, skips duplicate network probes during active repair, and can retry when the owner completes. This is an identified lifecycle hazard, not proof of the exact failure on the owner's phone. The live heading now explicitly says HTTP access, not YouTube video.
 
 Local focused suites: 34 JVM tests passed before recovery follow-up; three additional source/label regression tests added. Full seven-job Android/build/mask CI is required; no auto publication is configured.
+
+## Full CI blocker: pinned upstream artifact moved
+Run 41350694064 failed before JVM/Android tests: fetchTor received FileNotFoundException from dist.torproject.org for pinned 15.0.26. The official archive serves the same version. A transfer-error-only archive fallback is added; SHA-256 pins, native extraction, ABI requirements and version are unchanged. A checksum mismatch remains fatal. No test gate is waived.
