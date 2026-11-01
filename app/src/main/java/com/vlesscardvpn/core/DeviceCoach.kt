@@ -57,6 +57,7 @@ object DeviceCoach {
                     val plan=PhonePower.refresh(app)
                     runCatching { sample(app, includePhoneInfo = visible.value && plan.allowLight) }
                     PhonePower.requestRefresh(app)
+                    com.vlesscardvpn.watson.WatsonMonitor.requestRefresh()
                     delay(AutomaticCoachPolicy.sampleDelay(visible.value,!plan.allowLight))
                 }
             }

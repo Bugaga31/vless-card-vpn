@@ -10,7 +10,9 @@ class DeviceCoachJob : JobService() {
     private var task: Job? = null
     override fun onStartJob(params: JobParameters): Boolean {
         task = scope.launch {
-            try { if (DeviceCoach.backgroundEnabled(this@DeviceCoachJob) && !GameSession.active() && PhonePower.refresh(this@DeviceCoachJob).allowLight) runCatching { DeviceCoach.sample(this@DeviceCoachJob) } }
+            try { if (params.jobId == com.vlesscardvpn.watson.WatsonMonitor.JOB_ID) {
+                com.vlesscardvpn.watson.WatsonMonitor.refresh(this@DeviceCoachJob)
+            } else if (DeviceCoach.backgroundEnabled(this@DeviceCoachJob) && !GameSession.active() && PhonePower.refresh(this@DeviceCoachJob).allowLight) runCatching { DeviceCoach.sample(this@DeviceCoachJob) } }
             finally { if (isActive) withContext(Dispatchers.Main) { jobFinished(params, false) } }
         }
         return true

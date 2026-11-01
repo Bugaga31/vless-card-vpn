@@ -51,7 +51,11 @@ fun WatsonScreen(openPhone:()->Unit) {
     val automaticPower by PhonePower.state.collectAsState()
     val tips by DeviceCoach.advice.collectAsState()
     LaunchedEffect(Unit) {withContext(Dispatchers.IO) {runCatching {DeviceCoach.sample(ctx)}}}
-    var apps by remember {mutableStateOf<WatsonApps.Snapshot?>(null)}
+    val autoApps by WatsonMonitor.snapshot.collectAsState()
+    val auditStatus by WatsonMonitor.status.collectAsState()
+    var manualApps by remember {mutableStateOf<WatsonApps.Snapshot?>(null)}
+    val apps = if (settings.automaticSecurityAudit) autoApps else manualApps
+    LaunchedEffect(settings.automaticSecurityAudit) { manualApps = null }
     var scanning by remember {mutableStateOf(false)}
     var message by remember {mutableStateOf("")}
     var query by remember {mutableStateOf("")}
@@ -134,10 +138,18 @@ fun WatsonScreen(openPhone:()->Unit) {
             if(url.isNotEmpty()) TextButton(onClick={url="";urlResult=null}){Text("Очистить ссылку")}
         }
         item {Text("Приложения · манифест и разрешения",style=MaterialTheme.typography.titleLarge)
-            Text("Только видимые Android приложения с иконкой запуска и VLESS Card. Скрытые, другие профили и часть системных приложений недоступны. Данные читаются по нажатию, не отправляются и не сохраняются. Это не сканирование кода на вирусы.")
+            Text("Только видимые Android приложения с иконкой запуска и VLESS Card. Скрытые, другие профили и часть системных приложений недоступны. Автоаудит читает только локальные метаданные, уступает поиску VPN и экономии ресурсов. Снимок хранится только в памяти, не отправляется. Нет постоянного сканирования каждую секунду. Это не сканирование кода на вирусы.")
+            Row(Modifier.fillMaxWidth(), horizontalArrangement=Arrangement.SpaceBetween) {
+                Text("Автоаудит разрешений", modifier=Modifier.weight(1f))
+                Switch(settings.automaticSecurityAudit, { enabled -> Store.update { it.copy(settings=it.settings.copy(automaticSecurityAudit=enabled)) } })
+            }
+            Text(auditStatus, style=MaterialTheme.typography.bodyMedium)
             Button(onClick={scope.launch {
                 scanning=true;message=""
-                try {apps=withContext(Dispatchers.IO){WatsonApps.scan(ctx)};expanded=emptySet()}
+                try {withContext(Dispatchers.IO){
+                    if (Store.settings.value.automaticSecurityAudit) WatsonMonitor.refresh(ctx, force=true)
+                    else manualApps=WatsonApps.scan(ctx)
+                };expanded=emptySet()}
                 catch(e:CancellationException){throw e}
                 catch(_:Exception){message="Аудит не завершён. Безопасность приложений неизвестна."}
                 finally {scanning=false}

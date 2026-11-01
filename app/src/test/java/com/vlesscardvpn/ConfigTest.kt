@@ -54,14 +54,14 @@ class ConfigTest {
     }
 
     @Test fun maskCatalog() {
-        assertEquals(654, Masks.ALL.size) // 612 + 7 fingerprints × 3 bounded Hello profiles × 2 engine paths.
+        assertEquals(675, Masks.ALL.size) // Includes 7 fingerprints × 3 explicit tpws Hello profiles.
         Masks.FINGERPRINTS.forEach { fp -> listOf("balanced","coarse","mobile").forEach { profile ->
             assertNotNull(Masks.byId("$fp.hello.$profile")); assertNotNull(Masks.byId("$fp.hello.$profile.b"))
         } }
         val fastIds = Masks.FINGERPRINTS.flatMap { listOf("$it.hello.fast", "$it.hello.fast.b") }.toSet()
         assertEquals(fastIds, Masks.ALL.filter { ".hello.fast" in it.id }.map { it.id }.toSet())
         fastIds.forEach { id -> val mask = Masks.byId(id)!!; assertEquals("0-1", mask.delay); assertEquals("10", mask.maxSplit) }
-        assertEquals(161, Masks.ALL.count { it.viaByeDpi && it.dpi != Masks.CURRENT_DPI })
+        assertEquals(182, Masks.ALL.count { it.viaByeDpi && it.dpi != Masks.CURRENT_DPI })
         val r = LinkParser.parse(reality)!!
         val ws = LinkParser.parse(links[1])!!
         val m = listOf(r to Masks.byId("chrome.d:BYEDPI#VCARD_CASCADE"), ws to Masks.byId("firefox.d:TPWS#VCARD_SHRED"), ws to Masks.byId("edge.h2.b"))
@@ -120,7 +120,7 @@ class ConfigTest {
 
     @Test fun dpiStrategies() {
         val all = com.vlesscardvpn.core.DpiStrategies.BUILT_IN
-        assertEquals(28, all.size)
+        assertEquals(31, all.size)
         assertEquals(all.size, all.map { it.id }.toSet().size)
         assertEquals(10, all.count { it.own })
         all.forEach { s ->

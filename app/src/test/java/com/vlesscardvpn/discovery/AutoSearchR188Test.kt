@@ -61,40 +61,40 @@ class AutoSearchR188Test {
   entered.await();job.cancelAndJoin();assertEquals(setOf("0"),attempted)
  }
  @Test fun statisticsSeparateEveryReason() {
-  val s=AutoSearchStatistics();repeat(6){s.start()}
+  val s=AutoSearchStatistics(1000);repeat(6){s.start()}
   s.observe(false,0,null,0);s.observe(true,100,false,0);s.observe(true,100,null,0)
   s.observe(true,1001,true,100);s.observe(true,100,true,1001);s.observe(true,100,true,100)
   val c=s.snapshot();assertEquals(6,c["completed"]);assertEquals(1,c["https_unconfirmed"]);assertEquals(1,c["telegram_unconfirmed"]);assertEquals(1,c["telegram_unknown"]);assertEquals(2,c["over_1000ms"]);assertEquals(1,c["ready"])
  }
  @Test fun cancelledStartedProbeIsUnfinishedNotFailed() {
-  val s=AutoSearchStatistics();s.start();val c=s.snapshot();assertEquals(1,c["unfinished"]);assertEquals(0,c["completed"]);assertEquals(0,c["https_unconfirmed"])
+  val s=AutoSearchStatistics(1000);s.start();val c=s.snapshot();assertEquals(1,c["unfinished"]);assertEquals(0,c["completed"]);assertEquals(0,c["https_unconfirmed"])
  }
  @Test fun fasterThanFiftyAndExactlyFiveHundredAreReady() {
-  val s=AutoSearchStatistics();repeat(2){s.start()};s.observe(true,1,true,49);s.observe(true,500,true,500);assertEquals(2,s.snapshot()["ready"])
+  val s=AutoSearchStatistics(1000);repeat(2){s.start()};s.observe(true,1,true,49);s.observe(true,500,true,500);assertEquals(2,s.snapshot()["ready"])
  }
  @Test fun telegramFailureIsNotMislabelledAsLatency() {
-  val s=AutoSearchStatistics();s.start();s.observe(true,800,false,0);assertEquals(1,s.snapshot()["telegram_unconfirmed"]);assertEquals(0,s.snapshot()["over_1000ms"])
+  val s=AutoSearchStatistics(1000);s.start();s.observe(true,800,false,0);assertEquals(1,s.snapshot()["telegram_unconfirmed"]);assertEquals(0,s.snapshot()["over_1000ms"])
  }
  @Test fun unknownTelegramIsNotReadyEvenWhenHttpsFast() {
-  val s=AutoSearchStatistics();s.start();s.observe(true,30,true,0);assertEquals(1,s.snapshot()["telegram_unknown"]);assertEquals(0,s.snapshot()["ready"])
+  val s=AutoSearchStatistics(1000);s.start();s.observe(true,30,true,0);assertEquals(1,s.snapshot()["telegram_unknown"]);assertEquals(0,s.snapshot()["ready"])
  }
  @Test fun statisticsAreSafeUnderParallelCompletions() {
-  val s=AutoSearchStatistics();val ts=(0..3).map {Thread {repeat(100){s.start();s.observe(true,100,true,100)}}};ts.forEach{it.start()};ts.forEach{it.join()};assertEquals(400,s.snapshot()["ready"]);assertEquals(0,s.snapshot()["unfinished"])
+  val s=AutoSearchStatistics(1000);val ts=(0..3).map {Thread {repeat(100){s.start();s.observe(true,100,true,100)}}};ts.forEach{it.start()};ts.forEach{it.join()};assertEquals(400,s.snapshot()["ready"]);assertEquals(0,s.snapshot()["unfinished"])
  }
  @Test fun diagnosticsAreFixedSchemaWithoutEndpointNames() {
-  val s=AutoSearchStatistics();s.start();s.observe(true,1200,true,1200)
+  val s=AutoSearchStatistics(1000);s.start();s.observe(true,1200,true,1200)
   val d=AutoDiagnostics.searchEvent("WAVE_LIMIT",4,s.snapshot());assertEquals(setOf("stop","waves","ordinary_probes","latency_limit_ms"),d.keys().asSequence().toSet());assertEquals(1,d.getJSONObject("ordinary_probes").getInt("over_1000ms"))
  }
  @Test fun diagnosticsRejectFreeTextAndUnknownCounters() {
-  try {AutoDiagnostics.searchEvent("https://private.test",1,AutoSearchStatistics().snapshot());fail("free text")} catch(_:IllegalArgumentException) {}
+  try {AutoDiagnostics.searchEvent("https://private.test",1,AutoSearchStatistics(1000).snapshot());fail("free text")} catch(_:IllegalArgumentException) {}
   try {AutoDiagnostics.searchEvent("FOUND",1,mapOf("server address" to 1));fail("unknown key")} catch(_:IllegalArgumentException) {}
  }
  @Test fun diagnosticsClampCountsAndWaves() {
-  val c=AutoSearchStatistics().snapshot().mapValues {Int.MAX_VALUE};val d=AutoDiagnostics.searchEvent("TIME_LIMIT",Int.MAX_VALUE,c)
+  val c=AutoSearchStatistics(1000).snapshot().mapValues {Int.MAX_VALUE};val d=AutoDiagnostics.searchEvent("TIME_LIMIT",Int.MAX_VALUE,c)
   assertEquals(100000,d.getInt("waves"));assertEquals(100000,d.getJSONObject("ordinary_probes").getInt("started"))
  }
  @Test fun defaultLimitsAreBoundedAndLatencyPolicyUnchanged() {
   assertEquals(4,AutoSearchCampaign.MAX_WAVES);assertEquals(45000L,AutoSearchCampaign.MAX_TOTAL_MS)
-  assertEquals(1000,AutoLatencyPolicy.MAX_MS);assertFalse(AutoLatencyPolicy.accepts(Probe(1001,true,null,tgOk=true,tgMs=200)))
+  assertEquals(3000,AutoLatencyPolicy.MAX_MS);assertFalse(AutoLatencyPolicy.accepts(Probe(3001,true,null,tgOk=true,tgMs=200)))
  }
 }

@@ -7,18 +7,22 @@ import android.content.pm.PackageManager
 import android.content.pm.PackageInfo
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.yield
+import kotlinx.coroutines.CancellationException
 
 object WatsonApps {
     data class Snapshot(val apps:List<WatsonApp>,val incomplete:Boolean,val at:Long)
-    /** Explicit user action only. Launcher-visible packages plus self, not all installed apps. */
+    /** Manual or bounded automatic audit. Launcher-visible packages plus self, not all installed apps. */
     @Suppress("DEPRECATION")
-    suspend fun scan(ctx:Context):Snapshot {
+    suspend fun scan(ctx:Context, mayContinue: () -> Boolean = { true }):Snapshot {
         val pm=ctx.packageManager
         val launchable=pm.queryIntentActivities(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER),0)
         val names=(launchable.map{it.activityInfo.packageName}+ctx.packageName).distinct().sorted()
         val chosen=names.take(300)
         val apps=chosen.map {pkg->
             currentCoroutineContext().ensureActive()
+            yield()
+            if (!mayContinue()) throw CancellationException("Optional audit deferred")
             try {
                 val info=pm.getPackageInfo(pkg,PackageManager.GET_PERMISSIONS or PackageManager.GET_SERVICES or
                     PackageManager.GET_ACTIVITIES or PackageManager.GET_RECEIVERS or PackageManager.GET_PROVIDERS)

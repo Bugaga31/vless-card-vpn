@@ -160,6 +160,7 @@ data class Settings(
     /** «Охлаждение»: when the phone is hot the app lowers its own load (pauses background checks, turbo, light masks). */
     val autoCool: Boolean = true,
     val phoneLearning: Boolean = true,
+    val automaticSecurityAudit: Boolean = true,
     val oceanBackground: Boolean = true,
     val oceanMotion: Boolean = true,
     val welcomeSound: Boolean = true,
@@ -200,7 +201,7 @@ data class Settings(
         .put("ruAppsDirect", ruAppsDirect).put("randomTun", randomTun).put("coverTraffic", coverTraffic).put("torRotation", torRotation).put("torExitCountries", torExitCountries).put("torRotationSeconds", torRotationSeconds.coerceIn(5, 86400)).put("torFastOnly", torFastOnly).put("torMaxLatencyMs", torMaxLatencyMs.coerceAtLeast(1)).put("torNetworkRecommendations", torNetworkRecommendations).put("autoChainSearch", autoChainSearch).put("autoChainPurpose", autoChainPurpose).put("torAll", torAll).put("torRouting", torRouting).put("torAuto", torAuto).put("torBridge", torBridge).put("torBridgeLines", torBridgeLines).put("torDirect", torDirect).put("rev", rev).put("turbo", turbo).put("autoStart", autoStart)
         .put("alwaysVpn", JSONArray(alwaysVpn)).put("alwaysDirect", JSONArray(alwaysDirect))
         .put("traffic", JSONObject().apply { traffic.forEach { (k, v) -> put(k, v) } }).put("monthLimitGb", monthLimitGb)
-        .put("country", country).put("favorites", JSONArray(favorites)).put("smartYoutube", smartYoutube).put("appAware", appAware).put("autopilot", autopilot).put("oceanBackground", oceanBackground).put("oceanMotion", oceanMotion).put("welcomeSound", welcomeSound).put("phoneLearning", phoneLearning).put("powerProfile", powerProfile).put("batteryThreshold", batteryThreshold).put("quietScreen", quietScreen).put("chargeOnly", chargeOnly).put("wifiMaintenance", wifiMaintenance).put("protectActiveTraffic", protectActiveTraffic).put("autoCool", autoCool).put("gpsSpoof", gpsSpoof)
+        .put("country", country).put("favorites", JSONArray(favorites)).put("smartYoutube", smartYoutube).put("appAware", appAware).put("autopilot", autopilot).put("oceanBackground", oceanBackground).put("oceanMotion", oceanMotion).put("welcomeSound", welcomeSound).put("phoneLearning", phoneLearning).put("automaticSecurityAudit", automaticSecurityAudit).put("powerProfile", powerProfile).put("batteryThreshold", batteryThreshold).put("quietScreen", quietScreen).put("chargeOnly", chargeOnly).put("wifiMaintenance", wifiMaintenance).put("protectActiveTraffic", protectActiveTraffic).put("autoCool", autoCool).put("gpsSpoof", gpsSpoof)
         .put("ytDpi", JSONObject().apply { ytDpi.forEach { (k, v) -> put(k, v) } })
         .put("netServers", JSONObject().apply { netServers.forEach { (k, v) -> put(k, JSONArray(v)) } })
         .put("subInfo", JSONObject().apply { subInfo.forEach { (k, v) -> put(k, v.toJson()) } })
@@ -285,6 +286,7 @@ data class Settings(
                 smartYoutube = o.optBoolean("smartYoutube", d.smartYoutube), appAware = o.optBoolean("appAware", true), autopilot = o.optBoolean("autopilot", true), autoCool = o.optBoolean("autoCool", true),
                 oceanBackground = o.optBoolean("oceanBackground", true), oceanMotion = o.optBoolean("oceanMotion", true), welcomeSound = o.optBoolean("welcomeSound", true),
                 phoneLearning = o.optBoolean("phoneLearning", true),
+                automaticSecurityAudit = o.optBoolean("automaticSecurityAudit", true),
                 powerProfile = o.optString("powerProfile", "balanced").takeIf { it in listOf("balanced", "eco", "fast") } ?: "balanced",
                 batteryThreshold = o.optInt("batteryThreshold", 20).coerceIn(5, 50), quietScreen = o.optBoolean("quietScreen", true),
                 chargeOnly = o.optBoolean("chargeOnly", false), wifiMaintenance = o.optBoolean("wifiMaintenance", true), protectActiveTraffic = o.optBoolean("protectActiveTraffic", true), gpsSpoof = o.optBoolean("gpsSpoof", false), ytDpi = o.optJSONObject("ytDpi")?.let { m -> m.keys().asSequence().associateWith { m.optBoolean(it) } } ?: emptyMap(),

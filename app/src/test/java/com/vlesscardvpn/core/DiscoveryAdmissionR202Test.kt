@@ -28,7 +28,7 @@ class DiscoveryAdmissionR202Test {
  @Test fun networkChangePreventsPendingPreparation()=runBlocking {var valid=true;var count=0;assertEquals(0,ForegroundProbePlan.run(listOf(pending("p"),ready("r")),true,{valid}) {count++;valid=false;0});assertEquals(1,count)}
  @Test fun cancellationDoesNotEnterDeferredCohort()=runBlocking {var calls=0;try {ForegroundProbePlan.run(listOf(pending("p"),ready("r")),true,{true}) {calls++;throw CancellationException("stop")};fail("must cancel")}catch(_:CancellationException){};assertEquals(1,calls)}
  @Test fun foregroundHasNoArtificialWorkerStagger(){assertEquals(0L,ForegroundProbePlan.staggerMs(true,1))}
- @Test fun backgroundHedgingIsRetained(){assertEquals(120L,ForegroundProbePlan.staggerMs(false,1))}
+ @Test fun backgroundStartsWithoutArtificialStagger(){assertEquals(0L,ForegroundProbePlan.staggerMs(false,1))}
  @Test fun completeBatchNeverStaggers(){assertEquals(0L,ForegroundProbePlan.staggerMs(false,Int.MAX_VALUE));assertEquals(0L,ForegroundProbePlan.staggerMs(true,Int.MAX_VALUE))}
  @Test fun admittedWorkersCanStartTogetherWithoutIncreasingSlots()=runBlocking {val gate=CompletableDeferred<Unit>();val admitted=CompletableDeferred<Unit>();val starts=java.util.concurrent.atomic.AtomicInteger();val j=launch {ProbeRace.run((0..3).toList(),4,1,staggerMs=ForegroundProbePlan.staggerMs(true,1),probe={if(starts.incrementAndGet()==4)admitted.complete(Unit);gate.await();Probe(0,null,null,"fixture")},onEach={_,_->})};withTimeout(2000){admitted.await()};assertEquals(4,starts.get());gate.complete(Unit);j.join()}
 }
