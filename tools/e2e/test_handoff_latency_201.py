@@ -10,4 +10,4 @@ class HandoffLatencyWiring(unittest.TestCase):
   self.assertIn('Net.observation(app)',s);self.assertIn('Net.matches(app,observed)',s);self.assertIn('AutoHandoffPolicy.prioritize',s);self.assertIn('AutoHandoffPolicy.PROBE_WINDOW_MS',s);self.assertIn('AutoEligibility.servicePool',s);self.assertIn('if (valid()) progress.value',s)
  def test_subscription_queue_and_pause_preserved(self):
   s=(R/'app/src/main/java/com/vlesscardvpn/core/Actions.kt').read_text();self.assertIn('SubscriptionQueue.fetchOrder(due,round)',s);self.assertIn('SubscriptionQueue.window(rankedCandidates',s)
-  self.assertIn('WAVE_PAUSE_MS = 5000L',(R/'app/src/main/java/com/vlesscardvpn/core/AutoSearchCampaign.kt').read_text())
+  self.assertIn('WAVE_PAUSE_MS = 1000L',(R/'app/src/main/java/com/vlesscardvpn/core/AutoSearchCampaign.kt').read_text())

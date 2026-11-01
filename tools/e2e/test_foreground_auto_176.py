@@ -6,11 +6,13 @@ class ForegroundWiring(unittest.TestCase):
  def test_user_tcp_uses_explicit_foreground_limit(self):
   a=(ROOT/'core/Actions.kt').read_text();t=(ROOT/'core/Tester.kt').read_text()
   self.assertIn('Tester.fastFilter(ping, foreground = true)',a)
-  self.assertIn('plan.foregroundTcpParallel',t)
+  self.assertIn('minOf(parallel.coerceAtLeast(1),ProbeConcurrencyPolicy.normalize(Store.state.value.settings.probeParallel))',t)
+  policy=(ROOT/'core/ProbeConcurrencyPolicy.kt').read_text()
+  self.assertIn('minOf(requested.coerceAtLeast(1),normalize(selected))',policy)
  def test_actual_probe_limit_matches_foreground_message(self):
   a=(ROOT/'core/Actions.kt').read_text();t=(ROOT/'core/Tester.kt').read_text()
   self.assertIn('foreground = firstWaveOnly',a);self.assertIn('calls = calls, foreground = foreground',a)
-  self.assertIn('PowerPolicy.cap(parallel, probeLimit)',t)
+  self.assertIn('ProbeConcurrencyPolicy.limit(parallel,selectedParallel,plan,foreground)',t)
  def test_rescue_has_no_full_catalog_scan_or_two_minute_masks(self):
   a=(ROOT/'core/Actions.kt').read_text().split('suspend fun autoRescue',1)[1].split('\n    }',1)[0]
   self.assertNotIn('doTestAll(',a);self.assertNotIn('doRefresh()',a);self.assertNotIn('120_000',a)

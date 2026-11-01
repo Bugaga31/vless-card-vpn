@@ -12,10 +12,10 @@ class DiscoveryAdmission(unittest.TestCase):
  def test_foreground_workers_and_power_caps(self):
   t=(R/'app/src/main/java/com/vlesscardvpn/core/Tester.kt').read_text()
   self.assertIn('staggerMs = ForegroundProbePlan.staggerMs(foreground,stopAfter)',t)
-  self.assertIn('PowerPolicy.cap(parallel, probeLimit)',t)
+  self.assertIn('ProbeConcurrencyPolicy.limit(parallel,selectedParallel,plan,foreground)',t)
   self.assertIn('AutoLatencyPolicy.accepts(p)',t)
  def test_source_queue_and_pause_unchanged(self):
   a=(R/'app/src/main/java/com/vlesscardvpn/core/Actions.kt').read_text()
   for x in ['SubscriptionQueue.fetchOrder(due,round)','SubscriptionQueue.window(', 'ConnectPolicy.FIRST,provenLeader']:
    self.assertIn(x,a)
-  self.assertIn('const val WAVE_PAUSE_MS = 5000L',(R/'app/src/main/java/com/vlesscardvpn/core/AutoSearchCampaign.kt').read_text())
+  self.assertIn('const val WAVE_PAUSE_MS = 1000L',(R/'app/src/main/java/com/vlesscardvpn/core/AutoSearchCampaign.kt').read_text())

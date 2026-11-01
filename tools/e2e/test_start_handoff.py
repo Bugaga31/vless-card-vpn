@@ -20,5 +20,7 @@ class StartHandoff(unittest.TestCase):
         self.assertIn('currentCoroutineContext().ensureActive()',real)
         self.assertIn('started.claimSelected',source)
         self.assertIn('n > 0 && committed',source)
-        self.assertIn('AutoEligibility.serviceRank(snapshot.state(it)',source)
+        self.assertIn('val serviceRanks=allEligible.associate { it.id to AutoChecks.rank(st.state(it),net,time) }',source)
+        self.assertIn('serviceRank = {serviceRanks.getValue(it.id)}',source)
+        self.assertIn('AutoEligibility.servicePool',source)
 if __name__=='__main__':unittest.main()
