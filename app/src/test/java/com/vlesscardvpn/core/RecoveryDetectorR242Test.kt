@@ -8,7 +8,7 @@ class RecoveryDetectorR242Test {
         return listOf(File("app/$path"),File(path)).first {it.exists()}.readText()
     }
     @Test fun requestingAutoRepairDoesNotRetireOnlyDetector() {
-        val body=source().substringAfter("Log.i("E2E", "watchdog: connection lost")").substringBefore("if (ok && vpnMode)")
+        val body=source().substringAfter("""Log.i("E2E", "watchdog: connection lost")""").substringBefore("if (ok && vpnMode)")
         val auto=body.substringAfter("if(settings.mode==Mode.AUTO && usedChain==null && !usedTorRoute) {").substringBefore("hardRestart(")
         assertTrue(auto.contains("recoverServerRoute()"))
         assertTrue(auto.contains("continue"))
