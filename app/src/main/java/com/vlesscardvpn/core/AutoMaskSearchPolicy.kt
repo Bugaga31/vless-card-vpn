@@ -4,6 +4,7 @@ import com.vlesscardvpn.model.Server
 import com.vlesscardvpn.model.Settings
 import com.vlesscardvpn.xray.Mask
 import com.vlesscardvpn.xray.Masks
+import com.vlesscardvpn.xray.MaskLab
 
 /** Bounded automatic exploration, never random mutation of a live route or the server contract. */
 object AutoMaskSearchPolicy {
@@ -19,7 +20,7 @@ object AutoMaskSearchPolicy {
         val gentle=MaskWarmStart.trials(server,current,settings,8)
         val nativeFp=server.fp.ifEmpty {"chrome"}
         val boundedTpws=allowed.filter {it.fingerprint==nativeFp && it.dpi.startsWith("TPWS#HELLO_")}
-        val learned=allowed.filter {it.auto && it.id==current}
+        val learned=MaskLab.load(settings.autoMasks).filter {it.id==current}
         val evolved=AutoMaskEvolution.candidates(server,settings,learned+gentle+allowed.filter {it.auto})
         // One baseline and one bounded mutant first; then real compatible tpws profiles, not nfqws argv.
         return (gentle.take(1)+evolved.take(1)+allowed.filter {it.custom}+boundedTpws+gentle.drop(1)+evolved.drop(1)+allowed).distinctBy {it.id}.filter { m ->
