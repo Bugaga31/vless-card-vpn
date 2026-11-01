@@ -968,22 +968,8 @@ object Actions {
         if (!sameNetwork()) return outcome(false,"context_or_policy")
         st = Store.state.value
         var ytSwitch = false
-        if (deepPending && PhonePower.refresh(app).allowed) {
-            // connected right after the quick check: now test the rest calmly (outside the tunnel) and lighten heavy masks
-            deepPending = false
-            val prev0 = progress.value
-            val s0 = Store.state.value
-            val rest = s0.servers.filter { s0.state(it).tcpMs > 0 && (s0.state(it).realMs < 0 || System.currentTimeMillis() - s0.state(it).checkedAt > 6 * 3600_000L) }
-                .sortedBy { s0.state(it).tcpMs }.take(if (!lightPlan.allowLight) 2 else if (wifi) 12 else 6)
-            if (rest.isNotEmpty()) realTest(rest, "Фоновая проверка", big = true, attempts = 1)
-            if (!sameNetwork()) { progress.value = prev0; return outcome(false,"context_or_policy") }
-            if (!PhonePower.refresh(app).allowed) { deepPending = true; progress.value = prev0; return outcome(false,"deep_power_changed") }
-            lightenMasks(wifi)
-            if (!sameNetwork()) { progress.value = prev0; return outcome(false,"context_or_policy") }
-            // Wi-Fi: a real 3-second download through the 5 best (≈ what YouTube gets), not a 256 KB guess
-            if (wifi) Store.state.value.let { s1 -> realSpeed(automaticOrder(s1, s1.servers.filter { s1.state(it).works }).take(5)) }
-            progress.value = prev0
-        }
+        // Repair the measured selected pool before optional exploration. A later phone-power
+        // deferral must not discard already completed health evidence or keep a dead member selected.
         if (!sameNetwork()) return outcome(false,"context_or_policy")
         if (!BackgroundReservePolicy.mayProbe(Store.state.value.settings.mode == Mode.AUTO,PhonePower.refresh(app))) return outcome(ytSwitch,"optional_power_or_empty")
         st = Store.state.value
@@ -1040,7 +1026,31 @@ object Actions {
         val changed = originalSelection != applied.selected.map { AutoRoutePolicy.configuration(it,applied.state(it),originalNet) }.toSet()
         lastOptimizeSwitched = changed
         android.util.Log.i("E2E", "optimize sel=${sel.size} ok=${selOk.size} median=$median best=$bestMs switch=$switch changed=$changed")
-        return outcome(ytSwitch || changed,"completed")
+        if (changed) {
+            // Do not start more test cores/downloads while the service must apply a repaired pool.
+            // deepPending stays queued for a later healthy pass.
+            return outcome(true,"repair_or_upgrade_applied")
+        }
+        if (deepPending && PhonePower.refresh(app).allowed) {
+            // connected right after the quick check: now test the rest calmly (outside the tunnel) and lighten heavy masks
+            deepPending = false
+            val prev0 = progress.value
+            val s0 = Store.state.value
+            val rest = s0.servers.filter { s0.state(it).tcpMs > 0 && (s0.state(it).realMs < 0 || System.currentTimeMillis() - s0.state(it).checkedAt > 6 * 3600_000L) }
+                .sortedBy { s0.state(it).tcpMs }.take(if (!lightPlan.allowLight) 2 else if (wifi) 12 else 6)
+            if (rest.isNotEmpty()) realTest(rest, "Фоновая проверка", big = true, attempts = 1)
+            if (!sameNetwork()) { progress.value = prev0; return outcome(false,"context_or_policy") }
+            if (!PhonePower.refresh(app).allowed) { deepPending = true; progress.value = prev0; return outcome(false,"deep_power_changed") }
+            lightenMasks(wifi)
+            if (!sameNetwork()) { progress.value = prev0; return outcome(false,"context_or_policy") }
+            // Wi-Fi: a real 3-second download through the 5 best (≈ what YouTube gets), not a 256 KB guess
+            if (wifi) Store.state.value.let { s1 -> realSpeed(automaticOrder(s1, s1.servers.filter { s1.state(it).works }).take(5)) }
+            progress.value = prev0
+        }
+        val finalSnapshot=Store.state.value
+        val deepChanged=originalSelection != finalSnapshot.selected.map { AutoRoutePolicy.configuration(it,finalSnapshot.state(it),originalNet) }.toSet()
+        lastOptimizeSwitched=deepChanged
+        return outcome(ytSwitch || deepChanged,"completed")
     }
 
     // ---------- WARP ----------
