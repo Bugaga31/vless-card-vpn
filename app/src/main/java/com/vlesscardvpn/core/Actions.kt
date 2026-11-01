@@ -479,7 +479,7 @@ object Actions {
                 val x=committed.state(s)
                 if (x.works && x.checkedAt>=sampleStartedAt && x.maskFor(net)==st.state(s).maskFor(net) &&
                     AutoChecks.accepts(x))
-                    WarmReserveMemory.session.record(observed,s,x.maskFor(net),st.settings.testUrl,android.os.SystemClock.elapsedRealtime())
+                    WarmReserveMemory.session.record(observed,s,x.maskFor(net),MaskTrialFence.context(st.settings),android.os.SystemClock.elapsedRealtime())
             }
         }
         if(Tunnel.status.value.state==Tunnel.State.CONNECTING && st.settings.mode==Mode.AUTO && Net.matches(app,observed))
@@ -1313,7 +1313,7 @@ object Actions {
         if (observed!=null && valid()) {
             val snapshot=Store.state.value
             val ready=WarmReserveMemory.session.candidates(observed,snapshot.servers.filter {it.id !in ids && it.id !in attempted},
-                {snapshot.state(it).maskFor(net)},snapshot.settings.testUrl,android.os.SystemClock.elapsedRealtime())
+                {snapshot.state(it).maskFor(net)},MaskTrialFence.context(snapshot.settings),android.os.SystemClock.elapsedRealtime())
                 .filter { !RouteStabilityMemory.session.cooling(net,it.id,snapshot.state(it).maskFor(net),now) &&
                     (!AutoChecks.current.telegram || !TelegramRouteMemory.cooling(net,it.id,snapshot.state(it).maskFor(net),now)) }
             val eligible=AutoEligibility.servicePool(ready,{snapshot.state(it)},net,now).filter {snapshot.state(it).works}
@@ -2054,7 +2054,7 @@ object Actions {
         val observation=Net.observation(app) ?: return 0
         val st=Store.state.value; val now=System.currentTimeMillis()
         return WarmReserveMemory.session.candidates(observation,st.servers.filter {s->used.none {it.id==s.id}},
-            {st.state(it).maskFor(observation.profile)},st.settings.testUrl,android.os.SystemClock.elapsedRealtime())
+            {st.state(it).maskFor(observation.profile)},MaskTrialFence.context(st.settings),android.os.SystemClock.elapsedRealtime())
             .count { st.state(it).works && AutoChecks.rank(st.state(it),observation.profile,now)==0 &&
                 AutoChecks.accepts(st.state(it)) && !RouteStabilityMemory.session.cooling(observation.profile,it.id,st.state(it).maskFor(observation.profile),now) }
     }
@@ -2071,7 +2071,7 @@ object Actions {
         val warm = warmReserveCount(used)
         if (warm>=StandbyPreparationPolicy.TARGET) { reserveStatus.value="Резервы: готовы $warm"; return null }
         val observation=Net.observation(app) ?: return null
-        val cached=WarmReserveMemory.session.candidates(observation,st.servers,{st.state(it).maskFor(net)},st.settings.testUrl,
+        val cached=WarmReserveMemory.session.candidates(observation,st.servers,{st.state(it).maskFor(net)},MaskTrialFence.context(st.settings),
             android.os.SystemClock.elapsedRealtime()).mapTo(HashSet()) {it.id}
         val pool = preferred(st, st.servers.filter { it.id !in ids && it.id !in cached }).filter {server->
             !probeMemory.cooling(net,server.id,st.state(server).maskFor(net),stamp) &&

@@ -5,18 +5,18 @@ import com.vlesscardvpn.model.Server
 /** Session-only proofs, never persisted or transferred across physical paths. Not a stability certificate. */
 class WarmReserveMemory {
     private data class Entry(val path: NetworkHandoff.Snapshot, val server: Server, val mask: String,
-        val testUrl: String, val at: Long)
+        val context: MaskTrialFence.Context, val at: Long)
     private val entries = linkedMapOf<String, Entry>()
-    @Synchronized fun record(path: NetworkHandoff.Snapshot, server: Server, mask: String, testUrl: String, now: Long) {
+    @Synchronized fun record(path: NetworkHandoff.Snapshot, server: Server, mask: String, context: MaskTrialFence.Context, now: Long) {
         prune(now); entries.remove(server.id)
-        entries[server.id] = Entry(path, server, mask, testUrl, now)
+        entries[server.id] = Entry(path, server, mask, context, now)
         while (entries.size > CAPACITY) entries.remove(entries.keys.first())
     }
     @Synchronized fun candidates(path: NetworkHandoff.Snapshot, servers: List<Server>, mask: (Server)->String,
-        testUrl: String, now: Long): List<Server> {
+        context: MaskTrialFence.Context, now: Long): List<Server> {
         prune(now)
         return servers.filter { s -> entries[s.id]?.let {
-            it.path == path && it.server == s && it.mask == mask(s) && it.testUrl == testUrl
+            it.path == path && it.server == s && it.mask == mask(s) && it.context == context
         } == true }
     }
     @Synchronized fun remove(ids: Collection<String>) { ids.forEach { entries.remove(it) } }

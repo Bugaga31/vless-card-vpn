@@ -54,11 +54,17 @@ object DeviceCoach {
                 ui, vpn, search -> AutomaticCoachPolicy.active(ui, vpn, search)
             }.distinctUntilChanged().collectLatest { active ->
                 if (active) while (true) {
-                    val plan=PhonePower.refresh(app)
-                    runCatching { sample(app, includePhoneInfo = visible.value && plan.allowLight) }
-                    PhonePower.requestRefresh(app)
-                    com.vlesscardvpn.watson.WatsonMonitor.requestRefresh()
-                    delay(AutomaticCoachPolicy.sampleDelay(visible.value,!plan.allowLight))
+                    try {
+                        val plan=PhonePower.refresh(app)
+                        sample(app, includePhoneInfo = visible.value && plan.allowLight)
+                        PhonePower.requestRefresh(app)
+                        com.vlesscardvpn.watson.WatsonMonitor.requestRefresh()
+                    } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                        throw cancelled
+                    } catch (_: Exception) {
+                        // A transient sensor/binder failure must not disable automatic advice until UI re-entry.
+                    }
+                    delay(AutomaticCoachPolicy.sampleDelay(visible.value,!PhonePower.state.value.allowLight))
                 }
             }
         }
