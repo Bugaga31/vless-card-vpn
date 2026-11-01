@@ -16,3 +16,7 @@ ROKI/эволюция масок R234 и быстрое восстановлен
 ## Регрессии и критерии
 Устаревшие тесты 1000 мс, пятисекундных пауз, постоянного исключения по истории отказов, искусственной задержки воркеров и старого количества tpws-профилей синхронизированы с действующими R211/R226/R227. Старые 1000 мс сценарии теперь задают предел явно. Привязки Python E2E-регрессий обновлены к текущим AutoChecks, cohort и ProbeConcurrencyPolicy без отключения самих регрессий. Добавлены 16 новых тестов автоаудита и точной границы 3000 мс.
 Обычный релиз допустим только после полного JVM debug+release, lint, масочной матрицы, E2E API29/33, установки/обновления и storage API30/34. Новый замер физического телефона, оператора, батареи и реального звонка не выполнялся.
+
+## Follow-up full Android gates
+The first full Android API29/33 run exposed premature cleanup in AutoChainRunner startup: CancellableProbe.run closes registered resources on success, stopping the core before measurement. Startup now transfers successful ownership to Session.close, with cancellation/failure cleanup retained and three JVM regressions. End-to-end still requires a measured DPI_SERVER winner and other-UID transfer.
+Legacy E2E assertions now follow single active primary with authenticated eight-candidate traffic, current mask-summary wording/counts, and the actual ВАТСОН navigation label. No required service, body proof or admission predicate is removed. Ordinary release remains blocked until the new exact-SHA full CI passes.

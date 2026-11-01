@@ -212,11 +212,15 @@ adb logcat -d -s E2E:I | grep "socks port=" | tail -1 | grep -q "mode=SERVERS" |
 c=$(grep -c "email: u8443" $W/access.log); echo "auto: server :8443 accepted $c"
 [ "$c" -gt 0 ] || fail "auto: traffic did not go through the auto-picked server"
 
-# Do not merely assert the selected checkboxes: this log is emitted after the real Xray core starts.
+# Eight real candidates, but the current production invariant is ONE active primary.
+# The other authenticated candidates remain reserves, not eight simultaneous exits.
 : > $W/access.log
 run_case auto-eight auto-eight.json 180
-P=$(waitlog "pool size=8 " 150) || fail "auto-eight: real Xray pool never reached eight outbounds"
-echo "eight: $P"
+P=$(waitlog "pool size=1 " 30) || fail "auto-eight: real Xray must use one primary"
+echo "eight-candidate primary: $P"
+# Require authenticated fixture transfer, not just a UI selection or open local socket.
+c=$(grep -c 'email: pool' $W/access.log)
+[ "$c" -gt 0 ] || fail "auto-eight: no authenticated candidate carried traffic"
 
 # Production runner -> measured winner -> actual live VPN config, using native DPI.
 # Tor is intentionally not faked here; Tor socket chaining has a separate closed host fixture.
@@ -316,7 +320,7 @@ adb logcat -d -s E2E:I | grep -q "action\\[Подбор маскировки\\]"
 adb shell pidof "$PKG" >/dev/null || fail "manual-check: app exited during server scan"
 adb logcat -d | grep -q "FATAL EXCEPTION" && fail "manual-check: app crashed during server scan"
 adb exec-out screencap -p > "$W/server-check.png"
-tap_ui "Телефон" || fail "manual-check: could not open the device screen"
+tap_ui "ВАТСОН" || fail "manual-check: could not open the device screen"
 sleep 2
 adb exec-out screencap -p > "$W/device-screen.png"
 
@@ -325,7 +329,7 @@ adb logcat -c
 adb shell am start -n $PKG/.MainActivity --ez e2e_masks true >/dev/null
 M=$(waitlog "action\[Подбор маскировки\]" 240) || fail "masks: no result"
 echo "masks: $M"
-echo "$M" | grep -q "найдена для 3 из 4" || fail "masks: expected masks for 3 of 4 servers"
+echo "$M" | grep -q "Подтверждено маскировок для 3 из 4 серверов; применено 3" || fail "masks: expected masks for 3 of 4 servers"
 
 adb shell am start -n $PKG/.MainActivity --ez e2e_disconnect true >/dev/null
 adb logcat -d > $W/logcat.txt

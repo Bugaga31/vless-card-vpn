@@ -71,13 +71,7 @@ object AutoChainRunner {
                         val dpiPort=if(option.dpiStrategy==Masks.CURRENT_DPI)currentDpi else dpiPorts[option.dpiStrategy]
                         val config=ChainProbeConfig.build(chain,port,option.server?.let { XrayConfigBuilder.outbound(it,"chain-main",option.mask) },
                             if(chain.layout.tor) com.vlesscardvpn.tor.TorCard.DEFAULT_SOCKS_PORT else null,dpiPort)
-                        CancellableProbe.run { bind ->
-                            val cancelled=java.util.concurrent.atomic.AtomicBoolean(false)
-                            bind { cancelled.set(true);core.stop() }
-                            check(!cancelled.get()) { "Chain startup cancelled" }
-                            core.start(config)
-                            if(cancelled.get()){core.stop();error("Late chain startup cancelled")}
-                        }
+                        CancellableProbe.startRetained({ core.start(config) }, { core.stop() })
                         currentCoroutineContext().ensureActive()
                         check(core.running) { "Chain Xray did not start" }
                         object:AutoChainSelection.Session {

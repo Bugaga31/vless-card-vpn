@@ -10,6 +10,26 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 
 class DiscoveryCancellationRegressionR138Test {
+    @Test fun retainedCoreSurvivesSuccessfulStartupUntilSessionCloses() = runBlocking {
+        val active = java.util.concurrent.atomic.AtomicBoolean(false)
+        val stops = AtomicInteger()
+        CancellableProbe.startRetained({ active.set(true) }, { active.set(false); stops.incrementAndGet() })
+        assertTrue(active.get()); assertEquals(0, stops.get())
+        active.set(false) // Session.close owns successful core cleanup.
+    }
+    @Test fun retainedCoreStopsAfterStartupFailure() = runBlocking {
+        val stops = AtomicInteger()
+        try { CancellableProbe.startRetained({ error("fixture") }, { stops.incrementAndGet() }); fail("must throw") }
+        catch (_: IllegalStateException) { }
+        assertEquals(1, stops.get())
+    }
+    @Test fun retainedCoreStopsWhenStartupIsCancelled() = runBlocking {
+        val entered = CountDownLatch(1); val stopped = AtomicInteger()
+        val job = launch { CancellableProbe.startRetained({ entered.countDown(); Thread.sleep(30_000) }, { stopped.incrementAndGet() }) }
+        withContext(Dispatchers.IO) { assertTrue(entered.await(2, TimeUnit.SECONDS)) }
+        job.cancelAndJoin(); assertEquals(1, stopped.get())
+    }
+
     private fun server(i: Int) = Server("test-$i", "vless", "host$i.example", 443, "id-$i")
     @Test fun recentFailureIsDeferredNotBlacklisted() {
         val list = (0..12).map(::server)

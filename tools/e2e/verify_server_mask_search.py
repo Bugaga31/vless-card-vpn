@@ -7,7 +7,7 @@ import sys
 
 
 def verified(text, expected=3):
-    match = re.search(r'Маскировка найдена для (\d{1,3}) из (\d{1,3}) серверов \(перебрано (\d{1,5}) вариантов(?:,|\))', text)
+    match = re.search(r'Подтверждено маскировок для (\d{1,3}) из (\d{1,3}) серверов; применено \d{1,3}, более свежие результаты сохранены \(перебрано (\d{1,5}) вариантов(?:,|\))', text)
     if not match or 'Сеть изменилась' in text:
         return False
     worked, total, candidates = map(int, match.groups())

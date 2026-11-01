@@ -10,7 +10,7 @@ from pathlib import Path
 import sys
 
 LIMIT = 2_000_000
-CASES = ['setup','single','byedpi','multi','tpws','ownmask','xraydpi','services','auto','auto-eight','auto-chain','proxy','warp']
+CASES = ['setup','single','byedpi','multi','tpws','ownmask','xraydpi','services','auto','auto-eight','auto-chain','proxy','warp','retired-proxy','server-mask-search','manual-check']
 
 def tail_file(path, limit=LIMIT):
     try:
