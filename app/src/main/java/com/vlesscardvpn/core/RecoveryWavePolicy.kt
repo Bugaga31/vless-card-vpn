@@ -12,6 +12,12 @@ object RecoveryWavePolicy {
         for(i in current.indices) out+=alternatives.getOrNull(i).orEmpty().drop(1).take(1)
         return out.distinct().take(minOf(6,ProbeConcurrencyPolicy.normalize(selected)*2))
     }
+    /** One alternative per host before a second variant of the first host. A one-slot
+     * wave keeps both hosts represented; later waves explore the remaining masks. */
+    fun <T> alternatives(pools:List<List<T>>,selected:Int):List<T> =
+        (pools.mapNotNull {it.firstOrNull()} + pools.flatMap {it.drop(1)})
+            .distinct().take(minOf(6,ProbeConcurrencyPolicy.normalize(selected)*2))
+
     fun budgetMs(variants:Int,selected:Int):Long {
         val slots=ProbeConcurrencyPolicy.normalize(selected)
         val batches=(variants.coerceAtLeast(1)+slots-1)/slots

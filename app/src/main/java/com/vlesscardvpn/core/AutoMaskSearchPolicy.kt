@@ -24,7 +24,7 @@ object AutoMaskSearchPolicy {
         val evolved=AutoMaskEvolution.candidates(server,settings,learned+gentle+allowed.filter {it.auto})
         // One baseline and one bounded mutant first; then real compatible tpws profiles, not nfqws argv.
         return (gentle.take(1)+evolved.take(1)+allowed.filter {it.custom}+boundedTpws+gentle.drop(1)+evolved.drop(1)+allowed).distinctBy {it.id}.filter { m ->
-            m.id!=current && Masks.compatible(m,server) && m.sni.isEmpty() && m.alpn.isEmpty() &&
+            m.id!=current && !(current.isEmpty() && m.id=="$nativeFp.n") && Masks.compatible(m,server) && m.sni.isEmpty() && m.alpn.isEmpty() &&
                 !m.hasNoise && m.mss==0 && !m.mux && !m.tfo && !m.ipv6 &&
                 (!m.viaByeDpi || m.dpi!=Masks.CURRENT_DPI && DpiStrategies.byId(m.dpi,settings)?.let {available(it.engine)}==true)
         }
