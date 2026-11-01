@@ -45,6 +45,10 @@ adb install -r -g app/build/outputs/apk/debug/app-debug.apk | tail -1
 adb install -r -t vpn-test-probe/build/outputs/apk/debug/vpn-test-probe-debug.apk | tail -1
 bash tools/e2e/tor-native-smoke.sh "$PKG" || exit 1
 adb shell appops set $PKG ACTIVATE_VPN allow
+# A closed host fixture must not import live cloud-manifest/phone caches. Subscription
+# opt-out alone does not disable the separate public-cloud control plane.
+# Use the existing user preference in this debug installation, before its first launch.
+adb shell "run-as $PKG sh -c 'mkdir -p shared_prefs && printf \"<map><boolean name=\\\"on\\\" value=\\\"false\\\" /></map>\" > shared_prefs/report.xml'" || exit 1
 adb shell am start -W -n $PKG/.MainActivity >/dev/null; sleep 3
 
 load() { # $1 = state file
@@ -228,6 +232,7 @@ c=$(grep -c 'email: pool' $W/access.log)
 
 # Service-owned preparation and actual loss recovery while MainActivity stays backgrounded.
 : > $W/access.log
+BACKGROUND_FAILS=$FAILS
 run_case auto background-reserve.json 180
 adb shell input keyevent KEYCODE_HOME
 waitlog "standby prepared count=[1-9]" 100 >/dev/null || fail "background: no strictly verified spare after leaving the app"
@@ -240,6 +245,7 @@ if [ -n "$PRIMARY" ]; then
   sudo iptables -I INPUT -p tcp --dport "$BLOCKED_PORT" -j DROP || exit 1
   waitlog_after 'check ok=true' "$CHECKS" 150 >/dev/null || fail "background: no automatic recovery after primary blackhole"
   NEXT=$(adb logcat -d -s E2E:I | sed -n 's/.*runtime primary-port=\([0-9]*\).*/\1/p' | tail -1)
+  case "$NEXT" in 8443|8444|8447) ;; *) fail "background: replacement escaped closed fixture catalogue" ;; esac
   [ "$NEXT" != "$PRIMARY" ] || fail "background: failed primary was not replaced"
   [ "$(logcount 'service command=start state=')" -eq "$STARTS_BEFORE" ] || fail "background: recovery used another hard START"
   adb shell dumpsys activity activities | grep 'mResumedActivity' | grep -q "$PKG/.MainActivity" && fail "background: MainActivity unexpectedly resumed"
@@ -248,7 +254,9 @@ if [ -n "$PRIMARY" ]; then
   [ "$c" -gt 0 ] || fail "background: replacement server saw no authenticated traffic"
   sudo iptables -D INPUT -p tcp --dport "$BLOCKED_PORT" -j DROP || exit 1
   BLOCKED_PORT=""
-  echo "::notice title=Background recovery verified::Home pressed; verified spare prepared; primary blackholed; different authenticated port and other-UID transfer checked"
+  if [ "$FAILS" -eq "$BACKGROUND_FAILS" ]; then
+    echo "::notice title=Background recovery verified::Home pressed; verified spare prepared; primary blackholed; different authenticated port and other-UID transfer checked"
+  fi
 fi
 
 # Production runner -> measured winner -> actual live VPN config, using native DPI.
