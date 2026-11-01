@@ -936,26 +936,36 @@ object Actions {
     @Volatile var lastOptimizeSwitched = false
 
     suspend fun optimize(): Boolean {
+        fun outcome(value: Boolean, reason: String): Boolean {
+            if (com.vlesscardvpn.BuildConfig.DEBUG) android.util.Log.i("E2E", "optimize exit=$reason changed=$value")
+            return value
+        }
         lastOptimizeSwitched = false
         val lightPlan = PhonePower.refresh(app)
         if (!BackgroundReservePolicy.mayProbe(Store.state.value.settings.mode == Mode.AUTO,lightPlan)) {
             if (com.vlesscardvpn.BuildConfig.DEBUG) android.util.Log.i("E2E", "optimize skipped=power")
-            return false
+            return outcome(false,"context_or_policy")
         }
         var st = Store.state.value
         if ((!st.settings.autoOptimize && st.settings.mode != Mode.AUTO) || job?.isActive == true) {
             if (com.vlesscardvpn.BuildConfig.DEBUG) android.util.Log.i("E2E", "optimize skipped=${if(job?.isActive == true) "foreground_busy" else "disabled"}")
-            return false
+            return outcome(false,"context_or_policy")
         }
-        val observed = Net.observation(app) ?: return false
-        fun sameNetwork() = Net.matches(app,observed)
-        if (!sameNetwork()) return false
+        val observed = Net.observation(app) ?: return outcome(false,"network_unknown")
+        fun sameNetwork(): Boolean {
+            val current=Net.observation(app)
+            val same=NetworkObservation.accepts(observed,current)
+            if (!same && com.vlesscardvpn.BuildConfig.DEBUG) android.util.Log.i("E2E",
+                "optimize context handle=${observed.handle==current?.handle} profile=${observed.profile==current?.profile} path=${observed.path==current?.path}")
+            return same
+        }
+        if (!sameNetwork()) return outcome(false,"context_or_policy")
         val originalNet = observed.profile
         val originalSelection = st.selected.map { AutoRoutePolicy.configuration(it,st.state(it),originalNet) }.toSet()
-        if (st.settings.mode == com.vlesscardvpn.model.Mode.BYEDPI || st.settings.mode == com.vlesscardvpn.model.Mode.HYBRID) return false
+        if (st.settings.mode == com.vlesscardvpn.model.Mode.BYEDPI || st.settings.mode == com.vlesscardvpn.model.Mode.HYBRID) return outcome(false,"context_or_policy")
         val wifi = unmetered()
         catalogWave()
-        if (!sameNetwork()) return false
+        if (!sameNetwork()) return outcome(false,"context_or_policy")
         st = Store.state.value
         var ytSwitch = false
         if (deepPending && PhonePower.refresh(app).allowed) {
@@ -966,22 +976,22 @@ object Actions {
             val rest = s0.servers.filter { s0.state(it).tcpMs > 0 && (s0.state(it).realMs < 0 || System.currentTimeMillis() - s0.state(it).checkedAt > 6 * 3600_000L) }
                 .sortedBy { s0.state(it).tcpMs }.take(if (!lightPlan.allowLight) 2 else if (wifi) 12 else 6)
             if (rest.isNotEmpty()) realTest(rest, "Фоновая проверка", big = true, attempts = 1)
-            if (!sameNetwork()) { progress.value = prev0; return false }
-            if (!PhonePower.refresh(app).allowed) { deepPending = true; progress.value = prev0; return false }
+            if (!sameNetwork()) { progress.value = prev0; return outcome(false,"context_or_policy") }
+            if (!PhonePower.refresh(app).allowed) { deepPending = true; progress.value = prev0; return outcome(false,"deep_power_changed") }
             lightenMasks(wifi)
-            if (!sameNetwork()) { progress.value = prev0; return false }
+            if (!sameNetwork()) { progress.value = prev0; return outcome(false,"context_or_policy") }
             // Wi-Fi: a real 3-second download through the 5 best (≈ what YouTube gets), not a 256 KB guess
             if (wifi) Store.state.value.let { s1 -> realSpeed(automaticOrder(s1, s1.servers.filter { s1.state(it).works }).take(5)) }
             progress.value = prev0
         }
-        if (!sameNetwork()) return false
-        if (!BackgroundReservePolicy.mayProbe(Store.state.value.settings.mode == Mode.AUTO,PhonePower.refresh(app))) return ytSwitch
+        if (!sameNetwork()) return outcome(false,"context_or_policy")
+        if (!BackgroundReservePolicy.mayProbe(Store.state.value.settings.mode == Mode.AUTO,PhonePower.refresh(app))) return outcome(ytSwitch,"optional_power_or_empty")
         st = Store.state.value
         // An empty Auto selection is recovered from the best working pool.
         val sel = st.selected.ifEmpty { automaticOrder(st, st.servers.filter { st.state(it).works }).take(AutoEligibility.TOP) }
         val others = automaticOrder(st, st.servers.filter { it !in sel && st.state(it).works }).take(if (!lightPlan.allowLight) 2 else if (wifi) 12 else 6)
         val cand = (sel + others).distinctBy { it.id }
-        if (cand.isEmpty()) return ytSwitch
+        if (cand.isEmpty()) return outcome(ytSwitch,"optional_power_or_empty")
         val prev = progress.value
         val sampleNet = originalNet
         try {
@@ -989,7 +999,7 @@ object Actions {
             // Concurrent downloads share the line and cannot rank throughput. First check HTTPS only.
             realTest(cand, "Фоновая проверка", big = wifi && !throughputMode && PhonePower.refresh(app).allowed, youtube = throughputMode && lightPlan.allowLight, telegram = throughputMode,
                 attempts = 1, parallel = 4, budgetMs = ConnectPolicy.QUICK_BUDGET_MS)
-            if (!sameNetwork()) return false
+            if (!sameNetwork()) return outcome(false,"context_or_policy")
             if (throughputMode) AutoSelection.compare(cand, { Store.state.value.state(it) }, sampleNet,
                 now = { System.currentTimeMillis() }, elapsed = { android.os.SystemClock.elapsedRealtime() },
                 validNetwork = { sameNetwork() }, gaming = false,
@@ -1000,14 +1010,16 @@ object Actions {
                     attempts = 1, parallel = 1, budgetMs = budget)
             }
         } finally { progress.value = prev }
-        if (!sameNetwork()) return false
+        if (!sameNetwork()) return outcome(false,"context_or_policy")
         val now = Store.state.value
         val selOk = sel.filter { now.state(it).works }
         val best = automaticOrder(now, cand.filter { now.state(it).works })
+        if (com.vlesscardvpn.BuildConfig.DEBUG) android.util.Log.i("E2E", "optimize sampled candidates=${cand.size} working=${best.size} selected_working=${selOk.size} deep=$deepPending")
         if (best.isEmpty()) {
+            if (com.vlesscardvpn.BuildConfig.DEBUG) android.util.Log.i("E2E", "optimize repair=all_unproven")
             val alive = now.servers.filter { now.state(it).tcpMs > 0 }.sortedBy { now.state(it).tcpMs }.take(8)
             if (alive.isNotEmpty()) doFindMasks(alive, 24)
-            if (!sameNetwork()) return false
+            if (!sameNetwork()) return outcome(false,"context_or_policy")
             val after = Store.state.value
             return if (alive.any { after.state(it).works }) { selectBest(10, close = true, among = alive.filter { after.state(it).works }); true } else ytSwitch
         }
@@ -1028,7 +1040,7 @@ object Actions {
         val changed = originalSelection != applied.selected.map { AutoRoutePolicy.configuration(it,applied.state(it),originalNet) }.toSet()
         lastOptimizeSwitched = changed
         android.util.Log.i("E2E", "optimize sel=${sel.size} ok=${selOk.size} median=$median best=$bestMs switch=$switch changed=$changed")
-        return ytSwitch || changed
+        return outcome(ytSwitch || changed,"completed")
     }
 
     // ---------- WARP ----------
