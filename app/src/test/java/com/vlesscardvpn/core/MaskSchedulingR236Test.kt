@@ -15,7 +15,7 @@ class MaskSchedulingR236Test {
     @Test fun emptyFirstPoolDoesNotStarveSecondHost() {assertEquals(listOf("b1","b2"),RecoveryWavePolicy.alternatives(listOf(emptyList(),pools[1]),1))}
     @Test fun duplicatesNeverWasteAProbeSlot() {assertEquals(listOf("a","b"),RecoveryWavePolicy.alternatives(listOf(listOf("a","a"),listOf("b","a")),3))}
     @Test fun pressureDoesNotIncreaseOptionalSampling() {assertTrue(AutomaticCoachPolicy.sampleDelay(true,true)>=AutomaticCoachPolicy.sampleDelay(true,false))}
-    @Test fun hiddenCoachDoesNotWakeFasterUnderPressure() {assertEquals(120000L,AutomaticCoachPolicy.sampleDelay(false,true));assertEquals(120000L,AutomaticCoachPolicy.sampleDelay(false,false))}
+    @Test fun hiddenCoachDoesNotWakeFasterUnderPressure() {assertEquals(300000L,AutomaticCoachPolicy.sampleDelay(false,true));assertEquals(120000L,AutomaticCoachPolicy.sampleDelay(false,false))}
     @Test fun pressureCannotReduceExplicitProbeCeiling() {
         val plan=PowerPolicy.evaluate(PowerPolicy.Input(0,battery=2,temp=47.0,saver=true),PowerPolicy.Options())
         for(n in listOf(1,3,5,10)) {assertEquals(n,ProbeConcurrencyPolicy.limit(20,n,plan,true));assertEquals(n,ProbeConcurrencyPolicy.limit(20,n,plan,false))}

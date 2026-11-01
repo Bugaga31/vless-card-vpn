@@ -21,7 +21,14 @@ class YouTubeAccessR226Test {
     @Test fun noVideoOrRangeIsRequested() {YouTubeAccessProbe.check {assertNull(it.header("Range"));assertFalse(it.url.toString().contains("videoplayback"));assertEquals("GET",it.method);Reply(it,204)}}
     @Test fun noCachedProofRequested() {YouTubeAccessProbe.check {assertEquals("no-cache, no-store",it.header("Cache-Control"));Reply(it,204)}}
     @Test fun http200PageDoesNotImpersonateExpected204() {assertEquals(false,YouTubeAccessProbe.check {Reply(it,200)}.ok)}
-    @Test fun unexpectedHttpDoesNotPass() {for(code in listOf(400,403,404,500,503)) {val r=YouTubeAccessProbe.check {Reply(it,code)};assertEquals(false,r.ok);assertEquals("YT_ACCESS_HTTP",r.reason)}}
+    @Test fun unexpectedHttpDoesNotPass() {for(code in listOf(400,404)) {val r=YouTubeAccessProbe.check {Reply(it,code)};assertEquals(false,r.ok);assertEquals("YT_ACCESS_HTTP",r.reason)}}
+    @Test fun restrictedAndUnavailableRemainUnknown() {
+        for(code in listOf(403,451,500,503)) {
+            val r=YouTubeAccessProbe.check {Reply(it,code)}
+            assertNull(r.ok)
+            assertEquals(if(code<500) "YT_ACCESS_RESTRICTED" else "YT_SERVICE_UNAVAILABLE",r.reason)
+        }
+    }
     @Test fun rateLimitIsUnknown() {assertNull(YouTubeAccessProbe.check {Reply(it,429)}.ok)}
     @Test fun redirectsAreNotFollowedByThisProbe() {var n=0;val r=YouTubeAccessProbe.check {n++;Reply(it,302)};assertNull(r.ok);assertEquals(1,n)}
     @Test fun foreignFinalUrlCannotPass() {assertNull(YouTubeAccessProbe.check {Reply(it.newBuilder().url("https://example.org/generate_204").build(),204)}.ok)}

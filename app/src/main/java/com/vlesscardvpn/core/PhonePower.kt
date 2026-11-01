@@ -18,7 +18,8 @@ object PhonePower {
     private var memory = PowerPolicy.Memory()
     private var sample = PowerPolicy.Input(0)
     private var sampledAt = -10000L
-    private var dirty = true
+    private val sensorInvalidations = java.util.concurrent.atomic.AtomicLong(1L)
+    private var sampledGeneration = 0L
     private var bytes = -1L
     @Volatile private var pauseUntil = 0L
     private var lagUntil = 0L
@@ -30,20 +31,25 @@ object PhonePower {
     init {
         sampler.launch {
             for (ctx in refreshRequests) {
-                synchronized(this@PhonePower) { dirty = true }
                 runCatching { refreshBlocking(ctx) }
             }
         }
     }
     /** UI reads the latest plan; binder/sensor work is serialized off the main thread. */
     fun requestRefresh(ctx: Context) { refreshRequests.trySend(ctx.applicationContext) }
+    /** Only real system events invalidate cached sensors. UI reads must respect the shared cache.
+     * Mark before enqueue: a conflated ordinary request must not erase an urgent invalidation. */
+    private fun invalidateSensors(ctx: Context) {
+        sensorInvalidations.incrementAndGet()
+        requestRefresh(ctx)
+    }
     /** Process lifetime observer: immediate screen/thermal updates, coalesced battery broadcasts. */
     @Synchronized fun start(ctx: Context) {
         if (started) return
         started = true
         val app = ctx.applicationContext
         fun changed() {
-            requestRefresh(app)
+            invalidateSensors(app)
         }
         val filter = android.content.IntentFilter(android.content.Intent.ACTION_SCREEN_OFF).apply {
             addAction(android.content.Intent.ACTION_SCREEN_ON)
@@ -91,8 +97,8 @@ object PhonePower {
     @Synchronized private fun refreshBlocking(ctx: Context): PowerPolicy.Plan {
         val now = SystemClock.elapsedRealtime()
         val voiceCall = isVoiceCallActive(ctx)
-        if (sample.voiceCall != voiceCall) dirty = true
-        if (dirty || now - sampledAt >= 10000) {
+        val generation = sensorInvalidations.get()
+        if (PhoneSamplingPolicy.due(now, sampledAt, generation != sampledGeneration || sample.voiceCall != voiceCall)) {
             val pm = ctx.getSystemService(Context.POWER_SERVICE) as PowerManager
             val bm = ctx.getSystemService(Context.BATTERY_SERVICE) as BatteryManager
             val cm = ctx.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
@@ -109,7 +115,7 @@ object PhonePower {
                 caps?.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED) != true,
                 android.os.Build.VERSION.SDK_INT >= 24 && cm.restrictBackgroundStatus == ConnectivityManager.RESTRICT_BACKGROUND_STATUS_ENABLED,
                 active, memoryInfo.lowMemory, voiceCall = voiceCall)
-            sampledAt = now; dirty = false
+            sampledAt = now; sampledGeneration = generation
             sensors.value = "Батарея: ${sample.battery.takeIf { it in 1..100 }?.let { "$it%" } ?: "неизвестно"} · ${if (sample.charging) "заряжается" else "без зарядки"}\nТемпература батареи / Android: ${Thermal.label(sample.temp, sample.thermal).ifEmpty { "нет данных" }}"
         }
         val s = Store.state.value.settings
