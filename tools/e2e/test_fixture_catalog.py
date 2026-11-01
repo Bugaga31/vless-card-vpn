@@ -40,4 +40,14 @@ class FixtureCatalogTest(unittest.TestCase):
             self.assertEqual(list(range(18001,18128)),[s['port'] for s in mass['servers'][1:]])
             self.assertEqual([],mass['e2e_select'])
 
+    def test_background_recovery_has_separate_primary_and_spare_ports(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            c=self.generate(Path(tmp))['background-reserve.json']
+            self.assertEqual({8443,8444,8447},{s['port'] for s in c['servers']})
+            self.assertEqual('AUTO',c['settings']['mode'])
+            self.assertTrue(c['settings']['quietScreen'])
+            self.assertTrue(c['settings']['wifiMaintenance'])
+            self.assertEqual([],c['settings']['autoChecks'])
+            self.assertFalse(c['settings']['autoChainSearch'])
+
 if __name__=='__main__':unittest.main()

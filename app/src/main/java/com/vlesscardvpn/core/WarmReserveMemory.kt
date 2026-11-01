@@ -21,5 +21,5 @@ class WarmReserveMemory {
     }
     @Synchronized fun remove(ids: Collection<String>) { ids.forEach { entries.remove(it) } }
     private fun prune(now: Long) { entries.entries.removeAll { now < it.value.at || now-it.value.at > TTL_MS } }
-    companion object { const val CAPACITY=20; const val TTL_MS=60_000L; val session=WarmReserveMemory() }
+    companion object { const val CAPACITY=20; const val TTL_MS=300_000L; val session=WarmReserveMemory() }
 }

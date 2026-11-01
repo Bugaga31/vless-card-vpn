@@ -187,7 +187,7 @@ class TunnelService : VpnService() {
         }
     }
 
-    /** Screen off or battery saver (with «Ускорение»): no background probes — they wake the radio and drain the battery. */
+    /** Quiet screen suppresses optional work, not Auto liveness/recovery or bounded standby preparation. */
     private fun asleep(): Boolean {
         val pm = getSystemService(android.os.PowerManager::class.java) ?: return false
         return !pm.isInteractive && Store.state.value.settings.quietScreen
@@ -380,6 +380,7 @@ class TunnelService : VpnService() {
             appliedAutoWeights = com.vlesscardvpn.core.SpeedBalance.fingerprint(downloadSpeeds,downloadLatencies)
             Tunnel.socks = socks
             if (BuildConfig.DEBUG) Log.i("E2E", "pool size=${used.size} ids=${used.map { it.first.id }}")
+            if (BuildConfig.DEBUG) Log.i("E2E", "runtime primary-port=${used.firstOrNull()?.first?.port ?: 0}")
             Log.i("E2E", "socks port=${socks.port} auth=${socks.auth} dpi=${dpiLabel.ifEmpty { "-" }} fixed=${set.ports.keys} mode=${settings.mode} services=${settings.services} proxy=$proxy")
             connectPhase = "tun"
             if (!proxy && !keepTun) startTun(settings, socks)
@@ -1064,6 +1065,19 @@ class TunnelService : VpnService() {
      * Watchdog: a light request through the tunnel every 20 s (a miss is re-checked after 3 s). Two misses in a row = the connection broke
      * (masking recognised, server died) → self-healing, without waiting for the user to notice.
      */
+    /** Hold CPU only during actual recovery/probe work, never during healthy timer sleeps.
+     * This is not an exemption from Doze/network policy or force-stop. */
+    private suspend fun <T> recoveryCpuLease(block: suspend () -> T): T {
+        val wake=runCatching {
+            getSystemService(android.os.PowerManager::class.java)?.newWakeLock(
+                android.os.PowerManager.PARTIAL_WAKE_LOCK,"VlessCard:recovery")?.apply {
+                setReferenceCounted(false); acquire(120_000L)
+            }
+        }.getOrNull()
+        try { return block() }
+        finally { runCatching { if(wake?.isHeld==true) wake.release() } }
+    }
+
     private fun watchdog() {
         if (watchJob?.isActive == true) return
         watchJob = scope.launch {
@@ -1073,6 +1087,7 @@ class TunnelService : VpnService() {
                 com.vlesscardvpn.core.ConnectionPassport.state.value.telegram.value != true
             var stats = TProxyService.stats()
             while (Tunnel.status.value.state == Tunnel.State.CONNECTED) {
+                try {
                 // wait 45 s (10 s offline), but check right away when the screen turns back on — that's when apps are opened
                 val watchSettings = Store.state.value.settings
                 val stabilityPending = "stability" in watchSettings.autoChecks && watchSettings.mode == Mode.AUTO && usedChain==null && !usedTorRoute && !watchSettings.torAll &&
@@ -1126,10 +1141,10 @@ class TunnelService : VpnService() {
                 val profileLimit=com.vlesscardvpn.core.SlowRouteConsent.runtimeLimit(usedServers)
                 val checkTelegram = profile?.telegram==true && !settings.torAll &&
                     !(settings.torRouting && "telegram" in settings.services) && usedChain == null
-                val live = com.vlesscardvpn.core.CancellableProbe.run { bind ->
+                val live = recoveryCpuLease { com.vlesscardvpn.core.CancellableProbe.run { bind ->
                     Tester.probeSocks(port, settings.testUrl, big = false, youtube = false, telegram = checkTelegram,
                         attempts = 1, budgetMs = if(healthOnly) 3500L else 6500L, onCall = { call -> bind { call.cancel() } }, onCancel = bind, autoChecks=profile,user=auth.user,pass=auth.pass)
-                }
+                } }
                 if (core !== sampledCore || chainEpoch.get()!=sampledEpoch || usedTorRoute!=sampledTorRoute ||
                     Tunnel.socks != auth || Net.key(this@TunnelService) != network ||
                     Net.underlying(this@TunnelService)?.toString() != handle) { telegramMiss = 0; telegramSlow = 0; com.vlesscardvpn.core.TelegramStability.clear(); continue }
@@ -1225,7 +1240,7 @@ class TunnelService : VpnService() {
                 }
                 if (ok && vpnMode) {
                     // the proxy works, but do apps? DNS the way apps ask it, and traffic through the TUN in both directions
-                    val dnsHealthy = Tester.dnsViaSocks(port, auth.user, auth.pass) || Tester.dnsViaSocks(port, auth.user, auth.pass, "cloudflare.com")
+                    val dnsHealthy = recoveryCpuLease { Tester.dnsViaSocks(port, auth.user, auth.pass) || Tester.dnsViaSocks(port, auth.user, auth.pass, "cloudflare.com") }
                     if (core !== sampledCore || chainEpoch.get()!=sampledEpoch || usedTorRoute!=sampledTorRoute ||
                         Tunnel.socks != auth || Net.key(this@TunnelService) != network ||
                         Net.underlying(this@TunnelService)?.toString() != handle) continue
@@ -1248,7 +1263,33 @@ class TunnelService : VpnService() {
                     if (dnsMiss >= 2) { hardRestart("DNS перестал отвечать"); break }
                     if (stall >= 3) { hardRestart("трафик приложений завис"); break }
                 }
+                } catch(e:kotlinx.coroutines.CancellationException) { throw e }
+                  catch(e:Exception) {
+                    // SupervisorJob logs a dead child but does not restart it. Keep this service-owned
+                    // detector alive without requiring ACTION_SCREEN_ON or opening MainActivity.
+                    Log.w(TAG,"watchdog cycle failed; retrying",e)
+                    delay(com.vlesscardvpn.core.VpnRecoveryPolicy.RETRY_MS)
+                }
             }
+        }
+    }
+
+    private var standbyJob: Job? = null
+    private var standbyAttemptAt: Long? = null
+    private fun prepareStandbySoon() {
+        val now=android.os.SystemClock.elapsedRealtime()
+        if(!com.vlesscardvpn.core.StandbyPreparationPolicy.due(now,standbyAttemptAt,Actions.warmReserveCount(usedServers),
+                standbyJob?.isActive==true || Actions.running.value || checkJob?.isActive==true || chainMeasuring)) return
+        standbyAttemptAt=now
+        val sampledCore=core; val servers=usedServers.toList()
+        standbyJob=scope.launch {
+            try {
+                if(core===sampledCore && Tunnel.status.value.state==Tunnel.State.CONNECTED) {
+                    recoveryCpuLease { Actions.prepareStandby(servers) }
+                    if(BuildConfig.DEBUG) Log.i("E2E","standby prepared count=${Actions.warmReserveCount(servers)}")
+                }
+            } catch(e:kotlinx.coroutines.CancellationException) {throw e}
+              catch(e:Exception) {Log.w(TAG,"standby preparation failed; retry remains scheduled",e)}
         }
     }
 
@@ -1259,18 +1300,21 @@ class TunnelService : VpnService() {
             var previous=TProxyService.stats();var windows=0
             while(isActive && Tunnel.status.value.state==Tunnel.State.CONNECTED) {
                 delay(1000)
+                try {
                 if(Store.state.value.settings.mode!=Mode.AUTO) break
                 if(healJob?.isActive==true || recoveryJob?.isActive==true) continue
                 val current=TProxyService.stats();val old=previous;previous=current
                 val suspicious=old!=null && current!=null && old.size>=4 && current.size>=4 && current[1]-old[1]>=4096 && current[3]==old[3]
                 windows=if(suspicious) windows+1 else 0
                 when(com.vlesscardvpn.core.ReserveScoutPolicy.next(windows,Actions.warmReserveCount(usedServers))) {
-                    // A healthy connection is not a reason to keep testing more servers.
-                    com.vlesscardvpn.core.ReserveScoutPolicy.Action.PREPARE -> Unit
+                    // Prepare only missing isolated spares, never re-test or replace the healthy primary.
+                    com.vlesscardvpn.core.ReserveScoutPolicy.Action.PREPARE -> prepareStandbySoon()
                     com.vlesscardvpn.core.ReserveScoutPolicy.Action.VERIFY -> {windows=0;verifySoon(0,suspectedFailure=true)}
                     com.vlesscardvpn.core.ReserveScoutPolicy.Action.KEEP -> Unit
                 }
                 // This scout never selects a route. Full verification/watchdog owns confirmed-failure recovery.
+                } catch(e:kotlinx.coroutines.CancellationException) {throw e}
+                  catch(e:Exception) {Log.w(TAG,"standby scout cycle failed; retrying",e);delay(5000)}
             }
         }
     }
@@ -1342,6 +1386,7 @@ class TunnelService : VpnService() {
     private fun healStatus(text: String) { val cur = Tunnel.status.value; if (cur.state == Tunnel.State.CONNECTED) Tunnel.status.value = cur.copy(check = text, checkOk = null) }
 
     private fun recoverServerRoute() {
+        standbyJob?.cancel(); standbyJob=null
         if (recoveryJob?.isActive == true || tun == null || Tunnel.socks == null) return
         recoveryStarted()
         recoveryJob = scope.launch {
@@ -1366,7 +1411,7 @@ class TunnelService : VpnService() {
                 }
                 val sampledCore=core;val auth=Tunnel.socks
                 val level = if (attempt == 0) 1 else 3
-                val found = try { Store.busy { Actions.autoRescue(usedServers, level, attempted=attempted, onStep={healStatus("Восстановление: $it")}) } }
+                val found = try { recoveryCpuLease { Store.busy { Actions.autoRescue(usedServers, level, attempted=attempted, onStep={healStatus("Восстановление: $it")}) } } }
                     catch(e:kotlinx.coroutines.CancellationException) {throw e}
                     catch(e:Exception) {Log.w(TAG,"Auto recovery failed",e);0}
                 kotlinx.coroutines.currentCoroutineContext().ensureActive()
@@ -1459,7 +1504,7 @@ class TunnelService : VpnService() {
             cancelChainSearch()
             curNet = network
             runCatching { setUnderlyingNetworks(network?.let { arrayOf(it) }) }
-            netJob?.cancel(); checkJob?.cancel(); healJob?.cancel(); recoveryJob?.cancel(); optJob?.cancel(); scoutJob?.cancel()
+            netJob?.cancel(); checkJob?.cancel(); healJob?.cancel(); recoveryJob?.cancel(); optJob?.cancel(); scoutJob?.cancel(); standbyJob?.cancel()
             watchJob?.cancel(); coverJob?.cancel(); serviceJob?.cancel(); liveJob?.cancel(); torJob?.cancel(); torJob = null
             torBridgeRefreshJob?.cancel(); torBridgeRefreshJob = null
             clearTorCountry()
@@ -1526,6 +1571,7 @@ class TunnelService : VpnService() {
         if (!keepTun) runCatching { com.vlesscardvpn.core.Traffic.tick() }
         liveJob?.cancel()
         scoutJob?.cancel(); scoutJob=null
+        standbyJob?.cancel(); standbyJob=null; standbyAttemptAt=null
         checkJob?.cancel(); watchJob?.cancel(); coverJob?.cancel(); serviceJob?.cancel(); if (error != null) netJob?.cancel()
         if (error != null) { healJob?.cancel(); recoveryJob?.cancel() }
         if (error != null) optJob?.cancel()

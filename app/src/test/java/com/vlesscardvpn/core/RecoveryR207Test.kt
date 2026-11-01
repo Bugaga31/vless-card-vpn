@@ -10,8 +10,8 @@ class RecoveryR207Test {
  private fun get(m:WarmReserveMemory,p:NetworkHandoff.Snapshot=path,s:List<Server> =listOf(a),mask:String="m",url:String="https://check.invalid",at:Long=1000)=m.candidates(p,s,{mask},url,at)
  private fun memory()=WarmReserveMemory().apply {record(path,a,"m","https://check.invalid",1000)}
  @Test fun freshProofUsable(){assertEquals(listOf(a),get(memory()))}
- @Test fun expiresAfterMinute(){assertTrue(get(memory(),at=61001).isEmpty())}
- @Test fun exactExpiryBoundary(){assertEquals(listOf(a),get(memory(),at=61000))}
+ @Test fun expiresAfterProofWindow(){assertTrue(get(memory(),at=1001+WarmReserveMemory.TTL_MS).isEmpty())}
+ @Test fun exactExpiryBoundary(){assertEquals(listOf(a),get(memory(),at=1000+WarmReserveMemory.TTL_MS))}
  @Test fun clockRollbackInvalidates(){assertTrue(get(memory(),at=999).isEmpty())}
  @Test fun differentHandleRejected(){assertTrue(get(memory(),p=path.copy(handle="13")).isEmpty())}
  @Test fun differentProfileRejected(){assertTrue(get(memory(),p=path.copy(profile="cell")).isEmpty())}
