@@ -656,7 +656,10 @@ class TunnelService : VpnService() {
                 com.vlesscardvpn.core.RequiredServiceRecovery.failed(profile,p)) {
                 val callActive=com.vlesscardvpn.core.PhonePower.isVoiceCallActive(this@TunnelService)
                 if (!callActive) {
-                    if (BuildConfig.DEBUG) Log.i("E2E", "recovery request=required_service telegram=${profile.telegram && p.tgOk==false} stability=${profile.stability && p.stableOk==false} voice=${profile.voice && p.callsOk==false} discord=${profile.discord && p.discordOk==false} youtube=${profile.youtube && p.ytOk==false} instagram=${profile.instagram && p.instagramOk==false}")
+                    if (BuildConfig.DEBUG) {
+                        val stabilityReason = p.serviceNotes["stability"].takeIf { it in setOf("STABILITY_RESPONSE_FAILED", "STABILITY_SPREAD", "STABILITY_LATENCY", "STABILITY_INCOMPLETE") } ?: "OTHER"
+                        Log.i("E2E", "recovery request=required_service telegram=${profile.telegram && p.tgOk==false} stability=${profile.stability && p.stableOk==false} voice=${profile.voice && p.callsOk==false} discord=${profile.discord && p.discordOk==false} youtube=${profile.youtube && p.ytOk==false} instagram=${profile.instagram && p.instagramOk==false} stability_reason=$stabilityReason")
+                    }
                     recoverServerRoute()
                     return@launch
                 }

@@ -100,3 +100,7 @@ class BoundedDiagnosticsTest(unittest.TestCase):
         self.assertEqual(8,len(d['required_failures']))
         self.assertEqual(['false'],d['recovery_applied'])
         self.assertNotIn('SECRET',output);self.assertNotIn('private',output)
+
+    def test_stability_reason_is_allowlisted(self):
+        output,d=self.summarize('stability_reason=STABILITY_SPREAD\n'*20+'stability_reason=SECRET\n')
+        self.assertEqual(['STABILITY_SPREAD']*8,d['stability_reasons']);self.assertNotIn('SECRET',output)
