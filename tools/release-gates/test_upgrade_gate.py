@@ -11,7 +11,7 @@ class UpgradeGateTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp); (root/'release').mkdir(); bin=root/'bin';bin.mkdir()
             commands={
-                'curl': '#!/usr/bin/env python3\nimport pathlib,sys\np=pathlib.Path(sys.argv[sys.argv.index("--output")+1]);p.write_text("mock")\n',
+                'curl': '#!/usr/bin/env python3\nimport os,pathlib,sys\nopen(os.environ["EVENTS"],"a").write("curl "+sys.argv[-1]+"\\n")\np=pathlib.Path(sys.argv[sys.argv.index("--output")+1]);p.write_text("mock")\n',
                 'sha256sum': '#!/usr/bin/env python3\nimport os,sys\ns=sys.stdin.read()\nopen(os.environ["EVENTS"],"a").write("hash "+s)\nsys.exit(1 if os.environ["MODE"]=="hash" else 0)\n',
                 'adb': r'''#!/usr/bin/env python3
 import os,sys
@@ -31,13 +31,15 @@ elif args and args[0]=='install':print('Success')
             return result.returncode,events.read_text() if events.exists() else '',result.stdout
     def test_all_published_baselines_are_required(self):
         rc,events,out=self.run_gate();self.assertEqual(0,rc,out)
-        self.assertEqual(5,events.count('adb install -r'))
-        for version in ('1.2.50','1.2.55','1.2.56','1.2.118','1.2.119'):
+        self.assertEqual(6,events.count('adb install -r'))
+        for version in ('1.2.50','1.2.55','1.2.56','1.2.118','1.2.119','1.2.123'):
             self.assertIn('baseline-'+version+'.apk',events)
             self.assertIn('Published '+version+' -> signed versionCode 167 upgrade: PASS',out)
         self.assertIn('b4a319c1753ae28761cba62e1ea3df40167116c6a946b160643a35dc1afdb7c1',events)
         self.assertIn('3e994e4004beeaf0cc6cef04d3c4fa9e1b4e48c0bf58cc0af541cf1553af713e',events)
         self.assertIn('7d2448905ca6d83bf3ab965465582d88ae17de90566c966d5ad22d1460d67515',events)
+        self.assertIn('1e499302caf200d41193cbc88d2a451d73522b16decfc3c744e0c508921c39a7',events)
+        self.assertIn('https://github.com/Bugaga31/vless-card-vpn/releases/download/v1.2.123/VLESS-Card-1.2.123.apk',events)
     def test_checksum_failure_stops_before_install(self):
         rc,events,_=self.run_gate('hash');self.assertNotEqual(0,rc);self.assertNotIn('adb install',events)
     def test_failed_upgrade_cannot_continue_or_claim_pass(self):
