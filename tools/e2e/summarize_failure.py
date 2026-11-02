@@ -57,6 +57,7 @@ else:
     soft_origins=re.findall(r'soft reconnect origin=(CHAIN_E2E|SAFE_RETRY|YOUTUBE_REPAIR|CHAIN_REPAIR|APP_REPAIR|CHAIN_SCOUT|SERVICE_ROUTES|MAINTENANCE|OPTIMIZE|TELEGRAM_REPAIR|AUTO_RESCUE|HEAL|HANDOFF|UNKNOWN) state=(IDLE|CONNECTING|CONNECTED|ERROR)(?=\s|$)',text)[-12:]
     result={'soft_reconnect_origins':soft_origins,'restored_count':min(text.count('fixture activity restored'),100000),'handoff_deltas':handoff_deltas,'core_events':core_events,'probe_events':probe_events,'failures':failures,'service_events':service_events,'teardown_events':teardown_events,
             'optimize_skips':re.findall(r'optimize skipped=(power|foreground_busy|disabled)\b',text)[-3:],
+            'optimize_power_categories':re.findall(r'optimize skipped=power category=(thermal|call|charging|eco|memory|gaming|saver|battery|prediction|pause|data_saver|metered|screen|charge_only|traffic|lag|other)(?=\s|$)',text)[-3:],
             'auto_ready_blocked':re.findall(r'auto ready_blocked=(network_changed|cancelled)\b',text)[-3:],
             'start_callers':re.findall(r'start request caller=((?:MainActivity|Actions|Assistant|BootReceiver|VpnWidget|ToggleTileService)\.kt:[0-9]{1,6}|unknown)(?=\s|$)',text)[-4:],
             'maintenance_events':re.findall(r'maintenance (queued|applying=soft)\b',text)[-4:],

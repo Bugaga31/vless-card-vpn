@@ -87,3 +87,8 @@ class BoundedDiagnosticsTest(unittest.TestCase):
         calls=re.findall(r'connect\(soft\s*=\s*true[^)]*\)',s)
         self.assertEqual(13,len(calls))
         self.assertTrue(all(re.fullmatch(r'connect\(soft\s*=\s*true, reason = SoftReason\.[A-Z0-9_]+\)',c) for c in calls))
+
+    def test_power_diagnostics_only_emit_allowed_categories(self):
+        s,d=self.summarize('optimize skipped=power category=screen\n'*8+'optimize skipped=power category=SECRET token=private\n')
+        self.assertEqual(['screen']*3,d['optimize_power_categories'])
+        self.assertNotIn('SECRET',s);self.assertNotIn('private',s)

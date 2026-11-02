@@ -382,9 +382,20 @@ load test.json || fail "checks-ui: fixture state load failed"
 tap_ui "Что проверять" || fail "checks-ui: navigation missing"
 tap_ui "Поиск сервисов" || fail "checks-ui: search missing"
 adb shell input text github
-sleep 1
-[ -n "$(ui_coords 'GitHub')" ] || fail "checks-ui: search did not find GitHub"
+# Dismiss the IME before asserting a LazyColumn row is visible; otherwise the keyboard
+# can cover the only result on a short emulator screen. The query/result are still required.
 adb shell input keyevent 4
+sleep 1
+FOUND=$(ui_coords 'GitHub')
+python3 - "$W/window.xml" > "$W/checks-ui-summary.txt" <<'PYUIRESULT'
+import json,sys,xml.etree.ElementTree as E
+nodes=E.parse(sys.argv[1]).getroot().iter('node')
+a=[n.attrib for n in nodes]
+query=any('github' in x.get('text','').lower() for x in a)
+result=any('GitHub' in (x.get('text','')+' '+x.get('content-desc','')) for x in a)
+print('::notice title=Checks UI bounded::'+json.dumps({'query_visible':query,'result_visible':result},separators=(',',':')))
+PYUIRESULT
+[ -n "$FOUND" ] || fail "checks-ui: search did not find GitHub"
 # Clear search so newly added entries remain visible.
 tap_ui "Поиск сервисов" || fail "checks-ui: search not editable"
 adb shell input keyevent KEYCODE_MOVE_END
@@ -407,6 +418,7 @@ adb logcat -d > $W/logcat.txt
 # Keep the bounded startup/recreation summary after later cases clear logcat.
 [ ! -f "$W/recreation-summary.txt" ] || cat "$W/recreation-summary.txt" >> "$W/logcat.txt"
 [ ! -f "$W/multi-summary.txt" ] || cat "$W/multi-summary.txt" >> "$W/logcat.txt"
+[ ! -f "$W/checks-ui-summary.txt" ] || cat "$W/checks-ui-summary.txt" >> "$W/logcat.txt"
 grep -E "FATAL EXCEPTION|Fatal signal" -A20 $W/logcat.txt | head -40
 cp $W/server.log $W/access.log . 2>/dev/null
 echo "E2E failures: $FAILS"

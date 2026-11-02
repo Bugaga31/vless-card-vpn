@@ -943,7 +943,28 @@ object Actions {
         lastOptimizeSwitched = false
         val lightPlan = PhonePower.refresh(app)
         if (!BackgroundReservePolicy.mayProbe(Store.state.value.settings.mode == Mode.AUTO,lightPlan)) {
-            if (com.vlesscardvpn.BuildConfig.DEBUG) android.util.Log.i("E2E", "optimize skipped=power")
+            if (com.vlesscardvpn.BuildConfig.DEBUG) {
+                val category = when {
+                    lightPlan.reason.startsWith("Тепловая защита") -> "thermal"
+                    lightPlan.reason.startsWith("Идёт звонок") -> "call"
+                    lightPlan.reason.startsWith("ВАТСОН: приоритет зарядке") -> "charging"
+                    lightPlan.reason.startsWith("Экономия батареи") -> "eco"
+                    lightPlan.reason.startsWith("Нехватка памяти") -> "memory"
+                    lightPlan.reason.startsWith("Игровая сессия") -> "gaming"
+                    lightPlan.reason.startsWith("Системная экономия энергии") -> "saver"
+                    lightPlan.reason.startsWith("Низкий заряд") -> "battery"
+                    lightPlan.reason.startsWith("ВАТСОН: прогноз нагрузки") -> "prediction"
+                    lightPlan.reason.startsWith("Пауза улучшений") -> "pause"
+                    lightPlan.reason.startsWith("Системная экономия трафика") -> "data_saver"
+                    lightPlan.reason.startsWith("Ожидание Wi-Fi") -> "metered"
+                    lightPlan.reason.startsWith("Экран выключен") -> "screen"
+                    lightPlan.reason.startsWith("Улучшения только на зарядке") -> "charge_only"
+                    lightPlan.reason.startsWith("Активный трафик") -> "traffic"
+                    lightPlan.reason.startsWith("Телефон тормозил") -> "lag"
+                    else -> "other"
+                }
+                android.util.Log.i("E2E", "optimize skipped=power category=$category")
+            }
             return outcome(false,"context_or_policy")
         }
         var st = Store.state.value
