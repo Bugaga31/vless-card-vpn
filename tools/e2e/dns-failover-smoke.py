@@ -17,8 +17,10 @@ def query(name, ident):
 
 
 class Resolver:
-    def __init__(self, reply):
+    def __init__(self, reply, signal=None, wait_for=None):
         self.reply = reply
+        self.signal = signal
+        self.wait_for = wait_for
         self.count = 0
         self.closed = threading.Event()
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -33,7 +35,11 @@ class Resolver:
             try:
                 data, peer = self.sock.recvfrom(4096)
                 self.count += 1
+                if self.signal is not None: self.signal.set()
                 if self.reply and len(data) >= 12:
+                    # A fast fallback may beat the primary resolver thread to the
+                    # counter assertion. Wait boundedly so the test observes both.
+                    if self.wait_for is not None: self.wait_for.wait(.5)
                     response = data[:2] + struct.pack('!5H', 0x8180, 1, 1, 0, 0) + data[12:]
                     response += b'\xc0\x0c' + struct.pack('!2HIH', 1, 1, 30, 4) + bytes([198, 18, 0, 1])
                     self.sock.sendto(response, peer)
@@ -66,7 +72,8 @@ def smoke(xray, template):
     fixtures = []
     process = None
     try:
-        fixtures = [Resolver(False), Resolver(True), Resolver(True)]
+        primary_seen = threading.Event()
+        fixtures = [Resolver(False, signal=primary_seen), Resolver(True, wait_for=primary_seen), Resolver(True, wait_for=primary_seen)]
         with contextlib.closing(socket.socket(socket.AF_INET, socket.SOCK_DGRAM)) as reserved:
             reserved.bind(('127.0.0.1', 0)); port = reserved.getsockname()[1]
         dns = {k: v for k, v in source.items() if k in ('enableParallelQuery', 'queryStrategy', 'tag')}
