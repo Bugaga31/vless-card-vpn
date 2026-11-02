@@ -442,7 +442,7 @@ class TunnelService : VpnService() {
                     check = "VLESS не восстановлен (${com.vlesscardvpn.core.Errors.human(e)}). Трафик заблокирован; ищу рабочий сервер.",
                     checkOk = false)
                 foreground("Трафик заблокирован · поиск VLESS")
-                if (Store.state.value.settings.mode == Mode.AUTO) recoverServerRoute() else heal()
+                if (Store.state.value.settings.mode == Mode.AUTO) { if (BuildConfig.DEBUG) Log.i("E2E", "recovery request=connect_failure"); recoverServerRoute() } else heal()
                 return
             }
             if (com.vlesscardvpn.tor.TorConnectionPolicy.needsAutoSearch(Store.state.value.settings) && connectFails < 2) {
@@ -656,6 +656,7 @@ class TunnelService : VpnService() {
                 com.vlesscardvpn.core.RequiredServiceRecovery.failed(profile,p)) {
                 val callActive=com.vlesscardvpn.core.PhonePower.isVoiceCallActive(this@TunnelService)
                 if (!callActive) {
+                    if (BuildConfig.DEBUG) Log.i("E2E", "recovery request=required_service telegram=${profile.telegram && p.tgOk==false} stability=${profile.stability && p.stableOk==false} voice=${profile.voice && p.callsOk==false} discord=${profile.discord && p.discordOk==false} youtube=${profile.youtube && p.ytOk==false} instagram=${profile.instagram && p.instagramOk==false}")
                     recoverServerRoute()
                     return@launch
                 }
@@ -1247,6 +1248,7 @@ class TunnelService : VpnService() {
                     if(settings.mode==Mode.AUTO && usedChain==null && !usedTorRoute) {
                         // Recovery may already be owned by a service repair job, or fail before
                         // launching. Never retire the only detector merely because it was requested.
+                        if (BuildConfig.DEBUG) Log.i("E2E", "recovery request=watchdog")
                         recoverServerRoute()
                         continue
                     }
@@ -1439,7 +1441,9 @@ class TunnelService : VpnService() {
                         if (tun != null && Tunnel.status.value.state == Tunnel.State.CONNECTED && core===sampledCore &&
                             Tunnel.socks==auth && physical==(Net.key(this@TunnelService) to Net.underlying(this@TunnelService)?.toString())) connect(soft = true, reason = SoftReason.AUTO_RESCUE)
                     }
-                    if (Tunnel.status.value.check == "Проверяю интернет…") break
+                    val awaitingVerification = Tunnel.status.value.check == "Проверяю интернет…"
+                    if (BuildConfig.DEBUG) Log.i("E2E", "recovery applied awaiting_verification=$awaitingVerification")
+                    if (awaitingVerification) break
                 }
                 attempt++
                 healStatus("Рабочего VLESS-сервера пока нет. Трафик остаётся заблокированным; повторный поиск через 1 с")
@@ -1452,6 +1456,7 @@ class TunnelService : VpnService() {
         val st = Store.state.value
         if (healJob?.isActive == true) return
         if (st.settings.mode == Mode.AUTO) {
+            if (BuildConfig.DEBUG) Log.i("E2E", "recovery request=heal")
             recoverServerRoute()
             return
         }

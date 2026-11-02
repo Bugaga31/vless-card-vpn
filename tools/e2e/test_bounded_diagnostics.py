@@ -92,3 +92,11 @@ class BoundedDiagnosticsTest(unittest.TestCase):
         s,d=self.summarize('optimize skipped=power category=screen\n'*8+'optimize skipped=power category=SECRET token=private\n')
         self.assertEqual(['screen']*3,d['optimize_power_categories'])
         self.assertNotIn('SECRET',s);self.assertNotIn('private',s)
+
+    def test_recovery_diagnostics_are_bounded_allowlisted_and_private(self):
+        good='recovery request=required_service telegram=false stability=false voice=true discord=false youtube=false instagram=false\n'
+        output,d=self.summarize(good*20+'recovery request=SECRET token=private\nrecovery applied awaiting_verification=false\n')
+        self.assertEqual(['required_service']*8,d['recovery_requests'])
+        self.assertEqual(8,len(d['required_failures']))
+        self.assertEqual(['false'],d['recovery_applied'])
+        self.assertNotIn('SECRET',output);self.assertNotIn('private',output)
