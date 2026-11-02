@@ -238,6 +238,22 @@ echo "eight-candidate primary: $P"
 c=$(grep -c 'email: pool' $W/access.log)
 [ "$c" -gt 0 ] || fail "auto-eight: no authenticated candidate carried traffic"
 
+# At least two verified count increases must occur in consecutive passes of the
+# same bounded wave, not merely across separate 30-second scout attempts.
+# This uses the closed 8-identity fixture above; no credentials enter the log.
+CASE=reserve-wave; R=""
+adb shell input keyevent KEYCODE_HOME
+WAVE_OK=0
+for i in $(seq 1 100); do
+  if adb logcat -d -s E2E:I | python3 tools/e2e/verify_standby_wave_r246.py > "$W/reserve-wave-summary.txt"; then
+    WAVE_OK=1; break
+  fi
+  sleep 1
+done
+[ "$WAVE_OK" -eq 1 ] || fail "reserve-wave: two consecutive verified increases in one wave were not observed"
+adb logcat -d -s E2E:I | grep -q 'teardown state=CONNECTED' && fail "reserve-wave: active VPN restarted during fixture"
+R=$(probe reserve-wave-after); okprobe "$R" || fail "reserve-wave: other UID could not transfer after preparation"
+
 # Service-owned preparation and actual loss recovery while MainActivity stays backgrounded.
 : > $W/access.log
 BACKGROUND_FAILS=$FAILS

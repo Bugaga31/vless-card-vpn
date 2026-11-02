@@ -1335,12 +1335,14 @@ class TunnelService : VpnService() {
                     recoveryCpuLease {
                         kotlinx.coroutines.withTimeoutOrNull(com.vlesscardvpn.core.StandbyPreparationPolicy.PASS_TIMEOUT_MS) {
                             var before=Actions.warmReserveCount(servers)
-                            repeat(com.vlesscardvpn.core.StandbyPreparationPolicy.TARGET) {
+                            repeat(com.vlesscardvpn.core.StandbyPreparationPolicy.TARGET) { pass ->
                                 if (!isActive || core!==sampledCore || chainEpoch.get()!=sampledEpoch ||
                                     !Net.matches(this@TunnelService,sampledNetwork) ||
                                     Tunnel.status.value.state!=Tunnel.State.CONNECTED || usedServers.toList()!=servers) return@withTimeoutOrNull
+                                val passStarted=android.os.SystemClock.elapsedRealtime()
                                 Actions.prepareStandby(servers)
                                 val after=Actions.warmReserveCount(servers)
+                                if(BuildConfig.DEBUG) Log.i("E2E","standby wave=$now pass=${pass+1} before=$before after=$after start=$passStarted end=${android.os.SystemClock.elapsedRealtime()}")
                                 if (!com.vlesscardvpn.core.StandbyPreparationPolicy.continueAfter(before,after)) return@withTimeoutOrNull
                                 before=after
                             }
