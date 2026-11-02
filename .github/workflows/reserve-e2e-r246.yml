@@ -1,0 +1,391 @@
+name: 1.2.124 candidate — verified reserve wave R246 (no auto publish)
+permissions:
+  contents: read
+env:
+  VERSION: release-build-235
+concurrency:
+  group: reserve-e2e-r246
+  cancel-in-progress: true
+jobs:
+  source:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      sha: ${{ steps.source.outputs.sha }}
+    steps:
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      with:
+        fetch-depth: 0
+    - id: source
+      shell: python
+      run: 'import subprocess,os
+
+        assert os.environ["GITHUB_REF"]=="refs/heads/work/reserve-e2e-r246"
+
+        subprocess.run(["git","merge-base","--is-ancestor","905f683c0839e1bc28d94c8b4ad849613bd2b11a","HEAD"],check=True)
+
+        sha=subprocess.check_output(["git","rev-parse","HEAD"],text=True).strip()
+
+        with open(os.environ["GITHUB_OUTPUT"],"a") as f:f.write("sha="+sha+"\n")
+
+        '
+  build:
+    needs: source
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      with:
+        persist-credentials: false
+        ref: ${{ needs.source.outputs.sha }}
+    - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
+      with:
+        distribution: temurin
+        java-version: '17'
+    - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407
+      with:
+        packages: platform-tools platforms;android-34 build-tools;34.0.0
+        log-accepted-android-sdk-licenses: false
+    - uses: gradle/actions/setup-gradle@d9c87d481d55275bb5441eef3fe0e46805f9ef70
+    - name: Restore native libraries (validated before use)
+      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+      with:
+        path: 'app/build/generated/byedpi
+
+          app/build/generated/hev
+
+          app/build/generated/byedpi-cache.json
+
+          app/build/generated/hev-cache.json
+
+          '
+        key: native-${{ runner.os }}-${{ runner.arch }}-ndk27.2.12479018-api24-all-${{ hashFiles('native/**', 'app/build.gradle.kts') }}
+    - name: Install pinned NDK
+      run: sdkmanager 'ndk;27.2.12479018'
+    - name: JVM tests and release build
+      run: 'N=${VERSION#beta-build-}; export GITHUB_RUN_NUMBER=${N#release-build-}
+
+        chmod +x gradlew
+
+        python3 -m unittest discover -s tools/release-gates -p ''test_*.py''
+
+        bash tools/test-security-result-parser.sh
+
+        PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p ''test_cloud_*.py''
+
+        ./gradlew -PbetaPreview=true -PemulatorAbis=true -PsplitAbi=true --no-daemon --max-workers=2 :app:testDebugUnitTest :app:testReleaseUnitTest
+        :app:lintRelease :app:assembleRelease :security-test-probe:assembleDebug
+
+        '
+    - name: Sign with persistent Beta key (v1+v2+v3)
+      env:
+        KS_B64: ${{ secrets.BETA_KEYSTORE_B64 }}
+        KSP: ${{ secrets.BETA_KEYSTORE_PASSWORD }}
+      run: "set -euo pipefail\numask 077\ntrap 'rm -f beta.jks aligned.apk release/*.idsig' EXIT INT TERM\nBT=$ANDROID_HOME/build-tools/34.0.0\n\
+        echo \"$KS_B64\" | base64 -d > beta.jks\nmkdir -p release\ncp security-test-probe/build/outputs/apk/debug/security-test-probe-debug.apk\
+        \ release/security-test-probe.apk\nOUT=app/build/outputs/apk/release\nsign() {\n  $BT/zipalign -f -p 4 \"$1\" aligned.apk\n  $BT/apksigner\
+        \ sign --ks beta.jks --ks-key-alias beta --ks-pass env:KSP --key-pass env:KSP \\\n    --v1-signing-enabled true --v2-signing-enabled true\
+        \ --v3-signing-enabled true \\\n    --min-sdk-version 21 --out \"$2\" aligned.apk\n  $BT/apksigner verify --min-sdk-version 21 \"$2\"\n\
+        }\n# Universal APK keeps the old file name (emulator check and existing download links).\nsign $OUT/app-universal-release-unsigned.apk\
+        \ release/VLESS-Card-Beta.apk\n# arm64-only: about half the download, for almost all modern phones.\nsign $OUT/app-arm64-v8a-release-unsigned.apk\
+        \ release/VLESS-Card-Beta-arm64.apk\nrm -f beta.jks aligned.apk release/*.idsig\nls -l release/*.apk\n$BT/apksigner verify -v --min-sdk-version\
+        \ 21 release/VLESS-Card-Beta.apk | tee verify.txt\ngrep -q \"v1 scheme (JAR signing): true\" verify.txt\ngrep -q \"v2 scheme (APK Signature\
+        \ Scheme v2): true\" verify.txt\n$BT/zipalign -c -p 4 release/VLESS-Card-Beta.apk\n$BT/aapt2 dump badging release/VLESS-Card-Beta.apk\
+        \ | grep -E \"^package|application-label:|native-code\"\nunzip -tq release/VLESS-Card-Beta.apk\n# Same signed universal APK used by launch\
+        \ gates must include native emulator libraries.\nfor lib in libgojni.so libhev-socks5-tunnel.so; do\n  unzip -l release/VLESS-Card-Beta.apk\
+        \ | grep -q \"lib/x86_64/$lib\"\ndone\n$BT/apksigner verify --print-certs -v release/VLESS-Card-Beta.apk | grep -E \"key size|SHA-256\
+        \ digest\"\n$BT/apksigner verify --print-certs -v release/VLESS-Card-Beta.apk | grep -q \"key size (bits): 2048\"\nunzip -l release/VLESS-Card-Beta.apk\
+        \ | grep -E \"META-INF/.*\\.(RSA|SF)$\"\nGITHUB_SHA=\"$CANDIDATE_SHA\" python3 tools/release-gates/verify_candidate.py\npython3 - <<'PY'\n\
+        import json\nd=json.load(open('release/verification.json'))['jvm']\nopen('release/tests.txt','w').write(f\"{d['tests']} {d['failures']\
+        \ + d['errors']}\\n\")\nPY\n"
+    - name: Verify both complete JVM variants
+      run: 'python3 - <<''PYCODE''
+
+        import sys,json,pathlib
+
+        sys.path.insert(0,''tools/release-gates'')
+
+        from verify_candidate import test_totals
+
+        p=pathlib.Path(''release/verification.json'');d=json.loads(p.read_text())
+
+        d[''jvm_variants'']={v:test_totals(pathlib.Path(''app/build/test-results/''+v).glob(''*.xml'')) for v in [''testDebugUnitTest'',''testReleaseUnitTest'']}
+
+        d[''release_status'']=''candidate_pending_all_emulator_gates''
+
+        p.write_text(json.dumps(d,indent=2)+''\n'')
+
+        PYCODE'
+    - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      with:
+        name: beta-apk
+        path: release/
+    - name: Save complete reports even on failure
+      if: always()
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      with:
+        name: reports-build
+        path: 'app/build/test-results/
+
+          app/build/reports/
+
+          release/verification.json
+
+          release/upgrade-*.txt
+
+          release/security-*.txt'
+        if-no-files-found: warn
+    env:
+      CANDIDATE_SHA: ${{ needs.source.outputs.sha }}
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        api:
+        - 33
+        - 29
+    steps:
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      with:
+        persist-credentials: false
+        ref: ${{ needs.source.outputs.sha }}
+    - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
+      with:
+        distribution: temurin
+        java-version: '17'
+    - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407
+      with:
+        packages: platform-tools platforms;android-34 build-tools;34.0.0
+        log-accepted-android-sdk-licenses: false
+    - uses: gradle/actions/setup-gradle@d9c87d481d55275bb5441eef3fe0e46805f9ef70
+    - name: Restore native libraries (validated before use)
+      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+      with:
+        path: 'app/build/generated/byedpi
+
+          app/build/generated/hev
+
+          app/build/generated/byedpi-cache.json
+
+          app/build/generated/hev-cache.json
+
+          '
+        key: native-${{ runner.os }}-${{ runner.arch }}-ndk27.2.12479018-api24-all-${{ hashFiles('native/**', 'app/build.gradle.kts') }}
+    - name: Install pinned NDK
+      run: sdkmanager 'ndk;27.2.12479018'
+    - name: Build (all ABIs, debug) + JVM tests
+      run: 'chmod +x gradlew
+
+        ./gradlew --no-daemon --max-workers=2 :app:testDebugUnitTest :app:assembleDebug :vpn-test-probe:testDebugUnitTest :vpn-test-probe:assembleDebug
+
+        '
+    - name: Xray-core for the host-side servers
+      run: 'curl -fsSL -o /tmp/xray.zip https://github.com/XTLS/Xray-core/releases/download/v26.9.30/Xray-linux-64.zip
+
+        echo "f851110beaff16e78d643f0ccfd9524b4a44dfd59bae3e34bb52bba378f7690e  /tmp/xray.zip" | sha256sum -c -
+
+        mkdir -p /tmp/xray && unzip -qo /tmp/xray.zip -d /tmp/xray && /tmp/xray/xray version | head -1
+
+        '
+    - name: Automatic DNS failover (closed loopback fixtures)
+      run: python3 tools/e2e/dns-failover-smoke.py --xray /tmp/xray/xray --config /tmp/dns-auto-config.json
+    - name: Tor server-uplink startup without standalone ByeDPI (loopback fixture)
+      run: python3 tools/e2e/tor-standalone-smoke.py --xray /tmp/xray/xray --config /tmp/chain-probe-configs/LIVE_SERVER_TOR.json
+    - name: Isolated Auto chain TLS body and required-hop failure gates
+      run: python3 tools/auto-chain-lab/smoke.py --xray /tmp/xray/xray --configs /tmp/chain-probe-configs
+    - name: Reclaim unrelated hosted toolchains before Android userdata allocation
+      run: 'sudo rm -rf /usr/share/dotnet /opt/hostedtoolcache/CodeQL /usr/local/swift
+
+        df -h "$HOME"
+
+        '
+    - name: Enable KVM
+      run: 'echo ''KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"'' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+
+        sudo udevadm control --reload-rules
+
+        sudo udevadm trigger --name-match=kvm
+
+        '
+    - uses: reactivecircus/android-emulator-runner@4c44018e59b437e86cdfc41da381398f93ed8808
+      with:
+        api-level: ${{ matrix.api }}
+        target: google_apis
+        arch: x86_64
+        disable-animations: true
+        emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
+        script: bash tools/e2e-android.sh
+    - if: always()
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      with:
+        name: e2e-api-${{ matrix.api }}
+        path: '/tmp/e2e/failure-*.txt
+
+          /tmp/e2e/logcat.txt
+
+          /tmp/e2e/server.log
+
+          /tmp/e2e/access.log
+
+          /tmp/e2e/tor-*.txt
+
+          /tmp/e2e/reserve-wave-summary.txt
+
+          '
+        if-no-files-found: ignore
+    - name: Save complete reports even on failure
+      if: always()
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      with:
+        name: reports-e2e-${{ matrix.api }}
+        path: 'app/build/test-results/
+
+          app/build/reports/
+
+          release/verification.json
+
+          release/upgrade-*.txt
+
+          release/security-*.txt'
+        if-no-files-found: warn
+    needs: source
+    env:
+      CANDIDATE_SHA: ${{ needs.source.outputs.sha }}
+  masks-matrix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      with:
+        persist-credentials: false
+        ref: ${{ needs.source.outputs.sha }}
+    - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
+      with:
+        distribution: temurin
+        java-version: '17'
+    - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407
+      with:
+        packages: platform-tools platforms;android-34 build-tools;34.0.0
+        log-accepted-android-sdk-licenses: false
+    - uses: gradle/actions/setup-gradle@d9c87d481d55275bb5441eef3fe0e46805f9ef70
+    - name: Restore native libraries (validated before use)
+      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+      with:
+        path: 'app/build/generated/byedpi
+
+          app/build/generated/hev
+
+          app/build/generated/byedpi-cache.json
+
+          app/build/generated/hev-cache.json
+
+          '
+        key: native-${{ runner.os }}-${{ runner.arch }}-ndk27.2.12479018-api24-all-${{ hashFiles('native/**', 'app/build.gradle.kts') }}
+    - name: Install pinned NDK
+      run: sdkmanager 'ndk;27.2.12479018'
+    - name: Every server type × every mask through real Xray-core
+      run: bash tools/masks-matrix-ci.sh
+    - name: Save complete reports even on failure
+      if: always()
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      with:
+        name: reports-masks-matrix
+        path: 'app/build/test-results/
+
+          app/build/reports/
+
+          release/verification.json
+
+          release/upgrade-*.txt
+
+          release/security-*.txt'
+        if-no-files-found: warn
+    needs: source
+    env:
+      CANDIDATE_SHA: ${{ needs.source.outputs.sha }}
+  emulator-install:
+    needs:
+    - source
+    - build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+        - api: 30
+          target: google_apis
+        - api: 34
+          target: google_apis
+    steps:
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      with:
+        persist-credentials: false
+        ref: ${{ needs.source.outputs.sha }}
+    - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      with:
+        name: beta-apk
+        path: release
+    - name: Enable KVM
+      run: 'echo ''KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"'' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+
+        sudo udevadm control --reload-rules
+
+        sudo udevadm trigger --name-match=kvm
+
+        '
+    - uses: reactivecircus/android-emulator-runner@4c44018e59b437e86cdfc41da381398f93ed8808
+      with:
+        api-level: ${{ matrix.api }}
+        target: ${{ matrix.target }}
+        arch: x86_64
+        disable-animations: true
+        emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
+        script: bash tools/release-gates/check-upgrade.sh && bash tools/security-storage-check.sh && bash tools/beta-install-check.sh
+    - if: always()
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      with:
+        name: install-check-api-${{ matrix.api }}
+        path: 'screen.png
+
+          home-ocean.png
+
+          home-large-text.png
+
+          intro.png
+
+          intro-large-text.png
+
+          logcat.txt
+
+          security-results.txt
+
+          release/upgrade-*.txt
+
+          '
+        if-no-files-found: ignore
+    - name: Save complete reports even on failure
+      if: always()
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      with:
+        name: reports-emulator-install-${{ matrix.api }}
+        path: 'app/build/test-results/
+
+          app/build/reports/
+
+          release/verification.json
+
+          release/upgrade-*.txt
+
+          release/security-*.txt'
+        if-no-files-found: warn
+    env:
+      CANDIDATE_SHA: ${{ needs.source.outputs.sha }}
+'on':
+  push:
+    branches:
+    - work/reserve-e2e-r246
+  workflow_dispatch: {}
