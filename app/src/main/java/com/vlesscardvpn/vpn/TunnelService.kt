@@ -1325,11 +1325,27 @@ class TunnelService : VpnService() {
         if(!com.vlesscardvpn.core.StandbyPreparationPolicy.due(now,standbyAttemptAt,Actions.warmReserveCount(usedServers),
                 standbyJob?.isActive==true || Actions.running.value || checkJob?.isActive==true || chainMeasuring)) return
         standbyAttemptAt=now
-        val sampledCore=core; val servers=usedServers.toList()
+        val sampledCore=core; val sampledEpoch=chainEpoch.get(); val servers=usedServers.toList()
+        val sampledNetwork=Net.observation(this@TunnelService)
         standbyJob=scope.launch {
             try {
                 if(core===sampledCore && Tunnel.status.value.state==Tunnel.State.CONNECTED) {
-                    recoveryCpuLease { Actions.prepareStandby(servers) }
+                    // One bounded wave fills missing reserves without a 30s pause after each
+                    // actual success. Never spin on an empty/failed/inconclusive pass.
+                    recoveryCpuLease {
+                        kotlinx.coroutines.withTimeoutOrNull(com.vlesscardvpn.core.StandbyPreparationPolicy.PASS_TIMEOUT_MS) {
+                            var before=Actions.warmReserveCount(servers)
+                            repeat(com.vlesscardvpn.core.StandbyPreparationPolicy.TARGET) {
+                                if (!isActive || core!==sampledCore || chainEpoch.get()!=sampledEpoch ||
+                                    !Net.matches(this@TunnelService,sampledNetwork) ||
+                                    Tunnel.status.value.state!=Tunnel.State.CONNECTED || usedServers.toList()!=servers) return@withTimeoutOrNull
+                                Actions.prepareStandby(servers)
+                                val after=Actions.warmReserveCount(servers)
+                                if (!com.vlesscardvpn.core.StandbyPreparationPolicy.continueAfter(before,after)) return@withTimeoutOrNull
+                                before=after
+                            }
+                        }
+                    }
                     if(BuildConfig.DEBUG) Log.i("E2E","standby prepared count=${Actions.warmReserveCount(servers)}")
                 }
             } catch(e:kotlinx.coroutines.CancellationException) {throw e}
