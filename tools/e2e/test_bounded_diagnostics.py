@@ -37,6 +37,16 @@ class BoundedDiagnosticsTest(unittest.TestCase):
         _,d=self.summarize('action[Авто-настройка]: Остановлено\n'*20)
         self.assertEqual(['cancelled']*3,d['auto_terminal_states'])
 
+    def test_handoff_deltas_are_allowlisted_bounded_and_private(self):
+        good='handoff delta handle=false profile=true path=true presence=false state=CONNECTED\n'
+        bad='handoff delta handle=SECRET profile=true path=true presence=false state=CONNECTED token=secret\n'
+        output,d=self.summarize(good*20+bad)
+        self.assertEqual(12,len(d['handoff_deltas']))
+        self.assertEqual(['false','true','true','false','CONNECTED'],d['handoff_deltas'][-1])
+        self.assertNotIn('SECRET',output);self.assertNotIn('secret',output)
+        _,d=self.summarize('fixture activity restored\n'*6)
+        self.assertEqual(6,d['restored_count'])
+
     def test_safe_connect_failure_reason_and_source_survive(self):
         _,d=self.summarize('failure scope=connect phase=core type=IOException code=file_limit origin=TunnelService.kt:350 causes=RuntimeException,IOException\n')
         self.assertEqual('file_limit',d['failures'][0]['code'])

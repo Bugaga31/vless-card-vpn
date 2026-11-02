@@ -11,6 +11,23 @@ class ActivityRecreationTest(unittest.TestCase):
     def test_normal_recreation(self): self.assertTrue(m.valid(self.good))
     def test_missing_evidence_fails(self):
         self.assertFalse(m.valid('')); self.assertFalse(m.valid(self.good.replace('fixture activity restored','')))
+    def test_six_recreations_required_when_requested(self):
+        six = self.good + 'fixture activity restored\n' * 5
+        self.assertTrue(m.valid(six, min_restores=6))
+        self.assertFalse(m.valid(self.good, min_restores=6))
+        self.assertFalse(m.valid(six + 'teardown state=CONNECTED keepTun=true reason=restart\n', min_restores=6))
+
+    def test_repeated_rotation_checked_without_clearing_startup_history(self):
+        root=Path(__file__).resolve().parents[2]
+        script=(root/'tools/e2e-android.sh').read_text()
+        single=script.split('if [ "$1" = single ]; then',2)[2].split('  fi\n  R=$(probe',1)[0]
+        self.assertIn('for rotation in 1 0 1 0 1 0',single)
+        self.assertIn('waitlog_after "fixture activity restored"',single)
+        self.assertIn('--min-restores 6',single)
+        self.assertNotIn('adb logcat -c',single)
+        self.assertIn('recreation-summary.txt',script)
+        self.assertIn('>> "$W/logcat.txt"',script)
+
     def test_replayed_reload_fails(self): self.assertFalse(m.valid(self.good+'fixture state mode=SERVERS\n'))
     def test_restarted_vpn_fails(self): self.assertFalse(m.valid(self.good+'service command=start state=CONNECTED\n'))
     def test_replaced_core_or_tun_fails(self):

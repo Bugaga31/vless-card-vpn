@@ -136,15 +136,19 @@ run_case() { # $1 name, $2 state, $3 seconds to wait for the connect result
   echo "app: $C"
   echo "$C" | grep -q "check ok=true" || fail "$1: in-app check through 127.0.0.1:10808 failed"
   if [ "$1" = single ]; then
-    # The initial Intent contains connect+reload. Rotation recreates this Activity;
-    # replaying it would tear down the live TUN and restart Xray.
+    # Preserve the complete startup history. Require a new Activity for each of six
+    # rotations; reusing an old log line would falsely pass a missing recreation.
     adb shell settings put system accelerometer_rotation 0
-    adb shell settings put system user_rotation 1
-    waitlog "fixture activity restored" 20 >/dev/null || fail "single: rotation did not recreate Activity"
-    adb shell settings put system user_rotation 0
+    for rotation in 1 0 1 0 1 0; do
+      before=$(logcount 'fixture activity restored')
+      adb shell settings put system user_rotation "$rotation"
+      waitlog_after "fixture activity restored" "$before" 20 >/dev/null || fail "single: rotation $rotation did not recreate Activity"
+    done
     sleep 2
     LC=$(adb logcat -d -s E2E:I)
-    printf '%s' "$LC" | python3 tools/e2e/verify_activity_recreation.py || fail "single: recreation replayed a command or restarted VPN"
+    # Allowlisted counters/flags only, retained even when the gate passes.
+    printf '%s' "$LC" | python3 tools/e2e/summarize_failure.py --case single > "$W/recreation-summary.txt"
+    printf '%s' "$LC" | python3 tools/e2e/verify_activity_recreation.py --min-restores 6 || fail "single: recreation replayed a command or restarted VPN"
   fi
   R=$(probe $1); okprobe "$R" || fail "$1: probe app traffic through VPN failed"
   S=$(adb logcat -d -s E2E:I | grep "socks port=" | tail -1); echo "app: $S"
@@ -372,6 +376,8 @@ echo "$M" | grep -q "Подтверждено маскировок для 3 из
 
 adb shell am start -n $PKG/.MainActivity --ez e2e_disconnect true >/dev/null
 adb logcat -d > $W/logcat.txt
+# Keep the bounded startup/recreation summary after later cases clear logcat.
+[ ! -f "$W/recreation-summary.txt" ] || cat "$W/recreation-summary.txt" >> "$W/logcat.txt"
 grep -E "FATAL EXCEPTION|Fatal signal" -A20 $W/logcat.txt | head -40
 cp $W/server.log $W/access.log . 2>/dev/null
 echo "E2E failures: $FAILS"
