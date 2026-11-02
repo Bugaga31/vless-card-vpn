@@ -521,6 +521,22 @@ class TunnelService : VpnService() {
     /** End-to-end check through the running chain (app → 127.0.0.1:socks → Xray → server → internet). */
     private val serviceLease=com.vlesscardvpn.core.PeriodicServicePolicy()
     private val recoveryAlert=com.vlesscardvpn.core.RecoveryAlertPolicy()
+    private val stabilityConfirmation=com.vlesscardvpn.core.StabilityRecoveryConfirmation()
+    private var qualityVerifyJob:Job?=null
+    private fun scheduleQualityRecheck(key:String, delayMs:Long) {
+        qualityVerifyJob?.cancel()
+        qualityVerifyJob=scope.launch(start=kotlinx.coroutines.CoroutineStart.LAZY) {
+            try {
+                delay(delayMs)
+                while (checkJob?.isActive==true && serviceCheckKey()==key && Tunnel.status.value.state==Tunnel.State.CONNECTED) delay(1000)
+                if (serviceCheckKey()==key && Tunnel.status.value.state==Tunnel.State.CONNECTED) {
+                    qualityVerifyJob=null
+                    verifySoon(0,suspectedFailure=true)
+                }
+            } finally { if (qualityVerifyJob===coroutineContext[Job]) qualityVerifyJob=null }
+        }
+        qualityVerifyJob?.start()
+    }
     private fun serviceCheckKey():String {
         val s=Store.state.value.settings
         val runtime=com.vlesscardvpn.core.MaskRuntimeEvidence.state.value
@@ -650,12 +666,20 @@ class TunnelService : VpnService() {
                 repairTelegramRoute()
                 return@launch
             }
-            // A full selected service can fail while HTTPS is alive. Repair this exact route,
-            // not only Telegram; UNKNOWN and unselected services never trigger this path.
+            // A failed quality series is not a dead connection. Keep its strict FAIL
+            // verdict, but confirm it on the same route before disruptive recovery.
+            val qualityOnly=profile!=null && com.vlesscardvpn.core.RequiredServiceRecovery.qualityOnly(profile,p)
+            if (!qualityOnly) { stabilityConfirmation.clear(); qualityVerifyJob?.cancel(); qualityVerifyJob=null }
             if (p.works && profile!=null && st.autoHeal && usedChain==null && !usedTorRoute &&
                 com.vlesscardvpn.core.RequiredServiceRecovery.failed(profile,p)) {
                 val callActive=com.vlesscardvpn.core.PhonePower.isVoiceCallActive(this@TunnelService)
-                if (!callActive) {
+                val now=android.os.SystemClock.elapsedRealtime()
+                val remaining=if(qualityOnly) stabilityConfirmation.remaining(sampledServiceKey,now) else 0L
+                if (qualityOnly && (remaining>0L || callActive)) {
+                    if (BuildConfig.DEBUG) Log.i("E2E", "stability recovery=deferred")
+                    scheduleQualityRecheck(sampledServiceKey,maxOf(remaining,if(callActive) 30_000L else 0L))
+                } else if (!callActive) {
+                    if (qualityOnly) stabilityConfirmation.attempted(now)
                     if (BuildConfig.DEBUG) {
                         val stabilityReason = p.serviceNotes["stability"].takeIf { it in setOf("STABILITY_RESPONSE_FAILED", "STABILITY_SPREAD", "STABILITY_LATENCY", "STABILITY_INCOMPLETE") } ?: "OTHER"
                         Log.i("E2E", "recovery request=required_service telegram=${profile.telegram && p.tgOk==false} stability=${profile.stability && p.stableOk==false} voice=${profile.voice && p.callsOk==false} discord=${profile.discord && p.discordOk==false} youtube=${profile.youtube && p.ytOk==false} instagram=${profile.instagram && p.instagramOk==false} stability_reason=$stabilityReason")
@@ -1596,6 +1620,7 @@ class TunnelService : VpnService() {
         liveJob?.cancel()
         scoutJob?.cancel(); scoutJob=null
         standbyJob?.cancel(); standbyJob=null; standbyAttemptAt=null
+        qualityVerifyJob?.cancel(); qualityVerifyJob=null
         checkJob?.cancel(); watchJob?.cancel(); coverJob?.cancel(); serviceJob?.cancel(); if (error != null) netJob?.cancel()
         if (error != null) { healJob?.cancel(); recoveryJob?.cancel() }
         if (error != null) optJob?.cancel()

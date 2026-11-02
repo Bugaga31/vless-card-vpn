@@ -101,6 +101,10 @@ class BoundedDiagnosticsTest(unittest.TestCase):
         self.assertEqual(['false'],d['recovery_applied'])
         self.assertNotIn('SECRET',output);self.assertNotIn('private',output)
 
+    def test_stability_deferral_is_bounded_and_does_not_emit_other_text(self):
+        output,d=self.summarize('stability recovery=deferred\n'*5+'secret=private\n')
+        self.assertEqual(5,d['stability_deferred_count']);self.assertNotIn('private',output)
+
     def test_stability_reason_is_allowlisted(self):
         output,d=self.summarize('stability_reason=STABILITY_SPREAD\n'*20+'stability_reason=SECRET\n')
         self.assertEqual(['STABILITY_SPREAD']*8,d['stability_reasons']);self.assertNotIn('SECRET',output)
