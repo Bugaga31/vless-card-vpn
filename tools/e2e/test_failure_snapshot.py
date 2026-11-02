@@ -72,3 +72,26 @@ class FailureSnapshotTest(unittest.TestCase):
         d=json.loads(out.split('::',2)[-1])
         self.assertEqual(24,len(d['core_events']));self.assertEqual(1,len(d['probe_events']))
         self.assertNotIn('SECRET',out);self.assertNotIn('PRIVATE',out)
+
+    def test_reserve_wave_failure_cli_saves_and_summarizes_safe_counters(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d)
+            logs = ('standby wave=1200 pass=1 before=0 after=1 start=1300 end=1400\n'
+                    'standby wave=1200 pass=2 before=1 after=2 start=1401 end=1500\n'
+                    'standby wave=SECRET pass=1 before=0 after=1 start=1 end=2\n')
+            snapshot = subprocess.run(
+                [sys.executable, str(Path(__file__).with_name('snapshot_failure.py')),
+                 '--directory', d, '--case', 'reserve-wave', '--failure', '1'],
+                input=logs, text=True, capture_output=True)
+            self.assertEqual(0, snapshot.returncode, snapshot.stderr)
+            captured = (p/'failure-reserve-wave-1-logcat.txt').read_text()
+            self.assertEqual(logs, captured)
+            self.assertTrue((p/'failure-reserve-wave-1-snapshot.txt').exists())
+            summary = subprocess.run(
+                [sys.executable, str(Path(__file__).with_name('summarize_failure.py')),
+                 '--case', 'reserve-wave'], input=captured, text=True, capture_output=True)
+            self.assertEqual(0, summary.returncode, summary.stderr)
+            self.assertNotIn('SECRET', summary.stdout)
+            data = json.loads(summary.stdout.split('::', 2)[-1])
+            self.assertEqual([[1200, 1, 0, 1, 1300, 1400],
+                              [1200, 2, 1, 2, 1401, 1500]], data['standby_passes'])

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Publish only allowlisted counters/booleans, never URLs, addresses, payloads or credentials."""
 import argparse, json, re, sys
-p=argparse.ArgumentParser();p.add_argument('--case',required=True,choices=['setup','single','byedpi','multi','tpws','ownmask','xraydpi','services','auto','auto-eight','auto-chain','proxy','warp']);p.add_argument('--probe',action='store_true');a=p.parse_args()
+p=argparse.ArgumentParser();p.add_argument('--case',required=True,choices=['setup','single','byedpi','multi','tpws','ownmask','xraydpi','services','auto','auto-eight','reserve-wave','auto-chain','proxy','warp']);p.add_argument('--probe',action='store_true');a=p.parse_args()
 text=sys.stdin.buffer.read(2_000_000).decode('utf-8',errors='replace')
 if a.probe:
     try: data=json.loads(text)
@@ -57,9 +57,10 @@ else:
     soft_origins=re.findall(r'soft reconnect origin=(CHAIN_E2E|SAFE_RETRY|YOUTUBE_REPAIR|CHAIN_REPAIR|APP_REPAIR|CHAIN_SCOUT|SERVICE_ROUTES|MAINTENANCE|OPTIMIZE|TELEGRAM_REPAIR|AUTO_RESCUE|HEAL|HANDOFF|UNKNOWN) state=(IDLE|CONNECTING|CONNECTED|ERROR)(?=\s|$)',text)[-12:]
     recovery_requests=re.findall(r'recovery request=(connect_failure|required_service|watchdog|heal)(?=\s|$)',text)[-8:]
     recovery_applied=re.findall(r'recovery applied awaiting_verification=(true|false)(?=\s|$)',text)[-8:]
+    standby_passes=re.findall(r'standby wave=([0-9]{1,15}) pass=([1-3]) before=([0-9]{1,3}) after=([0-9]{1,3}) start=([0-9]{1,15}) end=([0-9]{1,15})(?=\s|$)',text)[-12:]
     required_failures=re.findall(r'recovery request=required_service telegram=(true|false) stability=(true|false) voice=(true|false) discord=(true|false) youtube=(true|false) instagram=(true|false)(?=\s|$)',text)[-8:]
     stability_reasons=re.findall(r'stability_reason=(STABILITY_RESPONSE_FAILED|STABILITY_SPREAD|STABILITY_LATENCY|STABILITY_INCOMPLETE|OTHER)(?=\s|$)',text)[-8:]
-    result={'stability_deferred_count':min(text.count('stability recovery=deferred'),100000),'stability_reasons':stability_reasons,'recovery_requests':recovery_requests,'recovery_applied':recovery_applied,'required_failures':required_failures,'soft_reconnect_origins':soft_origins,'restored_count':min(text.count('fixture activity restored'),100000),'handoff_deltas':handoff_deltas,'core_events':core_events,'probe_events':probe_events,'failures':failures,'service_events':service_events,'teardown_events':teardown_events,
+    result={'standby_passes':[[int(v) for v in row] for row in standby_passes],'stability_deferred_count':min(text.count('stability recovery=deferred'),100000),'stability_reasons':stability_reasons,'recovery_requests':recovery_requests,'recovery_applied':recovery_applied,'required_failures':required_failures,'soft_reconnect_origins':soft_origins,'restored_count':min(text.count('fixture activity restored'),100000),'handoff_deltas':handoff_deltas,'core_events':core_events,'probe_events':probe_events,'failures':failures,'service_events':service_events,'teardown_events':teardown_events,
             'optimize_skips':re.findall(r'optimize skipped=(power|foreground_busy|disabled)\b',text)[-3:],
             'optimize_power_categories':re.findall(r'optimize skipped=power category=(thermal|call|charging|eco|memory|gaming|saver|battery|prediction|pause|data_saver|metered|screen|charge_only|traffic|lag|other)(?=\s|$)',text)[-3:],
             'auto_ready_blocked':re.findall(r'auto ready_blocked=(network_changed|cancelled)\b',text)[-3:],
