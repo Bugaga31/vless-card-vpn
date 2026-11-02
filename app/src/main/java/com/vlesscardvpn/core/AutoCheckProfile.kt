@@ -8,24 +8,27 @@ data class AutoCheckProfile(val selected:Set<String>) {
     val discord get() = "discord" in selected
     val instagram get() = "instagram" in selected
     val voice get() = "voice" in selected
+    val sites get() = selected.mapNotNull(SiteCheckCatalog::fromId).sorted()
     val key get() = selected.sorted().joinToString(",").ifEmpty { "https" }
     fun accepts(p:Probe,maxMs:Int):Boolean = p.works && p.realMs in 1..maxMs &&
         (!telegram || p.tgOk==true && p.tgMs in 1..maxMs) &&
         (!instagram || p.instagramOk==true) && (!youtube || p.ytOk==true) && (!discord || p.discordOk==true) &&
-        (!stability || p.stableOk==true) && (!voice || p.callsOk==true)
+        (!stability || p.stableOk==true) && (!voice || p.callsOk==true) && sites.all { p.siteOk[it]==true }
     fun verdict(p:Probe,maxMs:Int):Boolean? {
         if(!p.works || p.realMs !in 1..maxMs) return false
         val values=listOfNotNull(if(telegram) Pair(p.tgOk,p.tgMs) else null,
             if(instagram) Pair(p.instagramOk,1) else null, if(youtube) Pair(p.ytOk,1) else null, if(discord) Pair(p.discordOk,1) else null,
             if(stability) Pair(p.stableOk,1) else null, if(voice) Pair(p.callsOk,1) else null)
+        if(sites.any {p.siteOk[it]==false}) return false
         if(values.any {it.first==false || it.first==true && (it.second<=0 || it.second>maxMs)}) return false
+        if(sites.any {p.siteOk[it]!=true}) return null
         if(values.any {it.first==null}) return null
         return true
     }
     companion object {
         val allowed=setOf("telegram","stability","voice","discord","youtube","instagram")
         val defaults=setOf("telegram","stability","voice","discord")
-        fun of(values:Collection<String>)=AutoCheckProfile(values.filter {it in allowed}.toSet())
+        fun of(values:Collection<String>)=AutoCheckProfile(values.filter {it in allowed || SiteCheckCatalog.fromId(it)!=null}.toSet())
     }
 }
 object AutoChecks {
@@ -33,7 +36,7 @@ object AutoChecks {
     fun accepts(p:Probe)=current.accepts(p,AutoLatencyPolicy.MAX_MS)
     fun key(profile:AutoCheckProfile,maxMs:Int)=profile.key+"@"+maxMs+(if(profile.discord) "|discord-hello-v1" else "")+
         (if(profile.youtube) "|youtube-access-v5" else "")+(if(profile.voice) "|udp-availability-v2" else "")+
-        (if(profile.stability) "|telegram-series-v2" else "")+(if(profile.instagram) "|instagram-web-v1" else "")
+        (if(profile.stability) "|telegram-series-v2" else "")+(if(profile.sites.isNotEmpty()) "|site-https-v1" else "")+(if(profile.instagram) "|instagram-web-v1" else "")
     fun stamp(p:Probe,profile:AutoCheckProfile,maxMs:Int):String = when {
         profile.accepts(p,maxMs)->key(profile,maxMs)
         (profile.accepts(p,Int.MAX_VALUE) || p.latencyOnlyOk && profile.accepts(p.latencyConsented(),Int.MAX_VALUE))->key(profile,Int.MAX_VALUE)
@@ -50,5 +53,5 @@ object AutoChecks {
     }
     fun label(profile:AutoCheckProfile=current):String = (listOf("HTTPS")+listOf(
         "telegram" to "Telegram", "stability" to "устойчивость Telegram", "voice" to "UDP для звонков",
-        "discord" to "Discord gateway", "youtube" to "YouTube веб-доступ", "instagram" to "Instagram веб-доступ").filter {it.first in profile.selected}.map {it.second}).joinToString(", ")
+        "discord" to "Discord gateway", "youtube" to "YouTube веб-доступ", "instagram" to "Instagram веб-доступ").filter {it.first in profile.selected}.map {it.second} + profile.sites.map {"$it · HTTPS"}).joinToString(", ")
 }

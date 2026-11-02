@@ -177,6 +177,8 @@ c=$(grep -c "email: u" $W/access.log)
 
 : > $W/access.log
 run_case multi multi.json
+# Retain bounded multi-case evidence on success too; later cases clear logcat.
+adb logcat -d -s E2E:I | python3 tools/e2e/summarize_failure.py --case multi > "$W/multi-summary.txt"
 # Optional mask improvements must not send another hard START during the multi transfer.
 STARTS=$(adb logcat -d -s E2E:I | grep -c 'service command=start state=')
 [ "$STARTS" -eq 1 ] || fail "multi: optional background work hard-restarted VPN"
@@ -374,10 +376,37 @@ M=$(waitlog "action\[Подбор маскировки\]" 240) || fail "masks: n
 echo "masks: $M"
 echo "$M" | grep -q "Подтверждено маскировок для 3 из 4 серверов; применено 3" || fail "masks: expected masks for 3 of 4 servers"
 
+# Search and add a domain using the real Compose UI, then verify persisted state.
+CASE=setup; R=""
+load test.json || fail "checks-ui: fixture state load failed"
+tap_ui "Что проверять" || fail "checks-ui: navigation missing"
+tap_ui "Поиск сервисов" || fail "checks-ui: search missing"
+adb shell input text github
+sleep 1
+[ -n "$(ui_coords 'GitHub')" ] || fail "checks-ui: search did not find GitHub"
+adb shell input keyevent 4
+# Clear search so newly added entries remain visible.
+tap_ui "Поиск сервисов" || fail "checks-ui: search not editable"
+adb shell input keyevent KEYCODE_MOVE_END
+for i in 1 2 3 4 5 6; do adb shell input keyevent KEYCODE_DEL; done
+adb shell input keyevent 4
+tap_ui "Добавить домен" || fail "checks-ui: add button missing"
+tap_ui "Домен" || fail "checks-ui: domain field missing"
+adb shell input text example.com
+adb shell input keyevent 4
+tap_ui "Добавить и проверять" || fail "checks-ui: confirm missing"
+sleep 3
+adb shell "run-as $PKG cat files/state.json" | python3 -c 'import json,sys;s=json.load(sys.stdin)["settings"];sys.exit(0 if "example.com" in s.get("customCheckDomains",[]) and "site:example.com" in s.get("autoChecks",[]) else 1)' || fail "checks-ui: domain or selection not saved"
+adb shell am force-stop "$PKG"
+adb shell am start -W -n "$PKG/.MainActivity" >/dev/null; sleep 3
+tap_ui "Что проверять" || fail "checks-ui: navigation missing after restart"
+adb shell "run-as $PKG cat files/state.json" | python3 -c 'import json,sys;s=json.load(sys.stdin)["settings"];sys.exit(0 if "example.com" in s.get("customCheckDomains",[]) and "site:example.com" in s.get("autoChecks",[]) else 1)' || fail "checks-ui: selection lost after restart"
+
 adb shell am start -n $PKG/.MainActivity --ez e2e_disconnect true >/dev/null
 adb logcat -d > $W/logcat.txt
 # Keep the bounded startup/recreation summary after later cases clear logcat.
 [ ! -f "$W/recreation-summary.txt" ] || cat "$W/recreation-summary.txt" >> "$W/logcat.txt"
+[ ! -f "$W/multi-summary.txt" ] || cat "$W/multi-summary.txt" >> "$W/logcat.txt"
 grep -E "FATAL EXCEPTION|Fatal signal" -A20 $W/logcat.txt | head -40
 cp $W/server.log $W/access.log . 2>/dev/null
 echo "E2E failures: $FAILS"

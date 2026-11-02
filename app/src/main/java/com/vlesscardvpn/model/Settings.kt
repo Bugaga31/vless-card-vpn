@@ -19,6 +19,7 @@ data class Settings(
     val balance: Balance = Balance.LEAST_PING,
     val socksPort: Int = 10808,
     val autoChecks: Set<String> = com.vlesscardvpn.core.AutoCheckProfile.defaults,
+    val customCheckDomains: List<String> = emptyList(),
     val probeParallel: Int = com.vlesscardvpn.core.ProbeConcurrencyPolicy.DEFAULT,
     val autoLatencyMinMs: Int = 100,
     val autoLatencyMaxMs: Int = com.vlesscardvpn.core.AutoLatencyRange.DEFAULT_MAX,
@@ -182,6 +183,7 @@ data class Settings(
     val httpPort: Int get() = if (socksPort < 65535) socksPort + 1 else socksPort - 1
     fun toJson(): JSONObject = JSONObject().put("mode", mode.name).put("balance", balance.name).put("socksPort", socksPort)
         .put("autoChecks", JSONArray(autoChecks.sorted()))
+        .put("customCheckDomains", JSONArray(customCheckDomains))
         .put("probeParallel", com.vlesscardvpn.core.ProbeConcurrencyPolicy.normalize(probeParallel))
         .put("autoLatencyMinMs", autoLatencyMinMs).put("autoLatencyMaxMs", autoLatencyMaxMs).put("autoLatencyPresetVersion", com.vlesscardvpn.core.AutoLatencyRange.PRESET_VERSION)
         .put("ruAllDirect", ruAllDirect).put("ruWhitelist", ruWhitelist).put("ruDirect", ruDirect).put("blockAds", blockAds).put("blockTrackers", blockTrackers).put("byeDpiArgs", byeDpiArgs).put("byeDpiSni", byeDpiSni)
@@ -253,6 +255,7 @@ data class Settings(
                 autoChecks = if(o.has("autoChecks")) com.vlesscardvpn.core.AutoCheckProfile.of(
                     o.optJSONArray("autoChecks")?.let {a->(0 until a.length()).map {a.optString(it)}}.orEmpty()).selected
                     else com.vlesscardvpn.core.AutoCheckProfile.defaults,
+                customCheckDomains = list("customCheckDomains", emptyList()).mapNotNull(com.vlesscardvpn.core.SiteCheckCatalog::domain).distinct().take(100),
                 probeParallel = com.vlesscardvpn.core.ProbeConcurrencyPolicy.normalize(o.optInt("probeParallel", com.vlesscardvpn.core.ProbeConcurrencyPolicy.DEFAULT)),
                 autoLatencyMinMs = latency.min,
                 autoLatencyMaxMs = latency.max,

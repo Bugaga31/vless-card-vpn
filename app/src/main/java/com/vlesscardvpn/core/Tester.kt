@@ -21,7 +21,7 @@ import java.net.ServerSocket
 import java.net.Socket
 import java.util.concurrent.TimeUnit
 
-data class Probe(val realMs: Int, val bigOk: Boolean?, val ytOk: Boolean?, val error: String = "", val tgOk: Boolean? = null, val kbps: Int = 0, val ytKbps: Int = 0, val bodyBytes: Long = 0, val bodyMs: Long = 0, val callsOk: Boolean? = null, val tgMs: Int = 0, val discordOk:Boolean?=null, val stableOk:Boolean?=null, val autoChecksKey:String="",val latencyOnlyOk:Boolean=false,val serviceNotes:Map<String,String> = emptyMap(),val instagramOk:Boolean?=null) {
+data class Probe(val realMs: Int, val bigOk: Boolean?, val ytOk: Boolean?, val error: String = "", val tgOk: Boolean? = null, val kbps: Int = 0, val ytKbps: Int = 0, val bodyBytes: Long = 0, val bodyMs: Long = 0, val callsOk: Boolean? = null, val tgMs: Int = 0, val discordOk:Boolean?=null, val stableOk:Boolean?=null, val autoChecksKey:String="",val latencyOnlyOk:Boolean=false,val serviceNotes:Map<String,String> = emptyMap(),val instagramOk:Boolean?=null,val siteOk:Map<String,Boolean> = emptyMap()) {
     val works: Boolean get() = realMs > 0 && bigOk != false
     fun latencyConsented()=if(latencyOnlyOk) copy(stableOk=true,callsOk=true) else this
 }
@@ -188,6 +188,19 @@ object Tester {
             val ytF = if (autoChecks?.youtube ?: youtube) servicePool.submit<YouTubeMediaProbe.Result> {
                 YouTubeAccessProbe.check { boundedCall(mediaClient, it) }
             }.also { tasks += it } else null
+            val siteResults=java.util.concurrent.ConcurrentHashMap<String,Boolean>()
+            // One bounded worker per candidate; never fall back to a direct connection or follow redirects.
+            val sitesF=if(autoChecks?.sites?.isNotEmpty()==true) servicePool.submit<Unit> {
+                for (domain in autoChecks.sites) {
+                    if(Thread.currentThread().isInterrupted || remaining()<=1) break
+                    try {
+                        SiteWebProbe.check(domain) {request -> boundedCall(mediaClient,request,minOf(4000L,remaining()))}
+                            ?.let {siteResults[domain]=it}
+                    } catch(e: java.io.InterruptedIOException) {
+                        if(Thread.currentThread().isInterrupted) break
+                    } catch(_:Exception) { /* unknown is never promoted to a pass */ }
+                }
+            }.also {tasks+=it} else null
             val relaxedCalls=java.util.concurrent.atomic.AtomicReference<Boolean?>(null)
             val voiceNote=java.util.concurrent.atomic.AtomicReference<String?>(null)
             val callF = if (autoChecks?.voice ?: calls) servicePool.submit<Boolean?> {
@@ -244,12 +257,14 @@ object Tester {
                 notes["discord"]=discordResult.reason
             val instagramResult=await(instagramF,remaining(),InstagramWebProbe.Result(null),"instagram") {it.ok!=null}
             if(instagramF!=null && instagramResult.ok==null && instagramResult.reason.isNotBlank() && notes["instagram"]=="INCONCLUSIVE") notes["instagram"]=instagramResult.reason
+            if(sitesF!=null) await(sitesF,remaining(),Unit,"sites")
             val discordOk=discordResult.ok
             val stabilityResult=await(stabilityF,remaining(),StabilitySeriesProbe.Result(null,null,"INCONCLUSIVE"),"stability") {it.stable!=null}
             if(stabilityF!=null && stabilityResult.reason.isNotBlank() && notes["stability"] in listOf(null,"INCONCLUSIVE")) notes["stability"]=stabilityResult.reason
             val stableOk=stabilityResult.stable
             val result=Probe(best.toInt().coerceAtLeast(1), if (bigF != null) bigResult.ok else null, ytResult.ok, tgOk = tgResult.ok, tgMs = if(tgResult.ok==true) tgResult.ms else 0, kbps = bigResult.kbps, ytKbps = ytResult.kbps, bodyBytes = bigResult.bytes, bodyMs = bigResult.ms, callsOk = callsOk, discordOk=discordOk,stableOk=stableOk,serviceNotes=notes.toMap(),instagramOk=instagramResult.ok)
-            val measured=if(autoChecks!=null) LatencyOnlyProbe.proof(result,autoChecks,stabilityResult.ignoringLatency,relaxedCalls.get()) else result
+            val withSites=result.copy(siteOk=siteResults.toMap())
+            val measured=if(autoChecks!=null) LatencyOnlyProbe.proof(withSites,autoChecks,stabilityResult.ignoringLatency,relaxedCalls.get()) else withSites
             return if(autoChecks!=null) measured.copy(autoChecksKey=AutoChecks.stamp(measured,autoChecks,AutoLatencyPolicy.MAX_MS)) else measured
         } finally {
             ProbeTasks.cancel(tasks)

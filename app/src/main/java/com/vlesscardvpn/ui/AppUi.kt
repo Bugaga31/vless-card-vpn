@@ -9,7 +9,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.PowerSettingsNew
-import androidx.compose.material.icons.filled.Psychology
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material3.*
@@ -77,7 +77,7 @@ fun AppUi(onConnect: () -> Unit, onDisconnect: () -> Unit, onConnectFound:()->Un
                 val tabs = listOf(
                     Triple(0, "Главная", Icons.Filled.PowerSettingsNew),
                     Triple(1, "Серверы", Icons.Filled.Dns),
-                    Triple(3, "Помощник", Icons.Filled.Psychology),
+                    Triple(3, "Что проверять", Icons.Filled.Search),
                     Triple(4, "ВАТСОН", Icons.Filled.PhoneAndroid),
                     Triple(2, "Настройки", Icons.Filled.Settings)
                 )
@@ -97,10 +97,11 @@ fun AppUi(onConnect: () -> Unit, onDisconnect: () -> Unit, onConnectFound:()->Un
                 androidx.compose.animation.Crossfade(tab, animationSpec = tween(if(theme.reducedMotion) 0 else 200), label = "tab") { t -> when (t) {
                     0 -> HomeScreen(onConnect, onDisconnect, openServers = { tab = 1 }, onConnectFound=onConnectFound, openWatson={tab=4})
                     1 -> ServersScreen(onConnectFound)
-                    3 -> ChatScreen()
+                    3 -> WhatToCheckScreen()
+                    6 -> ChatScreen()
                     4 -> WatsonScreen(openPhone={tab=5})
                     5 -> DeviceScreen(openWatson={tab=4})
-                    else -> SettingsScreen()
+                    else -> SettingsScreen(openAssistant={tab=6})
                 } }
             }
         }

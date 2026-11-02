@@ -36,7 +36,7 @@ import com.vlesscardvpn.model.Balance
 import com.vlesscardvpn.model.Settings
 
 @Composable
-fun SettingsScreen() {
+fun SettingsScreen(openAssistant: () -> Unit = {}) {
     val s by Store.settings.collectAsState()
     val busy by Actions.running.collectAsState()
     val ctx = LocalContext.current
@@ -47,6 +47,7 @@ fun SettingsScreen() {
         val storageError by Store.storageError.collectAsState()
         if (storageError.isNotEmpty()) Text(storageError, color = Bad, fontSize = 13.sp)
         RuWhitelistCard(s, onGeoChange = { enabled -> set { it.copy(ruAllDirect = enabled) } }) { enabled -> set { it.copy(ruWhitelist = enabled) } }
+        TextButton(onClick=openAssistant) { Text("Открыть помощника") }
         Group("Автоматический выбор") { AutoCheckSettings(); HorizontalDivider(); AutoLatencySettings() }
         Group("Проверка через VLESS") {
             val report by com.vlesscardvpn.core.Actions.netReport.collectAsState()
@@ -247,7 +248,7 @@ fun SettingsScreen() {
             supportingText = { Text(com.vlesscardvpn.core.Traffic.line(s).first.ifEmpty { "На главном экране покажу, сколько ушло через VPN за месяц, и предупрежу у лимита" }) })
         Toggle("Подключаться после перезагрузки", "Телефон включился — VPN включится сам (если разрешение уже дано)", s.autoStart) { v -> set { it.copy(autoStart = v) } }
         Toggle("Умный YouTube", "Авто: в каждой сети сам сравнивает скорость YouTube через серверы и через обход DPI напрямую к Google. Если обход заметно быстрее — YouTube идёт им, остальное через серверы. Сломается — сам вернёт серверы", s.smartYoutube) { v -> set { it.copy(smartYoutube = v, ytDpi = emptyMap()) } }
-        Toggle("Автопилот помощника", "Пока VPN включён, помощник сам следит за связью: пропал интернет — чинит (серверы, маски, обход DPI), маска тяжёлая — ищет лёгкую. Обо всём пишет во вкладке «Помощник»", s.autopilot) { v -> set { it.copy(autopilot = v) } }
+        Toggle("Автопилот помощника", "Пока VPN включён, помощник сам следит за связью: пропал интернет — чинит (серверы, маски, обход DPI), маска тяжёлая — ищет лёгкую. Обо всём пишет в помощнике", s.autopilot) { v -> set { it.copy(autopilot = v) } }
         Toggle("Охлаждение", "Снижает только нагрузку VPN: пауза необязательных задач, ограничение параллелизма, возврат после устойчивого остывания. Настройки пакетов и масок не меняются; критическая защита действует всегда", s.autoCool) { v -> set { it.copy(autoCool = v) } }
         Toggle("Под приложение", "Видит, что открыто: Gemini, ChatGPT, Claude, Spotify, Netflix — сам переключит на серверы страны, где они работают (США, Нидерланды…); YouTube — ускорит видео для этой сети", s.appAware) { v -> set { it.copy(appAware = v) } }
         if (s.appAware && !com.vlesscardvpn.core.AppWatch.hasAccess(ctx)) TextButton(onClick = { com.vlesscardvpn.core.AppWatch.openAccess(ctx) }) { Text("Разрешить «Доступ к истории использования»") }
