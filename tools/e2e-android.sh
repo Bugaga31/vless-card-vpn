@@ -230,6 +230,8 @@ c=$(grep -c "email: u8443" $W/access.log); echo "auto: server :8443 accepted $c"
 # The other authenticated candidates remain reserves, not eight simultaneous exits.
 : > $W/access.log
 run_case auto-eight auto-eight.json 180
+# Preserve allowlisted recovery causes and probe timing even if the transfer succeeds.
+adb logcat -d -s E2E:I | python3 tools/e2e/summarize_failure.py --case auto-eight > "$W/auto-eight-summary.txt"
 P=$(waitlog "pool size=1 " 30) || fail "auto-eight: real Xray must use one primary"
 echo "eight-candidate primary: $P"
 # Require authenticated fixture transfer, not just a UI selection or open local socket.
@@ -418,6 +420,7 @@ adb logcat -d > $W/logcat.txt
 # Keep the bounded startup/recreation summary after later cases clear logcat.
 [ ! -f "$W/recreation-summary.txt" ] || cat "$W/recreation-summary.txt" >> "$W/logcat.txt"
 [ ! -f "$W/multi-summary.txt" ] || cat "$W/multi-summary.txt" >> "$W/logcat.txt"
+[ ! -f "$W/auto-eight-summary.txt" ] || cat "$W/auto-eight-summary.txt" >> "$W/logcat.txt"
 [ ! -f "$W/checks-ui-summary.txt" ] || cat "$W/checks-ui-summary.txt" >> "$W/logcat.txt"
 grep -E "FATAL EXCEPTION|Fatal signal" -A20 $W/logcat.txt | head -40
 cp $W/server.log $W/access.log . 2>/dev/null
