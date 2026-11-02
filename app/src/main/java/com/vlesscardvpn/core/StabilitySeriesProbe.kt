@@ -3,6 +3,20 @@ package com.vlesscardvpn.core
 /** Three serial MTProto samples share the candidate deadline. Queue/HTTPS waiting is not RTT. */
 object StabilitySeriesProbe {
     data class Result(val stable:Boolean?,val ignoringLatency:Boolean?,val reason:String="")
+    /** Keep all timings in one series on the first proven DC; missing or mismatched
+     * target identity is inconclusive, never a substitute for valid MTProto evidence. */
+    fun collectTelegram(first:TelegramProbe.Result,remaining:()->Long,maxMs:Int,
+                        measure:(Long,Int)->TelegramProbe.Result):Result {
+        val target=first.targetIndex
+        val firstSample=LinkStabilityPolicy.Sample(if(first.ok==true && target==null) null else first.ok,first.ms)
+        return collect(firstSample,remaining,maxMs) { allowance ->
+            if(target==null) LinkStabilityPolicy.Sample(null,0)
+            else {
+                val next=measure(allowance,target)
+                LinkStabilityPolicy.Sample(if(next.ok==true && next.targetIndex!=target) null else next.ok,next.ms)
+            }
+        }
+    }
     fun collect(first:LinkStabilityPolicy.Sample,remaining:()->Long,maxMs:Int,
                 measure:(Long)->LinkStabilityPolicy.Sample):Result {
         val samples=mutableListOf(first)

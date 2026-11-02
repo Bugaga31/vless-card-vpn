@@ -14,7 +14,7 @@ import java.util.concurrent.TimeUnit
  * All traffic uses the supplied local SOCKS listener; never direct fallback or account data.
  */
 object TelegramProbe {
-    data class Result(val ok: Boolean?, val ms: Int)
+    data class Result(val ok: Boolean?, val ms: Int, internal val targetIndex: Int? = null)
     private val dc = listOf("149.154.167.51", "149.154.175.50")
     private val timer = Executors.newSingleThreadScheduledExecutor { r -> Thread(r, "tg-probe-timeout").apply { isDaemon = true } }
     private val random = SecureRandom()
@@ -62,17 +62,23 @@ object TelegramProbe {
     fun measure(port: Int, budgetMs: Long = 3000, onCancel:((()->Unit)->Unit)?=null): Result =
         measureOn(port,budgetMs,onCancel,workers)
 
+    /** Follow-up samples use exactly the first successful DC, through the same SOCKS path. */
+    internal fun measureTarget(port:Int,budgetMs:Long,onCancel:((()->Unit)->Unit)?,targetIndex:Int):Result =
+        measureOn(port,budgetMs,onCancel,workers,targetIndex)
+
     /** Test queue is bounded by the overall deadline, but is not route RTT. */
-    internal fun measureOn(port:Int,budgetMs:Long,onCancel:((()->Unit)->Unit)?,executor:java.util.concurrent.Executor):Result {
+    internal fun measureOn(port:Int,budgetMs:Long,onCancel:((()->Unit)->Unit)?,executor:java.util.concurrent.Executor,targetIndex:Int?=null):Result {
         val started=System.nanoTime()
-        if(port !in 1..65535 || budgetMs<200 || Thread.currentThread().isInterrupted) return Result(null,0)
+        if(port !in 1..65535 || budgetMs<200 || (targetIndex != null && targetIndex !in dc.indices) || Thread.currentThread().isInterrupted) return Result(null,0)
+        val targets=if(targetIndex==null) dc.indices.toList() else listOf(targetIndex)
         val deadline=started+TimeUnit.MILLISECONDS.toNanos(budgetMs.coerceAtMost(3100))
         val resources=ProbeCancellation()
         onCancel?.invoke {resources.close()}
         val completed=java.util.concurrent.ExecutorCompletionService<Result>(executor)
         var received=0;var unknown=false
         try {
-            for(host in dc) {
+            for(index in targets) {
+                val host=dc[index]
                 val future=completed.submit(java.util.concurrent.Callable<Result> {
                     if(resources.isClosed() || Thread.currentThread().isInterrupted) return@Callable Result(null,0)
                     val left=TimeUnit.NANOSECONDS.toMillis(deadline-System.nanoTime())
@@ -100,11 +106,11 @@ object TelegramProbe {
                             System.nanoTime()-attemptStarted>=TimeUnit.MILLISECONDS.toNanos(allowance) ||
                             System.nanoTime()>=deadline) null else false
                     } finally {timeout.cancel(false);runCatching {socket.close()}}
-                    Result(answered,elapsedMs(attemptStarted))
+                    Result(answered,elapsedMs(attemptStarted),if(answered==true) index else null)
                 })
                 resources.add {future.cancel(true)}
             }
-            while(received<dc.size) {
+            while(received<targets.size) {
                 if(resources.isClosed() || Thread.currentThread().isInterrupted) return Result(null,elapsedMs(started))
                 val left=deadline-System.nanoTime()
                 if(left<=0) return Result(null,elapsedMs(started))
