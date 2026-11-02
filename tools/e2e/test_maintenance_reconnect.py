@@ -17,7 +17,7 @@ class MaintenanceWiringTest(unittest.TestCase):
         self.assertIn('maintenanceReconnect = { scheduleMaintenanceReconnect() }',s)
         body=s[s.index('private fun scheduleMaintenanceReconnect()'):s.index('private fun scheduleOptimize(')]
         self.assertIn('core === observed',body); self.assertIn('Net.underlying(this)?.toString() == handle',body)
-        self.assertIn('connect(soft = true)',body); self.assertNotRegex(body,r'(?<![\w])connect\(\)')
+        self.assertIn('connect(soft = true, reason = SoftReason.MAINTENANCE)',body); self.assertNotRegex(body,r'(?<![\w])connect\(\)')
         self.assertIn('maintenanceJob?.cancel(); maintenanceJob = null',s)
     def test_new_multi_gate_does_not_replace_transfer_gate(self):
         s=(ROOT/'tools/e2e-android.sh').read_text()

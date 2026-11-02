@@ -54,7 +54,8 @@ else:
     core_events=re.findall(r'core instance=([0-9]{1,10}) role=(vpn|test|test1|speed|auto-chain|other) event=(start_begin|start_return|start_throw|stop_begin|stop_return|stop_throw) wall_ms=([0-9]{1,15}) elapsed_ms=([0-9]{1,15})(?=\s|$)',text)[-24:]
     probe_events=re.findall(r'probe run=([0-9]{1,10}) request=([0-9]{1,2}) event=(begin|complete|error) phase=(url|connect_headers|redirect|body|other) wall_ms=([0-9]{1,15}) elapsed_ms=([0-9]{1,15})(?=\s|$)',text)[-12:]
     handoff_deltas=re.findall(r'handoff delta handle=(true|false) profile=(true|false) path=(true|false) presence=(true|false) state=(IDLE|CONNECTING|CONNECTED|ERROR)(?=\s|$)',text)[-12:]
-    result={'restored_count':min(text.count('fixture activity restored'),100000),'handoff_deltas':handoff_deltas,'core_events':core_events,'probe_events':probe_events,'failures':failures,'service_events':service_events,'teardown_events':teardown_events,
+    soft_origins=re.findall(r'soft reconnect origin=(CHAIN_E2E|SAFE_RETRY|YOUTUBE_REPAIR|CHAIN_REPAIR|APP_REPAIR|CHAIN_SCOUT|SERVICE_ROUTES|MAINTENANCE|OPTIMIZE|TELEGRAM_REPAIR|AUTO_RESCUE|HEAL|HANDOFF|UNKNOWN) state=(IDLE|CONNECTING|CONNECTED|ERROR)(?=\s|$)',text)[-12:]
+    result={'soft_reconnect_origins':soft_origins,'restored_count':min(text.count('fixture activity restored'),100000),'handoff_deltas':handoff_deltas,'core_events':core_events,'probe_events':probe_events,'failures':failures,'service_events':service_events,'teardown_events':teardown_events,
             'optimize_skips':re.findall(r'optimize skipped=(power|foreground_busy|disabled)\b',text)[-3:],
             'auto_ready_blocked':re.findall(r'auto ready_blocked=(network_changed|cancelled)\b',text)[-3:],
             'start_callers':re.findall(r'start request caller=((?:MainActivity|Actions|Assistant|BootReceiver|VpnWidget|ToggleTileService)\.kt:[0-9]{1,6}|unknown)(?=\s|$)',text)[-4:],

@@ -72,3 +72,18 @@ class BoundedDiagnosticsTest(unittest.TestCase):
         self.assertIn('tee "$W/failure-${CASE}-${FAILS}.txt"',script)
         workflow=(root.parent/'.github/workflows/e2e.yml').read_text()
         self.assertIn('/tmp/e2e/failure-*.txt',workflow)
+
+    def test_reconnect_origin_is_bounded_and_allowlisted(self):
+        good='soft reconnect origin=SERVICE_ROUTES state=CONNECTED\n'
+        bad='soft reconnect origin=SECRET state=CONNECTED token=private\n'
+        output,d=self.summarize(good*20+bad)
+        self.assertEqual([['SERVICE_ROUTES','CONNECTED']]*12,d['soft_reconnect_origins'])
+        self.assertNotIn('SECRET',output);self.assertNotIn('private',output)
+
+    def test_all_soft_call_sites_identify_origin(self):
+        root=Path(__file__).resolve().parents[2]
+        s=(root/'app/src/main/java/com/vlesscardvpn/vpn/TunnelService.kt').read_text()
+        import re
+        calls=re.findall(r'connect\(soft\s*=\s*true[^)]*\)',s)
+        self.assertEqual(13,len(calls))
+        self.assertTrue(all(re.fullmatch(r'connect\(soft\s*=\s*true, reason = SoftReason\.[A-Z0-9_]+\)',c) for c in calls))

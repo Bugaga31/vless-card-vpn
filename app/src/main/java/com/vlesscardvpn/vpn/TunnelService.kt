@@ -148,7 +148,7 @@ class TunnelService : VpnService() {
                     val measured=com.vlesscardvpn.core.RuntimeChainE2E.measure(settings,Store.state.value.servers,set,net,epoch,::generation)
                     check(measured!=null && generation()==epoch){"No verified DPI-server winner"}
                     chainChoice=measured
-                    connect(soft=true)
+                    connect(soft = true, reason = SoftReason.CHAIN_E2E)
                     check(usedChain?.chain?.layout==com.vlesscardvpn.core.AutoChainSelection.Layout.DPI_SERVER){"Measured chain was not applied"}
                     Log.i("E2E","auto-chain-e2e applied=DPI_SERVER body=${measured.sample.bodyBytes} data=${measured.sample.data}")
                 }catch(e:kotlinx.coroutines.CancellationException){throw e}
@@ -228,7 +228,10 @@ class TunnelService : VpnService() {
      * [soft]: internal reconnect (network change, healing, speed-up) — the TUN and its local proxy stay, only Xray and
      * the DPI engines restart. No moment without VPN: apps don't leak past it and don't drop everything on "VPN off".
      */
-    private suspend fun connect(soft: Boolean = false) {
+    private enum class SoftReason { CHAIN_E2E, SAFE_RETRY, YOUTUBE_REPAIR, CHAIN_REPAIR, APP_REPAIR, CHAIN_SCOUT, SERVICE_ROUTES, MAINTENANCE, OPTIMIZE, TELEGRAM_REPAIR, AUTO_RESCUE, HEAL, HANDOFF }
+
+    private suspend fun connect(soft: Boolean = false, reason: SoftReason? = null) {
+        if (soft && BuildConfig.DEBUG) Log.i("E2E", "soft reconnect origin=${reason?.name ?: "UNKNOWN"} state=${Tunnel.status.value.state}")
         if (!soft) chainChoice = null
         val prevSocks = Tunnel.socks
         val keepTun = soft && tun != null && prevSocks != null
@@ -430,7 +433,7 @@ class TunnelService : VpnService() {
                     safeMasks = true
                     teardown(null, keepTun = true)
                     Tunnel.status.value = prev.copy(check = "VLESS не запустился (${com.vlesscardvpn.core.Errors.human(e)}); повторяю с безопасной маскировкой. Трафик остаётся заблокированным до сервера.", checkOk = false)
-                    connect(soft = true)
+                    connect(soft = true, reason = SoftReason.SAFE_RETRY)
                     return
                 }
                 safeMasks = false
@@ -629,7 +632,7 @@ class TunnelService : VpnService() {
             if (p.realMs > 0 && p.ytOk == false && Tunnel.ytViaDpi) {
                 val net = Net.key(this@TunnelService)
                 Store.update { a -> a.copy(settings = a.settings.copy(ytDpi = a.settings.ytDpi + (net to false))) }
-                scope.launch { lock.withLock { connect(soft = true) } }
+                scope.launch { lock.withLock { connect(soft = true, reason = SoftReason.YOUTUBE_REPAIR) } }
                 return@launch
             }
             if((!p.works || chainExitRejected || p.tgOk==false || p.ytOk==false) && usedChain != null) {
@@ -637,7 +640,7 @@ class TunnelService : VpnService() {
                     definiteFailure=!p.works || p.tgOk==false || p.ytOk==false)}
                 chainChoice=chainReserves.take(st,sampledNet,chainEpoch.get(),android.os.SystemClock.elapsedRealtime(),usedChain?.chain?.id)
                 usedChain=null; chainScanAfter=if(chainChoice == null) android.os.SystemClock.elapsedRealtime()+120_000 else 0L
-                scope.launch { lock.withLock { connect(soft=true) } }
+                scope.launch { lock.withLock { connect(soft = true, reason = SoftReason.CHAIN_REPAIR) } }
                 return@launch
             }
             // HTTPS success must not suppress recovery of a broken native service.
@@ -669,7 +672,7 @@ class TunnelService : VpnService() {
                 if (sinceNet < 90_000L && !netHardDone) { netHardDone = true; hardRestart("новая сеть, а интернет не пошёл", force = true); return@launch }
                 if (System.currentTimeMillis() - lastHard > 5 * 60_000L) { hardRestart("после переподключения интернет не пошёл"); return@launch }
             }
-            if (p.works) { healStep = 0; dpiHeals = 0; connectFails = 0; scheduleOptimize(if (com.vlesscardvpn.core.Actions.deepPending || usedServers.size < com.vlesscardvpn.core.AutoEligibility.ACTIVE) 5_000 else 60_000); if(st.mode!=Mode.AUTO) com.vlesscardvpn.core.AppWatch.start(this@TunnelService, reconnect = { scope.launch { lock.withLock { connect(soft = true) } } }, maintenanceReconnect = { scheduleMaintenanceReconnect() }, connectedAt = { connectedElapsed }); watchdog(); standbyScout(); coverTraffic(); torLoop(); serviceRoutes(); if(st.mode!=Mode.AUTO) autoChainScout() } else heal()
+            if (p.works) { healStep = 0; dpiHeals = 0; connectFails = 0; scheduleOptimize(if (com.vlesscardvpn.core.Actions.deepPending || usedServers.size < com.vlesscardvpn.core.AutoEligibility.ACTIVE) 5_000 else 60_000); if(st.mode!=Mode.AUTO) com.vlesscardvpn.core.AppWatch.start(this@TunnelService, reconnect = { scope.launch { lock.withLock { connect(soft = true, reason = SoftReason.APP_REPAIR) } } }, maintenanceReconnect = { scheduleMaintenanceReconnect() }, connectedAt = { connectedElapsed }); watchdog(); standbyScout(); coverTraffic(); torLoop(); serviceRoutes(); if(st.mode!=Mode.AUTO) autoChainScout() } else heal()
         }
     }
 
@@ -755,7 +758,7 @@ class TunnelService : VpnService() {
                     // A separate job performs the soft switch: teardown cancels the scout itself.
                     scope.launch {lock.withLock {
                         if(chainChoice?.let {com.vlesscardvpn.core.AutoChainRunner.fresh(it,Store.state.value.settings,Net.key(this@TunnelService),chainEpoch.get(),android.os.SystemClock.elapsedRealtime())}==true &&
-                            Tunnel.status.value.state==Tunnel.State.CONNECTED) connect(soft=true)
+                            Tunnel.status.value.state==Tunnel.State.CONNECTED) connect(soft = true, reason = SoftReason.CHAIN_SCOUT)
                     }}
                     return@launch
                 }
@@ -913,7 +916,7 @@ class TunnelService : VpnService() {
                     pending = runCatching { Store.busy { Actions.checkServiceRoutes() } }.getOrDefault(false) || pending
                     if (pending && (!Store.state.value.settings.protectActiveTraffic || !userActive())) {
                         pending = false
-                        scope.launch { lock.withLock { connect(soft = true) } }
+                        scope.launch { lock.withLock { connect(soft = true, reason = SoftReason.SERVICE_ROUTES) } }
                         break
                     }
                 }
@@ -975,7 +978,7 @@ class TunnelService : VpnService() {
                             if (BuildConfig.DEBUG) Log.i("E2E", "maintenance applying=soft")
                             // teardown must not cancel the coroutine performing this reconnect.
                             maintenanceJob = null
-                            connect(soft = true)
+                            connect(soft = true, reason = SoftReason.MAINTENANCE)
                         }
                     }
                     return@launch
@@ -1041,7 +1044,7 @@ class TunnelService : VpnService() {
                 if (reconnect && !busyNow && !com.vlesscardvpn.core.SessionHold.active() && Tunnel.status.value.state == Tunnel.State.CONNECTED) {
                     Log.i("E2E", "optimize: switching to faster servers")
                     com.vlesscardvpn.core.BackgroundOptimization.show(com.vlesscardvpn.core.BackgroundOptimization.Stage.APPLYING)
-                    lock.withLock { connect(soft = true) }
+                    lock.withLock { connect(soft = true, reason = SoftReason.OPTIMIZE) }
                 }
                 if (!busyNow) com.vlesscardvpn.core.BackgroundOptimization.show(com.vlesscardvpn.core.BackgroundOptimization.Stage.FINISHED)
                 calm = if (Actions.lastOptimizeSwitched) 0 else minOf(calm + 1, 3)
@@ -1382,7 +1385,7 @@ class TunnelService : VpnService() {
                     Net.underlying(this@TunnelService)?.toString() == handle &&
                     !com.vlesscardvpn.core.PhonePower.isVoiceCallActive(this@TunnelService)) {
                     recoveryStarted()
-                    connect(soft = true)
+                    connect(soft = true, reason = SoftReason.TELEGRAM_REPAIR)
                 }
             } else {
                 val cur = Tunnel.status.value
@@ -1434,7 +1437,7 @@ class TunnelService : VpnService() {
                     connectFails = 0
                     lock.withLock {
                         if (tun != null && Tunnel.status.value.state == Tunnel.State.CONNECTED && core===sampledCore &&
-                            Tunnel.socks==auth && physical==(Net.key(this@TunnelService) to Net.underlying(this@TunnelService)?.toString())) connect(soft = true)
+                            Tunnel.socks==auth && physical==(Net.key(this@TunnelService) to Net.underlying(this@TunnelService)?.toString())) connect(soft = true, reason = SoftReason.AUTO_RESCUE)
                     }
                     if (Tunnel.status.value.check == "Проверяю интернет…") break
                 }
@@ -1476,7 +1479,7 @@ class TunnelService : VpnService() {
                 return@launch
             }
             delay(500)
-            lock.withLock { connect(soft = true) }
+            lock.withLock { connect(soft = true, reason = SoftReason.HEAL) }
         }
     }
 
@@ -1561,7 +1564,7 @@ class TunnelService : VpnService() {
                 lock.withLock {
                     if (handoff.valid(change.revision)) {
                         Log.i("E2E", "physical network changed → applying new profile")
-                        connect(soft = true)
+                        connect(soft = true, reason = SoftReason.HANDOFF)
                     }
                 }
             }
