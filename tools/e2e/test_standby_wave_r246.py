@@ -1,5 +1,5 @@
 import unittest
-from verify_standby_wave_r246 import verify
+from verify_standby_wave_r246 import verify, no_restart_during_fixture
 
 class StandbyWaveTest(unittest.TestCase):
     def test_two_consecutive_gains_in_same_bounded_wave(self):
@@ -20,6 +20,16 @@ class StandbyWaveTest(unittest.TestCase):
     def test_target_reached_is_not_continued(self):
         self.assertFalse(verify(['standby wave=100 pass=1 before=2 after=3 start=110 end=1000',
                                  'standby wave=100 pass=2 before=3 after=4 start=1001 end=2000']))
+    def test_previous_case_stop_is_not_a_restart_of_current_fixture(self):
+        self.assertTrue(no_restart_during_fixture([
+            'teardown state=CONNECTED keepTun=false reason=stop',
+            'fixture state mode=AUTO servers=8 selected=0',
+            'pool size=1 ids=[]']))
+    def test_current_fixture_connected_teardown_and_missing_marker_fail(self):
+        self.assertFalse(no_restart_during_fixture([
+            'fixture state mode=AUTO servers=8 selected=0',
+            'teardown state=CONNECTED keepTun=true reason=restart']))
+        self.assertFalse(no_restart_during_fixture(['pool size=1 ids=[]']))
 if __name__ == '__main__': unittest.main()
 
 class WiringTest(unittest.TestCase):

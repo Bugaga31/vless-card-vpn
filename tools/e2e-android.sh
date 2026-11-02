@@ -240,7 +240,9 @@ c=$(grep -c 'email: pool' $W/access.log)
 
 # At least two verified count increases must occur in consecutive passes of the
 # same bounded wave, not merely across separate 30-second scout attempts.
-# This uses the closed 8-identity fixture above; no credentials enter the log.
+# A separate serial-probe setting makes individual gains observable; the normal
+# eight-candidate case above retains the default parallelism and is still tested.
+run_case reserve-wave reserve-wave.json 180
 CASE=reserve-wave; R=""
 adb shell input keyevent KEYCODE_HOME
 WAVE_OK=0
@@ -251,7 +253,7 @@ for i in $(seq 1 100); do
   sleep 1
 done
 [ "$WAVE_OK" -eq 1 ] || fail "reserve-wave: two consecutive verified increases in one wave were not observed"
-adb logcat -d -s E2E:I | grep -q 'teardown state=CONNECTED' && fail "reserve-wave: active VPN restarted during fixture"
+adb logcat -d -s E2E:I | python3 tools/e2e/verify_standby_wave_r246.py --no-connected-teardown || fail "reserve-wave: missing fixture marker or active VPN restarted during fixture"
 R=$(probe reserve-wave-after); okprobe "$R" || fail "reserve-wave: other UID could not transfer after preparation"
 
 # Service-owned preparation and actual loss recovery while MainActivity stays backgrounded.

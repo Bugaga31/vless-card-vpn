@@ -50,6 +50,15 @@ class FixtureCatalogTest(unittest.TestCase):
             self.assertEqual([],c['settings']['autoChecks'])
             self.assertFalse(c['settings']['autoChainSearch'])
 
+    def test_reserve_wave_fixture_serializes_probes_without_changing_auto_eight(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cases=self.generate(Path(tmp))
+            wave=cases['reserve-wave.json']; standard=cases['auto-eight.json']
+            self.assertEqual(8,len(wave['servers']))
+            self.assertEqual(standard['servers'],wave['servers'])
+            self.assertEqual(1,wave['settings']['probeParallel'])
+            self.assertNotIn('probeParallel',standard['settings'])
+
     def test_public_cloud_disabled_before_first_app_launch(self):
         script=Path(__file__).parents[1].joinpath('e2e-android.sh').read_text()
         disable=script.index('> shared_prefs/report.xml')
