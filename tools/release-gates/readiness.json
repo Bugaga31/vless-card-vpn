@@ -1,0 +1,9 @@
+{
+  "ready": true,
+  "version": "1.2.119",
+  "version_code": 230,
+  "channel": "ordinary_release",
+  "scope": "Owner requested ordinary 1.2.119 (not prerelease). Bounded automatic RAM-only permission inventory of launcher-visible apps, opt-out, cancellation and optional-work preemption. Existing Watson power advice, ROKI/mask evolution and strict VPN admission preserved. Implementation complete; this file is NOT proof of validation. Publication requires full Debug+Release JVM, release lint, signed APK verification, mask matrix, E2E API29/33, storage/install/upgrade API30/34 on the exact final SHA. No auto-publication by R235 workflow. No certificate bypass, direct fallback, server contract mutation or optimizer control of VPN. No antivirus, charging-speed or physical cooling claims.",
+  "required_full_ci": true,
+  "physical_phone_tested": false
+}

@@ -1,0 +1,454 @@
+--- a/app/src/main/java/com/vlesscardvpn/core/Actions.kt
++++ b/app/src/main/java/com/vlesscardvpn/core/Actions.kt
+@@ -1467,19 +1467,12 @@
+         val remembered = (st.settings.netServers[net] ?: st.settings.netServers[Net.family(net)]).orEmpty().toSet()
+         val time = System.currentTimeMillis()
+         val gaming = GameSession.active()
+-        val speedRank = eligible.sortedWith(ServerChoice.downloadOrder({ st.state(it) },net,time))
+-            .mapIndexed { index,server -> server.id to index }.toMap()
+-        val learnedScores = eligible.associate { server ->
+-            val state = st.state(server)
+-            val score = if (gaming) -ServerChoice.latencyScore(state.evidenceFor(net), state.realMs)
+-                else if (ServerChoice.measuredSpeed(state, net, time) > 0) 2.0 - (speedRank[server.id] ?: eligible.size).toDouble() / (eligible.size + 1)
+-                else ServerChoice.blended(CloudSpeed.prior(server), state.evidenceFor(net), time)
+-            server.id to (score to Brain.p(net, server, state))
+-        }
+-        val learned = eligible.sortedWith(
+-            compareByDescending<Server> { learnedScores[it.id]?.first ?: 0.0 }
+-                .thenByDescending { learnedScores[it.id]?.second ?: 0.0 }
+-        ).mapIndexed { i, server -> server.id to i }.toMap()
++        // Score each candidate once; sorting must not repeatedly read cloud/model state.
++        val learned = (if(gaming) eligible.map {server ->
++            server to (ServerChoice.latencyScore(st.state(server).evidenceFor(net),st.state(server).realMs) to Brain.p(net,server,st.state(server)))
++        }.sortedWith(compareBy<Pair<Server,Pair<Double,Double>>>{it.second.first}.thenByDescending{it.second.second}.thenBy{it.first.id}).map{it.first}
++        else AdaptiveRouteRank.order(eligible,{st.state(it)},net,time,{CloudSpeed.prior(it)}))
++            .mapIndexed {i,server -> server.id to i}.toMap()
+         val first = ConnectPolicy.candidates(eligible, cloud, remembered, cooling = { server ->
+             val e = st.state(server).evidenceFor(net)
+             TelegramRouteMemory.cooling(net, server.id, st.state(server).maskFor(net), time) ||
+@@ -1688,11 +1681,19 @@
+     /** Find a VERIFIED spare while the existing TUN stays up. Selection changes only after returning success. */
+     suspend fun prepareStandby(used: List<Server>): Server? {
+         if (job?.isActive == true) return null
++        val plan=PhonePower.refresh(app)
++        if(SessionHold.active() || GameSession.active() || !plan.allowLight || plan.deferTraffic) return null
+         val st = Store.state.value; val ids = used.map { it.id }.toSet(); val net = Net.key(app)
+-        val pool = preferred(st, st.servers.filter { it.id !in ids })
++        if(!ReserveBudget.take(net+"|"+Net.underlying(app)?.toString(),android.os.SystemClock.elapsedRealtime())) return null
++        val stamp=System.currentTimeMillis()
++        val pool = preferred(st, st.servers.filter { it.id !in ids }).filter {server->
++            !probeMemory.cooling(net,server.id,st.state(server).maskFor(net),stamp) &&
++            !TelegramRouteMemory.cooling(net,server.id,st.state(server).maskFor(net),stamp) &&
++            AutoEligibility.telegramRank(st.state(server),net,stamp)!=2
++        }
+         val now = System.currentTimeMillis()
+         val total = pool.sumOf { st.state(it).evidenceFor(net).checks.coerceIn(0, 10000) }.coerceAtMost(1_000_000)
+-        val ranked = pool.sortedByDescending { ServerChoice.blended(CloudSpeed.prior(it), st.state(it).evidenceFor(net), now) }
++        val ranked = AdaptiveRouteRank.order(pool,{st.state(it)},net,now,{CloudSpeed.prior(it)})
+         val exploit = ServerChoice.diverse(ranked, 5)
+         // One exploration slot, only for background verification; never an unverified live switch.
+         val explore = pool.filter { s -> exploit.none { it.id == s.id } }.maxByOrNull {
+@@ -1702,7 +1703,7 @@
+         val candidates = exploit + listOfNotNull(explore)
+         var found: Server? = null
+         val previous = progress.value
+-        try { realTest(candidates,"Фоновый запасной маршрут",big=false,youtube=false,attempts=1,stopAfter=1,
++        try { realTest(candidates,"Фоновый запасной маршрут",big=false,youtube=false,telegram=st.settings.mode==Mode.AUTO,attempts=1,stopAfter=1,
+             budgetMs=ConnectPolicy.QUICK_BUDGET_MS,onFirst={ found=it }) }
+         finally { progress.value=previous }
+         return found
+--- /dev/null
++++ b/app/src/main/java/com/vlesscardvpn/core/AdaptiveRouteRank.kt
+@@ -0,0 +1,31 @@
++package com.vlesscardvpn.core
++
++import com.vlesscardvpn.model.Server
++import com.vlesscardvpn.model.ServerState
++import kotlin.math.exp
++import kotlin.math.ln
++import kotlin.math.sqrt
++
++/** Candidate-probe priority, never permission to launch a live route. Not a calibrated success probability. */
++object AdaptiveRouteRank {
++    private const val HALF_LIFE_MS=30*60_000.0
++    fun priority(state:ServerState,net:String,now:Long,cloud:Double?=null):Double {
++        val e=state.evidenceFor(net)
++        val age=if(e.at>0 && now>=e.at) (now-e.at).toDouble() else Double.POSITIVE_INFINITY
++        val decay=exp(-ln(2.0)*age/HALF_LIFE_MS)
++        // Beta(2,2) shrinks tiny/stale samples toward neutral; old failures are not permanent bans.
++        val n=e.checks.coerceIn(0,1000)*decay
++        val wins=if(e.checks>0) n*e.successes.coerceIn(0,e.checks).toDouble()/e.checks else 0.0
++        val mean=(wins+2)/(n+4)
++        val confidence=(mean-sqrt((mean*(1-mean)/(n+5)).coerceAtLeast(0.0))).coerceIn(0.0,1.0)
++        val recent=e.ema.coerceIn(0.0,1.0)*decay + .5*(1-decay)
++        val speed=ServerChoice.measuredSpeed(state,net,now)
++        val throughput=if(speed>0) (ln(1+speed/1000.0)/ln(51.0)).coerceIn(0.0,1.0) else 0.0
++        val tail=if(e.latency>0 && decay>.1) ((e.latency+2*e.jitter.coerceAtLeast(0.0))/10_000).coerceIn(0.0,.25) else .05
++        val hint=cloud?.takeIf {it.isFinite() && it in 0.0..1.0} ?: .5
++        return (.45*confidence+.30*recent+.20*throughput+.05*hint-tail).coerceIn(-.25,1.0)
++    }
++    fun order(list:List<Server>,state:(Server)->ServerState,net:String,now:Long,cloud:(Server)->Double?):List<Server> =
++        list.distinctBy{it.id}.map {it to priority(state(it),net,now,cloud(it))}
++            .sortedWith(compareByDescending<Pair<Server,Double>>{it.second}.thenBy{it.first.id}).map{it.first}
++}
+--- a/app/src/main/java/com/vlesscardvpn/core/ConnectPolicy.kt
++++ b/app/src/main/java/com/vlesscardvpn/core/ConnectPolicy.kt
+@@ -39,6 +39,8 @@
+             .thenBy { if (it.id in remembered) 0 else 1 }.thenBy { if (it.id in cloudIds) 0 else 1 })
+         val (deferred, ready) = unique.partition(cooling)
+         val eligibleCloud = cloud.filter { hint -> ready.any { it.id == hint.id } }
+-        return PublicCloudQueue.merge(ready + deferred, eligibleCloud, list, FIRST, slots = FIRST / 2)
++        if(ready.isEmpty()) return ServerChoice.diverse(deferred,1)
++        // The fallback catalog is the ready pool itself, not the unfiltered import list.
++        return PublicCloudQueue.merge(ready,eligibleCloud,ready,FIRST,slots=1)
+     }
+ }
+--- a/app/src/main/java/com/vlesscardvpn/core/ConnectionPassport.kt
++++ b/app/src/main/java/com/vlesscardvpn/core/ConnectionPassport.kt
+@@ -34,7 +34,7 @@
+         val s=state.value
+         return JSONObject().put("schema",1).put("version",com.vlesscardvpn.BuildConfig.VERSION_NAME)
+             .put("scope","local_socks_chain_not_independent_app_tun_test")
+-            .put("https",status(s.https)).put("dns_socks_udp",status(s.dns))
++            .put("probe_scheduler",ProbeArbiter.report()).put("https",status(s.https)).put("dns_socks_udp",status(s.dns))
+             .put("telegram_sampled_mtproto",status(s.telegram)).put("youtube_sampled_media",status(s.youtube))
+             .put("sample_age_seconds",JSONObject().put("https",age(s.https) ?: JSONObject.NULL).put("dns",age(s.dns) ?: JSONObject.NULL)
+                 .put("telegram",age(s.telegram) ?: JSONObject.NULL).put("youtube",age(s.youtube) ?: JSONObject.NULL))
+--- /dev/null
++++ b/app/src/main/java/com/vlesscardvpn/core/ProbeArbiter.kt
+@@ -0,0 +1,42 @@
++package com.vlesscardvpn.core
++
++import android.os.SystemClock
++import java.util.concurrent.atomic.AtomicInteger
++import kotlinx.coroutines.delay
++import kotlinx.coroutines.flow.MutableStateFlow
++import kotlinx.coroutines.flow.update
++import kotlinx.coroutines.sync.Mutex
++import org.json.JSONObject
++
++/** A single test-core permit. Foreground gets the next permit, not an unsafe kill of a running probe. */
++object ProbeArbiter {
++    data class Snapshot(val active:String="idle",val foregroundWaiting:Int=0,val lastWaitMs:Long=0,val completed:Long=0)
++    val state=MutableStateFlow(Snapshot())
++    private val mutex=Mutex()
++    private val urgent=AtomicInteger()
++    private fun waiting() {state.update {it.copy(foregroundWaiting=urgent.get().coerceAtLeast(0))}}
++    suspend fun <T> withPermit(foreground:Boolean=false,block:suspend ()->T):T {
++        val start=SystemClock.elapsedRealtime()
++        var registered=foreground
++        if(registered) {urgent.incrementAndGet();waiting()}
++        try {
++            while(true) {
++                if(!foreground && urgent.get()>0) {delay(20);continue}
++                mutex.lock()
++                if(!foreground && urgent.get()>0) {mutex.unlock();delay(1);continue}
++                if(registered) {urgent.decrementAndGet();registered=false}
++                state.update {it.copy(active=if(foreground) "foreground" else "background",foregroundWaiting=urgent.get().coerceAtLeast(0),lastWaitMs=(SystemClock.elapsedRealtime()-start).coerceAtLeast(0))}
++                try {return block()}
++                finally {
++                    state.update {it.copy(active="idle",foregroundWaiting=urgent.get().coerceAtLeast(0),completed=(it.completed+1).coerceAtMost(1_000_000))}
++                    mutex.unlock()
++                }
++            }
++        } finally {if(registered) {urgent.decrementAndGet();waiting()}}
++    }
++    fun report():JSONObject {
++        val s=state.value
++        return JSONObject().put("active",s.active).put("foreground_waiting",s.foregroundWaiting)
++            .put("last_permit_wait_ms",s.lastWaitMs).put("completed_batches",s.completed)
++    }
++}
+--- a/app/src/main/java/com/vlesscardvpn/core/ProbeMemory.kt
++++ b/app/src/main/java/com/vlesscardvpn/core/ProbeMemory.kt
+@@ -18,6 +18,7 @@
+         val key = Triple(net, id, mask); val f = failed[key] ?: return false
+         if (now < f.at) { failed.remove(key); return false }
+         val duration = if (ttlMs == 120_000L) cooldownMs(f.streak) else ttlMs
+-        return now - f.at < duration
++        val jitter=if(ttlMs==120_000L) ((key.hashCode().toLong() and 0x7fffffffL)%21L) else 0L
++        return now - f.at < duration + duration*jitter/100L
+     }
+ }
+--- /dev/null
++++ b/app/src/main/java/com/vlesscardvpn/core/ReserveBudget.kt
+@@ -0,0 +1,15 @@
++package com.vlesscardvpn.core
++
++/** Session-only per-network token bucket, bounded memory. Count of optional probe waves, NOT a byte limit. */
++object ReserveBudget {
++    private data class Bucket(var tokens:Double=2.0,var at:Long)
++    private val buckets=linkedMapOf<String,Bucket>()
++    @Synchronized fun take(network:String,now:Long):Boolean {
++        val b=buckets.getOrPut(network){Bucket(at=now)}
++        if(now<b.at) {b.tokens=2.0;b.at=now}
++        b.tokens=(b.tokens+(now-b.at).coerceAtLeast(0)/60_000.0).coerceAtMost(2.0);b.at=now
++        while(buckets.size>8) buckets.remove(buckets.keys.first())
++        if(b.tokens<1.0) return false
++        b.tokens-=1.0;return true
++    }
++}
+--- a/app/src/main/java/com/vlesscardvpn/core/TelegramRouteMemory.kt
++++ b/app/src/main/java/com/vlesscardvpn/core/TelegramRouteMemory.kt
+@@ -18,6 +18,7 @@
+         val f = failures[key] ?: return false
+         if (now < f.at) { failures.remove(key); return false }
+         val duration = minOf(300000L,15000L * (1L shl (f.streak-1)))
+-        return now-f.at < duration
++        val jitter=(key.hashCode().toLong() and 0x7fffffffL)%21L
++        return now-f.at < duration+duration*jitter/100L
+     }
+ }
+--- a/app/src/main/java/com/vlesscardvpn/core/Tester.kt
++++ b/app/src/main/java/com/vlesscardvpn/core/Tester.kt
+@@ -7,9 +7,7 @@
+ import kotlinx.coroutines.async
+ import kotlinx.coroutines.awaitAll
+ import kotlinx.coroutines.coroutineScope
+-import kotlinx.coroutines.sync.Mutex
+ import kotlinx.coroutines.sync.Semaphore
+-import kotlinx.coroutines.sync.withLock
+ import kotlinx.coroutines.sync.withPermit
+ import kotlinx.coroutines.withContext
+ import okhttp3.OkHttpClient
+@@ -37,7 +35,7 @@
+  */
+ object Tester {
+     val SKIPPED = Probe(0, null, null, "пропущено")
+-    private val mutex = Mutex()
++    // All temporary core users share ProbeArbiter, including chain and throughput probes.
+     private val base: OkHttpClient by lazy {
+         OkHttpClient.Builder().connectTimeout(8, TimeUnit.SECONDS).readTimeout(8, TimeUnit.SECONDS)
+             .callTimeout(15, TimeUnit.SECONDS).retryOnConnectionFailure(false).build()
+@@ -335,17 +333,19 @@
+     }
+ 
+     /** Real download speed (kbit/s, 0 = failed) of several variants, one after another so they don't share the line. */
+-    suspend fun speedMany(variants: List<Pair<Server, Mask?>>, byeDpiPort: Int?, dpiPorts: Map<String, Int>, seconds: Int = 3): List<Int> = mutex.withLock {
+-        withContext(Bg.io) {
+-            val ports = freePorts(variants.size)
+-            val core = XrayCore.Instance("speed")
+-            try {
+-                runCatching { core.start(XrayConfigBuilder.testConfig(variants, ports, byeDpiPort, dpiPorts)) }
+-                if (!core.running) return@withContext variants.map { 0 }
+-                ports.map { p -> runCatching { (speed(p, seconds).mbps * 1000).toInt() }.getOrDefault(0) }
+-            } finally { core.stop() }
+-        }
+-    }
++    suspend fun speedMany(variants: List<Pair<Server, Mask?>>, byeDpiPort: Int?, dpiPorts: Map<String, Int>, seconds: Int = 3): List<Int> =
++        variants.map { variant ->
++            ProbeArbiter.withPermit {
++                withContext(Bg.io) {
++                    val ports=freePorts(1)
++                    val core=XrayCore.Instance("speed")
++                    try {
++                        runCatching {core.start(XrayConfigBuilder.testConfig(listOf(variant),ports,byeDpiPort,dpiPorts))}
++                        if(!core.running) 0 else runCatching {(speed(ports[0],seconds).mbps*1000).toInt()}.getOrDefault(0)
++                    } finally {core.stop()}
++                }
++            }
++        }
+ 
+     private fun download(client: OkHttpClient, url: String, deadline: Long = Long.MAX_VALUE, onCall: ((okhttp3.Call) -> Unit)? = null): TransferProof.Sample =
+         client.newCall(Request.Builder().url(url).header("User-Agent", UA)
+@@ -359,7 +359,7 @@
+         }
+ 
+     /** Serialize chain downloads with ordinary server/mask tests. Waiting is cancellable. */
+-    suspend fun <T> exclusiveProbe(block: suspend () -> T): T = mutex.withLock { block() }
++    suspend fun <T> exclusiveProbe(block: suspend () -> T): T = ProbeArbiter.withPermit { block() }
+ 
+     /** Tests [variants] (server + mask) in parallel through one temporary Xray instance. */
+     suspend fun real(
+@@ -370,8 +370,8 @@
+         stopAfter: Int = Int.MAX_VALUE,
+         budgetMs: Long = 0,
+         onEach: (Int, Probe) -> Unit,
+-    ) = mutex.withLock {
+-        withContext(Bg.io) {
++    ) = withContext(Bg.io) {
++        run {
+             val successes = java.util.concurrent.atomic.AtomicInteger()
+             fun skipped(i: Int) = successes.get() >= stopAfter.coerceAtLeast(1) || skip(i) || (variants[i].first.protocol == "wireguard" && variants[i].first.secret in Tunnel.wireguardKeys)
+             fun accepted(p: Probe) = p.works && (!requireTelegram || p.tgOk == true)
+@@ -379,10 +379,13 @@
+             // Bound config/socket footprint too, not merely simultaneous HTTP calls.
+             val plan = PhonePower.state.value
+             val probeLimit = if (foreground) plan.foregroundRealParallel else plan.realParallel
+-            val effectiveBatch = PowerPolicy.cap(batch, if (probeLimit <= 2) 4 else batch)
++            val effectiveBatch = PowerPolicy.cap(batch, if(foreground) ConnectPolicy.FIRST else minOf(6,probeLimit.coerceAtLeast(1)))
+             for (all in chunks(variants, effectiveBatch)) {
+                 val idx = all.filter { i -> if (skipped(i)) { onEach(i, SKIPPED); false } else true }
+                 if (idx.isEmpty()) continue
++                ProbeArbiter.withPermit(foreground) {
++                // Re-evaluate skip after waiting; another successful batch may have satisfied stopAfter.
++                if(idx.all { skipped(it) }) {idx.forEach {onEach(it,SKIPPED)};return@withPermit}
+                 val chunk = idx.map { variants[it] }
+                 val ports = freePorts(chunk.size)
+                 val core = XrayCore.Instance("test")
+@@ -398,7 +401,7 @@
+                         try { report(idx[i], if (ok) CancellableProbe.run { bind -> probeSocks(p[0], testUrl, big = big, youtube = youtube, telegram = telegram, attempts = attempts, budgetMs = budgetMs, onCall = { call -> bind { call.cancel() } }, calls = calls, onCancel = bind) } else Probe(0, null, null, "конфиг не принят ядром")) }
+                         finally { one.stop() }
+                     }
+-                    continue
++                    return@withPermit
+                 }
+                 try {
+                     coroutineScope {
+@@ -409,6 +412,7 @@
+                             accepted = { accepted(it) }, onEach = { i, p -> report(idx[i], p) })
+                     }
+                 } finally { core.stop() }
++                }
+             }
+         }
+     }
+--- a/app/src/main/java/com/vlesscardvpn/ui/ConnectionTools.kt
++++ b/app/src/main/java/com/vlesscardvpn/ui/ConnectionTools.kt
+@@ -25,6 +25,7 @@
+     val settings by Store.settings.collectAsState()
+     val snapshot by ConnectionPassport.state.collectAsState()
+     val events by ConnectionHistory.events.collectAsState()
++    val scheduler by ProbeArbiter.state.collectAsState()
+     val hold by SessionHold.until.collectAsState()
+     val running by Actions.running.collectAsState()
+     var expanded by rememberSaveable { mutableStateOf(false) }
+@@ -55,6 +56,7 @@
+         if(paused) Text("Фоновое ускорение на паузе: ещё ${SessionHold.minutesLeft()} мин. VPN и аварийное восстановление не выключены.",style=MaterialTheme.typography.bodySmall)
+         if(expanded) {
+             Text("Что подтвердили локальные пробы",style=MaterialTheme.typography.titleSmall)
++            Text("Очередь проверок: ${when(scheduler.active){"foreground"->"ручная/стартовая волна";"background"->"фоновая волна";else->"свободна"}} · ожидают приоритета: ${scheduler.foregroundWaiting}. Последнее ожидание ядра: ${scheduler.lastWaitMs} мс (не задержка сети).",style=MaterialTheme.typography.bodySmall)
+             Text("HTTPS: ${ConnectionPassport.label(snapshot.https)} · DNS: ${ConnectionPassport.label(snapshot.dns)}",style=MaterialTheme.typography.bodySmall)
+             Text("Telegram MTProto: ${ConnectionPassport.label(snapshot.telegram)}",style=MaterialTheme.typography.bodySmall)
+             Text("Видео YouTube: ${ConnectionPassport.label(snapshot.youtube)}",style=MaterialTheme.typography.bodySmall)
+--- /dev/null
++++ b/app/src/test/java/com/vlesscardvpn/core/AdaptiveQueueR182Test.kt
+@@ -0,0 +1,41 @@
++package com.vlesscardvpn.core
++
++import com.vlesscardvpn.model.Server
++import com.vlesscardvpn.model.ServerState
++import com.vlesscardvpn.model.RouteEvidence
++import org.junit.Assert.*
++import org.junit.Test
++
++class AdaptiveQueueR182Test {
++    private fun server(i:Int)=Server("server$i","vless","host$i.example",443,"key$i",security="tls")
++    @Test fun coolingRoutesAreNotInjectedByCloudOrCatalog() {
++        val a=server(1);val b=server(2)
++        val picked=ConnectPolicy.candidates(listOf(a,b),listOf(b),emptySet(),cooling={it==b}) {0}
++        assertEquals(listOf(a),picked)
++    }
++    @Test fun allCoolingAllowsOnlyOneRecoveryCandidate() {
++        val all=(1..12).map(::server)
++        assertEquals(1,ConnectPolicy.candidates(all,all,emptySet(),cooling={true}){0}.size)
++    }
++    @Test fun freshServiceFailureDoesNotReenterFromCloud() {
++        val a=server(1);val b=server(2)
++        assertEquals(listOf(a),ConnectPolicy.candidates(listOf(a,b),listOf(b),emptySet(),serviceRank={if(it==b) 2 else 1}){0})
++    }
++    @Test fun unknownCloudValuesNeverBecomeLocalSuccess() {
++        val s=ServerState()
++        val score=AdaptiveRouteRank.priority(s,"wifi",1000,1.0)
++        assertTrue(score.isFinite());assertEquals(0,s.evidenceFor("wifi").successes)
++        assertEquals(1,AutoEligibility.telegramRank(s,"wifi",1000))
++    }
++    @Test fun largeCountersStayFiniteAndBounded() {
++        val state=ServerState(netEvidence=mapOf("wifi|" to RouteEvidence(checks=1_000_000,successes=999_999,ema=.99,latency=50.0,at=1000)))
++        val score=AdaptiveRouteRank.priority(state,"wifi",1001)
++        assertTrue(score.isFinite() && score in -.25..1.0)
++    }
++    @Test fun failedBudgetDoesNotGrowWithoutBound() {
++        val key="isolated-test-network"
++        assertTrue(ReserveBudget.take(key,1_000));assertTrue(ReserveBudget.take(key,1_000))
++        assertFalse(ReserveBudget.take(key,1_000));assertFalse(ReserveBudget.take(key,60_999))
++        assertTrue(ReserveBudget.take(key,61_000))
++    }
++}
+--- /dev/null
++++ b/tools/release-gates/prepare_experimental_182.py
+@@ -0,0 +1,84 @@
++import hashlib
++import json
++import os
++from pathlib import Path
++import re
++import subprocess
++import zipfile
++from verify_candidate import CERT, PACKAGE, require, verify_package, verify_signature
++
++
++def run(*args):
++    return subprocess.check_output(args, text=True, stderr=subprocess.STDOUT)
++
++
++def prepare(root, sha, run_id, docs):
++    bt = Path(os.environ["ANDROID_HOME"]) / "build-tools/34.0.0"
++    expected = {
++        "VLESS-Card-Beta.apk": "VLESS-Card-Beta-1.2.71-experimental.apk",
++        "VLESS-Card-Beta-arm64.apk": "VLESS-Card-Beta-1.2.71-experimental-arm64.apk",
++    }
++    report = {
++        "candidate_sha": sha,
++        "run_id": str(run_id),
++        "version": "1.2.71",
++        "version_code": 182,
++        "channel": "experimental",
++        "functional_checks": {
++            "unit_tests": "not_run_by_request",
++            "lint": "not_run_by_request",
++            "emulator": "not_run_by_request",
++            "physical_device": "not_run",
++        },
++        "apks": [],
++    }
++    sums = []
++    for old_name, new_name in expected.items():
++        apk = root / old_name
++        signature = run(str(bt / "apksigner"), "verify", "--min-sdk-version", "21", "--verbose", "--print-certs", str(apk))
++        verify_signature(signature)
++        run(str(bt / "zipalign"), "-c", "-p", "4", str(apk))
++        package = run(str(bt / "aapt2"), "dump", "badging", str(apk)).splitlines()[0]
++        verify_package(package, 182)
++        manifest = run(str(bt / "aapt2"), "dump", "xmltree", str(apk), "--file", "AndroidManifest.xml")
++        for attr in ("debuggable", "testOnly"):
++            require(not re.search(rf"android:{attr}[^\n]*0xffffffff", manifest), "Debug/test-only APK")
++        require("networkSecurityConfig" not in manifest, "Unexpected release network security override")
++        with zipfile.ZipFile(apk) as archive:
++            require(archive.testzip() is None, "Corrupt APK archive")
++            abi = "x86_64" if old_name == "VLESS-Card-Beta.apk" else "arm64-v8a"
++            for library in ("libTor.so", "libLyrebird.so", "libgojni.so", "libhev-socks5-tunnel.so"):
++                require(f"lib/{abi}/{library}" in archive.namelist(), f"Missing {abi} library: {library}")
++        digest = hashlib.sha256(apk.read_bytes()).hexdigest()
++        new_path = root / new_name
++        apk.rename(new_path)
++        report["apks"].append({
++            "file": new_name,
++            "sha256": digest,
++            "certificate_sha256": CERT,
++            "package": package,
++        })
++        sums.append(f"{digest}  {new_name}")
++    (root / "verification.json").write_text(json.dumps(report, indent=2) + "\n")
++    (root / "SHA256SUMS-Beta.txt").write_text("\n".join(sums) + "\n")
++    notice = f"""# Experimental prerelease — functional checks skipped
++
++This is an experimental build, not a stable release. Unit tests, lint, emulator checks and physical-device checks were not run by request. The release job compiled the app, signed both APKs, verified the persistent Beta certificate and checked APK package integrity.
++
++Commit: `{sha}`  
++Build: https://github.com/Bugaga31/vless-card-vpn/actions/runs/{run_id}  
++Package: `{PACKAGE}`, version 1.2.71, code 182.  
++The attached `verification.json` and `SHA256SUMS-Beta.txt` identify the exact signed files.
++
++Local passport outcomes are scoped probes, not a guarantee of account login, all Telegram DCs, media, calls, or the full application TUN path. Optional optimization hold never disables emergency healing. All functional checks were omitted by owner request.
++
++---
++
++"""
++    (root / "notes-experimental.md").write_text(notice + docs.read_text())
++
++
++if __name__ == "__main__":
++    require(os.environ.get("GITHUB_REPOSITORY") == "Bugaga31/vless-card-vpn", "Wrong repository")
++    require(os.environ.get("GITHUB_REF") == "refs/heads/experiment/prerelease-182", "Wrong experimental branch")
++    prepare(Path("release"), os.environ["CANDIDATE_SHA"], os.environ["GITHUB_RUN_ID"], Path("docs/release-1.2.71.md"))

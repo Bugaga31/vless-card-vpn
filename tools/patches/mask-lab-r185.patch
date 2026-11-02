@@ -1,0 +1,505 @@
+--- a/app/src/main/java/com/vlesscardvpn/core/Actions.kt
++++ b/app/src/main/java/com/vlesscardvpn/core/Actions.kt
+@@ -1573,18 +1573,31 @@
+         if(start.settings.mode!=Mode.AUTO) return null
+         val expected=candidates.associate {it.id to start.state(it).maskFor(net)}
+         val pinned=pinCertificates(candidates.take(2))
+-        val variants=pinned.flatMap {s->MaskWarmStart.trials(s,expected[s.id].orEmpty(),start.settings).map{s to it}}
++        val lab=start.settings.experimentalMaskLab
++        val trialStarted=android.os.SystemClock.elapsedRealtime()
++        val variants=pinned.flatMap {s->
++            val available=MaskWarmStart.trials(s,expected[s.id].orEmpty(),start.settings,if(lab) 5 else 2)
++            val ids=if(lab) MaskExperiment.memory.choose(net,network,s.id,available.map {it.id},trialStarted) else available.map {it.id}
++            available.filter {it.id in ids}.map{s to it}
++        }
+         if(variants.isEmpty() || Net.key(app)!=net || Net.underlying(app)?.toString()!=network) return null
+         val winner=java.util.concurrent.atomic.AtomicReference<Pair<Int,Probe>?>(null)
+         progress.value=progress.value.copy(title="Авто: лёгкая маскировка Hello",message="До двух серверов · без тяжёлого дробления; нужны HTTPS и Telegram MTProto")
++        if(lab) variants.forEach {(server,mask)->MaskExperiment.memory.schedule(net,network,server.id,mask.id,trialStarted)}
+         kotlinx.coroutines.withTimeoutOrNull(3800L) {
+             Tester.real(variants,start.settings.testUrl,null,youtube=false,telegram=true,requireTelegram=true,
+                 foreground=true,batch=4,parallel=4,attempts=1,big=false,stopAfter=1,budgetMs=3500L) {i,p->
++                if(lab && p!=Tester.SKIPPED && Net.key(app)==net && Net.underlying(app)?.toString()==network) {
++                    val (server,mask)=variants[i]
++                    MaskExperiment.memory.observe(net,network,server.id,mask.id,trialStarted,
++                        android.os.SystemClock.elapsedRealtime(),MaskExperiment.verdict(p))
++                }
+                 if(p.works && p.tgOk==true) winner.compareAndSet(null,i to p)
+             }
+         }
+         kotlinx.coroutines.currentCoroutineContext().ensureActive()
+         if(Net.key(app)!=net || Net.underlying(app)?.toString()!=network) return null
++        if(Store.state.value.settings.mode!=Mode.AUTO || lab && !Store.state.value.settings.experimentalMaskLab) return null
+         val (index,p)=winner.get() ?: return null
+         val (server,mask)=variants[index]
+         val stamp=System.currentTimeMillis()
+--- a/app/src/main/java/com/vlesscardvpn/core/AutoRoutePolicy.kt
++++ b/app/src/main/java/com/vlesscardvpn/core/AutoRoutePolicy.kt
+@@ -30,7 +30,7 @@
+         if (server.protocol !in setOf("vless", "vmess", "trojan")) return emptyList()
+         val allowed = Masks.searchOrder(false, server, settings.maskFamilies, settings.maskFps).map { it.id }.toSet()
+         val nativeChrome = server.fp.ifEmpty { "chrome" } == "chrome"
+-        return listOf("", "chrome.n", "chrome.hello.coarse", "chrome.hello.fast").filter { id ->
++        return listOf("", "chrome.n", "chrome.hello.fast").filter { id ->
+             id != current && (id.isEmpty() || id in allowed) &&
+                 !(nativeChrome && (id == "chrome.n" || id.isEmpty() && current == "chrome.n"))
+         }.take(2)
+--- a/app/src/main/java/com/vlesscardvpn/core/ConnectionPassport.kt
++++ b/app/src/main/java/com/vlesscardvpn/core/ConnectionPassport.kt
+@@ -34,7 +34,7 @@
+         val s=state.value
+         return JSONObject().put("schema",1).put("version",com.vlesscardvpn.BuildConfig.VERSION_NAME)
+             .put("scope","local_socks_chain_not_independent_app_tun_test")
+-            .put("probe_scheduler",ProbeArbiter.report()).put("https",status(s.https)).put("dns_socks_udp",status(s.dns))
++            .put("mask_experiment",MaskExperiment.report()).put("probe_scheduler",ProbeArbiter.report()).put("https",status(s.https)).put("dns_socks_udp",status(s.dns))
+             .put("telegram_sampled_mtproto",status(s.telegram)).put("youtube_sampled_media",status(s.youtube))
+             .put("sample_age_seconds",JSONObject().put("https",age(s.https) ?: JSONObject.NULL).put("dns",age(s.dns) ?: JSONObject.NULL)
+                 .put("telegram",age(s.telegram) ?: JSONObject.NULL).put("youtube",age(s.youtube) ?: JSONObject.NULL))
+--- /dev/null
++++ b/app/src/main/java/com/vlesscardvpn/core/MaskExperimentMemory.kt
+@@ -0,0 +1,49 @@
++package com.vlesscardvpn.core
++
++/** Session-local scheduling for the optional Hello experiment. No transport, keys or telemetry.
++ * An absent/cancelled observation never becomes a failure. All times are monotonic.
++ */
++class MaskExperimentMemory(private val capacity:Int=512) {
++    private data class Key(val network:String,val handle:String?,val server:String,val mask:String)
++    private data class Entry(val scheduled:Long,val observed:Long=0,val ok:Boolean?=null,val streak:Int=0)
++    private val entries=linkedMapOf<Key,Entry>()
++    private var clock=0L
++    private var scheduled=0; private var passed=0; private var rejected=0; private var unknown=0
++    private fun tick(now:Long) {if(now<clock) entries.clear();clock=now}
++    private fun cooling(e:Entry,now:Long):Boolean = when {
++        e.observed<=0 -> now-e.scheduled<15_000L
++        e.ok==false -> now-e.observed<minOf(240_000L,30_000L*(1L shl (e.streak-1).coerceIn(0,3)))
++        else -> false
++    }
++    @Synchronized fun choose(network:String,handle:String?,server:String,masks:List<String>,now:Long,limit:Int=2):List<String> {
++        tick(now)
++        return masks.distinct().filter {id->entries[Key(network,handle,server,id)]?.let { !cooling(it,now) } ?: true}
++            .sortedWith(compareBy<String> {id -> entries[Key(network,handle,server,id)]?.let {if(it.ok==true && now-it.observed<=600_000L) 0 else 1} ?: 1}
++                .thenBy {id->entries[Key(network,handle,server,id)]?.scheduled ?: Long.MIN_VALUE})
++            .take(limit.coerceIn(0,2))
++    }
++    @Synchronized fun schedule(network:String,handle:String?,server:String,mask:String,now:Long) {
++        tick(now);val key=Key(network,handle,server,mask);val before=entries.remove(key)
++        entries[key]=Entry(now,streak=before?.streak ?: 0)
++        while(entries.size>capacity.coerceIn(1,512)) entries.remove(entries.keys.first())
++        scheduled=(scheduled+1).coerceAtMost(1_000_000)
++    }
++    @Synchronized fun observe(network:String,handle:String?,server:String,mask:String,started:Long,now:Long,result:Boolean?) {
++        tick(now);val key=Key(network,handle,server,mask);val before=entries[key] ?: return
++        if(before.scheduled!=started || now<started) return
++        if(result==null) {unknown=(unknown+1).coerceAtMost(1_000_000);return}
++        entries[key]=before.copy(observed=now,ok=result,streak=if(result) 0 else (before.streak+1).coerceAtMost(4))
++        if(result) passed=(passed+1).coerceAtMost(1_000_000) else rejected=(rejected+1).coerceAtMost(1_000_000)
++    }
++    @Synchronized fun counts():List<Int> = listOf(scheduled,passed,rejected,unknown,entries.size)
++}
++
++object MaskExperiment {
++    val memory=MaskExperimentMemory()
++    fun verdict(p:Probe):Boolean? = if(!p.works) null else p.tgOk
++    fun report():org.json.JSONObject {
++        val c=memory.counts()
++        return org.json.JSONObject().put("scope","session_hello_probe_trials_not_dpi_resistance")
++            .put("scheduled",c[0]).put("confirmed",c[1]).put("rejected_mtproto",c[2]).put("unknown",c[3]).put("entries",c[4])
++    }
++}
+--- a/app/src/main/java/com/vlesscardvpn/core/MaskWarmStart.kt
++++ b/app/src/main/java/com/vlesscardvpn/core/MaskWarmStart.kt
+@@ -7,13 +7,13 @@
+ 
+ /** Native TLS identity, bounded Hello-only fragmentation, no random SNI, noise, MSS clamp or extra engine. */
+ object MaskWarmStart {
+-    fun trials(server:Server,current:String,settings:Settings):List<Mask> {
++    fun trials(server:Server,current:String,settings:Settings, limit:Int=2):List<Mask> {
+         if(server.protocol !in setOf("vless","vmess","trojan") || server.security !in setOf("tls","reality")) return emptyList()
+         val allowed=Masks.searchOrder(false,server,settings.maskFamilies,settings.maskFps).map{it.id}.toSet()
+         val fp=server.fp.ifEmpty{"chrome"}
+         return listOf("$fp.n","$fp.hello.fast","$fp.hello.balanced","$fp.hello.coarse","$fp.hello.mobile")
+             .filter{it!=current && it in allowed}.mapNotNull{Masks.byId(it)}
+             .filter{!it.viaByeDpi && !it.hasNoise && it.sni.isEmpty() && it.mss==0 && !it.mux}
+-            .take(2)
++            .take(limit.coerceIn(0,5))
+     }
+ }
+--- a/app/src/main/java/com/vlesscardvpn/model/Settings.kt
++++ b/app/src/main/java/com/vlesscardvpn/model/Settings.kt
+@@ -85,6 +85,8 @@
+     val myMasks: List<String> = emptyList(),
+     /** «Эволюция масок»: every search also tries mutants of masks that passed (MaskLab). */
+     val maskEvolution: Boolean = true,
++    /** Opt-in bounded experiments, not a new UDP transport or guaranteed DPI evasion. */
++    val experimentalMaskLab: Boolean = false,
+     /** Auto masks bred by MaskLab that passed somewhere (JSON, newest first, ≤ MaskLab.CAP). */
+     val autoMasks: List<String> = emptyList(),
+     /** Bred ByeDPI strategies (DpiEvo ids) that won a search on any network, newest first. */
+@@ -183,7 +185,7 @@
+         .put("maskFamilies", JSONArray(maskFamilies)).put("maskFps", JSONArray(maskFps))
+         .put("warpKeys", warpKeys).put("warpBuiltinKeys", warpBuiltinKeys).put("warpChain", warpChain).put("autoOptimize", autoOptimize)
+         .put("warpKeyOff", JSONArray(warpKeyOff)).put("warpKeyStatus", JSONObject(warpKeyStatus as Map<*, *>)).put("myMasks", JSONArray(myMasks))
+-        .put("maskEvolution", maskEvolution).put("autoMasks", JSONArray(autoMasks)).put("dpiEvoPool", JSONArray(dpiEvoPool)).put("theme", theme).put("reducedMotion", reducedMotion).put("compactServers", compactServers).put("secureScreen", secureScreen).put("hideServerNames", hideServerNames)
++        .put("experimentalMaskLab",experimentalMaskLab).put("maskEvolution", maskEvolution).put("autoMasks", JSONArray(autoMasks)).put("dpiEvoPool", JSONArray(dpiEvoPool)).put("theme", theme).put("reducedMotion", reducedMotion).put("compactServers", compactServers).put("secureScreen", secureScreen).put("hideServerNames", hideServerNames)
+         .put("dpiRanking", JSONObject().apply { dpiRanking.forEach { (k, v) -> put(k, JSONArray(v)) } })
+         .put("ruAppsDirect", ruAppsDirect).put("randomTun", randomTun).put("coverTraffic", coverTraffic).put("torRotation", torRotation).put("torRotationSeconds", torRotationSeconds.coerceIn(30, 86400)).put("torFastOnly", torFastOnly).put("torMaxLatencyMs", torMaxLatencyMs.coerceAtLeast(1)).put("torNetworkRecommendations", torNetworkRecommendations).put("autoChainSearch", autoChainSearch).put("autoChainPurpose", autoChainPurpose).put("torAll", torAll).put("torRouting", torRouting).put("torAuto", torAuto).put("torBridge", torBridge).put("torBridgeLines", torBridgeLines).put("torDirect", torDirect).put("rev", rev).put("turbo", turbo).put("autoStart", autoStart)
+         .put("alwaysVpn", JSONArray(alwaysVpn)).put("alwaysDirect", JSONArray(alwaysDirect))
+@@ -254,7 +256,7 @@
+                 warpKeyOff = list("warpKeyOff", emptyList()),
+                 warpKeyStatus = o.optJSONObject("warpKeyStatus")?.let { m -> m.keys().asSequence().associateWith { m.getString(it) } } ?: emptyMap(),
+                 myMasks = list("myMasks", emptyList()),
+-                maskEvolution = o.optBoolean("maskEvolution", true), autoMasks = list("autoMasks", emptyList()), dpiEvoPool = list("dpiEvoPool", emptyList()), theme = o.optString("theme", "dark").takeIf { it in setOf("dark","amoled","you","light","system") } ?: "dark",
++                experimentalMaskLab = o.optBoolean("experimentalMaskLab", false), maskEvolution = o.optBoolean("maskEvolution", true), autoMasks = list("autoMasks", emptyList()), dpiEvoPool = list("dpiEvoPool", emptyList()), theme = o.optString("theme", "dark").takeIf { it in setOf("dark","amoled","you","light","system") } ?: "dark",
+                 reducedMotion = o.optBoolean("reducedMotion", false), compactServers = o.optBoolean("compactServers", false),
+                 secureScreen = o.optBoolean("secureScreen", false), hideServerNames = o.optBoolean("hideServerNames", false),
+                 dpiRanking = o.optJSONObject("dpiRanking")?.let { m -> m.keys().asSequence().associateWith { k -> m.optJSONArray(k)?.let { a -> (0 until a.length()).map { a.getString(it) } }.orEmpty() } } ?: emptyMap(),
+--- a/app/src/main/java/com/vlesscardvpn/ui/SettingsScreen.kt
++++ b/app/src/main/java/com/vlesscardvpn/ui/SettingsScreen.kt
+@@ -297,6 +297,10 @@
+         }
+         MyMasksSection()
+ 
++        Group("Лаборатория маскировок") {
++        Toggle("Адаптивные Hello-эксперименты", "Эксперимент: чередовать до пяти лёгких TLS-профилей, не повторять подряд неизвестные пробы, временно откладывать подтверждённые MTProto-отказы. До двух вариантов на сервер. Может увеличить время поиска; не включает WebRTC/QUIC-протокол.", s.experimentalMaskLab) { v -> set { it.copy(experimentalMaskLab = v) } }
++        Hint("Только при неудаче обычного Auto. Рабочий маршрут не переключается ради эксперимента; для выбора нужны HTTPS и Telegram. В паспорте — обезличенные счётчики текущего сеанса.")
++        }
+         Group("Подбор маскировки: что перебирать") {
+         Hint("Ничего не отмечено — все виды. Меньше видов — быстрее подбор. Сервер перестаёт перебираться после 3 рабочих масок.")
+         com.vlesscardvpn.xray.Masks.FAMILIES.forEach { (id, title) ->
+--- a/app/src/test/java/com/vlesscardvpn/ConfigTest.kt
++++ b/app/src/test/java/com/vlesscardvpn/ConfigTest.kt
+@@ -54,7 +54,10 @@
+     }
+ 
+     @Test fun maskCatalog() {
+-        assertEquals(570, Masks.ALL.size) // 556 existing + 7 fingerprints × (direct/current engine).
++        assertEquals(612, Masks.ALL.size) // 570 + 7 fingerprints × 3 additional Hello profiles × 2 engine paths.
++        Masks.FINGERPRINTS.forEach { fp -> listOf("balanced","coarse","mobile").forEach { profile ->
++            assertNotNull(Masks.byId("$fp.hello.$profile")); assertNotNull(Masks.byId("$fp.hello.$profile.b"))
++        } }
+         val fastIds = Masks.FINGERPRINTS.flatMap { listOf("$it.hello.fast", "$it.hello.fast.b") }.toSet()
+         assertEquals(fastIds, Masks.ALL.filter { ".hello.fast" in it.id }.map { it.id }.toSet())
+         fastIds.forEach { id -> val mask = Masks.byId(id)!!; assertEquals("0-1", mask.delay); assertEquals("10", mask.maxSplit) }
+--- a/app/src/test/java/com/vlesscardvpn/core/AssistantCommandsRegressionR82Test.kt
++++ b/app/src/test/java/com/vlesscardvpn/core/AssistantCommandsRegressionR82Test.kt
+@@ -137,7 +137,7 @@
+     @org.junit.Test fun widgetLook() {
+         val on = com.vlesscardvpn.vpn.VpnWidget.look(com.vlesscardvpn.core.Tunnel.State.CONNECTED, true, "NL-1", "")
+         org.junit.Assert.assertEquals("Подключено", on.second); org.junit.Assert.assertEquals("NL-1", on.third)
+-        org.junit.Assert.assertEquals("Подключено · нет интернета", com.vlesscardvpn.vpn.VpnWidget.look(com.vlesscardvpn.core.Tunnel.State.CONNECTED, false, "", "").second)
++        org.junit.Assert.assertEquals("Подключено · есть проблемы", com.vlesscardvpn.vpn.VpnWidget.look(com.vlesscardvpn.core.Tunnel.State.CONNECTED, false, "", "").second)
+     }
+ }
+ 
+--- /dev/null
++++ b/app/src/test/java/com/vlesscardvpn/core/MaskExperimentR185Test.kt
+@@ -0,0 +1,55 @@
++package com.vlesscardvpn.core
++
++import com.vlesscardvpn.model.Settings
++import org.json.JSONObject
++import org.junit.Assert.*
++import org.junit.Test
++
++class MaskExperimentR185Test {
++    private val ids=listOf("native","fast","balanced","coarse","mobile")
++    @Test fun rotatesScheduledUnknownsInsteadOfOnlyFirstTwoForever() {
++        val m=MaskExperimentMemory();val first=m.choose("wifi","1","server",ids,100)
++        assertEquals(ids.take(2),first);first.forEach {m.schedule("wifi","1","server",it,100)}
++        assertEquals(listOf("balanced","coarse"),m.choose("wifi","1","server",ids,101))
++        assertEquals(listOf("balanced","coarse"),m.choose("wifi","1","server",ids,16_000))
++    }
++    @Test fun completedUnknownIsNotNegativeLearning() {
++        val m=MaskExperimentMemory();m.schedule("wifi","1","s","fast",100)
++        m.observe("wifi","1","s","fast",100,200,null)
++        assertEquals(listOf(1,0,0,1,1),m.counts())
++    }
++    @Test fun explicitNativeFailureIsTemporarilyDeferred() {
++        val m=MaskExperimentMemory();m.schedule("wifi","1","s","fast",100)
++        m.observe("wifi","1","s","fast",100,200,false)
++        assertTrue(m.choose("wifi","1","s",listOf("fast"),201).isEmpty())
++        assertEquals(listOf("fast"),m.choose("wifi","1","s",listOf("fast"),30_200))
++    }
++    @Test fun handleAndServerDoNotShareEvidence() {
++        val m=MaskExperimentMemory();m.schedule("wifi","1","s","fast",100)
++        m.observe("wifi","1","s","fast",100,200,false)
++        assertEquals(listOf("fast"),m.choose("wifi","2","s",listOf("fast"),201))
++        assertEquals(listOf("fast"),m.choose("wifi","1","other",listOf("fast"),201))
++    }
++    @Test fun staleObservationCannotOverwriteNewTrial() {
++        val m=MaskExperimentMemory();m.schedule("n",null,"s","m",100);m.schedule("n",null,"s","m",200)
++        m.observe("n",null,"s","m",100,300,false)
++        assertEquals(0,m.counts()[2])
++    }
++    @Test fun memoryIsBoundedAndMonotonicRollbackClearsScheduling() {
++        val m=MaskExperimentMemory(3)
++        repeat(8){m.schedule("n",null,"s","m$it",100L+it)}
++        assertEquals(3,m.counts()[4])
++        assertEquals(listOf("m7"),m.choose("n",null,"s",listOf("m7"),1))
++    }
++    @Test fun failureTimeoutAndMissingTelegramAreUnknown() {
++        assertNull(MaskExperiment.verdict(Probe(0,null,null,error="timeout")))
++        assertNull(MaskExperiment.verdict(Probe(50,null,null)))
++        assertEquals(false,MaskExperiment.verdict(Probe(50,null,null,tgOk=false)))
++        assertEquals(true,MaskExperiment.verdict(Probe(50,null,null,tgOk=true)))
++    }
++    @Test fun settingsOptInIsExplicitAndSurvivesRoundTrip() {
++        assertFalse(Settings().experimentalMaskLab)
++        assertFalse(Settings.fromJson(JSONObject()).experimentalMaskLab)
++        assertTrue(Settings.fromJson(Settings(experimentalMaskLab=true).toJson()).experimentalMaskLab)
++    }
++}
+--- a/app/src/test/java/com/vlesscardvpn/discovery/AutoDiscoveryR174Test.kt
++++ b/app/src/test/java/com/vlesscardvpn/discovery/AutoDiscoveryR174Test.kt
+@@ -45,9 +45,9 @@
+         assertTrue(selected.all { it in sources });assertEquals(4,selected.distinct().size)
+         assertTrue(AutoDiscoveryPolicy.sources(emptyList(),false).isEmpty())
+     }
+-    @Test fun firstSearchStageTargetsFiveSecondsAndRemainsBounded() {
++    @Test fun firstSearchStageAllowsTelegramHandshakeAndRemainsBounded() {
+         assertEquals(10_000L,AutoDiscoveryPolicy.FAST_MS)
+-        assertEquals(5000L,AutoDiscoveryPolicy.FIRST_CONNECT_MS)
++        assertEquals(10_000L,AutoDiscoveryPolicy.FIRST_CONNECT_MS)
+         assertTrue(AutoDiscoveryPolicy.SOURCE_MS<=3500)
+         assertTrue(AutoDiscoveryPolicy.RECOVERY_MS<=45000)
+         assertTrue(ConnectPolicy.fastStart().budgetMs<=AutoDiscoveryPolicy.FIRST_CONNECT_MS)
+--- a/app/src/test/java/com/vlesscardvpn/discovery/AutoPoolRecoveryR140Test.kt
++++ b/app/src/test/java/com/vlesscardvpn/discovery/AutoPoolRecoveryR140Test.kt
+@@ -12,15 +12,16 @@
+     private val now=500000L
+     private fun server(n:String,source:String="")=Server(n,"vless","$n.invalid",443,"00000000-0000-0000-0000-000000000001",source=source)
+     private fun sample(kbps:Int=10000,ms:Int=100)=ServerState(realMs=ms,bigOk=true,kbps=kbps,speedNetwork="wifi",speedMask="",speedCheckedAt=now)
+-    @Test fun oneServiceProvenNodeCannotCollapseEightHttpsWorkingRoutes() {
++    @Test fun unknownTelegramRoutesRemainCandidatesNotConnectedEvidence() {
+         val states=(0..7).map { sample(10000+it*1000).let { s -> if(it==0) s.copy(ytOk=true,tgOk=true,serviceNetwork="wifi",serviceCheckedAt=now) else s } }
+-        assertEquals(8,AutoEligibility.servicePool(states,{it},"wifi",now).size)
++        assertEquals(listOf(states.first()),AutoEligibility.servicePool(states,{it},"wifi",now))
++        assertEquals(8,states.count { it.works }) // HTTPS evidence alone is insufficient for live Auto.
+         assertEquals(8,AutoEligibility.TOP)
+     }
+     @Test fun onlyKnownCurrentServiceFailuresAreExcluded() {
+-        val good=sample(); val bad=good.copy(ytOk=false,serviceNetwork="wifi",serviceCheckedAt=now)
++        val good=sample().copy(tgOk=true,serviceNetwork="wifi",serviceMask="",serviceCheckedAt=now); val bad=good.copy(ytOk=false)
+         assertEquals(listOf(good),AutoEligibility.servicePool(listOf(good,bad),{it},"wifi",now))
+-        assertEquals(listOf(good,bad),AutoEligibility.servicePool(listOf(good,bad),{it},"cell",now))
++        assertTrue(AutoEligibility.servicePool(listOf(good,bad),{it},"cell",now).isEmpty())
+         assertTrue(AutoEligibility.servicePool(listOf(bad),{it},"wifi",now).isEmpty())
+     }
+     @Test fun fasterUnknownServiceCandidateBeatsSlowProvenButNeverKnownFailure() {
+--- a/app/src/test/java/com/vlesscardvpn/discovery/AutoRoutePolicyTest.kt
++++ b/app/src/test/java/com/vlesscardvpn/discovery/AutoRoutePolicyTest.kt
+@@ -44,15 +44,17 @@
+         assertFalse("chrome.hello.fast" in trials)
+     }
+     @Test fun onlySuccessfulFullFasterDownloadChangesMask() {
++        assertFalse(AutoRoutePolicy.improved(state(),"wifi",now,Probe(100,true,null,kbps=9000)))
++        assertFalse(AutoRoutePolicy.improved(state(),"wifi",now,Probe(100,true,null,kbps=9000,tgOk=false)))
+         assertFalse(AutoRoutePolicy.improved(state(),"wifi",now,Probe(10,null,null,kbps=9000)))
+         assertFalse(AutoRoutePolicy.improved(state(),"wifi",now,Probe(10,false,null,kbps=9000)))
+-        assertFalse(AutoRoutePolicy.improved(state(),"wifi",now,Probe(10,true,null,kbps=0)))
+-        assertFalse(AutoRoutePolicy.improved(state(),"wifi",now,Probe(10,true,null,kbps=999)))
+-        assertTrue(AutoRoutePolicy.improved(state(),"wifi",now,Probe(100,true,null,kbps=9000)))
++        assertFalse(AutoRoutePolicy.improved(state(),"wifi",now,Probe(10,true,null,kbps=0,tgOk=true)))
++        assertFalse(AutoRoutePolicy.improved(state(),"wifi",now,Probe(10,true,null,kbps=999,tgOk=true)))
++        assertTrue(AutoRoutePolicy.improved(state(),"wifi",now,Probe(100,true,null,kbps=9000,tgOk=true)))
+     }
+     @Test fun acceptedMaskAndBandwidthProvenanceChangeAtomically() {
+         val old=state().copy(netMasks=mapOf("cell" to "firefox.h4"))
+-        val result=AutoRoutePolicy.apply(old,"wifi","",now,Probe(100,true,null,kbps=9000))
++        val result=AutoRoutePolicy.apply(old,"wifi","",now,Probe(100,true,null,kbps=9000,tgOk=true))
+         assertEquals("",result.maskFor("wifi"));assertEquals("firefox.h4",result.maskFor("cell"))
+         assertEquals("",result.speedMask);assertEquals("wifi",result.speedNetwork)
+         assertEquals(9000,ServerChoice.measuredSpeed(result,"wifi",now))
+@@ -70,7 +72,7 @@
+     }
+     @Test fun sameServerWithDifferentMaskRequiresCoreReconfiguration() {
+         val old=state()
+-        val changed=AutoRoutePolicy.apply(old,"wifi","",now,Probe(100,true,null,kbps=9000))
++        val changed=AutoRoutePolicy.apply(old,"wifi","",now,Probe(100,true,null,kbps=9000,tgOk=true))
+         assertNotEquals(AutoRoutePolicy.configuration(server,old,"wifi"),AutoRoutePolicy.configuration(server,changed,"wifi"))
+         assertEquals(AutoRoutePolicy.configuration(server,old,"wifi"),AutoRoutePolicy.configuration(server,old.copy(kbps=9000),"wifi"))
+     }
+@@ -85,12 +87,12 @@
+         assertEquals(listOf(Subs.DIMAN),Subs.mirrors(Subs.DIMAN))
+     }
+     @Test fun smallBandwidthNoiseCannotFlipTheMask() {
+-        assertFalse(AutoRoutePolicy.improved(state(10000),"wifi",now,Probe(30,true,null,kbps=10001)))
+-        assertFalse(AutoRoutePolicy.improved(state(10000),"wifi",now,Probe(30,true,null,kbps=11999)))
+-        assertTrue(AutoRoutePolicy.improved(state(10000),"wifi",now,Probe(30,true,null,kbps=12000)))
+-        assertFalse(AutoRoutePolicy.improved(state(100),"wifi",now,Probe(30,true,null,kbps=120)))
+-        assertTrue(AutoRoutePolicy.improved(state(100),"wifi",now,Probe(30,true,null,kbps=356)))
+-        assertTrue(AutoRoutePolicy.improved(state(0),"wifi",now,Probe(30,true,null,kbps=100)))
++        assertFalse(AutoRoutePolicy.improved(state(10000),"wifi",now,Probe(30,true,null,kbps=10001,tgOk=true)))
++        assertFalse(AutoRoutePolicy.improved(state(10000),"wifi",now,Probe(30,true,null,kbps=11999,tgOk=true)))
++        assertTrue(AutoRoutePolicy.improved(state(10000),"wifi",now,Probe(30,true,null,kbps=12000,tgOk=true)))
++        assertFalse(AutoRoutePolicy.improved(state(100),"wifi",now,Probe(30,true,null,kbps=120,tgOk=true)))
++        assertTrue(AutoRoutePolicy.improved(state(100),"wifi",now,Probe(30,true,null,kbps=356,tgOk=true)))
++        assertTrue(AutoRoutePolicy.improved(state(0),"wifi",now,Probe(30,true,null,kbps=100,tgOk=true)))
+     }
+ 
+ }
+--- a/app/src/test/java/com/vlesscardvpn/discovery/DiscoveryCancellationRegressionR138Test.kt
++++ b/app/src/test/java/com/vlesscardvpn/discovery/DiscoveryCancellationRegressionR138Test.kt
+@@ -24,9 +24,11 @@
+     }
+     @Test fun cooldownExpiresAndSuccessClearsIt() {
+         val memory = ProbeMemory(); memory.record("n", "s", "m", false, 1000)
+-        assertFalse(memory.cooling("n", "s", "m", 121000))
+-        memory.record("n", "s", "m", false, 122000); memory.record("n", "s", "m", true, 122001)
+-        assertFalse(memory.cooling("n", "s", "m", 122002))
++        assertTrue(memory.cooling("n", "s", "m", 120999))
++        // Default cooldown includes deterministic 0–20% jitter, never beyond 144 seconds.
++        assertFalse(memory.cooling("n", "s", "m", 145001))
++        memory.record("n", "s", "m", false, 146000); memory.record("n", "s", "m", true, 146001)
++        assertFalse(memory.cooling("n", "s", "m", 146002))
+     }
+     @Test fun memoryIsBoundedAndBackwardsClockDoesNotExtendCooldown() {
+         val memory = ProbeMemory(capacity = 2)
+--- a/app/src/test/java/com/vlesscardvpn/discovery/FullCloudSelectionR139Test.kt
++++ b/app/src/test/java/com/vlesscardvpn/discovery/FullCloudSelectionR139Test.kt
+@@ -41,17 +41,17 @@
+         assertTrue(ServerChoice.downloadUpgrade(bad,good,"wifi",now))
+         assertEquals(listOf(good),AutoEligibility.servicePool(listOf(bad,good),{it},"wifi",now))
+     }
+-    @Test fun eightWorkingRoutesActuallyReachTheConnectedPoolNotJustOnePrimary() {
++    @Test fun onePrimaryCarriesTrafficWhileOtherProvenRoutesRemainReserves() {
+         val routes=(1..14).map { server("DE-$it") };val states=routes.mapIndexed { i,s -> s.id to state((i+1)*1000) }.toMap()
+         val connected=AutoEligibility.connectedPool(routes,{states.getValue(it.id)},"wifi",now,false)
+-        assertEquals(8,connected.size);assertEquals(routes.last(),connected.first())
+-        assertEquals(routes.takeLast(8).reversed(),connected)
+-        assertEquals(3,AutoEligibility.connectedPool(routes.take(3),{states.getValue(it.id)},"wifi",now,false).size)
++        assertEquals(1,connected.size);assertEquals(routes.last(),connected.first())
++        assertEquals(14,AutoEligibility.servicePool(routes,{states.getValue(it.id)},"wifi",now).size)
++        assertEquals(1,AutoEligibility.connectedPool(routes.take(3),{states.getValue(it.id)},"wifi",now,false).size)
+         assertTrue(AutoEligibility.connectedPool(listOf(server("🇷🇺 blocked")),{state()},"wifi",now,false).isEmpty())
+         val config=org.json.JSONObject(XrayConfigBuilder.vpnConfig(connected.map { it to null },Settings(mode=Mode.SERVERS),null))
+         val out=config.getJSONArray("outbounds")
+-        assertEquals(8,(0 until out.length()).count { out.getJSONObject(it).optString("tag").startsWith("proxy-") })
+-        assertTrue(config.getJSONObject("routing").getJSONArray("balancers").length()>0)
++        assertEquals(1,(0 until out.length()).count { out.getJSONObject(it).optString("tag").startsWith("proxy-") })
++        assertEquals(0,config.getJSONObject("routing").optJSONArray("balancers")?.length() ?: 0)
+     }
+     @Test fun serviceProvenanceSurvivesDiskRoundTrip() {
+         val s=state();val loaded=ServerState.fromJson(s.toJson())
+--- a/app/src/test/java/com/vlesscardvpn/discovery/ReleaseQualityR141Test.kt
++++ b/app/src/test/java/com/vlesscardvpn/discovery/ReleaseQualityR141Test.kt
+@@ -20,7 +20,9 @@
+         val a=server("DE-slow"); val b=server("DE-fast")
+         val states=mapOf(a.id to ServerState(realMs=10,bigOk=true,kbps=1000,speedCheckedAt=100000,speedNetwork="wifi"),
+             b.id to ServerState(realMs=200,bigOk=true,kbps=30000,speedCheckedAt=100000,speedNetwork="wifi"))
+-        assertEquals(listOf(b),AutoEligibility.connectedPool(listOf(a,b),{states.getValue(it.id)},"wifi",100000,false))
++        val ranked=listOf(a,b).sortedWith(ServerChoice.downloadOrder({states.getValue(it.id)},"wifi",100000))
++        assertEquals(listOf(b),AutoEligibility.independent(ranked))
++        assertTrue(AutoEligibility.connectedPool(listOf(a,b),{states.getValue(it.id)},"wifi",100000,false).isEmpty())
+     }
+     @Test fun coverProfilesNeverChangeRealitySniOrBypassCertificateAuthentication() {
+         val m=Masks.byId("vc.sni.vk.com.fast")!!
+--- a/app/src/test/java/com/vlesscardvpn/network/StrictEligibilityR163Test.kt
++++ b/app/src/test/java/com/vlesscardvpn/network/StrictEligibilityR163Test.kt
+@@ -21,7 +21,8 @@
+     @Test fun measuredDownloadLeaderWinsDespiteLowerPingCompetitor() {
+         val fast=Server("fast","vless","192.0.2.1",443,"fast")
+         val lowPing=Server("low-ping","vless","198.51.100.1",443,"low-ping")
+-        fun state(s:Server)=ServerState(realMs=if(s==fast) 500 else 5,kbps=if(s==fast) 30000 else 1000,speedNetwork="wifi",speedMask="",speedCheckedAt=100)
++        fun state(s:Server)=ServerState(realMs=if(s==fast) 500 else 5,kbps=if(s==fast) 30000 else 1000,speedNetwork="wifi",speedMask="",speedCheckedAt=100,
++            tgOk=true,serviceNetwork="wifi",serviceMask="",serviceCheckedAt=100)
+         assertEquals(fast,AutoEligibility.connectedPool(listOf(lowPing,fast),::state,"wifi",101,false).first())
+     }
+ }
+--- /dev/null
++++ b/docs/research-mask-lab-r185.md
+@@ -0,0 +1,31 @@
++# Mask Lab r185: эксперименты, не обещание невидимости
++
++## Прочитанные источники
++- The Bell: https://thebell.site/byvshiy-sotrudnik-roskomnadzora-otvechavshiy-za-blokirovki-v-runete-stal-razrabotchikom-vpn — интервью и сведения о проекте, не независимый DPI-бенчмарк.
++- Исходный README AIVPN на просмотренном коммите c5262587adb2b6b81d9e8fcdee453598685e3fb9: https://github.com/infosave2007/aivpn/blob/c5262587adb2b6b81d9e8fcdee453598685e3fb9/README_RU.md — просмотрены описание и структура исходников, код не запускался и не импортировался.
++- The Insider, 10 октября 2023: https://theins.ru/politika/265575 — опубликованный разбор утечки ГРЧЦ с обсуждением блокировки IP и протоколов, оборудования и централизованного управления. Это историческое расследование, не текущий набор сигнатур каждого оператора. Закрытые архивы, персональные данные и учётные данные не загружались.
++- Human Rights Watch, 30 июля 2025: https://www.hrw.org/report/2025/07/30/disrupted-throttled-and-blocked/state-censorship-control-and-increasing-isolation — публичный технический/правовой обзор ТСПУ, EcoSGE, блокировки протоколов, ECH и различий между сетями. Различаем возможности из руководства и подтверждённое применение; не считаем любую функцию включённой повсеместно.
++
++## Что интересно в AIVPN и как с этим экспериментировать
++| Идея | Статус в VLESS Card | Что нужно для корректного эксперимента |
++| --- | --- | --- |
++| Обратная связь по маске, смена после отказа | Новый опциональный Hello-experiment: локальное расписание, разные сети/handle и серверы изолированы, известный MTProto-отказ временно откладывает вариант | Не классифицировать отсутствие ответа как доказанную DPI-детекцию; хранить unknown отдельно |
++| Не застревать на одних профилях | До пяти уже поддерживаемых лёгких TLS/Hello-профилей; до двух на сервер за этап. Неизвестные/отменённые расписания не мешают пробовать ещё не выбранные варианты | Ограничивать время/параллельность и не менять рабочий маршрут только ради эксперимента |
++| Региональные подсказки | Существующее облако остаётся подсказкой; локальное подтверждение обязательно | Не отправлять подписки/ключи/сырые трассы. Новая лаборатория ничего не отправляет |
++| UDP-носители QUIC/CONNECT-UDP, STUN/ICE/DTLS/SRTP | НЕ реализованы новым Hello-переключателем | Совместимая серверная часть, новый клиентский transport/native bridge, управление ключами, повторной передачей/MTU и отдельные межоператорские испытания |
++| Padding, IAT и адаптация очередей | Не подменяются замедлением всех пакетов или набором фиктивных UDP-заголовков | Управление обеими сторонами transport, измерение latency/overhead/потерь, контроль нагрузки и корректности wire-протокола |
++| Защищённая синхронизация маски и bootstrap | Не переносим автоматически | Аутентифицированный обмен, совместимость поколений клиента/сервера и отдельный security review |
++| FEC и ограниченные фрагменты | Не включены | Серверное восстановление, лимиты памяти/MTU, тесты потерь/дубликатов/перестановки и цены overhead |
++| Проверка классификаторами PCAP | Пока пройден локальный стенд структуры TLS/ByeDPI, не тест AIVPN | Контролируемый сбор без пользовательских данных, проверка TShark/nDPI не равна неуязвимости к ТСПУ |
++
++Названия масок Telegram Calls/WebRTC не доказывают сходство с реальным приложением; Telegram-звонки не равнозначны MTProto. Сам AIVPN README указывает необходимость согласованного обновления клиента/сервера и ограничения своих проверок. «Невозможно» не утверждается: более крупные идеи остаются реалистичными отдельными протокольными экспериментами, а не выдуманными возможностями существующего APK.
++
++## Из опубликованных разборов утечек — в проверяемые требования
++- Проверять IP-доступность, transport/TLS и сервисные ответы по отдельности.
++- Пробовать независимые хосты, а не бесконечно дробить handshake к одному недоступному адресу.
++- Отдельные результаты для сети/маски/физического handle; не переносить Wi-Fi PASS на мобильную сеть.
++- Различать timeout/cancellation и явный отрицательный ответ; ограничивать фоновую нагрузку.
++- Не отключать проверку сертификата и не устанавливать сторонний корневой CA ради обхода.
++
++## Границы текущего изменения
++Лаборатория по умолчанию выключена и не реализует AIVPN, WebRTC или новый QUIC transport. Она не измеряет DPI-устойчивость и не гарантирует ускорение. Счётчики в паспорте агрегированы за текущий процесс, не содержат адресов/ключей и не выгружаются автоматически. Размер памяти ограничен 512 маршрутными вариантами, при перезапуске история теряется.
+--- a/tools/e2e/test_auto_campaign_175.py
++++ b/tools/e2e/test_auto_campaign_175.py
+@@ -18,11 +18,12 @@
+   s=(ROOT/'app/src/main/java/com/vlesscardvpn/core/Actions.kt').read_text()
+   self.assertIn('.take(AutoDiscoveryPolicy.RANKING_WINDOW) else allEligible',s)
+   p=s.split('suspend fun quickTest',1)[1]
+-  # 1.2.66 records attempts only after realTest returns, never on cancellation.
++  # r184 advances scheduled IDs before the deadline; cancelled probes are NOT failures.
+   probe=p.index('val fastOk = realTest')
+   recorded=p.index('if (firstWaveOnly) attempted.addAll(shortlist.map { it.id })')
+-  self.assertLess(probe,recorded)
+-  self.assertNotIn('attempted.addAll',p[:probe])
++  self.assertLess(recorded,probe)
++  self.assertNotIn('probeMemory.record',p[:probe])
++  self.assertIn('RETRY_CATALOG_MS',(ROOT/'app/src/main/java/com/vlesscardvpn/core/AutoSearchCampaign.kt').read_text())
+   self.assertIn('ConnectPolicy.requiresBodyProof(earlyHandoff)',p)
+  def test_diagnostics_are_local_fixed_schema_and_explicit_share(self):
+   s=(ROOT/'app/src/main/java/com/vlesscardvpn/core/AutoDiagnostics.kt').read_text()
+--- a/tools/e2e/test_auto_discovery_174.py
++++ b/tools/e2e/test_auto_discovery_174.py
+@@ -1,5 +1,6 @@
+ from pathlib import Path
+ import unittest
++import re
+ ROOT=Path(__file__).resolve().parents[2]
+ class AutoDiscoveryWiring(unittest.TestCase):
+     def test_rescue_is_parallel_and_not_behind_global_twelve_hour_gate(self):
+@@ -11,7 +12,8 @@
+         # The latest prerelease uses a shorter bounded foreground window.
+         self.assertIn('withTimeoutOrNull(AutoDiscoveryPolicy.FIRST_CONNECT_MS)',p)
+         policy=(ROOT/'app/src/main/java/com/vlesscardvpn/core/AutoDiscoveryPolicy.kt').read_text()
+-        self.assertIn('const val FIRST_CONNECT_MS = 5_000L',policy)
++        budget=int(re.search(r'FIRST_CONNECT_MS = ([0-9_]+)L',policy).group(1).replace('_',''))
++        self.assertGreaterEqual(budget,6500);self.assertLessEqual(budget,15000)
+         self.assertIn('batches.receiveCatching()',p)
+         self.assertIn('refresh.cancel()',p)
+         self.assertIn('firstWaveOnly = true',p)
+--- a/tools/e2e/test_foreground_auto_176.py
++++ b/tools/e2e/test_foreground_auto_176.py
+@@ -1,5 +1,6 @@
+ from pathlib import Path
+ import unittest
++import re
+ ROOT=Path(__file__).resolve().parents[2]/'app/src/main/java/com/vlesscardvpn'
+ class ForegroundWiring(unittest.TestCase):
+  def test_user_tcp_uses_explicit_foreground_limit(self):
+@@ -13,10 +14,13 @@
+  def test_rescue_has_no_full_catalog_scan_or_two_minute_masks(self):
+   a=(ROOT/'core/Actions.kt').read_text().split('suspend fun autoRescue',1)[1].split('\n    }',1)[0]
+   self.assertNotIn('doTestAll(',a);self.assertNotIn('doRefresh()',a);self.assertNotIn('120_000',a)
+-  self.assertIn('firstWaveOnly = true',a)
++  self.assertRegex(a,r'firstWaveOnly\s*=\s*true')
++  self.assertIn('attempted.addAll',a)
+  def test_skipped_masks_are_not_failed_servers(self):
+   a=(ROOT/'core/Actions.kt').read_text().split('suspend fun doFindMasks',1)[1].split('\n    }',1)[0]
+-  self.assertIn('if (b == null && tried.none { it.first == s.id }) return@forEach',a)
++  self.assertRegex(a,r'if\s*\(b\s*==\s*null\)\s*return@forEach')
++  self.assertIn('MaskSamplePolicy.unchanged',a)
++  self.assertNotIn('copy(realMs = 0',a)
+   self.assertIn('kotlinx.coroutines.withTimeoutOrNull',a)
+   self.assertNotIn('System.currentTimeMillis() > deadline',a)
+  def test_background_reserves_are_wired_and_visible(self):

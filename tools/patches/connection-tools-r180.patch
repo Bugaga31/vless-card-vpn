@@ -1,0 +1,413 @@
+--- /dev/null
++++ b/app/src/main/java/com/vlesscardvpn/core/SessionHold.kt
+@@ -0,0 +1,13 @@
++package com.vlesscardvpn.core
++
++import android.os.SystemClock
++import kotlinx.coroutines.flow.MutableStateFlow
++
++/** User-requested pause of optional improvements, never of emergency repair or the VPN itself. */
++object SessionHold {
++    val until = MutableStateFlow(0L)
++    fun active(): Boolean = until.value > SystemClock.elapsedRealtime()
++    fun start() { until.value = SystemClock.elapsedRealtime() + 30 * 60_000L }
++    fun clear() { until.value = 0L }
++    fun minutesLeft(): Long = ((until.value-SystemClock.elapsedRealtime()).coerceAtLeast(0L)+59_999L)/60_000L
++}
+--- /dev/null
++++ b/app/src/main/java/com/vlesscardvpn/core/ConnectionPassport.kt
+@@ -0,0 +1,37 @@
++package com.vlesscardvpn.core
++
++import android.os.SystemClock
++import kotlinx.coroutines.flow.MutableStateFlow
++import org.json.JSONObject
++
++/** Coarse local probe outcomes only. Never takes endpoint URLs, keys, IDs, logs or exception text. */
++object ConnectionPassport {
++    data class Check(val value: Boolean? = null, val at: Long = 0L)
++    data class Snapshot(val https: Check = Check(), val dns: Check = Check(), val telegram: Check = Check(), val youtube: Check = Check())
++    val state = MutableStateFlow(Snapshot())
++    private fun check(v: Boolean?) = Check(v,SystemClock.elapsedRealtime())
++    @Synchronized fun clear() { state.value = Snapshot() }
++    @Synchronized fun full(https: Boolean, dns: Boolean?, telegram: Boolean?, youtube: Boolean?) {
++        state.value = Snapshot(check(https),check(dns),check(telegram),check(youtube))
++    }
++    @Synchronized fun light(https: Boolean, telegram: Boolean?, sampledTelegram: Boolean) {
++        val s = state.value
++        state.value = s.copy(https=check(https),telegram=if(sampledTelegram) check(telegram) else s.telegram)
++    }
++    @Synchronized fun dns(ok: Boolean) { state.value = state.value.copy(dns=check(ok)) }
++    fun status(c: Check): String = when {
++        c.at <= 0 || c.value == null -> "UNKNOWN"
++        SystemClock.elapsedRealtime() < c.at || SystemClock.elapsedRealtime()-c.at > 90_000L -> "STALE"
++        c.value == true -> "PASS"
++        else -> "FAIL"
++    }
++    fun label(c: Check): String = when(status(c)) { "PASS" -> "отвечает"; "FAIL" -> "нет ответа"; "STALE" -> "замер устарел"; else -> "не подтверждено" }
++    fun report(): String {
++        val s=state.value
++        return JSONObject().put("schema",1).put("version",com.vlesscardvpn.BuildConfig.VERSION_NAME)
++            .put("scope","local_socks_chain_not_independent_app_tun_test")
++            .put("https",status(s.https)).put("dns_socks_udp",status(s.dns))
++            .put("telegram_sampled_mtproto",status(s.telegram)).put("youtube_sampled_media",status(s.youtube))
++            .put("optional_optimization_paused",SessionHold.active()).put("contains_endpoints_or_keys",false).toString(2)
++    }
++}
+--- /dev/null
++++ b/app/src/main/java/com/vlesscardvpn/ui/ConnectionTools.kt
+@@ -0,0 +1,56 @@
++package com.vlesscardvpn.ui
++
++import android.content.Intent
++import androidx.compose.foundation.horizontalScroll
++import androidx.compose.foundation.layout.*
++import androidx.compose.foundation.rememberScrollState
++import androidx.compose.material3.*
++import androidx.compose.runtime.*
++import androidx.compose.ui.Modifier
++import androidx.compose.ui.platform.LocalContext
++import androidx.compose.ui.unit.dp
++import androidx.lifecycle.Lifecycle
++import androidx.lifecycle.repeatOnLifecycle
++import androidx.compose.ui.platform.LocalLifecycleOwner
++import com.vlesscardvpn.core.*
++import com.vlesscardvpn.model.Mode
++import com.vlesscardvpn.vpn.TunnelService
++
++@Composable
++fun ConnectionTools() {
++    val context=LocalContext.current
++    val owner=LocalLifecycleOwner.current
++    val settings by Store.settings.collectAsState()
++    val snapshot by ConnectionPassport.state.collectAsState()
++    val hold by SessionHold.until.collectAsState()
++    val running by Actions.running.collectAsState()
++    var expanded by remember { mutableStateOf(false) }
++    var tick by remember { mutableStateOf(0) }
++    LaunchedEffect(owner,hold) {
++        owner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
++            while(true) { tick++; kotlinx.coroutines.delay(5000) }
++        }
++    }
++    val paused=remember(hold,tick) { SessionHold.active() }
++    Column(Modifier.fillMaxWidth().padding(top=8.dp),verticalArrangement=Arrangement.spacedBy(6.dp)) {
++        Row(Modifier.horizontalScroll(rememberScrollState()),horizontalArrangement=Arrangement.spacedBy(6.dp)) {
++            AssistChip(onClick={TunnelService.repairTelegram(context)},enabled=!running && settings.mode==Mode.AUTO && !settings.torAll,
++                label={Text("Починить Telegram")})
++            AssistChip(onClick={if(paused) SessionHold.clear() else SessionHold.start()},
++                label={Text(if(paused) "Вернуть фоновое ускорение" else "Без фонового ускорения 30 мин")})
++            AssistChip(onClick={expanded=!expanded},label={Text(if(expanded) "Скрыть паспорт" else "Паспорт соединения")})
++        }
++        if(paused) Text("Фоновое ускорение на паузе: ещё ${SessionHold.minutesLeft()} мин. VPN и аварийное восстановление не выключены.",style=MaterialTheme.typography.bodySmall)
++        if(expanded) {
++            Text("Что подтвердили локальные пробы",style=MaterialTheme.typography.titleSmall)
++            Text("HTTPS: ${ConnectionPassport.label(snapshot.https)} · DNS: ${ConnectionPassport.label(snapshot.dns)}",style=MaterialTheme.typography.bodySmall)
++            Text("Telegram MTProto: ${ConnectionPassport.label(snapshot.telegram)}",style=MaterialTheme.typography.bodySmall)
++            Text("Видео YouTube: ${ConnectionPassport.label(snapshot.youtube)}",style=MaterialTheme.typography.bodySmall)
++            Text("Это пробы через локальный SOCKS, не проверка вашего аккаунта, звонков или всего пути приложения через TUN. Замеры старше 90 с помечаются устаревшими.",style=MaterialTheme.typography.bodySmall)
++            TextButton(onClick={
++                val report=ConnectionPassport.report()
++                context.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT,report),"Отправить паспорт без адресов и ключей"))
++            }) {Text("Поделиться без адресов и ключей")}
++        }
++    }
++}
+--- a/app/src/main/java/com/vlesscardvpn/ui/HomeScreen.kt
++++ b/app/src/main/java/com/vlesscardvpn/ui/HomeScreen.kt
+@@ -168,6 +168,7 @@
+             if (tick > 0 && (now.first > 0 || now.second > 0)) Text("Сейчас: ↓ ${Actions.mbps(now.first.toInt())} ↑ ${Actions.mbps(now.second.toInt())}",
+                 fontSize = 13.sp, color = MaterialTheme.colorScheme.onBackground, textAlign = TextAlign.Center)
+             SessionStats(min, rx, tx, cfg.turbo)
++            ConnectionTools()
+             val aw by com.vlesscardvpn.core.AppWatch.status.collectAsState()
+             if (aw.isNotEmpty()) Text(aw, fontSize = 12.sp, color = Accent, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 4.dp))
+             val (month, over) = com.vlesscardvpn.core.Traffic.line(cfg)
+--- a/app/src/main/java/com/vlesscardvpn/core/Actions.kt
++++ b/app/src/main/java/com/vlesscardvpn/core/Actions.kt
+@@ -1130,7 +1130,7 @@
+     }
+ 
+     /** Recheck current routes separately, then bounded alternatives; no direct fallback or account login. */
+-    suspend fun repairTelegram(used: List<Server>): Int {
++    suspend fun repairTelegram(used: List<Server>, preferAlternative: Boolean = false): Int {
+         val snapshot = Store.state.value
+         val net = Net.key(app); val handle = Net.underlying(app)?.toString()
+         val stamp = System.currentTimeMillis()
+@@ -1148,7 +1148,8 @@
+         }
+         if (Net.key(app) != net || Net.underlying(app)?.toString() != handle) return 0
+         val ready = candidates.filter { it.id in passed }
+-        return if (ready.isEmpty()) 0 else selectBest(1, among = ready, close = true)
++        val preferred = if (preferAlternative) ready.filter { s -> used.none { it.id == s.id } }.ifEmpty { ready } else ready
++        return if (preferred.isEmpty()) 0 else selectBest(1, among = preferred, close = true)
+     }
+ 
+     /** Dead servers that could be revived through another Cloudflare edge (Revive). */
+--- a/app/src/main/java/com/vlesscardvpn/vpn/TunnelService.kt
++++ b/app/src/main/java/com/vlesscardvpn/vpn/TunnelService.kt
+@@ -57,6 +57,7 @@
+     companion object {
+         const val ACTION_START = "com.vlesscardvpn.START"
+         const val ACTION_STOP = "com.vlesscardvpn.STOP"
++        const val ACTION_REPAIR_TELEGRAM = "com.vlesscardvpn.REPAIR_TELEGRAM"
+         const val ACTION_PAUSE = "com.vlesscardvpn.PAUSE"
+         const val PAUSE_MS = 5 * 60_000L
+         val WARM = listOf("www.youtube.com", "i.ytimg.com", "yt3.ggpht.com", "rr1---sn-4g5e6nzz.googlevideo.com", "www.google.com",
+@@ -74,6 +75,7 @@
+             val i = Intent(context, TunnelService::class.java).setAction(ACTION_START)
+             if (Build.VERSION.SDK_INT >= 26) context.startForegroundService(i) else context.startService(i)
+         }
++        fun repairTelegram(context: Context) { context.startService(Intent(context,TunnelService::class.java).setAction(ACTION_REPAIR_TELEGRAM)) }
+         fun pause(context: Context) { context.startService(Intent(context, TunnelService::class.java).setAction(ACTION_PAUSE)) }
+         fun stop(context: Context) {
+             context.startService(Intent(context, TunnelService::class.java).setAction(ACTION_STOP))
+@@ -118,6 +120,11 @@
+     private var safeMasks = false
+ 
+     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
++        if (intent?.action == ACTION_REPAIR_TELEGRAM) {
++            if (Tunnel.status.value.state == Tunnel.State.CONNECTED) repairTelegramRoute(manual = true)
++            else if (Tunnel.status.value.state == Tunnel.State.IDLE || Tunnel.status.value.state == Tunnel.State.ERROR) stopSelf(startId)
++            return if (Tunnel.status.value.state == Tunnel.State.CONNECTED) START_STICKY else START_NOT_STICKY
++        }
+         if (BuildConfig.DEBUG) {
+             val command = when { intent?.getBooleanExtra("e2e_chain_check",false)==true -> "chain"; intent?.action==ACTION_STOP -> "stop"; intent?.action==ACTION_PAUSE -> "pause"; intent?.action==ACTION_START -> "start"; else -> "sticky" }
+             Log.i("E2E", "service command=$command state=${Tunnel.status.value.state}")
+@@ -226,6 +233,7 @@
+         lastSoft = keepTun
+         teardown(null, keepTun)
+         Store.init(this); Actions.init(this)
++        com.vlesscardvpn.core.ConnectionPassport.clear()
+         val prev = Tunnel.status.value
+         Tunnel.status.value = if (keepTun && prev.state == Tunnel.State.CONNECTED) prev.copy(check = "Переподключаюсь без разрыва VPN…", checkOk = null)
+             else Tunnel.Status(Tunnel.State.CONNECTING, "Подключение…")
+@@ -484,6 +492,7 @@
+             }
+             // A SOCKS HTTPS success uses remote name resolution and does not prove
+             // Android apps' UDP DNS path. Never show a healthy VPN on that evidence alone.
++            val httpsReachable = p.works
+             val dnsOk = if (p.works && !st.proxyOnly) com.vlesscardvpn.core.CancellableProbe.run { bind ->
+                 Tester.dnsViaSocks(port, auth.user, auth.pass, budgetMs = 3000, onCancel = bind)
+             } else st.proxyOnly
+@@ -510,6 +519,7 @@
+                 st.mode == Mode.AUTO && p.tgOk == null -> null
+                 else -> true
+             }
++            com.vlesscardvpn.core.ConnectionPassport.full(httpsReachable, if(st.proxyOnly || !httpsReachable) null else dnsOk, p.tgOk, p.ytOk)
+             Tunnel.status.value = cur.copy(check = text, checkOk = liveHealthy)
+             if (attributeServers) runCatching { val stv = Store.state.value; com.vlesscardvpn.core.Brain.lived(sampledNet, sampledServers, { stv.state(it) }, p.works); com.vlesscardvpn.core.Brain.save(this@TunnelService) }
+             Log.i("E2E", "check ok=${p.works} ms=${p.realMs} big=${p.bigOk} yt=${p.ytOk} tg=${p.tgOk} err=${p.error} warp=$warp dns=$dnsOk")
+@@ -561,6 +571,7 @@
+             while(isActive && Tunnel.status.value.state == Tunnel.State.CONNECTED) {
+                 val settings=Store.state.value.settings
+                 if(!com.vlesscardvpn.core.AutoChainLivePolicy.enabled(settings)) return@launch
++                if(com.vlesscardvpn.core.SessionHold.active()) {delay(5000);continue}
+                 if(android.os.SystemClock.elapsedRealtime()<chainScanAfter || asleep() || com.vlesscardvpn.core.GameSession.active() ||
+                     !com.vlesscardvpn.core.PhonePower.refresh(this@TunnelService).let {it.allowLight && !it.deferTraffic} ||
+                     healJob?.isActive==true || Actions.deepPending) {delay(30_000);continue}
+@@ -573,7 +584,7 @@
+                     val handle=Net.underlying(this@TunnelService)?.toString()
+                     val epoch=chainEpoch.get()
+                     val settingsKey=com.vlesscardvpn.core.AutoChainRunner.settingsKey(settings)
+-                    fun generation():Long = if(core===observedCore && Net.key(this@TunnelService)==net &&
++                    fun generation():Long = if(!com.vlesscardvpn.core.SessionHold.active() && core===observedCore && Net.key(this@TunnelService)==net &&
+                         Net.underlying(this@TunnelService)?.toString()==handle &&
+                         com.vlesscardvpn.core.AutoChainRunner.settingsKey(Store.state.value.settings)==settingsKey) chainEpoch.get() else Long.MIN_VALUE
+                     val set=dpi ?: return@withLock
+@@ -809,6 +820,7 @@
+         maintenanceJob = scope.launch {
+             try {
+                 while (current()) {
++                    if (com.vlesscardvpn.core.SessionHold.active()) { delay(5000); continue }
+                     val remaining = com.vlesscardvpn.core.MaintenanceReconnectPolicy.remaining(
+                         android.os.SystemClock.elapsedRealtime(), connectedElapsed)
+                     if (remaining > 0) { delay(remaining); continue }
+@@ -825,7 +837,7 @@
+                         continue
+                     }
+                     lock.withLock {
+-                        if (current()) {
++                        if (current() && !com.vlesscardvpn.core.SessionHold.active()) {
+                             if (BuildConfig.DEBUG) Log.i("E2E", "maintenance applying=soft")
+                             // teardown must not cancel the coroutine performing this reconnect.
+                             maintenanceJob = null
+@@ -845,6 +857,7 @@
+             delay(firstDelay)
+             var calm = 0
+             while (Tunnel.status.value.state == Tunnel.State.CONNECTED) {
++                if (com.vlesscardvpn.core.SessionHold.active()) { delay(5000); continue }
+                 while (asleep() && Tunnel.status.value.state == Tunnel.State.CONNECTED) delay(60_000) // no re-tests while the phone sleeps
+                 // Starting test cores/downloads is itself load, even when their resulting reconnect is deferred.
+                 val startupRemaining = com.vlesscardvpn.core.MaintenanceReconnectPolicy.remaining(
+@@ -869,7 +882,7 @@
+                 val reconnect = result || pending
+                 // the user is in a call / watching video: wait a minute; still busy → skip, the next pass decides again
+                 val busyNow = reconnect && userActive() && run { Log.i("E2E", "optimize: user is busy — switch postponed"); delay(60_000); userActive() }
+-                if (reconnect && !busyNow && Tunnel.status.value.state == Tunnel.State.CONNECTED) {
++                if (reconnect && !busyNow && !com.vlesscardvpn.core.SessionHold.active() && Tunnel.status.value.state == Tunnel.State.CONNECTED) {
+                     Log.i("E2E", "optimize: switching to faster servers")
+                     lock.withLock { connect(soft = true) }
+                 }
+@@ -933,6 +946,7 @@
+                 if (core !== sampledCore || Tunnel.socks != auth || Net.key(this@TunnelService) != network ||
+                     Net.underlying(this@TunnelService)?.toString() != handle) { telegramMiss = 0; continue }
+                 val ok = live.works
++                com.vlesscardvpn.core.ConnectionPassport.light(ok,live.tgOk,checkTelegram)
+                 if (ok && checkTelegram) {
+                     val wasFailing = telegramMiss > 0
+                     telegramMiss = when (live.tgOk) { true -> 0; false -> telegramMiss + 1; null -> telegramMiss }
+@@ -966,7 +980,11 @@
+                 }
+                 if (ok && vpnMode) {
+                     // the proxy works, but do apps? DNS the way apps ask it, and traffic through the TUN in both directions
+-                    dnsMiss = if (Tester.dnsViaSocks(port, auth.user, auth.pass) || Tester.dnsViaSocks(port, auth.user, auth.pass, "cloudflare.com")) 0 else dnsMiss + 1
++                    val dnsHealthy = Tester.dnsViaSocks(port, auth.user, auth.pass) || Tester.dnsViaSocks(port, auth.user, auth.pass, "cloudflare.com")
++                    if (core !== sampledCore || Tunnel.socks != auth || Net.key(this@TunnelService) != network ||
++                        Net.underlying(this@TunnelService)?.toString() != handle) continue
++                    com.vlesscardvpn.core.ConnectionPassport.dns(dnsHealthy)
++                    dnsMiss = if (dnsHealthy) 0 else dnsMiss + 1
+                     val now = TProxyService.stats()
+                     stall = if (Tester.tunStalled(stats, now)) stall + 1 else 0
+                     stats = now
+@@ -1041,11 +1059,18 @@
+ 
+     private var telegramRepairAt = -60_000L
+     /** Isolate bad members instead of restarting the same aggregate pool indefinitely. */
+-    private fun repairTelegramRoute() {
++    private fun repairTelegramRoute(manual: Boolean = false) {
++        val settings = Store.state.value.settings
++        if (settings.mode != Mode.AUTO || settings.torAll || usedChain != null ||
++            settings.torRouting && "telegram" in settings.services) {
++            if (manual) android.widget.Toast.makeText(this,"Эта кнопка предназначена для обычного Авто без Tor-маршрута Telegram",android.widget.Toast.LENGTH_LONG).show()
++            return
++        }
++        if (manual && Actions.running.value) return
+         if (recoveryJob?.isActive == true || tun == null || Tunnel.socks == null) return
+         if (com.vlesscardvpn.core.PhonePower.isVoiceCallActive(this)) return
+         val now = android.os.SystemClock.elapsedRealtime()
+-        if (now - telegramRepairAt < 60_000L) return
++        if (now - telegramRepairAt < if (manual) 10_000L else 60_000L) return
+         telegramRepairAt = now
+         val sampledCore = core
+         val auth = Tunnel.socks
+@@ -1054,7 +1079,7 @@
+         recoveryJob = scope.launch {
+             val before = Tunnel.status.value
+             Tunnel.status.value = before.copy(check = "Telegram не отвечает — проверяю серверы отдельно и ищу резерв", checkOk = false)
+-            val found = try { Store.busy { Actions.repairTelegram(servers) } }
++            val found = try { Store.busy { Actions.repairTelegram(servers, preferAlternative = manual) } }
+                 catch (e: kotlinx.coroutines.CancellationException) { throw e }
+                 catch (e: Exception) { Log.w(TAG, "Telegram repair failed", e); 0 }
+             if (core !== sampledCore || Tunnel.socks != auth || Net.key(this@TunnelService) != network ||
+@@ -1214,6 +1239,8 @@
+ 
+     private fun teardown(error: String?, keepTun: Boolean = false) {
+         maintenanceJob?.cancel(); maintenanceJob = null
++        com.vlesscardvpn.core.ConnectionPassport.clear()
++        if (error != null) com.vlesscardvpn.core.SessionHold.clear()
+         if (BuildConfig.DEBUG) Log.i("E2E", "teardown state=${Tunnel.status.value.state} keepTun=$keepTun reason=${if(error == null) "restart" else if(error.isEmpty()) "stop" else "error"}")
+         chainJob?.cancel();chainJob=null;usedChain=null
+         if(error != null || !keepTun) { chainReserves.clear();chainChoice=null;chainEpoch.incrementAndGet() }
+--- /dev/null
++++ b/tools/release-gates/prepare_experimental_180.py
+@@ -0,0 +1,84 @@
++import hashlib
++import json
++import os
++from pathlib import Path
++import re
++import subprocess
++import zipfile
++from verify_candidate import CERT, PACKAGE, require, verify_package, verify_signature
++
++
++def run(*args):
++    return subprocess.check_output(args, text=True, stderr=subprocess.STDOUT)
++
++
++def prepare(root, sha, run_id, docs):
++    bt = Path(os.environ["ANDROID_HOME"]) / "build-tools/34.0.0"
++    expected = {
++        "VLESS-Card-Beta.apk": "VLESS-Card-Beta-1.2.69-experimental.apk",
++        "VLESS-Card-Beta-arm64.apk": "VLESS-Card-Beta-1.2.69-experimental-arm64.apk",
++    }
++    report = {
++        "candidate_sha": sha,
++        "run_id": str(run_id),
++        "version": "1.2.69",
++        "version_code": 180,
++        "channel": "experimental",
++        "functional_checks": {
++            "unit_tests": "not_run_by_request",
++            "lint": "not_run_by_request",
++            "emulator": "not_run_by_request",
++            "physical_device": "not_run",
++        },
++        "apks": [],
++    }
++    sums = []
++    for old_name, new_name in expected.items():
++        apk = root / old_name
++        signature = run(str(bt / "apksigner"), "verify", "--min-sdk-version", "21", "--verbose", "--print-certs", str(apk))
++        verify_signature(signature)
++        run(str(bt / "zipalign"), "-c", "-p", "4", str(apk))
++        package = run(str(bt / "aapt2"), "dump", "badging", str(apk)).splitlines()[0]
++        verify_package(package, 180)
++        manifest = run(str(bt / "aapt2"), "dump", "xmltree", str(apk), "--file", "AndroidManifest.xml")
++        for attr in ("debuggable", "testOnly"):
++            require(not re.search(rf"android:{attr}[^\n]*0xffffffff", manifest), "Debug/test-only APK")
++        require("networkSecurityConfig" not in manifest, "Unexpected release network security override")
++        with zipfile.ZipFile(apk) as archive:
++            require(archive.testzip() is None, "Corrupt APK archive")
++            abi = "x86_64" if old_name == "VLESS-Card-Beta.apk" else "arm64-v8a"
++            for library in ("libTor.so", "libLyrebird.so", "libgojni.so", "libhev-socks5-tunnel.so"):
++                require(f"lib/{abi}/{library}" in archive.namelist(), f"Missing {abi} library: {library}")
++        digest = hashlib.sha256(apk.read_bytes()).hexdigest()
++        new_path = root / new_name
++        apk.rename(new_path)
++        report["apks"].append({
++            "file": new_name,
++            "sha256": digest,
++            "certificate_sha256": CERT,
++            "package": package,
++        })
++        sums.append(f"{digest}  {new_name}")
++    (root / "verification.json").write_text(json.dumps(report, indent=2) + "\n")
++    (root / "SHA256SUMS-Beta.txt").write_text("\n".join(sums) + "\n")
++    notice = f"""# Experimental prerelease — functional checks skipped
++
++This is an experimental build, not a stable release. Unit tests, lint, emulator checks and physical-device checks were not run by request. The release job compiled the app, signed both APKs, verified the persistent Beta certificate and checked APK package integrity.
++
++Commit: `{sha}`  
++Build: https://github.com/Bugaga31/vless-card-vpn/actions/runs/{run_id}  
++Package: `{PACKAGE}`, version 1.2.69, code 180.  
++The attached `verification.json` and `SHA256SUMS-Beta.txt` identify the exact signed files.
++
++Local passport outcomes are scoped probes, not a guarantee of account login, all Telegram DCs, media, calls, or the full application TUN path. Optional optimization hold never disables emergency healing. All functional checks were omitted by owner request.
++
++---
++
++"""
++    (root / "notes-experimental.md").write_text(notice + docs.read_text())
++
++
++if __name__ == "__main__":
++    require(os.environ.get("GITHUB_REPOSITORY") == "Bugaga31/vless-card-vpn", "Wrong repository")
++    require(os.environ.get("GITHUB_REF") == "refs/heads/experiment/prerelease-180", "Wrong experimental branch")
++    prepare(Path("release"), os.environ["CANDIDATE_SHA"], os.environ["GITHUB_RUN_ID"], Path("docs/release-1.2.69.md"))
+--- /dev/null
++++ b/docs/release-1.2.69.md
+@@ -0,0 +1,12 @@
++# VLESS Card 1.2.69 · Experimental — управление и прозрачность Авто
++
++## Новые инструменты на главном экране
++- «Починить Telegram»: в обычном Авто запускает ограниченную отдельную проверку текущего сервера и резервов. При ручном запросе предпочитает другой прямо сейчас подтверждённый маршрут, если такой найден. Не трогает аккаунт Telegram, не включает прямой обход и не перезапускает обычное подключение через общий ACTION_START.
++- «Без фонового ускорения 30 мин»: временно приостанавливает фоновое сравнение/скоростную оптимизацию, исследование цепочек и необязательные maintenance-переподключения. VPN, проверка доступности, смена физической сети и аварийное восстановление остаются активны. Это не гарантия отсутствия любого переподключения при сбое. Можно снять паузу вручную; состояние только в памяти процесса.
++- «Паспорт соединения»: отдельные результаты HTTPS, DNS через SOCKS UDP, sampled Telegram MTProto и sampled YouTube media. Неопределённый результат не превращается в успех; результаты старше 90 секунд помечаются устаревшими.
++- Паспорт отправляется только нажатием «Поделиться»: фиксированный JSON без адресов серверов, subscription URL, ключей, токенов, сырого журнала, названий сетей или аккаунтов. Никакой автоматической отправки.
++
++## Ограничения
++Паспорт описывает локальные пробы через SOCKS, а не независимое доказательство пути приложения через Android TUN. Проба Telegram не подтверждает авторизацию, все DC, файлы или звонки. Кнопка восстановления предназначена для обычного Авто без отдельного Tor-маршрута Telegram; защита обнаруженного звонка и ограничение частоты сохраняются. Заявления о лидерстве, монополии, гарантированной скорости и работе у всех операторов не делаются.
++
++На базе 1.2.68 сохранены single-primary, проверенные резервы, отсрочка MTProto-отказов и порог переключения по скорости. По просьбе владельца unit-тесты, lint, эмулятор и телефон не запускались. Только компиляция, подпись постоянным Beta-ключом и проверка целостности APK. Стабильный канал и старые APK не заменены.

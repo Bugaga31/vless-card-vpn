@@ -32,7 +32,17 @@ class TProxyService {
         fun start(dir: File, tun: ParcelFileDescriptor, socksPort: Int, mtu: Int, ipv4: String, ipv6: String?, user: String = "", pass: String = "", quietLogs: Boolean = false) {
             val f = File(dir, "hev-socks5-tunnel.yaml")
             f.writeText(config(socksPort, mtu, ipv4, ipv6, user, pass, quietLogs))
-            TProxyStartService(f.absolutePath, tun.fd)
+            check(TProxyStartService(f.absolutePath, tun.fd)) { "Не удалось запустить мост TUN–SOCKS" }
+        }
+
+        /** Restart the userspace bridge only; the VpnService still owns and keeps its TUN fd.
+         * Reuse the established interface config and SOCKS credentials, not newly guessed values.
+         * Native tunnel_fini does not close externally supplied descriptors.
+         */
+        fun resume(dir: File, tun: ParcelFileDescriptor) {
+            val f = File(dir, "hev-socks5-tunnel.yaml")
+            check(f.isFile) { "Нет конфигурации моста TUN–SOCKS" }
+            check(TProxyStartService(f.absolutePath, tun.fd)) { "Не удалось восстановить мост TUN–SOCKS" }
         }
 
         fun stop() { runCatching { TProxyStopService() } }

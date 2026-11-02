@@ -7,15 +7,15 @@ import java.util.concurrent.ThreadFactory
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
- * Background-priority threads for checks, mask search and saving. On Dispatchers.IO / Default they ran at the same
- * priority as the UI thread, so thousands of probes made taps, scrolling and «Подключить» stutter.
+ * Bounded app-priority executors. Explicit checks are no longer deprioritized for other applications.
+ * ProbeConcurrencyPolicy bounds admitted routes; CPU work remains off the UI thread.
  */
 object Bg {
     private val n = AtomicInteger()
     private fun factory(name: String) = ThreadFactory { r ->
         Thread({
-            // THREAD_PRIORITY_BACKGROUND = 10; plain JVM (unit tests) has no android.os.Process
-            runCatching { android.os.Process.setThreadPriority(10) }
+            // Normal app priority; plain JVM (unit tests) has no android.os.Process
+            runCatching { android.os.Process.setThreadPriority(0) }
             r.run()
         }, "vc-$name-${n.incrementAndGet()}").apply { isDaemon = true }
     }
