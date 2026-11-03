@@ -24,7 +24,7 @@ object ProbeRace {
                         if (successes.get() >= stopAfter.coerceAtLeast(1) || skip(i)) {
                             reported = true; onEach(i,Tester.SKIPPED)
                         } else {
-                            val result = probe(i)
+                            val result = ProbeInFlight.trackSuspend { probe(i) }
                             val reached = accepted(result) && successes.incrementAndGet() >= stopAfter.coerceAtLeast(1)
                             reported = true; onEach(i,result)
                             if (reached) {

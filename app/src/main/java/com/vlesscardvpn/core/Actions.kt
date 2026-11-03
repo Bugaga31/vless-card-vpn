@@ -330,7 +330,9 @@ object Actions {
     // ---------- tests ----------
     /** Self-signed TLS servers: fetch and pin the certificate hash (Xray 26 has no allowInsecure). */
     suspend fun pinCertificates(servers: List<Server>): List<Server> = withContext(Bg.io) {
-        val sem = Semaphore(16) // in parallel: subscriptions have many self-signed servers, 3 s each one by one was slow
+        // In parallel: subscriptions have many self-signed servers, 3 s each one by one was slow.
+        // Follow the user's ceiling (bounded) so 100 queued pins do not serialize into ~19 s of waiting.
+        val sem = Semaphore(ProbeConcurrencyPolicy.normalize(Store.state.value.settings.probeParallel).coerceIn(16, 128))
         servers.map { s -> async { sem.withPermit {
             if (!ForegroundProbePlan.needsCertificate(s)) return@withPermit s
             val req = JSONObject().put("address", s.address).put("port", s.port).put("serverName", s.sni.ifEmpty { s.host.ifEmpty { s.address } }).put("timeoutMs", 3000)
@@ -423,7 +425,7 @@ object Actions {
         val firstWinner = java.util.concurrent.atomic.AtomicReference<Server?>(null)
         val warmPassed = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
         try {
-            Tester.real(variants, st.settings.testUrl, port, own.ports, batch = if (onFirst != null) ConnectPolicy.FIRST else batch, parallel = parallel, big = big, youtube = youtube, telegram = telegram, calls = calls, foreground = foreground, attempts = attempts, requireTelegram = st.settings.mode == Mode.AUTO && telegram, autoChecks=profile, stopAfter = stopAfter, budgetMs = budgetMs, onStarted = { i ->
+            Tester.real(variants, st.settings.testUrl, port, own.ports, batch = if (onFirst != null) ConnectPolicy.firstWave(selectedParallel) else batch, parallel = parallel, big = big, youtube = youtube, telegram = telegram, calls = calls, foreground = foreground, attempts = attempts, requireTelegram = st.settings.mode == Mode.AUTO && telegram, autoChecks=profile, stopAfter = stopAfter, budgetMs = budgetMs, onStarted = { i ->
                 if(Net.matches(app,observed)) onAttempt?.invoke(variants[i].first)
             }) { i, p ->
                 if (p == Tester.SKIPPED) return@real
@@ -1808,10 +1810,10 @@ object Actions {
             e.successes>0 && e.streak==0 && time>=e.at && time-e.at<1800000} && serviceRanks.getValue(server.id)==0 }?.id
         val firstBase=if(firstWaveOnly && readySources.isNotEmpty()) SubscriptionQueue.window(
             (proposed+readySources.sortedBy {learned[it.id] ?: Int.MAX_VALUE}).distinctBy {it.id},
-            sourceQuality.map {it.source},ConnectPolicy.FIRST,provenLeader) else proposed
+            sourceQuality.map {it.source},ConnectPolicy.firstWave(st.settings.probeParallel),provenLeader) else proposed
         val known=allEligible.filter {st.state(it).works || st.state(it).tcpMs>0}
             .sortedWith(compareBy<Server>{!st.state(it).works}.thenByDescending {st.state(it).checkedAt})
-        val first=KnownRouteQueue.merge(firstBase,known,ConnectPolicy.FIRST){it.id}
+        val first=KnownRouteQueue.merge(firstBase,known,if(firstWaveOnly) ConnectPolicy.firstWave(st.settings.probeParallel) else ConnectPolicy.FIRST){it.id}
         val cachedGood = first.filter { st.state(it).evidenceFor(net).let { e -> e.successes > 0 && e.streak == 0 && time >= e.at && time - e.at < 1800000 } }.map { it.id }.toSet()
         val ping = first.filter { it.id !in cachedGood }
         val earlyHandoff = firstWaveOnly
@@ -1829,7 +1831,7 @@ object Actions {
         val available = first.filter { (reachable[it.id] ?: -1) != 0 }.ifEmpty { first }
         val ordered = available.sortedBy { if (it.id in cachedGood || (reachable[it.id] ?: -1) > 0) 0 else 1 }
         // First connect as soon as one real HTTPS route passes; compare the remaining candidates after the tunnel is up.
-        val shortlist = ServerChoice.diverse(ordered, ConnectPolicy.shortlistLimit(firstWaveOnly))
+        val shortlist = ServerChoice.diverse(ordered, ConnectPolicy.shortlistLimit(firstWaveOnly, st.settings.probeParallel))
         val passed = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
         val firstFired = java.util.concurrent.atomic.AtomicBoolean(false)
         val firstCallback: ((Server) -> Unit)? = onFirst?.let { callback -> { server ->

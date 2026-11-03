@@ -10,6 +10,7 @@ import com.vlesscardvpn.core.Store
 class VlessApplication : Application() {
     override fun onCreate() {
         super.onCreate()
+        com.vlesscardvpn.core.ProbeConcurrencyPolicy.initDevice(android.os.Process.is64Bit())
         Store.init(this)
         Actions.init(this)
         com.vlesscardvpn.core.PhonePower.start(this)

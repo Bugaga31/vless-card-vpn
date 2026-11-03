@@ -29,6 +29,9 @@ object ConnectPolicy {
     const val NEXT = 20
     const val BACKGROUND = 24
     fun shortlistLimit(foreground: Boolean) = if (foreground) FIRST else AutoEligibility.TOP
+    /** First foreground wave: never fewer than [FIRST], and wide enough for the user's simultaneous ceiling. */
+    fun firstWave(selected: Int) = maxOf(FIRST, minOf(ProbeConcurrencyPolicy.normalize(selected), ProbeConcurrencyPolicy.deviceCeiling))
+    fun shortlistLimit(foreground: Boolean, selected: Int) = if (foreground) firstWave(selected) else AutoEligibility.TOP
     fun candidates(list: List<Server>, cloud: List<Server>, remembered: Set<String>,
                    cooling: (Server) -> Boolean = { false }, serviceRank: (Server) -> Int = { 1 },
                    recoveryProbeLimit: Int = 1, score: (Server) -> Int): List<Server> {

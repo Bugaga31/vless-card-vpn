@@ -8,7 +8,7 @@ class ForegroundWiring(unittest.TestCase):
   self.assertIn('Tester.fastFilter(ping, foreground = true)',a)
   self.assertIn('minOf(parallel.coerceAtLeast(1),ProbeConcurrencyPolicy.normalize(Store.state.value.settings.probeParallel))',t)
   policy=(ROOT/'core/ProbeConcurrencyPolicy.kt').read_text()
-  self.assertIn('minOf(requested.coerceAtLeast(1),normalize(selected))',policy)
+  self.assertIn('minOf(requested.coerceAtLeast(1),normalize(selected),deviceCeiling)',policy)
  def test_actual_probe_limit_matches_foreground_message(self):
   a=(ROOT/'core/Actions.kt').read_text();t=(ROOT/'core/Tester.kt').read_text()
   self.assertIn('foreground = firstWaveOnly',a);self.assertIn('calls = calls, foreground = foreground',a)

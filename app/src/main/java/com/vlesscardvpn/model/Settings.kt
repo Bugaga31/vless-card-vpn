@@ -184,7 +184,7 @@ data class Settings(
     fun toJson(): JSONObject = JSONObject().put("mode", mode.name).put("balance", balance.name).put("socksPort", socksPort)
         .put("autoChecks", JSONArray(autoChecks.sorted()))
         .put("customCheckDomains", JSONArray(customCheckDomains))
-        .put("probeParallel", com.vlesscardvpn.core.ProbeConcurrencyPolicy.normalize(probeParallel))
+        .put("probeParallel", com.vlesscardvpn.core.ProbeConcurrencyPolicy.normalize(probeParallel)).put("probeParallelSchema", com.vlesscardvpn.core.ProbeConcurrencyPolicy.SCHEMA)
         .put("autoLatencyMinMs", autoLatencyMinMs).put("autoLatencyMaxMs", autoLatencyMaxMs).put("autoLatencyPresetVersion", com.vlesscardvpn.core.AutoLatencyRange.PRESET_VERSION)
         .put("ruAllDirect", ruAllDirect).put("ruWhitelist", ruWhitelist).put("ruDirect", ruDirect).put("blockAds", blockAds).put("blockTrackers", blockTrackers).put("byeDpiArgs", byeDpiArgs).put("byeDpiSni", byeDpiSni)
         .put("hybridDomains", JSONArray(hybridDomains)).put("testUrl", testUrl).put("dnsUrl", dnsUrl).put("dnsAuto", dnsAuto)
@@ -256,7 +256,9 @@ data class Settings(
                     o.optJSONArray("autoChecks")?.let {a->(0 until a.length()).map {a.optString(it)}}.orEmpty()).selected
                     else com.vlesscardvpn.core.AutoCheckProfile.defaults,
                 customCheckDomains = list("customCheckDomains", emptyList()).mapNotNull(com.vlesscardvpn.core.SiteCheckCatalog::domain).distinct().take(100),
-                probeParallel = com.vlesscardvpn.core.ProbeConcurrencyPolicy.normalize(o.optInt("probeParallel", com.vlesscardvpn.core.ProbeConcurrencyPolicy.DEFAULT)),
+                probeParallel = com.vlesscardvpn.core.ProbeConcurrencyPolicy.migrate(
+                    if(o.has("probeParallel")) o.optInt("probeParallel", com.vlesscardvpn.core.ProbeConcurrencyPolicy.DEFAULT) else null,
+                    o.optInt("probeParallelSchema", 0)),
                 autoLatencyMinMs = latency.min,
                 autoLatencyMaxMs = latency.max,
                 ruAllDirect = o.optBoolean("ruAllDirect", d.ruAllDirect), ruWhitelist = o.optBoolean("ruWhitelist", d.ruWhitelist), ruDirect = o.optBoolean("ruDirect", d.ruDirect), blockAds = o.optBoolean("blockAds", d.blockAds), blockTrackers = o.optBoolean("blockTrackers", d.blockTrackers),
