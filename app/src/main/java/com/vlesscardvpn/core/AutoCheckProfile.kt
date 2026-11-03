@@ -36,7 +36,7 @@ object AutoChecks {
     fun accepts(p:Probe)=current.accepts(p,AutoLatencyPolicy.MAX_MS)
     fun key(profile:AutoCheckProfile,maxMs:Int)=profile.key+"@"+maxMs+(if(profile.discord) "|discord-hello-v1" else "")+
         (if(profile.youtube) "|youtube-access-v5" else "")+(if(profile.voice) "|udp-availability-v2" else "")+
-        (if(profile.stability) "|telegram-series-v2" else "")+(if(profile.sites.isNotEmpty()) "|site-https-v1" else "")+(if(profile.instagram) "|instagram-web-v1" else "")
+        (if(profile.stability) "|telegram-series-v3" else "")+(if(profile.sites.isNotEmpty()) "|site-https-v1" else "")+(if(profile.instagram) "|instagram-web-v1" else "")
     fun stamp(p:Probe,profile:AutoCheckProfile,maxMs:Int):String = when {
         profile.accepts(p,maxMs)->key(profile,maxMs)
         (profile.accepts(p,Int.MAX_VALUE) || p.latencyOnlyOk && profile.accepts(p.latencyConsented(),Int.MAX_VALUE))->key(profile,Int.MAX_VALUE)

@@ -226,9 +226,8 @@ object Tester {
             // Telegram future consumes the same deadline, never a fresh per-service budget.
             val stabilityF = if(autoChecks?.stability==true) tgExecutor.submit<StabilitySeriesProbe.Result> {
                 val first=ProbeTasks.await(tgF,remaining(),TelegramProbe.Result(null,0))
-                StabilitySeriesProbe.collect(LinkStabilityPolicy.Sample(first.ok,first.ms),::remaining,AutoLatencyPolicy.MAX_MS) { allowance ->
-                    val x=TelegramProbe.measure(port,allowance,onCancel)
-                    LinkStabilityPolicy.Sample(x.ok,x.ms)
+                StabilitySeriesProbe.collectTelegram(first,::remaining,AutoLatencyPolicy.MAX_MS) { allowance, target ->
+                    TelegramProbe.measureTarget(port,allowance,onCancel,target)
                 }
             }.also {tasks+=it} else null
             var best = Long.MAX_VALUE; var err = ""

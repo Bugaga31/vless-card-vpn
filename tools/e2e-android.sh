@@ -139,10 +139,19 @@ run_case() { # $1 name, $2 state, $3 seconds to wait for the connect result
     # Preserve the complete startup history. Require a new Activity for each of six
     # rotations; reusing an old log line would falsely pass a missing recreation.
     adb shell settings put system accelerometer_rotation 0
+    # Bounded aggregate memory only: no raw dumps, app identifiers or user content.
+    # Capture before the first rotation and on failure, without changing any gate.
+    memory_snapshot() {
+      { timeout 5s adb shell cat /proc/meminfo 2>/dev/null || true
+        printf '\n--- SYSTEM_SERVER ---\n'
+        timeout 5s adb shell dumpsys meminfo system 2>/dev/null || true
+      } | python3 tools/e2e/summarize_system_memory.py "$1" >> "$W/failure-single-memory.txt"
+    }
+    memory_snapshot before-rotation
     for rotation in 1 0 1 0 1 0; do
       before=$(logcount 'fixture activity restored')
       adb shell settings put system user_rotation "$rotation"
-      waitlog_after "fixture activity restored" "$before" 20 >/dev/null || fail "single: rotation $rotation did not recreate Activity"
+      waitlog_after "fixture activity restored" "$before" 20 >/dev/null || { memory_snapshot after-rotation-failure; fail "single: rotation $rotation did not recreate Activity"; }
     done
     sleep 2
     LC=$(adb logcat -d -s E2E:I)
