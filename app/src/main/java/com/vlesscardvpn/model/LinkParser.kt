@@ -82,15 +82,18 @@ object LinkParser {
     }
 
     private fun vmess(link: String, source: String): Server? {
-        val json = Base64.decodeToString(link.substringAfter("://").substringBefore('#')) ?: return null
+        val payload = link.substringAfter("://").substringBefore('#').substringBefore('?').trim()
+        val json = Base64.decodeToString(payload) ?: return null
         val o = JSONObject(json)
         val net = o.optString("net", "tcp").lowercase().let { if (it == "http") "h2" else if (it == "splithttp") "xhttp" else it.ifEmpty { "tcp" } }
         val tls = o.optString("tls").lowercase().let { if (it == "none") "" else it }
+        val q = if ('?' in link.substringAfter("://")) query(link.substringAfter("?").substringBefore('#')) else emptyMap()
         return Server(
-            name = o.optString("ps").ifEmpty { o.optString("add") }, protocol = "vmess", address = o.optString("add"),
-            port = o.optString("port").toInt(), secret = o.optString("id"), method = o.optString("scy", "auto").ifEmpty { "auto" },
-            network = net, security = tls, sni = o.optString("sni"), fp = o.optString("fp"), alpn = o.optString("alpn"),
-            host = o.optString("host"), path = if (net == "grpc") "" else o.optString("path"),
+            name = (o.optString("ps").ifEmpty { q["remarks"].orEmpty() }).ifEmpty { o.optString("add") }, protocol = "vmess", address = o.optString("add"),
+            port = (o.optString("port").toDoubleOrNull()?.toInt() ?: o.optString("port").toIntOrNull() ?: return null),
+            secret = o.optString("id"), method = o.optString("scy", "auto").ifEmpty { "auto" },
+            network = net, security = tls, sni = o.optString("sni", q["sni"].orEmpty()), fp = o.optString("fp"), alpn = o.optString("alpn"),
+            host = o.optString("host", q["host"].orEmpty()), path = if (net == "grpc") "" else o.optString("path", q["path"].orEmpty()),
             serviceName = if (net == "grpc") o.optString("path") else "", headerType = o.optString("type").let { if (it == "none") "" else it },
             mode = if (net == "xhttp") o.optString("type") else "", source = source,
         )
