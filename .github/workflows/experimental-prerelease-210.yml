@@ -1,0 +1,140 @@
+name: Experimental prerelease 1.2.99 (targeted JVM)
+on:
+  push:
+    branches: ['experiment/prerelease-210-release']
+permissions:
+  contents: read
+env:
+  VERSION: beta-build-210
+concurrency:
+  group: experimental-prerelease-210
+  cancel-in-progress: true
+jobs:
+  source:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      sha: ${{ steps.source.outputs.sha }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+      - id: source
+        shell: python
+        run: |
+          import base64,gzip,json,pathlib,subprocess,os
+          assert os.environ["GITHUB_REF"]=="refs/heads/experiment/prerelease-210-release"
+          subprocess.run(["git","merge-base","--is-ancestor","8d73b811493f5b4ca890ca740738e938a1f7e031","HEAD"],check=True)
+          p=json.loads(gzip.decompress(base64.b64decode("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")))
+          patch=p["patch"].encode()
+          assert __import__('hashlib').sha256(patch).hexdigest()=="3c25938520eb4c8247379d510b0a23a72f4800956bbbefca4805663fbd746e8c"
+          if not pathlib.Path("app/src/main/java/com/vlesscardvpn/core/ProbeConcurrencyPolicy.kt").exists():
+              subprocess.run(["git","apply","--check","-"],input=patch,check=True)
+              subprocess.run(["git","apply","-"],input=patch,check=True)
+              for name,content in p["files"].items():
+                  f=pathlib.Path(name);f.parent.mkdir(parents=True,exist_ok=True);f.write_text(content)
+              subprocess.run(["git","add","app/src","docs/release-1.2.99.md","tools/release-gates/prepare_experimental_210.py"],check=True)
+              subprocess.run(["git","-c","user.name=github-actions[bot]","-c","user.email=41898282+github-actions[bot]@users.noreply.github.com","commit","-m","feat: selectable route probe concurrency with default five [skip ci]"],check=True)
+              subprocess.run(["git","push","origin","HEAD:experiment/prerelease-210-release"],check=True)
+          sha=subprocess.check_output(["git","rev-parse","HEAD"],text=True).strip()
+          with open(os.environ["GITHUB_OUTPUT"],"a") as f:f.write("sha="+sha+"\n")
+  build:
+    needs: source
+    if: github.repository == 'Bugaga31/vless-card-vpn' && github.ref == 'refs/heads/experiment/prerelease-210-release'
+    runs-on: ubuntu-latest
+    timeout-minutes: 65
+    env:
+      CANDIDATE_SHA: ${{ needs.source.outputs.sha }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ needs.source.outputs.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407
+        with:
+          packages: platform-tools platforms;android-34 build-tools;34.0.0
+          log-accepted-android-sdk-licenses: false
+      - uses: gradle/actions/setup-gradle@d9c87d481d55275bb5441eef3fe0e46805f9ef70
+      - name: Restore native libraries
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: |
+            app/build/generated/byedpi
+            app/build/generated/hev
+            app/build/generated/byedpi-cache.json
+            app/build/generated/hev-cache.json
+          key: native-${{ runner.os }}-${{ runner.arch }}-ndk27.2.12479018-api24-all-${{ hashFiles('native/**', 'app/build.gradle.kts') }}
+      - name: Install pinned NDK
+        run: sdkmanager 'ndk;27.2.12479018'
+      - name: Compile release APKs and targeted JVM regressions
+        run: |
+          export GITHUB_RUN_NUMBER=210
+          chmod +x gradlew
+          ./gradlew -PbetaPreview=true -PemulatorAbis=true -PsplitAbi=true --no-daemon --max-workers=2 :app:assembleRelease :app:testDebugUnitTest --tests "*ProbeConcurrencyR210Test" --tests "*ForegroundAutoR176Test" --tests "*PoolLatencyR203Test" --tests "*PhoneRuntimePolicyTest" --tests "*PowerRoutingR192Test" --tests "*AutoCheckProfileR209Test" --tests "*PowerPolicy*"
+      - name: Sign with persistent Beta key
+        env:
+          KS_B64: ${{ secrets.BETA_KEYSTORE_B64 }}
+          KSP: ${{ secrets.BETA_KEYSTORE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          umask 077
+          trap 'rm -f beta.jks aligned.apk release/*.idsig' EXIT INT TERM
+          BT=$ANDROID_HOME/build-tools/34.0.0
+          echo "$KS_B64" | base64 -d > beta.jks
+          mkdir -p release
+          OUT=app/build/outputs/apk/release
+          sign() {
+            $BT/zipalign -f -p 4 "$1" aligned.apk
+            $BT/apksigner sign --ks beta.jks --ks-key-alias beta --ks-pass env:KSP --key-pass env:KSP \
+              --v1-signing-enabled true --v2-signing-enabled true --v3-signing-enabled true \
+              --min-sdk-version 21 --out "$2" aligned.apk
+          }
+          sign "$OUT/app-universal-release-unsigned.apk" release/VLESS-Card-Beta.apk
+          sign "$OUT/app-arm64-v8a-release-unsigned.apk" release/VLESS-Card-Beta-arm64.apk
+          rm -f beta.jks aligned.apk release/*.idsig
+      - name: Verify persistent signature and signed package integrity
+        shell: bash
+        run: |
+          set -o pipefail
+          python3 tools/release-gates/prepare_experimental_210.py 2>&1 | tee "$RUNNER_TEMP/package-check.log" || {
+            python3 -c 'import pathlib,os; s=pathlib.Path(os.environ["RUNNER_TEMP"],"package-check.log").read_text()[-5000:]; print("::error title=Package integrity check failed::"+s.replace("%","%25").replace("\n","%0A").replace("\r","%0D"))'
+            exit 1
+          }
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: beta-apk
+          path: release/
+  publish-experimental:
+    needs: [source, build]
+    if: github.repository == 'Bugaga31/vless-card-vpn' && github.ref == 'refs/heads/experiment/prerelease-210-release'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: beta-apk
+          path: release
+      - name: Publish experimental prerelease only
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_SHA: ${{ needs.source.outputs.sha }}
+        run: |
+          set -euo pipefail
+          CURRENT=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/experiment/prerelease-210-release" --jq .object.sha)
+          test "$CURRENT" = "$CANDIDATE_SHA" || { echo 'Candidate branch moved; publication stopped'; exit 1; }
+          gh release create beta-v1.2.99-experimental \
+            release/VLESS-Card-Beta-1.2.99-experimental.apk \
+            release/VLESS-Card-Beta-1.2.99-experimental-arm64.apk \
+            release/SHA256SUMS-Beta.txt release/verification.json \
+            --repo "$GITHUB_REPOSITORY" --target "$CANDIDATE_SHA" \
+            --prerelease --latest=false --title 'VLESS Card 1.2.99 · Experimental — проверки серверов' \
+            --notes-file release/notes-experimental.md
+
+# Experimental release: targeted JVM and package checks; no device/UI claims.

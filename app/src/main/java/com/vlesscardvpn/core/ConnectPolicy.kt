@@ -4,23 +4,46 @@ import com.vlesscardvpn.model.Server
 
 /** Bounded foreground discovery. Cloud is a hint; only a phone-side HTTPS success can start the tunnel. */
 object ConnectPolicy {
-    const val QUICK_BUDGET_MS = 3500L
+    const val QUICK_BUDGET_MS = 4500L
+    val FIRST_PROBE_MS: Long get() = maxOf(1800L, AutoLatencyPolicy.MAX_MS.toLong()+100L)
+    data class FastStart(val candidates: Int, val parallel: Int, val stopAfter: Int, val budgetMs: Long)
+    fun fastStart(background: Boolean = false) = FastStart(
+        candidates = if (background) 3 else FIRST,
+        parallel = if (background) 2 else 8,
+        stopAfter = 1,
+        budgetMs = if (background) 1800L else QUICK_BUDGET_MS,
+    )
+    fun requiresBodyProof(earlyHandoff: Boolean) = !earlyHandoff
+    fun requiresTcpFilter(earlyHandoff: Boolean) = !earlyHandoff
     class StartGate {
         private val taken = java.util.concurrent.atomic.AtomicBoolean()
         val started get() = taken.get()
         fun claim() = taken.compareAndSet(false, true)
+        /** Do not consume the first-start slot until a working route is committed. */
+        @Synchronized fun claimSelected(select: () -> Boolean): Boolean {
+            if (taken.get() || !select()) return false
+            return taken.compareAndSet(false, true)
+        }
     }
-    const val FIRST = 8
-    const val NEXT = 16
+    const val FIRST = 20
+    const val NEXT = 20
     const val BACKGROUND = 24
+    fun shortlistLimit(foreground: Boolean) = if (foreground) FIRST else AutoEligibility.TOP
     fun candidates(list: List<Server>, cloud: List<Server>, remembered: Set<String>,
-                   cooling: (Server) -> Boolean = { false }, score: (Server) -> Int): List<Server> {
+                   cooling: (Server) -> Boolean = { false }, serviceRank: (Server) -> Int = { 1 },
+                   recoveryProbeLimit: Int = 1, score: (Server) -> Int): List<Server> {
         val byId = list.associateBy { it.id }
+        val uniqueList = list.distinctBy { it.id }
+        val hasPossibleServiceRoute = uniqueList.any { serviceRank(it) < 2 }
+        val eligible = uniqueList // Negative service history changes priority, not membership.
         val cloudIds = cloud.mapNotNull { byId[it.id] }.map { it.id }.toSet()
-        val unique = list.distinctBy { it.id }.sortedWith(compareBy<Server> { score(it) }
+        val unique = eligible.sortedWith(compareBy<Server> { serviceRank(it) }.thenBy { score(it) }
             .thenBy { if (it.id in remembered) 0 else 1 }.thenBy { if (it.id in cloudIds) 0 else 1 })
         val (deferred, ready) = unique.partition(cooling)
         val eligibleCloud = cloud.filter { hint -> ready.any { it.id == hint.id } }
-        return PublicCloudQueue.merge(ready + deferred, eligibleCloud, list, FIRST, slots = FIRST / 2)
+        if(ready.isEmpty()) return ServerChoice.diverse(deferred,recoveryProbeLimit.coerceIn(1,3))
+        // The fallback catalog is the ready pool itself, not the unfiltered import list.
+        val ranked = PublicCloudQueue.merge(ready,eligibleCloud,ready,FIRST,slots=1)
+        return TransportExploration.merge(ranked, ready, FIRST)
     }
 }

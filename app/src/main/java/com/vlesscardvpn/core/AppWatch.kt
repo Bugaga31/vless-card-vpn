@@ -95,11 +95,13 @@ object AppWatch {
     /** Native apps are not tested by opening their marketing/web pages. */
     private fun serviceAnswer(g: Guard, port: Int): Pair<Boolean?, String> = when {
         g.title.startsWith("Telegram") -> TelegramProbe.check(port) to "MTProto"
-        g.title.startsWith("YouTube") -> Tester.youtubeMedia(port).ok to "видеоданные"
+        g.title.startsWith("YouTube") -> Tester.youtubeAccess(port).ok to "веб-доступ YouTube"
         else -> Tester.site(g.url, port).let { it.answers to it.result }
     }
 
     private suspend fun guard(pkg: String, g: Guard, opened: Boolean, reconnect: () -> Unit) {
+        val context = appCtx ?: return
+        if (PhonePower.isVoiceCallActive(context)) return
         val now = System.currentTimeMillis()
         if (!opened && now - (guardAt[pkg] ?: 0) < 120_000L) return
         if (Actions.progress.value.running) return
@@ -195,32 +197,25 @@ object AppWatch {
         if (reason != powerReason) { powerReason = reason; say("Нагрузка VPN: ${plan.reason}. Самовосстановление остаётся включено") }
     }
 
-    private suspend fun autopilot(reconnect: () -> Unit) {
+    private suspend fun autopilot(reconnect: () -> Unit, maintenanceReconnect: () -> Unit, connectedAt: () -> Long) {
         val elapsed = android.os.SystemClock.elapsedRealtime()
         if (elapsed - pilotAt < 60000) return
         pilotAt = elapsed
         val plan = appCtx?.let { PhonePower.refresh(it) } ?: return
         powerNote(plan)
-        if (plan.allowed) appCtx?.let { Updater.check(ctx = it); CloudSync.auto(it) } // hourly APK checks / 3 h private sync while VPN monitoring runs
+        val optionalAllowed = MaintenanceReconnectPolicy.mayProbe(elapsed, connectedAt(), plan.allowed)
+        if (optionalAllowed) appCtx?.let { Updater.check(ctx = it); CloudSync.auto(it) } // hourly APK checks / 3 h private sync while VPN monitoring runs
         // battery saver on or < 20 %: only what keeps the internet working (fix, switching) — no evolution, revival,
         // freeze/latency/speed checks; they come back when the phone charges
-        val eco = !plan.allowed
-        if (plan.allowLight) appCtx?.let { Report.auto(it) } // shared cloud: pull what all phones learned, send this one's report
+        val eco = !optionalAllowed
+        if (MaintenanceReconnectPolicy.mayProbe(elapsed, connectedAt(), plan.allowLight)) appCtx?.let { Report.auto(it) } // shared cloud: pull what all phones learned, send this one's report
         ecoOn = eco
         val s = Tunnel.status.value
         fails = if (s.checkOk == false) fails + 1 else 0
+        if (VoiceCallPolicy.deferRepair(plan.voiceCallActive, fails)) return
         val now = System.currentTimeMillis()
         // new network: masks that passed elsewhere may not pass here — evolve here ~15 min later instead of waiting 2 h
         val net = appCtx?.let { runCatching { Net.key(it) }.getOrNull() }.orEmpty()
-        if (!eco && net.isNotEmpty() && net != evolveNet && net.startsWith("Моб.")) {
-            // mobile network changed: are the operator's whitelists on? Then masks behind allowed sites are searched now
-            val r = Whitelist.check()
-            if (r.verdict == Whitelist.Verdict.WHITELIST) {
-                say("Автопилот: " + Whitelist.report(r).substringBefore("\nЧто").lowercase().let { "в этой сети " + it })
-                val sel = Store.state.value.selected
-                if (sel.isNotEmpty() && !Actions.progress.value.running) withContext(Dispatchers.Main) { Actions.findMasks(sel.take(4), perServer = 24) }
-            }
-        }
         if (net.isNotEmpty() && net != evolveNet) lastFreeze = now - 110 * 60_000L // new network: freeze check in ~10 min
         // mobile «заморозка» (TSPU stops downloads from hosting IPs after ~16 KB): 256 KB through the tunnel every 2 h
         if (!ecoOn && net.startsWith("Моб.") && now - lastFreeze > 2 * 3600_000L && fails == 0 && !Actions.progress.value.running) {
@@ -229,7 +224,7 @@ object AppWatch {
                 if (Diagnose.freeze(p) == Diagnose.Freeze.FROZEN && now - lastSpeedup > 30 * 60_000L) {
                     lastSpeedup = now
                     say("Автопилот: в этой сети загрузка через сервер замирает после ~16 КБ («заморозка» ТСПУ) — ищу сервер и маску, где этого нет")
-                    withContext(Dispatchers.Main) { Actions.boostYoutube() }
+                    withContext(Dispatchers.Main) { Actions.boostYoutube(maintenanceReconnect) }
                 }
             }
         }
@@ -260,27 +255,20 @@ object AppWatch {
             }
         }
         when (pilot(fails, Store.summary.value.heavyMask, Actions.progress.value.running || (Thermal.cooling || ecoOn) && fails < 2, now - lastFix, now - lastLight, now - lastEvolve, slow, now - lastSpeedup)) {
-            "speedup" -> { lastSpeedup = now; say(if (lastMbps > 0) "Автопилот: скорость всего %.1f Мбит/с — ищу серверы и маски быстрее".format(lastMbps) else "Автопилот: сайты открываются медленно (ответ ${slowMs / 1000.0} с) — ищу серверы и маски быстрее"); withContext(Dispatchers.Main) { Actions.boostYoutube() } }
+            "speedup" -> { lastSpeedup = now; say(if (lastMbps > 0) "Автопилот: скорость всего %.1f Мбит/с — ищу серверы и маски быстрее".format(lastMbps) else "Автопилот: сайты открываются медленно (ответ ${slowMs / 1000.0} с) — ищу серверы и маски быстрее"); withContext(Dispatchers.Main) { Actions.boostYoutube(maintenanceReconnect) } }
             "evolve" -> {
                 lastEvolve = now; evoN++
                 val st0 = Store.state.value
                 val sel = st0.selected
-                val m = st0.settings.mode
-                // ByeDPI strategies evolve too: always in «Без сервера», every second time in «Гибрид», in «Авто» without servers
-                if (m == com.vlesscardvpn.model.Mode.BYEDPI || m == com.vlesscardvpn.model.Mode.HYBRID && evoN % 2 == 0 || m == com.vlesscardvpn.model.Mode.AUTO && sel.isEmpty()) {
-                    say("Автопилот: эволюция обхода DPI — скрещиваю и проверяю мутантов рабочих стратегий")
-                    withContext(Dispatchers.Main) { Actions.findDpi() }
-                    delay(1000); while (Actions.progress.value.running) delay(1000)
-                    Actions.progress.value.message.takeIf { it.isNotEmpty() }?.let { say("Эволюция: $it") }
-                } else if (sel.isNotEmpty()) {
+                if (sel.isNotEmpty()) {
                     say("Автопилот: эволюция масок — скрещиваю и проверяю мутантов рабочих масок в этой сети")
                     withContext(Dispatchers.Main) { Actions.findMasks(sel.take(3), perServer = 12) }
                     delay(1000); while (Actions.progress.value.running) delay(1000)
                     Actions.progress.value.message.takeIf { it.isNotEmpty() }?.let { say("Эволюция: $it") }
                 }
             }
-            "fix" -> { lastFix = now; fails = 0; say("Автопилот: интернет через VPN пропал — чиню сам (серверы, маски, обход DPI)"); withContext(Dispatchers.Main) { Actions.fixAll { reconnect() } } }
-            "lighten" -> { lastLight = now; say("Автопилот: маска тяжёлая, видео может тормозить — ищу лёгкую"); withContext(Dispatchers.Main) { Actions.lighten() } }
+            "fix" -> { lastFix = now; fails = 0; say("Автопилот: VLESS-маршрут пропал — проверяю серверы и маскировки"); withContext(Dispatchers.Main) { Actions.fixAll { reconnect() } } }
+            "lighten" -> { lastLight = now; say("Автопилот: маска тяжёлая, видео может тормозить — ищу лёгкую"); withContext(Dispatchers.Main) { Actions.lighten(maintenanceReconnect) } }
         }
     }
 
@@ -313,7 +301,7 @@ object AppWatch {
     private fun countries(): List<String> = Store.state.value.selected.map { Countries.of(it.name) }
 
     /** Runs while the VPN is on. reconnect() re-applies the servers without dropping the tunnel. */
-    fun start(ctx: Context, reconnect: () -> Unit) {
+    fun start(ctx: Context, reconnect: () -> Unit, maintenanceReconnect: () -> Unit, connectedAt: () -> Long) {
         if (job?.isActive == true) return
         val app = ctx.applicationContext; appCtx = app
         job = CoroutineScope(SupervisorJob() + Dispatchers.Default).launch {
@@ -325,23 +313,23 @@ object AppWatch {
                     if (st.gpsSpoof && interactive(app)) GpsMock.follow(app, gpsCountry(st.country, countries())) else GpsMock.stop(app)
                     val pkg = if (st.appAware && interactive(app) && hasAccess(app)) foreground(app) else null
                     val opened = pkg != null && pkg != last
-                    if (opened) { last = pkg!!; PROFILES[pkg]?.let { if (!it.youtube || plan.allowed) handle(app, it, reconnect) } }
+                    if (opened) { last = pkg!!; PROFILES[pkg]?.let { if (!it.youtube || plan.allowed) handle(app, it, reconnect, maintenanceReconnect) } }
                     // usage events only show an app when it opens: until another one opens, the last one is still on screen
                     if (st.autopilot && last.isNotEmpty() && interactive(app)) GUARDS[last]?.let { runCatching { guard(last, it, opened, reconnect) } }
-                    if (st.autopilot) autopilot(reconnect)
+                    if (st.autopilot) autopilot(reconnect, maintenanceReconnect, connectedAt)
                     delay(plan.loopMs)
                 }
             } finally { GpsMock.stop(app); status.value = "" }
         }
     }
 
-    private suspend fun handle(app: Context, need: Need, reconnect: () -> Unit) {
+    private suspend fun handle(app: Context, need: Need, reconnect: () -> Unit, maintenanceReconnect: () -> Unit) {
         if (need.youtube) {
             val net = Net.key(app); val t = ytDone[net] ?: 0
             if (Store.state.value.settings.smartYoutube && System.currentTimeMillis() - t > 6 * 3600_000L && !Actions.progress.value.running) {
                 ytDone[net] = System.currentTimeMillis()
                 say("Открыт ${need.title}: ускоряю видео для этой сети")
-                withContext(Dispatchers.Main) { Actions.boostYoutube() }
+                withContext(Dispatchers.Main) { Actions.boostYoutube(maintenanceReconnect) }
             }
             return
         }

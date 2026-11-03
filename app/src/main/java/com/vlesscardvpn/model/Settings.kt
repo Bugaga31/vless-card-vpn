@@ -18,7 +18,14 @@ data class Settings(
     val mode: Mode = Mode.AUTO,
     val balance: Balance = Balance.LEAST_PING,
     val socksPort: Int = 10808,
-    val ruDirect: Boolean = true,
+    val autoChecks: Set<String> = com.vlesscardvpn.core.AutoCheckProfile.defaults,
+    val customCheckDomains: List<String> = emptyList(),
+    val probeParallel: Int = com.vlesscardvpn.core.ProbeConcurrencyPolicy.DEFAULT,
+    val autoLatencyMinMs: Int = 100,
+    val autoLatencyMaxMs: Int = com.vlesscardvpn.core.AutoLatencyRange.DEFAULT_MAX,
+    val ruDirect: Boolean = false,
+    val ruWhitelist: Boolean = true,
+    val ruAllDirect: Boolean = false,
     val blockAds: Boolean = true,
     /** Tracker/telemetry block + DoT port 853: apps can't bypass the app's DNS to phone home unseen. */
     val blockTrackers: Boolean = true,
@@ -27,6 +34,7 @@ data class Settings(
     /** Domains that go through ByeDPI in hybrid mode (geosite tags or domains). */
     val hybridDomains: List<String> = listOf("geosite:youtube", "geosite:discord", "geosite:twitter", "geosite:meta"),
     val testUrl: String = "https://www.gstatic.com/generate_204",
+    val dnsAuto: Boolean = true,
     val dnsUrl: String = "https://1.1.1.1/dns-query",
     val subscriptions: List<String> = DEFAULT_SUBSCRIPTIONS,
     /** DPI strategy id: [DPI_AUTO] (found for this network), "custom" (byeDpiArgs) or a built-in id. */
@@ -42,7 +50,7 @@ data class Settings(
     /** Each connect picks a random mask among the ones that passed the last search for that server. */
     val rotateMasks: Boolean = true,
     /** Russian domains resolved by Yandex DNS directly (with RU direct): RU sites see a normal Russian user. */
-    val ruDns: Boolean = true,
+    val ruDns: Boolean = false,
     /** Package names: excluded from VPN, or (if [onlyApps]) the only ones that use it. */
     val apps: List<String> = emptyList(),
     val onlyApps: Boolean = false,
@@ -60,7 +68,7 @@ data class Settings(
     /** Proxy mode: listen on 0.0.0.0 so other devices in the Wi-Fi / hotspot can use it. */
     val lanShare: Boolean = false,
     /** false = every app goes through the VPN regardless of [apps]. */
-    val perApp: Boolean = true,
+    val perApp: Boolean = false,
     /** Mask families used by the mask search (Masks.FAMILIES ids); empty = all. */
     val maskFamilies: List<String> = emptyList(),
     /** uTLS fingerprints used by the mask search; empty = all. */
@@ -73,6 +81,9 @@ data class Settings(
     val warpChain: Boolean = false,
     /** Background: get ready on app start, re-test and switch to faster servers while connected. */
     val autoOptimize: Boolean = true,
+    /** Bounded real chain comparison in Auto, with Tor only after torAuto opt-in. */
+    val autoChainSearch: Boolean = true,
+    val autoChainPurpose: String = "balanced",
     /** WARP+ keys switched off in «Ключи WARP+» (own or built-in): never tried. */
     val warpKeyOff: List<String> = emptyList(),
     /** Key → "ok@time" / "full@time" / "bad@time": what Cloudflare answered last time (see WarpKeys). */
@@ -81,23 +92,37 @@ data class Settings(
     val myMasks: List<String> = emptyList(),
     /** «Эволюция масок»: every search also tries mutants of masks that passed (MaskLab). */
     val maskEvolution: Boolean = true,
+    /** Opt-in bounded experiments, not a new UDP transport or guaranteed DPI evasion. */
+    val experimentalMaskLab: Boolean = false,
     /** Auto masks bred by MaskLab that passed somewhere (JSON, newest first, ≤ MaskLab.CAP). */
     val autoMasks: List<String> = emptyList(),
     /** Bred ByeDPI strategies (DpiEvo ids) that won a search on any network, newest first. */
     val dpiEvoPool: List<String> = emptyList(),
     /** «Оформление»: "dark", "amoled", "you" (Material You). */
     val theme: String = "dark",
+    val reducedMotion: Boolean = false,
+    val compactServers: Boolean = false,
+    val secureScreen: Boolean = false,
+    val hideServerNames: Boolean = false,
     /** DPI strategies of each network, best first (top 5 of the last search incl. evolved "EVO#" ones): fast fallback. */
     val dpiRanking: Map<String, List<String>> = emptyMap(),
     // ---- masking beyond packets (core/Disguise)
     /** Russian apps (banks, Госуслуги, маркетплейсы…) go around the VPN (VPN mode, unless «Только выбранные»). */
-    val ruAppsDirect: Boolean = true,
+    val ruAppsDirect: Boolean = false,
     /** Random TUN address on every connect and a neutral VPN session name. */
     val randomTun: Boolean = true,
     /** Now and then open an ordinary Russian site directly while connected (looks like a usual user). */
-    val coverTraffic: Boolean = true,
+    val coverTraffic: Boolean = false,
     /** Tor exit rotator (absorbed tor-rotator-vless): rotate Tor exit via the ControlPort every ~10 min while connected. */
     val torRotation: Boolean = false,
+    /** Requested NEWNYM cadence for new connections, not an IP/stream replacement guarantee. */
+    val torRotationSeconds: Int = 600,
+    val torExitCountries: String = "",
+    /** Prefer fresh, low-latency measured countries; does not certify every relay or throughput. */
+    val torFastOnly: Boolean = true,
+    val torMaxLatencyMs: Int = 2500,
+    /** Opt-in runtime Wi-Fi/cellular presets; never overwrites manual settings or bridges. */
+    val torNetworkRecommendations: Boolean = false,
     /** Services picked in settings ride the local Tor SOCKS (Tor over the tunnel), not the main proxy route. */
     val torRouting: Boolean = false,
     /** Auto mode may switch a broken service to Tor by itself (once measured routes are all dead). */
@@ -128,7 +153,7 @@ data class Settings(
     /** «Избранное»: server ids Auto always includes when they work. */
     val favorites: List<String> = emptyList(),
     /** «Умный YouTube» (Авто): YouTube through the DPI bypass straight to Google when that measured faster than the servers. */
-    val smartYoutube: Boolean = true,
+    val smartYoutube: Boolean = false,
     /** «Под приложение»: Gemini/ChatGPT → servers of a country where they work, YouTube → speed-up (needs usage access). */
     val appAware: Boolean = true,
     /** «Автопилот помощника»: repairs and lightens the connection by itself while the VPN is on. */
@@ -136,6 +161,7 @@ data class Settings(
     /** «Охлаждение»: when the phone is hot the app lowers its own load (pauses background checks, turbo, light masks). */
     val autoCool: Boolean = true,
     val phoneLearning: Boolean = true,
+    val automaticSecurityAudit: Boolean = true,
     val oceanBackground: Boolean = true,
     val oceanMotion: Boolean = true,
     val welcomeSound: Boolean = true,
@@ -156,8 +182,12 @@ data class Settings(
 ) {
     val httpPort: Int get() = if (socksPort < 65535) socksPort + 1 else socksPort - 1
     fun toJson(): JSONObject = JSONObject().put("mode", mode.name).put("balance", balance.name).put("socksPort", socksPort)
-        .put("ruDirect", ruDirect).put("blockAds", blockAds).put("blockTrackers", blockTrackers).put("byeDpiArgs", byeDpiArgs).put("byeDpiSni", byeDpiSni)
-        .put("hybridDomains", JSONArray(hybridDomains)).put("testUrl", testUrl).put("dnsUrl", dnsUrl)
+        .put("autoChecks", JSONArray(autoChecks.sorted()))
+        .put("customCheckDomains", JSONArray(customCheckDomains))
+        .put("probeParallel", com.vlesscardvpn.core.ProbeConcurrencyPolicy.normalize(probeParallel))
+        .put("autoLatencyMinMs", autoLatencyMinMs).put("autoLatencyMaxMs", autoLatencyMaxMs).put("autoLatencyPresetVersion", com.vlesscardvpn.core.AutoLatencyRange.PRESET_VERSION)
+        .put("ruAllDirect", ruAllDirect).put("ruWhitelist", ruWhitelist).put("ruDirect", ruDirect).put("blockAds", blockAds).put("blockTrackers", blockTrackers).put("byeDpiArgs", byeDpiArgs).put("byeDpiSni", byeDpiSni)
+        .put("hybridDomains", JSONArray(hybridDomains)).put("testUrl", testUrl).put("dnsUrl", dnsUrl).put("dnsAuto", dnsAuto)
         .put("subscriptions", JSONArray(subscriptions))
         .put("dpiStrategy", dpiStrategy).put("dpiRemembered", JSONObject(dpiRemembered as Map<*, *>))
         .put("stealthSocks", stealthSocks).put("blockStun", blockStun).put("blockQuic", blockQuic).put("mux", mux).put("rotateMasks", rotateMasks)
@@ -168,12 +198,12 @@ data class Settings(
         .put("maskFamilies", JSONArray(maskFamilies)).put("maskFps", JSONArray(maskFps))
         .put("warpKeys", warpKeys).put("warpBuiltinKeys", warpBuiltinKeys).put("warpChain", warpChain).put("autoOptimize", autoOptimize)
         .put("warpKeyOff", JSONArray(warpKeyOff)).put("warpKeyStatus", JSONObject(warpKeyStatus as Map<*, *>)).put("myMasks", JSONArray(myMasks))
-        .put("maskEvolution", maskEvolution).put("autoMasks", JSONArray(autoMasks)).put("dpiEvoPool", JSONArray(dpiEvoPool)).put("theme", theme)
+        .put("experimentalMaskLab",experimentalMaskLab).put("maskEvolution", maskEvolution).put("autoMasks", JSONArray(autoMasks)).put("dpiEvoPool", JSONArray(dpiEvoPool)).put("theme", theme).put("reducedMotion", reducedMotion).put("compactServers", compactServers).put("secureScreen", secureScreen).put("hideServerNames", hideServerNames)
         .put("dpiRanking", JSONObject().apply { dpiRanking.forEach { (k, v) -> put(k, JSONArray(v)) } })
-        .put("ruAppsDirect", ruAppsDirect).put("randomTun", randomTun).put("coverTraffic", coverTraffic).put("torRotation", torRotation).put("torRouting", torRouting).put("torAuto", torAuto).put("torBridge", torBridge).put("torBridgeLines", torBridgeLines).put("torDirect", torDirect).put("rev", rev).put("turbo", turbo).put("autoStart", autoStart)
+        .put("ruAppsDirect", ruAppsDirect).put("randomTun", randomTun).put("coverTraffic", coverTraffic).put("torRotation", torRotation).put("torExitCountries", torExitCountries).put("torRotationSeconds", torRotationSeconds.coerceIn(5, 86400)).put("torFastOnly", torFastOnly).put("torMaxLatencyMs", torMaxLatencyMs.coerceAtLeast(1)).put("torNetworkRecommendations", torNetworkRecommendations).put("autoChainSearch", autoChainSearch).put("autoChainPurpose", autoChainPurpose).put("torAll", torAll).put("torRouting", torRouting).put("torAuto", torAuto).put("torBridge", torBridge).put("torBridgeLines", torBridgeLines).put("torDirect", torDirect).put("rev", rev).put("turbo", turbo).put("autoStart", autoStart)
         .put("alwaysVpn", JSONArray(alwaysVpn)).put("alwaysDirect", JSONArray(alwaysDirect))
         .put("traffic", JSONObject().apply { traffic.forEach { (k, v) -> put(k, v) } }).put("monthLimitGb", monthLimitGb)
-        .put("country", country).put("favorites", JSONArray(favorites)).put("smartYoutube", smartYoutube).put("appAware", appAware).put("autopilot", autopilot).put("oceanBackground", oceanBackground).put("oceanMotion", oceanMotion).put("welcomeSound", welcomeSound).put("phoneLearning", phoneLearning).put("powerProfile", powerProfile).put("batteryThreshold", batteryThreshold).put("quietScreen", quietScreen).put("chargeOnly", chargeOnly).put("wifiMaintenance", wifiMaintenance).put("protectActiveTraffic", protectActiveTraffic).put("autoCool", autoCool).put("gpsSpoof", gpsSpoof)
+        .put("country", country).put("favorites", JSONArray(favorites)).put("smartYoutube", smartYoutube).put("appAware", appAware).put("autopilot", autopilot).put("oceanBackground", oceanBackground).put("oceanMotion", oceanMotion).put("welcomeSound", welcomeSound).put("phoneLearning", phoneLearning).put("automaticSecurityAudit", automaticSecurityAudit).put("powerProfile", powerProfile).put("batteryThreshold", batteryThreshold).put("quietScreen", quietScreen).put("chargeOnly", chargeOnly).put("wifiMaintenance", wifiMaintenance).put("protectActiveTraffic", protectActiveTraffic).put("autoCool", autoCool).put("gpsSpoof", gpsSpoof)
         .put("ytDpi", JSONObject().apply { ytDpi.forEach { (k, v) -> put(k, v) } })
         .put("netServers", JSONObject().apply { netServers.forEach { (k, v) -> put(k, JSONArray(v)) } })
         .put("subInfo", JSONObject().apply { subInfo.forEach { (k, v) -> put(k, v.toJson()) } })
@@ -182,12 +212,11 @@ data class Settings(
         /** "https://www.Site.com/path" → "site.com"; null when it is not a domain. */
         fun host(input: String): String? = input.trim().lowercase().substringAfter("://").substringBefore('/').substringBefore('?')
             .substringBefore(':').removePrefix("www.").trim('.').takeIf { Regex("^[a-z0-9а-яё-]+(\\.[a-z0-9а-яё-]+)+$").matches(it) }
-        const val REV = 75
+        const val REV = 79
         /** YouTube video, pictures and player — what «Умный YouTube» sends through the DPI bypass. */
         val YT_DOMAINS = listOf("geosite:youtube", "domain:googlevideo.com", "domain:ytimg.com", "domain:ggpht.com", "domain:youtu.be", "domain:youtube.com")
         /**
-         * Once per update, step by step (a later choice of the user is kept): 71 — all masking on (hidden proxy, QUIC off,
-         * rotating masks, evolution, behaviour layers, signature masks in the search); 72 — phone speed-up and ad blocking.
+         * Once per update, step by step; revision 76 forces every public route through the VLESS server.
          */
         fun migrate(s0: Settings): Settings {
             var s = s0
@@ -200,6 +229,10 @@ data class Settings(
             // Add the requested source once; a later removal by the user is respected.
             if (s.rev < 74 && Subs.DIMAN !in s.subscriptions) s = s.copy(subscriptions = s.subscriptions + Subs.DIMAN)
             if (s.rev < 75 && Subs.CLOUD_WORKS !in s.subscriptions) s = s.copy(subscriptions = listOf(Subs.CLOUD_WORKS) + s.subscriptions)
+            if (s.rev < 78 && s.torAll) s = com.vlesscardvpn.tor.TorConnectionPolicy.selectTor(s)
+            // Add the working requested source once, keeping manual links and later removals.
+            // Empty/unavailable sources remain opt-in in the catalog.
+            if (s.rev < 79 && Subs.OVI_FULL !in s.subscriptions) s = s.copy(subscriptions = s.subscriptions + Subs.OVI_FULL)
             return if (s.rev >= REV) s else s.copy(rev = REV)
         }
         const val DPI_AUTO = "auto"
@@ -212,14 +245,24 @@ data class Settings(
         fun mirrors(url: String): List<String> = Subs.mirrors(url)
         fun fromJson(o: JSONObject): Settings {
             val d = Settings()
+            val latency = if(o.optInt("autoLatencyPresetVersion",0)<com.vlesscardvpn.core.AutoLatencyRange.PRESET_VERSION) com.vlesscardvpn.core.AutoLatencyRange.Range()
+                else com.vlesscardvpn.core.AutoLatencyRange.safe(o.optInt("autoLatencyMinMs",100),o.optInt("autoLatencyMaxMs",com.vlesscardvpn.core.AutoLatencyRange.DEFAULT_MAX))
             fun list(k: String, def: List<String>) = o.optJSONArray(k)?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: def
             return Settings(
                 mode = runCatching { Mode.valueOf(o.getString("mode")) }.getOrDefault(d.mode),
                 balance = runCatching { Balance.valueOf(o.getString("balance")) }.getOrDefault(d.balance),
                 socksPort = o.optInt("socksPort", d.socksPort).takeIf { it in 1024..65535 } ?: d.socksPort,
-                ruDirect = o.optBoolean("ruDirect", d.ruDirect), blockAds = o.optBoolean("blockAds", d.blockAds), blockTrackers = o.optBoolean("blockTrackers", d.blockTrackers),
+                autoChecks = if(o.has("autoChecks")) com.vlesscardvpn.core.AutoCheckProfile.of(
+                    o.optJSONArray("autoChecks")?.let {a->(0 until a.length()).map {a.optString(it)}}.orEmpty()).selected
+                    else com.vlesscardvpn.core.AutoCheckProfile.defaults,
+                customCheckDomains = list("customCheckDomains", emptyList()).mapNotNull(com.vlesscardvpn.core.SiteCheckCatalog::domain).distinct().take(100),
+                probeParallel = com.vlesscardvpn.core.ProbeConcurrencyPolicy.normalize(o.optInt("probeParallel", com.vlesscardvpn.core.ProbeConcurrencyPolicy.DEFAULT)),
+                autoLatencyMinMs = latency.min,
+                autoLatencyMaxMs = latency.max,
+                ruAllDirect = o.optBoolean("ruAllDirect", d.ruAllDirect), ruWhitelist = o.optBoolean("ruWhitelist", d.ruWhitelist), ruDirect = o.optBoolean("ruDirect", d.ruDirect), blockAds = o.optBoolean("blockAds", d.blockAds), blockTrackers = o.optBoolean("blockTrackers", d.blockTrackers),
                 byeDpiArgs = o.optString("byeDpiArgs", d.byeDpiArgs), byeDpiSni = o.optString("byeDpiSni", d.byeDpiSni),
                 hybridDomains = list("hybridDomains", d.hybridDomains), testUrl = o.optString("testUrl", d.testUrl),
+                dnsAuto = o.optBoolean("dnsAuto", o.optString("dnsUrl", d.dnsUrl) == d.dnsUrl),
                 dnsUrl = o.optString("dnsUrl", d.dnsUrl), subscriptions = list("subscriptions", d.subscriptions),
                 dpiStrategy = o.optString("dpiStrategy", d.dpiStrategy),
                 dpiRemembered = o.optJSONObject("dpiRemembered")?.let { m -> m.keys().asSequence().associateWith { m.getString(it) } } ?: emptyMap(),
@@ -235,15 +278,18 @@ data class Settings(
                 warpKeyOff = list("warpKeyOff", emptyList()),
                 warpKeyStatus = o.optJSONObject("warpKeyStatus")?.let { m -> m.keys().asSequence().associateWith { m.getString(it) } } ?: emptyMap(),
                 myMasks = list("myMasks", emptyList()),
-                maskEvolution = o.optBoolean("maskEvolution", true), autoMasks = list("autoMasks", emptyList()), dpiEvoPool = list("dpiEvoPool", emptyList()), theme = o.optString("theme", "dark"),
+                experimentalMaskLab = o.optBoolean("experimentalMaskLab", false), maskEvolution = o.optBoolean("maskEvolution", true), autoMasks = list("autoMasks", emptyList()), dpiEvoPool = list("dpiEvoPool", emptyList()), theme = o.optString("theme", "dark").takeIf { it in setOf("dark","amoled","you","light","system") } ?: "dark",
+                reducedMotion = o.optBoolean("reducedMotion", false), compactServers = o.optBoolean("compactServers", false),
+                secureScreen = o.optBoolean("secureScreen", false), hideServerNames = o.optBoolean("hideServerNames", false),
                 dpiRanking = o.optJSONObject("dpiRanking")?.let { m -> m.keys().asSequence().associateWith { k -> m.optJSONArray(k)?.let { a -> (0 until a.length()).map { a.getString(it) } }.orEmpty() } } ?: emptyMap(),
-                ruAppsDirect = o.optBoolean("ruAppsDirect", true), randomTun = o.optBoolean("randomTun", true), coverTraffic = o.optBoolean("coverTraffic", true), torRotation = o.optBoolean("torRotation", false), torRouting = o.optBoolean("torRouting", false), torAuto = o.optBoolean("torAuto", false), torBridge = o.optString("torBridge", "none"), torBridgeLines = o.optString("torBridgeLines", ""), torDirect = o.optBoolean("torDirect", false), rev = o.optInt("rev", 0), turbo = o.optBoolean("turbo", true), autoStart = o.optBoolean("autoStart", false),
+                ruAppsDirect = o.optBoolean("ruAppsDirect", true), randomTun = o.optBoolean("randomTun", true), coverTraffic = o.optBoolean("coverTraffic", true), torRotation = o.optBoolean("torRotation", false), torExitCountries = runCatching { com.vlesscardvpn.tor.TorCountryPolicy.parse(o.optString("torExitCountries", "")).joinToString(",") }.getOrDefault(""), torRotationSeconds = o.optInt("torRotationSeconds", 600).coerceIn(5, 86400), torFastOnly = o.optBoolean("torFastOnly", true), torMaxLatencyMs = o.optInt("torMaxLatencyMs", 2500).coerceAtLeast(1), torNetworkRecommendations = o.optBoolean("torNetworkRecommendations", false), autoChainSearch = o.optBoolean("autoChainSearch", true), autoChainPurpose = o.optString("autoChainPurpose", "balanced").takeIf { it in setOf("balanced", "download", "interactive") } ?: "balanced", torAll = o.optBoolean("torAll", false), torRouting = o.optBoolean("torRouting", false), torAuto = o.optBoolean("torAuto", false), torBridge = o.optString("torBridge", "none"), torBridgeLines = o.optString("torBridgeLines", ""), torDirect = o.optBoolean("torDirect", false), rev = o.optInt("rev", 0), turbo = o.optBoolean("turbo", true), autoStart = o.optBoolean("autoStart", false),
                 alwaysVpn = list("alwaysVpn", emptyList()), alwaysDirect = list("alwaysDirect", emptyList()),
                 traffic = o.optJSONObject("traffic")?.let { m -> m.keys().asSequence().associateWith { m.optLong(it) } } ?: emptyMap(),
                 monthLimitGb = o.optInt("monthLimitGb", 0), country = o.optString("country", ""), favorites = list("favorites", emptyList()),
-                smartYoutube = o.optBoolean("smartYoutube", true), appAware = o.optBoolean("appAware", true), autopilot = o.optBoolean("autopilot", true), autoCool = o.optBoolean("autoCool", true),
+                smartYoutube = o.optBoolean("smartYoutube", d.smartYoutube), appAware = o.optBoolean("appAware", true), autopilot = o.optBoolean("autopilot", true), autoCool = o.optBoolean("autoCool", true),
                 oceanBackground = o.optBoolean("oceanBackground", true), oceanMotion = o.optBoolean("oceanMotion", true), welcomeSound = o.optBoolean("welcomeSound", true),
                 phoneLearning = o.optBoolean("phoneLearning", true),
+                automaticSecurityAudit = o.optBoolean("automaticSecurityAudit", true),
                 powerProfile = o.optString("powerProfile", "balanced").takeIf { it in listOf("balanced", "eco", "fast") } ?: "balanced",
                 batteryThreshold = o.optInt("batteryThreshold", 20).coerceIn(5, 50), quietScreen = o.optBoolean("quietScreen", true),
                 chargeOnly = o.optBoolean("chargeOnly", false), wifiMaintenance = o.optBoolean("wifiMaintenance", true), protectActiveTraffic = o.optBoolean("protectActiveTraffic", true), gpsSpoof = o.optBoolean("gpsSpoof", false), ytDpi = o.optJSONObject("ytDpi")?.let { m -> m.keys().asSequence().associateWith { m.optBoolean(it) } } ?: emptyMap(),

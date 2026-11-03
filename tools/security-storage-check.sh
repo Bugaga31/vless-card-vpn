@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+trap 'rc=$?; if [ "$rc" -ne 0 ]; then echo "::error title=Release install phase::storage-security failed; exit=$rc"; fi' EXIT
 source "$(dirname "$0")/security-results-valid.sh"
 PKG=com.vlesscardvpn.securityprobe
 adb install -r -t release/security-test-probe.apk >/dev/null

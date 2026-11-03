@@ -54,7 +54,7 @@ class PhoneRuntimePolicyTest {
     }
     @Test fun quietLogsAndRouteOnlySniffAreActuallyInXrayConfig() {
         val node=Server("n","vless","node.example",443,"00000000-0000-0000-0000-000000000001")
-        val s=Settings(mode=com.vlesscardvpn.model.Mode.SERVERS,blockQuic=true)
+        val s=Settings(mode=com.vlesscardvpn.model.Mode.SERVERS,blockQuic=true,ruWhitelist=false)
         val c=JSONObject(XrayConfigBuilder.vpnConfig(listOf(node to null),s,null,quietLogs=true))
         assertEquals("error",c.getJSONObject("log").getString("loglevel"))
         val sniff=c.getJSONArray("inbounds").getJSONObject(0).getJSONObject("sniffing")

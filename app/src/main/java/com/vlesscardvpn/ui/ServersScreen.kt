@@ -10,9 +10,20 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.*
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.repeatOnLifecycle
+import androidx.compose.ui.platform.LocalLifecycleOwner
+import com.vlesscardvpn.core.ServerBrowser
+import com.vlesscardvpn.core.Net
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -33,70 +44,182 @@ private enum class Filter(val title: String) { ALL("Все"), WORKING("Рабо�
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun ServersScreen() {
+fun ServersScreen(onConnectFound:()->Unit = {}) {
     val ctx = LocalContext.current
     val app by Store.ui.collectAsState()
     val busy by Actions.running.collectAsState()
-    var filter by remember { mutableStateOf(Filter.ALL) }
+    var filter by rememberSaveable { mutableStateOf(Filter.ALL) }
     var addOpen by remember { mutableStateOf(false) }
     var menuFor by remember { mutableStateOf<Server?>(null) }
-    var country by remember { mutableStateOf("") }
+    var country by rememberSaveable { mutableStateOf("") }
+    var query by rememberSaveable { mutableStateOf("") }
+    var moreOpen by remember { mutableStateOf(false) }
+    var pendingDelete by remember { mutableStateOf<Set<String>>(emptySet()) }
+    val search = query.trim()
+    var order by rememberSaveable { mutableStateOf("auto") }
+    var protocol by rememberSaveable { mutableStateOf("") }
+    var service by rememberSaveable { mutableStateOf("any") }
+    var showCountries by rememberSaveable { mutableStateOf(false) }
+    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    var network by remember { mutableStateOf(Net.key(ctx)) }
+    val owner=LocalLifecycleOwner.current
+    val scroll=rememberLazyListState()
+    val scope=rememberCoroutineScope()
+    LaunchedEffect(owner) {owner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+        while(true) {now=System.currentTimeMillis();network=Net.key(ctx);kotlinx.coroutines.delay(15_000)}
+    }}
 
-    // Sorting thousands of servers happens off the main thread; the old list stays on screen meanwhile.
-    val list by produceState(initialValue = emptyList<Server>(), app, filter, country) { value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
-        val rank = { s: Server -> val st = app.state(s)
-            when { st.selected -> 0; st.works -> 1; st.tcpMs > 0 && st.realMs < 0 -> 2; st.realMs < 0 && st.tcpMs < 0 -> 3; else -> 4 } }
-        val favs = app.settings.favorites.toHashSet()
-        app.servers.filter { when (filter) { Filter.ALL -> true; Filter.WORKING -> app.state(it).works; Filter.SELECTED -> app.state(it).selected; Filter.FAV -> it.id in favs } }
-            .filter { country.isEmpty() || com.vlesscardvpn.core.Countries.of(it.name) == country }
-            .sortedWith(compareBy<Server>(rank).thenBy { app.state(it).let { st -> if (st.works) st.score else if (st.realMs > 0) st.realMs + 5000 else Int.MAX_VALUE } }
-                .thenBy { app.state(it).tcpMs.let { ms -> if (ms > 0) ms else Int.MAX_VALUE } })
-    } }
+    val list by produceState(initialValue = emptyList<Server>(), app, filter, country, search, order, protocol, service, network, now) {
+        value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+            val favorites = app.settings.favorites.toHashSet()
+            app.servers.asSequence().map { it to app.state(it) }
+                .filter { (server, state) -> when (filter) {
+                    Filter.ALL -> true
+                    Filter.WORKING -> state.works
+                    Filter.SELECTED -> state.selected
+                    Filter.FAV -> server.id in favorites
+                } }
+                .filter { (server, _) -> country.isEmpty() || com.vlesscardvpn.core.Countries.of(server.name) == country }
+                .filter { (server, _) -> search.isEmpty() || server.name.contains(search, true) || server.address.contains(search, true) }
+                .filter { (server,state) -> ServerBrowser.matches(server,state,protocol,service,network,now) }
+                .toList()
+                .map { it.first }
+                .sortedWith(ServerBrowser.comparator(order,app::state,favorites))
+        }
+    }
+    val countries by produceState(initialValue = emptyList<Pair<String, Int>>(), app.servers) {
+        value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { Actions.countries(app) }
+    }
 
-    Column(Modifier.fillMaxSize().padding(horizontal = 12.dp)) {
-        Spacer(Modifier.height(10.dp))
-        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = { addOpen = true }) { Text("Добавить") }
-            OutlinedButton(onClick = { Actions.refreshSubscriptions() }, enabled = !busy) { Text("Подписки") }
-            OutlinedButton(onClick = { Actions.setupWarp() }, enabled = !busy) { Text("WARP") }
-            OutlinedButton(onClick = { Actions.testAll(onlySelected = filter == Filter.SELECTED) }, enabled = !busy) { Text("Проверить") }
-            OutlinedButton(onClick = {
-                val target = app.selected.ifEmpty { app.servers.filter { app.state(it).tcpMs > 0 }.sortedBy { app.state(it).tcpMs }.take(10) }
-                Actions.findMasks(target)
-            }, enabled = !busy) { Text("Авто-маскировка") }
-            OutlinedButton(onClick = {
-                val n = Actions.selectBest(5); Toast.makeText(ctx, if (n == 0) "Сначала нажмите «Проверить»" else "Выбрано: $n", Toast.LENGTH_SHORT).show()
-            }) { Text("5 лучших") }
-            OutlinedButton(onClick = {
-                val dead = app.servers.filter { val st = app.state(it); !st.selected && (st.tcpMs == 0 || st.realMs == 0) }.map { it.id }.toSet()
-                Store.remove(dead); Toast.makeText(ctx, "Удалено: ${dead.size}", Toast.LENGTH_SHORT).show()
-            }, enabled = !busy) { Text("Удалить нерабочие") }
-        }
-        Row(Modifier.horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Filter.values().forEach { f -> FilterChip(selected = filter == f, onClick = { filter = f }, label = { Text(f.title) }) }
-            Text("${list.size}", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
-        }
-        val countries = remember(app) { Actions.countries(app) }
-        if (countries.isNotEmpty()) Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            FilterChip(selected = country.isEmpty(), onClick = { country = "" }, label = { Text("🌐 Все страны") })
-            countries.take(20).forEach { (c, n) ->
-                FilterChip(selected = country == c, onClick = { country = if (country == c) "" else c }, label = { Text("${com.vlesscardvpn.core.Countries.flag(c)} $c · $n") })
+    LazyColumn(Modifier.fillMaxSize(), state=scroll, contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        item {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Column(Modifier.weight(1f)) {
+                    Text("Серверы", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
+                    Text("${app.servers.size} в списке · ${list.size} показано", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                OutlinedButton(onClick = { addOpen = true }) { Text("Добавить") }
             }
         }
-        LiveProgress(stop = true)
-        if (app.settings.mode == com.vlesscardvpn.model.Mode.AUTO && app.servers.isNotEmpty())
-            Text("Режим «Авто»: выбирать ничего не нужно — при подключении возьму 5 самых быстрых рабочих и сам подберу маскировку. " +
-                "Отмечайте серверы, только если нужны конкретные.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(vertical = 4.dp))
-        if (app.servers.isEmpty()) {
-            Text("Список пуст. Нажмите «Подписки» — загрузятся бесплатные серверы для России (igareck, с зеркал), " +
-                "или «Добавить» и вставьте свои ссылки vless:// vmess:// trojan:// ss:// hysteria2://.\n\n" +
-                "Публичные серверы держат посторонние люди: владелец видит, куда вы ходите, и может читать трафик без HTTPS. " +
-                "Не входите через них в банк и важные аккаунты.", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 16.dp))
-        }
-        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(vertical = 6.dp)) {
-            items(list, key = { it.id }) { s ->
-                ServerRow(s, app.state(s), fav = s.id in app.settings.favorites, onToggle = { Store.setState(s.id) { st -> st.copy(selected = !st.selected) } }, onLong = { menuFor = s })
+        item { FoundRoutesCard(onConnectFound) }
+        item {
+            Button(onClick = { Actions.testAll(onlySelected = filter == Filter.SELECTED) }, enabled = !busy,
+                modifier = Modifier.fillMaxWidth(), shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp)) {
+                Text(if (filter == Filter.SELECTED) "Проверить выбранные" else "Проверить все серверы")
             }
+            Text("Проверю доступность всего списка и до 150 лучших через Xray. Подбор маскировки запускается отдельно.",
+                modifier = Modifier.padding(top = 4.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        item {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                OutlinedButton(onClick = { Actions.refreshSubscriptions() }, enabled = !busy, modifier = Modifier.weight(1f)) { Text("Подписки") }
+                OutlinedButton(onClick = { Actions.setupWarp() }, enabled = !busy, modifier = Modifier.weight(1f)) { Text("WARP") }
+                Box {
+                    IconButton(onClick = { moreOpen = true }, enabled = !busy) {
+                        androidx.compose.material3.Icon(androidx.compose.material.icons.Icons.Filled.MoreVert, contentDescription = "Дополнительные действия")
+                    }
+                    DropdownMenu(expanded = moreOpen, onDismissRequest = { moreOpen = false }) {
+                        DropdownMenuItem(text = { Text("Авто-маскировка") }, enabled = !busy, onClick = {
+                            moreOpen = false
+                            val target = app.selected.ifEmpty { app.servers.filter { app.state(it).tcpMs > 0 }.sortedBy { app.state(it).tcpMs }.take(10) }
+                            if (target.isEmpty()) Toast.makeText(ctx, "Сначала проверьте серверы", Toast.LENGTH_SHORT).show() else Actions.findMasks(target)
+                        })
+                        DropdownMenuItem(text = { Text("Выбрать 5 лучших") }, enabled = !busy, onClick = {
+                            moreOpen = false
+                            val n = Actions.selectBest(5)
+                            Toast.makeText(ctx, if (n == 0) "Сначала проверьте серверы" else "Выбрано: $n", Toast.LENGTH_SHORT).show()
+                        })
+                        DropdownMenuItem(text = { Text("Удалить недоступные по TCP") }, enabled = !busy, onClick = {
+                            moreOpen = false
+                            val now = System.currentTimeMillis()
+                            val dead = app.servers.filter { server ->
+                                val state = app.state(server)
+                                !state.selected && com.vlesscardvpn.core.ManualServerCheckPolicy.confirmedTcpFailure(server, state, now)
+                            }.map { it.id }.toSet()
+                            if (dead.isEmpty()) Toast.makeText(ctx, "Недавних подтверждённых TCP-сбоев нет", Toast.LENGTH_SHORT).show()
+                            else pendingDelete = dead
+                        })
+                    }
+                }
+            }
+        }
+        item {
+            Row(Modifier.horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Filter.values().forEach { f -> FilterChip(selected = filter == f, onClick = { filter = f }, label = { Text(f.title) }) }
+            }
+        }
+        if (countries.isNotEmpty()) item {
+            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                FilterChip(selected = country.isEmpty(), onClick = { country = "" }, label = { Text("🌐 Все страны") })
+                countries.take(if(showCountries) countries.size else 20).forEach { (c, n) ->
+                    FilterChip(selected = country == c, onClick = { country = if (country == c) "" else c }, label = { Text("${com.vlesscardvpn.core.Countries.flag(c)} $c · $n") })
+                }
+            }
+        }
+        item {
+            OutlinedTextField(value = query, onValueChange = { query = it }, modifier = Modifier.fillMaxWidth(), singleLine = true,
+                label = { Text("Поиск по имени или адресу") },
+                leadingIcon = { androidx.compose.material3.Icon(androidx.compose.material.icons.Icons.Filled.Search, contentDescription = null) })
+        }
+        item {
+            Column(verticalArrangement=Arrangement.spacedBy(6.dp)) {
+                Row(Modifier.horizontalScroll(rememberScrollState()),horizontalArrangement=Arrangement.spacedBy(6.dp)) {
+                    ServerBrowser.sorts.forEach { (id,label)->FilterChip(selected=order==id,onClick={order=id},label={Text(label)}) }
+                }
+                Row(Modifier.horizontalScroll(rememberScrollState()),horizontalArrangement=Arrangement.spacedBy(6.dp)) {
+                    FilterChip(selected=protocol.isEmpty(),onClick={protocol=""},label={Text("Все протоколы")})
+                    app.servers.map{it.protocol}.distinct().sorted().forEach {id->FilterChip(selected=protocol==id,onClick={protocol=if(protocol==id) "" else id},label={Text(id.uppercase())})}
+                }
+                Row(Modifier.horizontalScroll(rememberScrollState()),horizontalArrangement=Arrangement.spacedBy(6.dp)) {
+                    ServerBrowser.services.forEach { (id,label)->FilterChip(selected=service==id,onClick={service=id},label={Text(label)}) }
+                }
+                Text("Фильтры меняют только список. Свежий ответ — до 5 мин на этой сети и маске, не проверка аккаунта. Сортировка скорости использует последний замер, не обещание текущей скорости.",style=MaterialTheme.typography.bodySmall)
+                Row(Modifier.horizontalScroll(rememberScrollState())) {
+                    TextButton(onClick={filter=Filter.ALL;country="";query="";protocol="";service="any";order="auto"}) {Text("Сбросить всё")}
+                    if(countries.size>20) TextButton(onClick={showCountries=!showCountries}) {Text(if(showCountries) "Меньше стран" else "Все страны")}
+                    TextButton(onClick={scope.launch{if(app.settings.reducedMotion) scroll.scrollToItem(0) else scroll.animateScrollToItem(0)}}) {Text("В начало")}
+                }
+            }
+        }
+        item { LiveProgress(stop = true) }
+        if (app.settings.mode == com.vlesscardvpn.model.Mode.AUTO && app.servers.isNotEmpty()) item {
+            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)) {
+                Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("Автоматический выбор", fontWeight = FontWeight.SemiBold)
+                    Text("Кнопка «Подключиться к найденным» сверху использует «Рабочие» без нового поиска по каталогу. Если доказательства устарели, перепроверю только найденные выбранными сервисами.",
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        }
+        if (app.servers.isEmpty()) item {
+            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+                Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Список пуст", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                    Text("Нажмите «Подписки», чтобы загрузить бесплатные серверы, или «Добавить» и вставьте свои ссылки VLESS, VMess, Trojan, Shadowsocks или Hysteria2.",
+                        style = MaterialTheme.typography.bodyMedium)
+                    Text("Публичные серверы контролируют посторонние люди. Не входите через них в банк и важные аккаунты; трафик без HTTPS может быть виден владельцу.",
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        } else if (list.isEmpty()) item {
+            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+                Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("Ничего не найдено", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                    Text("Измените поиск или сбросьте фильтры.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    TextButton(onClick = { filter = Filter.ALL; country = ""; query = ""; protocol="";service="any";order="auto" }) { Text("Сбросить фильтры") }
+                }
+            }
+        }
+        itemsIndexed(list, key = { _,server -> server.id }) { index,server ->
+            val ss=app.state(server)
+            val autoLabel=if(app.settings.mode==com.vlesscardvpn.model.Mode.AUTO && ss.works)
+                com.vlesscardvpn.core.AutoReadiness.describe(server,ss,
+                    com.vlesscardvpn.core.AutoCheckProfile.of(app.settings.autoChecks),
+                    com.vlesscardvpn.core.AutoLatencyRange.safe(app.settings.autoLatencyMinMs,app.settings.autoLatencyMaxMs).max,
+                    network,now,com.vlesscardvpn.core.RouteStabilityMemory.session.cooling(network,server.id,ss.maskFor(network),now)) else ""
+            ServerRow(server, ss, fav = server.id in app.settings.favorites, compact=app.settings.compactServers, hidden=app.settings.hideServerNames, displayIndex=index+1, now=now, autoLabel=autoLabel,
+                onToggle = { Store.setState(server.id) { state -> state.copy(selected = !state.selected) } },
+                onLong = { menuFor = server })
         }
     }
 
@@ -104,32 +227,42 @@ fun ServersScreen() {
         addOpen = false
         Toast.makeText(ctx, Actions.importAny(text), Toast.LENGTH_LONG).show()
     })
-    menuFor?.let { s -> ServerMenu(s, app.state(s), onDismiss = { menuFor = null }) }
+    menuFor?.let { server -> ServerMenu(server, app.state(server), onDismiss = { menuFor = null }) }
+    if (pendingDelete.isNotEmpty()) AlertDialog(
+        onDismissRequest = { pendingDelete = emptySet() },
+        title = { Text("Удалить серверы?") },
+        text = { Text("Удалить ${pendingDelete.size} серверов с подтверждённым TCP-сбоем за последние сутки? Непроверенные, устаревшие и прошедшие TCP узлы сохраняются.") },
+        confirmButton = { TextButton(onClick = { val count = pendingDelete.size; Store.remove(pendingDelete); pendingDelete = emptySet(); Toast.makeText(ctx, "Удалено: $count", Toast.LENGTH_SHORT).show() }) { Text("Удалить") } },
+        dismissButton = { TextButton(onClick = { pendingDelete = emptySet() }) { Text("Отмена") } }
+    )
 }
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun ServerRow(s: Server, st: ServerState, fav: Boolean = false, onToggle: () -> Unit, onLong: () -> Unit) {
+private fun ServerRow(s: Server, st: ServerState, fav: Boolean = false, compact:Boolean=false, hidden:Boolean=false, displayIndex:Int=0, now:Long=System.currentTimeMillis(), autoLabel:String="", onToggle: () -> Unit, onLong: () -> Unit) {
     Card(Modifier.fillMaxWidth().padding(vertical = 3.dp).combinedClickable(onClick = onToggle, onLongClick = onLong),
-        colors = CardDefaults.cardColors(containerColor = if (st.selected) Color(0xFF1C2A44) else MaterialTheme.colorScheme.surface)) {
+        colors = CardDefaults.cardColors(containerColor = if (st.selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface)) {
         Row(Modifier.padding(horizontal = 6.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
             Checkbox(checked = st.selected, onCheckedChange = { onToggle() })
             Column(Modifier.weight(1f)) {
-                Text((if (fav) "★ " else "") + s.name, maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.Medium, fontSize = 14.sp)
+                Text((if (fav) "★ " else "") + (if(hidden) "Сервер $displayIndex" else s.name), maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.Medium, fontSize = 14.sp)
+                if(autoLabel.isNotEmpty()) Text(autoLabel,style=MaterialTheme.typography.labelSmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
                 val mask = Masks.byId(st.maskId)?.title
+                if(s.insecure) Text("TLS: проверка сертификата отключена",style=MaterialTheme.typography.labelSmall,color=Bad)
+                if(!compact) Text(ServerBrowser.age(st.checkedAt,now),style=MaterialTheme.typography.labelSmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
                 // Catalog subscriptions are third-party free servers: mark them so they are not mistaken for your own.
                 val isPublic = com.vlesscardvpn.model.Subs.find(s.source) != null
-                Text(s.label + (if (isPublic) " · публичный" else "") + (mask?.let { " · $it" } ?: ""), maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if(!compact) Text(s.label + (if (isPublic) " · публичный" else "") + (mask?.let { " · $it" } ?: ""), maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             Column(horizontalAlignment = Alignment.End) {
                 val real = st.realMs
                 Text(when { real > 0 -> "$real мс"; real == 0 -> "не работает"; st.tcpMs == 0 -> "недоступен"; st.tcpMs > 0 -> "TCP ${st.tcpMs} мс"; else -> "—" },
-                    color = when { real > 0 && st.bigOk != false -> Good; real > 0 -> Warn; real == 0 || st.tcpMs == 0 -> Bad; else -> MaterialTheme.colorScheme.onSurfaceVariant }, fontSize = 13.sp)
-                if (real > 0) Text(buildString {
+                    color = when { real > 0 && st.bigOk != false -> Good; real > 0 -> Warn; real == 0 || st.tcpMs == 0 -> Bad; else -> MaterialTheme.colorScheme.onSurfaceVariant }, fontSize = 14.sp)
+                if (real > 0 && !compact) Text(buildString {
                     append(when (st.bigOk) { true -> if (st.kbps > 0) Actions.mbps(st.kbps) else "256К ✓"; false -> "256К ✗ (обрыв)"; null -> "" })
                     st.ytOk?.let { append(if (it) " · YT ✓" else " · YT ✗") }
                     st.tgOk?.let { append(if (it) " · TG ✓" else " · TG ✗") }
-                }, fontSize = 11.sp, color = if (st.bigOk == false) Warn else MaterialTheme.colorScheme.onSurfaceVariant)
+                }, fontSize = 14.sp, color = if (st.bigOk == false) Warn else MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
     }
@@ -148,7 +281,7 @@ private fun AddDialog(onDismiss: () -> Unit, onAdd: (String) -> Unit) {
                     val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                     text = cm.primaryClip?.getItemAt(0)?.coerceToText(ctx)?.toString().orEmpty()
                 }) { Text("Вставить из буфера") }
-                Text("Ссылку на подписку (https://…) добавьте в Настройках → Подписки.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("Ссылку на подписку (https://…) добавьте в Настройках → Подписки.", fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         },
         confirmButton = { Button(onClick = { onAdd(text) }, enabled = text.isNotBlank()) { Text("Добавить") } },
@@ -157,6 +290,7 @@ private fun AddDialog(onDismiss: () -> Unit, onAdd: (String) -> Unit) {
 
 @Composable
 private fun ServerMenu(s: Server, st: ServerState, onDismiss: () -> Unit) {
+    val currentSettings by Store.settings.collectAsState()
     val ctx = LocalContext.current
     var masks by remember { mutableStateOf(false) }
     var fork by remember { mutableStateOf(false) }
@@ -168,9 +302,9 @@ private fun ServerMenu(s: Server, st: ServerState, onDismiss: () -> Unit) {
         AlertDialog(onDismissRequest = onDismiss, title = { Text("Маскировка: ${options.size} вариантов") },
             text = {
                 LazyColumn(Modifier.heightIn(max = 420.dp)) {
-                    item { TextButton(onClick = { Store.setState(s.id) { it.copy(maskId = "", netMasks = emptyMap()) }; onDismiss() }) { Text("Без маскировки (как в ссылке)") } }
-                    items(options) { m -> TextButton(onClick = { Store.setState(s.id) { it.copy(maskId = m.id, netMasks = emptyMap()) }; onDismiss() }) {
-                        Text((if (m.id == st.maskId) "● " else "") + m.title, fontSize = 13.sp) } }
+                    item { TextButton(onClick = { Store.setState(s.id) { com.vlesscardvpn.core.MaskSamplePolicy.invalidate(it).copy(maskId = "", netMasks = emptyMap()) }; onDismiss() }) { Text("Без маскировки (как в ссылке)") } }
+                    items(options) { m -> TextButton(onClick = { Store.setState(s.id) { com.vlesscardvpn.core.MaskSamplePolicy.invalidate(it).copy(maskId = m.id, netMasks = emptyMap()) }; onDismiss() }) {
+                        Text((if (m.id == st.maskId) "● " else "") + m.title, fontSize = 14.sp) } }
                 }
             }, confirmButton = { TextButton(onClick = onDismiss) { Text("Закрыть") } })
         return
@@ -178,8 +312,8 @@ private fun ServerMenu(s: Server, st: ServerState, onDismiss: () -> Unit) {
     AlertDialog(onDismissRequest = onDismiss, title = { Text(s.name, maxLines = 2) },
         text = {
             Column {
-                Text("${s.label}\n${s.address}:${s.port}", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text("Маскировка: " + (Masks.byId(st.maskId)?.title ?: "авто") + " — подбирается сама под сеть и меняется, если её распознают.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("${s.label}\n${s.address}:${s.port}", fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("Маскировка: " + (Masks.byId(st.maskId)?.title ?: "как в ссылке") + " — стоимость ${Masks.byId(st.maskId)?.let { Masks.cost(it) } ?: 0} (эвристика нагрузки, не невидимость). Пригодность решают реальные пробы этой сети.", fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 TextButton(onClick = { Actions.findMasks(listOf(s)); onDismiss() }) { Text("Подобрать заново для этой сети") }
                 var expert by remember { mutableStateOf(false) }
                 TextButton(onClick = { expert = !expert }) { Text(if (expert) "Для опытных ▾" else "Для опытных ▸") }
@@ -192,7 +326,7 @@ private fun ServerMenu(s: Server, st: ServerState, onDismiss: () -> Unit) {
                     (ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("link", LinkParser.toLink(s)))
                     Toast.makeText(ctx, "Ссылка скопирована", Toast.LENGTH_SHORT).show(); onDismiss()
                 }) { Text("Копировать ссылку") }
-                val fav = s.id in Store.state.value.settings.favorites
+                val fav = s.id in currentSettings.favorites
                 TextButton(onClick = { Actions.toggleFavorite(s.id); onDismiss() }) {
                     Text(if (fav) "Убрать из избранного" else "★ В избранное (Авто всегда берёт его, если работает)")
                 }
@@ -216,7 +350,7 @@ fun QrDialog(title: String, text: String, onDismiss: () -> Unit) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 if (bmp != null) androidx.compose.foundation.Image(bmp.asImageBitmap(), "QR", Modifier.size(280.dp))
                 else Text("Ссылка слишком длинная для QR-кода")
-                Text("Внутри ключ сервера — показывайте только себе и тем, кому доверяете.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("Внутри ключ сервера — показывайте только себе и тем, кому доверяете.", fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }, confirmButton = { TextButton(onClick = onDismiss) { Text("Закрыть") } })
 }

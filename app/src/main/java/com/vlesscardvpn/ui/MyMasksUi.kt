@@ -19,6 +19,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.vlesscardvpn.core.Actions
+import com.vlesscardvpn.core.TpwsProfile
+import com.vlesscardvpn.core.DpiStrategies
+import com.vlesscardvpn.core.DpiEngine
 import com.vlesscardvpn.core.Store
 import com.vlesscardvpn.xray.Mask
 import com.vlesscardvpn.xray.Masks
@@ -36,6 +39,7 @@ fun describeMask(m: Mask): String = buildList {
     if (m.noiseJson.isNotEmpty()) add("свой шум")
     if (m.hop == Masks.HOP_LOCAL) add("смена порта") else if (m.hop == Masks.HOP_WARP) add("прыжки по портам WARP")
     if (m.dpi == Masks.CURRENT_DPI) add("+ обход DPI")
+    else if (m.dpi.startsWith("TPWS#")) add("zapret tpws · TCP/TLS")
 }.joinToString(" · ")
 
 fun saveMyMask(m: Mask, replacing: String? = null) = Store.update { st ->
@@ -129,7 +133,7 @@ fun MaskEvolutionSection() {
     }
 }
 
-private enum class Kind(val title: String) { FRAG("Дробление (TCP)"), LADDER("Лесенка (TCP)"), NOISE("Шум (UDP, WireGuard)"), PLAIN("Только отпечаток") }
+private enum class Kind(val title: String) { FRAG("Дробление (TCP)"), LADDER("Лесенка (TCP)"), NOISE("Шум (UDP, WireGuard)"), PLAIN("Только отпечаток"), TPWS("zapret tpws (TCP/TLS)") }
 
 /** Editor of an own mask. [base] = mask being edited (or a built-in to start from); null = new. */
 @Composable
@@ -137,7 +141,7 @@ fun MaskEditor(base: Mask?, onDismiss: () -> Unit) {
     val ctx = LocalContext.current
     val b = base ?: Masks.byId("chrome.l2")!!.copy(title = "")
     var title by remember { mutableStateOf(if (base?.custom == true) base.title else base?.title?.let { "$it (моя)" } ?: "") }
-    var kind by remember { mutableStateOf(when { b.hasNoise || b.hop.isNotEmpty() -> Kind.NOISE; b.lengths.isNotEmpty() -> Kind.LADDER; b.packets.isNotEmpty() -> Kind.FRAG; else -> Kind.PLAIN }) }
+    var kind by remember { mutableStateOf(when { b.dpi.startsWith("TPWS#") -> Kind.TPWS; b.hasNoise || b.hop.isNotEmpty() -> Kind.NOISE; b.lengths.isNotEmpty() -> Kind.LADDER; b.packets.isNotEmpty() -> Kind.FRAG; else -> Kind.PLAIN }) }
     var fp by remember { mutableStateOf(b.fingerprint.ifEmpty { "chrome" }) }
     var packets by remember { mutableStateOf(b.packets.ifEmpty { "tlshello" }) }
     var length by remember { mutableStateOf(b.length.ifEmpty { "10-30" }) }
@@ -149,6 +153,7 @@ fun MaskEditor(base: Mask?, onDismiss: () -> Unit) {
     var noiseJson by remember { mutableStateOf(b.noiseJson) }
     var hop by remember { mutableStateOf(b.hop) }
     var viaDpi by remember { mutableStateOf(b.dpi == Masks.CURRENT_DPI) }
+    var tpwsLine by remember { mutableStateOf(TpwsProfile.line(b.dpi) ?: DpiStrategies.BUILT_IN.firstOrNull { it.id == b.dpi && it.engine == DpiEngine.TPWS }?.args?.joinToString(" ") ?: TpwsProfile.EXAMPLES.first()) }
     var error by remember { mutableStateOf("") }
 
     fun build(): Mask = MyMasks.fromJson(JSONObject().put("t", title).put("fp", fp).apply {
@@ -157,8 +162,9 @@ fun MaskEditor(base: Mask?, onDismiss: () -> Unit) {
             Kind.LADDER -> put("p", packets).put("ls", lengths).put("ds", delays).put("ms", maxSplit)
             Kind.NOISE -> { if (noiseJson.isNotBlank()) put("nj", noiseJson) else put("n", noise); put("h", hop) }
             Kind.PLAIN -> {}
+            Kind.TPWS -> put("dpi", TpwsProfile.encode(tpwsLine))
         }
-        if (viaDpi && kind != Kind.NOISE) put("dpi", Masks.CURRENT_DPI)
+        if (viaDpi && kind != Kind.NOISE && kind != Kind.TPWS) put("dpi", Masks.CURRENT_DPI)
     })
 
     AlertDialog(onDismissRequest = onDismiss, title = { Text(if (base?.custom == true) "Изменить маскировку" else "Новая маскировка") },
@@ -206,6 +212,16 @@ fun MaskEditor(base: Mask?, onDismiss: () -> Unit) {
                         }
                     }
                     Kind.PLAIN -> Text("Только TLS-отпечаток, без дробления и шума.", fontSize = 12.sp, color = Color.Gray)
+                    Kind.TPWS -> {
+                        Text("zapret tpws: отдельный локальный TCP-движок без root. Меняет внешнее соединение до VPN-узла, не внутренние звонки/QUIC. Это не nfqws2/Lua.", style = MaterialTheme.typography.bodyMedium)
+                        OutlinedTextField(tpwsLine, { tpwsLine = it }, label = { Text("Параметры zapret tpws") }, modifier = Modifier.fillMaxWidth(),
+                            isError = TpwsProfile.parse(tpwsLine).isFailure,
+                            supportingText = { Text(TpwsProfile.parse(tpwsLine).exceptionOrNull()?.message ?: "Только первый блок (n2); SNI и ключи сервера не меняются") })
+                        TpwsProfile.EXAMPLES.forEachIndexed { i, example ->
+                            TextButton(onClick = { tpwsLine = example }) { Text("Пример ${i + 1}: $example", style = MaterialTheme.typography.bodyMedium) }
+                        }
+                        Text("Сохранение и импорт не подтверждают работу сети. Нужен Android 8+ и доступный libtpws.so; проверьте точную связку сервер–маска.", style = MaterialTheme.typography.bodyMedium)
+                    }
                 }
                 val preview = runCatching { build() }
                 Text(preview.fold({ "Будет: " + describeMask(it) }, { it.message ?: "Ошибка" }),

@@ -18,7 +18,7 @@ class YoutubePolicyRegressionR78Test {
         val a = Settings(smartYoutube = false, ytDpi = mapOf("wifi:Home" to true, "mobile:MTS" to false))
         val b = Settings.fromJson(JSONObject(a.toJson().toString()))
         assertFalse(b.smartYoutube); assertEquals(a.ytDpi, b.ytDpi)
-        assertTrue(Settings.fromJson(JSONObject("{}")).smartYoutube)
+        assertFalse(Settings.fromJson(JSONObject("{}")).smartYoutube)
     }
 
     @Test fun bypassMustWinClearly() {
@@ -33,10 +33,11 @@ class YoutubePolicyRegressionR78Test {
         assertEquals(64, lvl(true).getInt("bufferSize")); assertFalse(lvl(false).has("bufferSize"))
     }
 
-    @Test fun youtubeViaBypassConfig() {
-        val cfg = JSONObject(XrayConfigBuilder.vpnConfig(listOf(s to null), Settings(mode = Mode.HYBRID, hybridDomains = Settings.YT_DOMAINS, turbo = true), 10808))
-        val r = cfg.getJSONObject("routing").toString()
-        assertTrue(r.contains("googlevideo.com")); assertTrue(r.contains("geosite:youtube"))
-        java.io.File(System.getenv("XRAY_CONFIG_DUMP") ?: return).apply { mkdirs() }.resolve("smart-yt.json").writeText(cfg.toString())
+    @Test fun youtubeCannotUseStandaloneBypass() {
+        val cfg=JSONObject(XrayConfigBuilder.vpnConfig(listOf(s to null),Settings(mode=Mode.HYBRID,hybridDomains=Settings.YT_DOMAINS,turbo=true),10808))
+        val rows=cfg.getJSONObject("routing").getJSONArray("rules").let {a->(0 until a.length()).map(a::getJSONObject)}
+        assertFalse(rows.any {it.optString("outboundTag")=="byedpi"})
+        assertEquals("proxy-0",rows.last().getString("outboundTag"))
+        java.io.File(System.getenv("XRAY_CONFIG_DUMP") ?: return).apply {mkdirs()}.resolve("smart-yt.json").writeText(cfg.toString())
     }
 }

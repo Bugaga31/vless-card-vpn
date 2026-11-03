@@ -31,6 +31,7 @@ import com.vlesscardvpn.core.Store
 
 /** Silent, finite ocean signal. No network gate, audio, fake loading percentage or infinite animation. */
 @Composable fun LaunchIntro(onDismiss: () -> Unit) {
+    val accent = Accent
     val ctx = LocalContext.current
     val owner = LocalLifecycleOwner.current
     val settings by Store.settings.collectAsState()
@@ -50,11 +51,11 @@ import com.vlesscardvpn.core.Store
     val scheme = MaterialTheme.colorScheme
     Box(Modifier.fillMaxSize().background(scheme.background), contentAlignment = Alignment.Center) {
         Canvas(Modifier.fillMaxSize()) {
-            drawRect(Brush.radialGradient(listOf(Accent.copy(alpha = .08f), scheme.background),
+            drawRect(Brush.radialGradient(listOf(accent.copy(alpha = .08f), scheme.background),
                 center = center, radius = size.maxDimension * .65f))
             for (i in 0..2) {
                 val y = size.height * (.67f + i * .07f)
-                drawArc(Accent.copy(alpha = .04f + i * .015f), 180f, 180f, false,
+                drawArc(accent.copy(alpha = .04f + i * .015f), 180f, 180f, false,
                     topLeft = androidx.compose.ui.geometry.Offset(-size.width * .3f, y),
                     size = androidx.compose.ui.geometry.Size(size.width * 1.6f, size.height * .4f), style = Stroke(2.dp.toPx()))
             }
@@ -70,12 +71,12 @@ import com.vlesscardvpn.core.Store
                 Canvas(Modifier.fillMaxSize()) {
                     for (i in 0..2) {
                         val p = (phase.floatValue + i / 3f) % 1f
-                        drawCircle(Accent.copy(alpha = (1f - p) * .45f), size.minDimension * (.28f + p * .21f), style = Stroke(1.dp.toPx()))
+                        drawCircle(accent.copy(alpha = (1f - p) * .45f), size.minDimension * (.28f + p * .21f), style = Stroke(1.dp.toPx()))
                     }
                 }
                 Box(Modifier.size(96.dp).background(scheme.surface, CircleShape)
-                    .border(1.dp, Accent.copy(alpha = .5f), CircleShape), contentAlignment = Alignment.Center) {
-                    Icon(Icons.Filled.PowerSettingsNew, contentDescription = null, tint = Accent, modifier = Modifier.size(42.dp))
+                    .border(1.dp, accent.copy(alpha = .5f), CircleShape), contentAlignment = Alignment.Center) {
+                    Icon(Icons.Filled.PowerSettingsNew, contentDescription = null, tint = accent, modifier = Modifier.size(42.dp))
                 }
             }
             Text("VLESS Card", fontSize = 30.sp, fontWeight = FontWeight.Bold, color = scheme.onBackground, textAlign = TextAlign.Center)

@@ -1,0 +1,381 @@
+name: "1.2.119 ordinary release candidate \u2014 all gates (no auto publish)"
+'on':
+  push:
+    branches:
+    - work/stable-watson-r235
+permissions:
+  contents: read
+env:
+  VERSION: release-build-230
+concurrency:
+  group: stable-watson-r235-final
+  cancel-in-progress: true
+jobs:
+  source:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      sha: ${{ steps.source.outputs.sha }}
+    steps:
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      with:
+        fetch-depth: 0
+    - id: source
+      shell: python
+      run: "import base64,gzip,json,pathlib,subprocess,os,hashlib\nassert os.environ[\"GITHUB_REF\"]==\"refs/heads/work/stable-watson-r235\"\nsubprocess.run([\"git\",\"merge-base\",\"\
+        --is-ancestor\",\"80951cdacee4ba12bbb4d6a8d6b8761117e36c18\",\"HEAD\"],check=True)\np=json.loads(gzip.decompress(base64.b64decode(\"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\"\
+        )))\nif not all(pathlib.Path(n).exists() and pathlib.Path(n).read_text()==c for n,c in p[\"files\"].items()):\n    for name,want in p[\"base\"].items():\n        f=pathlib.Path(name);actual=hashlib.sha256(f.read_bytes()).hexdigest()\
+        \ if f.exists() else None\n        assert actual==want,\"Source changed before write: \"+name\n    for name,content in p[\"files\"].items():\n        f=pathlib.Path(name);f.parent.mkdir(parents=True,exist_ok=True);f.write_text(content)\n\
+        \    subprocess.run([\"git\",\"add\",*p[\"files\"]],check=True)\n    subprocess.run([\"git\",\"-c\",\"user.name=github-actions[bot]\",\"-c\",\"user.email=41898282+github-actions[bot]@users.noreply.github.com\"\
+        ,\"commit\",\"-m\",\"test: require upgrade from latest published APK R235 [skip ci]\"],check=True)\n    subprocess.run([\"git\",\"push\",\"origin\",\"HEAD:work/stable-watson-r235\"\
+        ],check=True)\nfor name,content in p[\"files\"].items(): assert pathlib.Path(name).read_text()==content\nsha=subprocess.check_output([\"git\",\"rev-parse\",\"HEAD\"],text=True).strip()\n\
+        with open(os.environ[\"GITHUB_OUTPUT\"],\"a\") as f:f.write(\"sha=\"+sha+\"\\n\")\n"
+  build:
+    needs: source
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      with:
+        persist-credentials: false
+        ref: ${{ needs.source.outputs.sha }}
+    - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
+      with:
+        distribution: temurin
+        java-version: '17'
+    - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407
+      with:
+        packages: platform-tools platforms;android-34 build-tools;34.0.0
+        log-accepted-android-sdk-licenses: false
+    - uses: gradle/actions/setup-gradle@d9c87d481d55275bb5441eef3fe0e46805f9ef70
+    - name: Restore native libraries (validated before use)
+      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+      with:
+        path: 'app/build/generated/byedpi
+
+          app/build/generated/hev
+
+          app/build/generated/byedpi-cache.json
+
+          app/build/generated/hev-cache.json
+
+          '
+        key: native-${{ runner.os }}-${{ runner.arch }}-ndk27.2.12479018-api24-all-${{ hashFiles('native/**', 'app/build.gradle.kts') }}
+    - name: Install pinned NDK
+      run: sdkmanager 'ndk;27.2.12479018'
+    - name: JVM tests and release build
+      run: 'N=${VERSION#beta-build-}; export GITHUB_RUN_NUMBER=${N#release-build-}
+
+        chmod +x gradlew
+
+        python3 -m unittest discover -s tools/release-gates -p ''test_*.py''
+
+        bash tools/test-security-result-parser.sh
+
+        PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p ''test_cloud_*.py''
+
+        ./gradlew -PbetaPreview=true -PemulatorAbis=true -PsplitAbi=true --no-daemon --max-workers=2 :app:testDebugUnitTest :app:testReleaseUnitTest :app:lintRelease :app:assembleRelease
+        :security-test-probe:assembleDebug
+
+        '
+    - name: Sign with persistent Beta key (v1+v2+v3)
+      env:
+        KS_B64: ${{ secrets.BETA_KEYSTORE_B64 }}
+        KSP: ${{ secrets.BETA_KEYSTORE_PASSWORD }}
+      run: "set -euo pipefail\numask 077\ntrap 'rm -f beta.jks aligned.apk release/*.idsig' EXIT INT TERM\nBT=$ANDROID_HOME/build-tools/34.0.0\necho \"$KS_B64\" | base64 -d > beta.jks\n\
+        mkdir -p release\ncp security-test-probe/build/outputs/apk/debug/security-test-probe-debug.apk release/security-test-probe.apk\nOUT=app/build/outputs/apk/release\nsign() {\n\
+        \  $BT/zipalign -f -p 4 \"$1\" aligned.apk\n  $BT/apksigner sign --ks beta.jks --ks-key-alias beta --ks-pass env:KSP --key-pass env:KSP \\\n    --v1-signing-enabled true --v2-signing-enabled\
+        \ true --v3-signing-enabled true \\\n    --min-sdk-version 21 --out \"$2\" aligned.apk\n  $BT/apksigner verify --min-sdk-version 21 \"$2\"\n}\n# Universal APK keeps the old file\
+        \ name (emulator check and existing download links).\nsign $OUT/app-universal-release-unsigned.apk release/VLESS-Card-Beta.apk\n# arm64-only: about half the download, for almost\
+        \ all modern phones.\nsign $OUT/app-arm64-v8a-release-unsigned.apk release/VLESS-Card-Beta-arm64.apk\nrm -f beta.jks aligned.apk release/*.idsig\nls -l release/*.apk\n$BT/apksigner\
+        \ verify -v --min-sdk-version 21 release/VLESS-Card-Beta.apk | tee verify.txt\ngrep -q \"v1 scheme (JAR signing): true\" verify.txt\ngrep -q \"v2 scheme (APK Signature Scheme\
+        \ v2): true\" verify.txt\n$BT/zipalign -c -p 4 release/VLESS-Card-Beta.apk\n$BT/aapt2 dump badging release/VLESS-Card-Beta.apk | grep -E \"^package|application-label:|native-code\"\
+        \nunzip -tq release/VLESS-Card-Beta.apk\n# Same signed universal APK used by launch gates must include native emulator libraries.\nfor lib in libgojni.so libhev-socks5-tunnel.so;\
+        \ do\n  unzip -l release/VLESS-Card-Beta.apk | grep -q \"lib/x86_64/$lib\"\ndone\n$BT/apksigner verify --print-certs -v release/VLESS-Card-Beta.apk | grep -E \"key size|SHA-256\
+        \ digest\"\n$BT/apksigner verify --print-certs -v release/VLESS-Card-Beta.apk | grep -q \"key size (bits): 2048\"\nunzip -l release/VLESS-Card-Beta.apk | grep -E \"META-INF/.*\\\
+        .(RSA|SF)$\"\nGITHUB_SHA=\"$CANDIDATE_SHA\" python3 tools/release-gates/verify_candidate.py\npython3 - <<'PY'\nimport json\nd=json.load(open('release/verification.json'))['jvm']\n\
+        open('release/tests.txt','w').write(f\"{d['tests']} {d['failures'] + d['errors']}\\n\")\nPY\n"
+    - name: Verify both complete JVM variants
+      run: 'python3 - <<''PYCODE''
+
+        import sys,json,pathlib
+
+        sys.path.insert(0,''tools/release-gates'')
+
+        from verify_candidate import test_totals
+
+        p=pathlib.Path(''release/verification.json'');d=json.loads(p.read_text())
+
+        d[''jvm_variants'']={v:test_totals(pathlib.Path(''app/build/test-results/''+v).glob(''*.xml'')) for v in [''testDebugUnitTest'',''testReleaseUnitTest'']}
+
+        d[''release_status'']=''candidate_pending_all_emulator_gates''
+
+        p.write_text(json.dumps(d,indent=2)+''\n'')
+
+        PYCODE'
+    - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      with:
+        name: beta-apk
+        path: release/
+    - name: Save complete reports even on failure
+      if: always()
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      with:
+        name: reports-build
+        path: 'app/build/test-results/
+
+          app/build/reports/
+
+          release/verification.json
+
+          release/upgrade-*.txt
+
+          release/security-*.txt'
+        if-no-files-found: warn
+    env:
+      CANDIDATE_SHA: ${{ needs.source.outputs.sha }}
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        api:
+        - 33
+        - 29
+    steps:
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      with:
+        persist-credentials: false
+        ref: ${{ needs.source.outputs.sha }}
+    - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
+      with:
+        distribution: temurin
+        java-version: '17'
+    - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407
+      with:
+        packages: platform-tools platforms;android-34 build-tools;34.0.0
+        log-accepted-android-sdk-licenses: false
+    - uses: gradle/actions/setup-gradle@d9c87d481d55275bb5441eef3fe0e46805f9ef70
+    - name: Restore native libraries (validated before use)
+      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+      with:
+        path: 'app/build/generated/byedpi
+
+          app/build/generated/hev
+
+          app/build/generated/byedpi-cache.json
+
+          app/build/generated/hev-cache.json
+
+          '
+        key: native-${{ runner.os }}-${{ runner.arch }}-ndk27.2.12479018-api24-all-${{ hashFiles('native/**', 'app/build.gradle.kts') }}
+    - name: Install pinned NDK
+      run: sdkmanager 'ndk;27.2.12479018'
+    - name: Build (all ABIs, debug) + JVM tests
+      run: 'chmod +x gradlew
+
+        ./gradlew --no-daemon --max-workers=2 :app:testDebugUnitTest :app:assembleDebug :vpn-test-probe:testDebugUnitTest :vpn-test-probe:assembleDebug
+
+        '
+    - name: Xray-core for the host-side servers
+      run: 'curl -fsSL -o /tmp/xray.zip https://github.com/XTLS/Xray-core/releases/download/v26.9.30/Xray-linux-64.zip
+
+        echo "f851110beaff16e78d643f0ccfd9524b4a44dfd59bae3e34bb52bba378f7690e  /tmp/xray.zip" | sha256sum -c -
+
+        mkdir -p /tmp/xray && unzip -qo /tmp/xray.zip -d /tmp/xray && /tmp/xray/xray version | head -1
+
+        '
+    - name: Automatic DNS failover (closed loopback fixtures)
+      run: python3 tools/e2e/dns-failover-smoke.py --xray /tmp/xray/xray --config /tmp/dns-auto-config.json
+    - name: Tor server-uplink startup without standalone ByeDPI (loopback fixture)
+      run: python3 tools/e2e/tor-standalone-smoke.py --xray /tmp/xray/xray --config /tmp/chain-probe-configs/LIVE_SERVER_TOR.json
+    - name: Isolated Auto chain TLS body and required-hop failure gates
+      run: python3 tools/auto-chain-lab/smoke.py --xray /tmp/xray/xray --configs /tmp/chain-probe-configs
+    - name: Reclaim unrelated hosted toolchains before Android userdata allocation
+      run: 'sudo rm -rf /usr/share/dotnet /opt/hostedtoolcache/CodeQL /usr/local/swift
+
+        df -h "$HOME"
+
+        '
+    - name: Enable KVM
+      run: 'echo ''KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"'' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+
+        sudo udevadm control --reload-rules
+
+        sudo udevadm trigger --name-match=kvm
+
+        '
+    - uses: reactivecircus/android-emulator-runner@4c44018e59b437e86cdfc41da381398f93ed8808
+      with:
+        api-level: ${{ matrix.api }}
+        target: google_apis
+        arch: x86_64
+        disable-animations: true
+        emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
+        script: bash tools/e2e-android.sh
+    - if: always()
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      with:
+        name: e2e-api-${{ matrix.api }}
+        path: '/tmp/e2e/failure-*.txt
+
+          /tmp/e2e/logcat.txt
+
+          /tmp/e2e/server.log
+
+          /tmp/e2e/access.log
+
+          /tmp/e2e/tor-*.txt
+
+          '
+        if-no-files-found: ignore
+    - name: Save complete reports even on failure
+      if: always()
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      with:
+        name: reports-e2e-${{ matrix.api }}
+        path: 'app/build/test-results/
+
+          app/build/reports/
+
+          release/verification.json
+
+          release/upgrade-*.txt
+
+          release/security-*.txt'
+        if-no-files-found: warn
+    needs: source
+    env:
+      CANDIDATE_SHA: ${{ needs.source.outputs.sha }}
+  masks-matrix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      with:
+        persist-credentials: false
+        ref: ${{ needs.source.outputs.sha }}
+    - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
+      with:
+        distribution: temurin
+        java-version: '17'
+    - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407
+      with:
+        packages: platform-tools platforms;android-34 build-tools;34.0.0
+        log-accepted-android-sdk-licenses: false
+    - uses: gradle/actions/setup-gradle@d9c87d481d55275bb5441eef3fe0e46805f9ef70
+    - name: Restore native libraries (validated before use)
+      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+      with:
+        path: 'app/build/generated/byedpi
+
+          app/build/generated/hev
+
+          app/build/generated/byedpi-cache.json
+
+          app/build/generated/hev-cache.json
+
+          '
+        key: native-${{ runner.os }}-${{ runner.arch }}-ndk27.2.12479018-api24-all-${{ hashFiles('native/**', 'app/build.gradle.kts') }}
+    - name: Install pinned NDK
+      run: sdkmanager 'ndk;27.2.12479018'
+    - name: "Every server type \xD7 every mask through real Xray-core"
+      run: bash tools/masks-matrix-ci.sh
+    - name: Save complete reports even on failure
+      if: always()
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      with:
+        name: reports-masks-matrix
+        path: 'app/build/test-results/
+
+          app/build/reports/
+
+          release/verification.json
+
+          release/upgrade-*.txt
+
+          release/security-*.txt'
+        if-no-files-found: warn
+    needs: source
+    env:
+      CANDIDATE_SHA: ${{ needs.source.outputs.sha }}
+  emulator-install:
+    needs:
+    - source
+    - build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+        - api: 30
+          target: google_apis
+        - api: 34
+          target: google_apis
+    steps:
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      with:
+        persist-credentials: false
+        ref: ${{ needs.source.outputs.sha }}
+    - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      with:
+        name: beta-apk
+        path: release
+    - name: Enable KVM
+      run: 'echo ''KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"'' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+
+        sudo udevadm control --reload-rules
+
+        sudo udevadm trigger --name-match=kvm
+
+        '
+    - uses: reactivecircus/android-emulator-runner@4c44018e59b437e86cdfc41da381398f93ed8808
+      with:
+        api-level: ${{ matrix.api }}
+        target: ${{ matrix.target }}
+        arch: x86_64
+        disable-animations: true
+        emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
+        script: bash tools/release-gates/check-upgrade.sh && bash tools/security-storage-check.sh && bash tools/beta-install-check.sh
+    - if: always()
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      with:
+        name: install-check-api-${{ matrix.api }}
+        path: 'screen.png
+
+          home-ocean.png
+
+          home-large-text.png
+
+          intro.png
+
+          intro-large-text.png
+
+          logcat.txt
+
+          security-results.txt
+
+          release/upgrade-*.txt
+
+          '
+        if-no-files-found: ignore
+    - name: Save complete reports even on failure
+      if: always()
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      with:
+        name: reports-emulator-install-${{ matrix.api }}
+        path: 'app/build/test-results/
+
+          app/build/reports/
+
+          release/verification.json
+
+          release/upgrade-*.txt
+
+          release/security-*.txt'
+        if-no-files-found: warn
+    env:
+      CANDIDATE_SHA: ${{ needs.source.outputs.sha }}
