@@ -16,6 +16,6 @@ class DiscoveryAdmission(unittest.TestCase):
   self.assertIn('AutoLatencyPolicy.accepts(p)',t)
  def test_source_queue_and_pause_unchanged(self):
   a=(R/'app/src/main/java/com/vlesscardvpn/core/Actions.kt').read_text()
-  for x in ['SubscriptionQueue.fetchOrder(due,round)','SubscriptionQueue.window(', 'ConnectPolicy.FIRST,provenLeader']:
+  for x in ['SubscriptionQueue.fetchOrder(due,round)','SubscriptionQueue.window(', 'ConnectPolicy.firstWave(st.settings.probeParallel),provenLeader']:
    self.assertIn(x,a)
   self.assertIn('const val WAVE_PAUSE_MS = 1000L',(R/'app/src/main/java/com/vlesscardvpn/core/AutoSearchCampaign.kt').read_text())
