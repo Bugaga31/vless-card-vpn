@@ -1,0 +1,22 @@
+{
+  "repository": "https://github.com/KaringX/karing-ruleset",
+  "revision": "2eddd3aa684b50372fe5996378d49158ec1d5eb6",
+  "files": [
+    {
+      "path": "geo/geosite/category-ru.json",
+      "sha256": "c65aa93784067714322a6e91f0cb8e9eb22cd0b5ef6721bd6a731c643645773a"
+    },
+    {
+      "path": "geo/geoip/ru.json",
+      "sha256": "a129202eb5fb2e400572845f5363d18f9d1d001c7802eb0dd71439b188029c40"
+    }
+  ],
+  "counts": {
+    "exact": 236,
+    "suffix": 921,
+    "ipv4": 12987,
+    "ipv6": 12170
+  },
+  "ipv6": "data retained but routing remains blocked",
+  "runtime_fetch": false
+}

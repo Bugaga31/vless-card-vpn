@@ -41,19 +41,24 @@ fun SettingsScreen() {
     val busy by Actions.running.collectAsState()
     val ctx = LocalContext.current
     fun set(f: (Settings) -> Settings) = Store.update { it.copy(settings = f(it.settings)) }
-    var appsDialog by remember { mutableStateOf(false) }
     var wipeDialog by remember { mutableStateOf(false) }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text("Настройки", fontSize = 30.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 4.dp, top = 12.dp, bottom = 8.dp))
         val storageError by Store.storageError.collectAsState()
         if (storageError.isNotEmpty()) Text(storageError, color = Bad, fontSize = 13.sp)
-        Group("Белые списки оператора") {
-            val wl by com.vlesscardvpn.core.Whitelist.last.collectAsState()
-            val sc = rememberCoroutineScope(); var checking by remember { mutableStateOf(false) }
-            Hint(wl?.let { com.vlesscardvpn.core.Whitelist.report(it) } ?: "Проверяет напрямую (мимо VPN), открываются ли только разрешённые сайты — так понятно, какие способы обхода вообще могут работать в этой сети. На мобильном автопилот проверяет сам при смене сети.")
-            Button(onClick = { checking = true; sc.launch { com.vlesscardvpn.core.Whitelist.check(); checking = false } }, enabled = !checking, modifier = Modifier.fillMaxWidth()) {
-                Text(if (checking) "Проверяю…" else "Проверить сеть")
+        RuWhitelistCard(s, onGeoChange = { enabled -> set { it.copy(ruAllDirect = enabled) } }) { enabled -> set { it.copy(ruWhitelist = enabled) } }
+        Group("Автоматический выбор") { AutoCheckSettings(); HorizontalDivider(); AutoLatencySettings() }
+        Group("Проверка через VLESS") {
+            val report by com.vlesscardvpn.core.Actions.netReport.collectAsState()
+            Hint(report.verdict.ifEmpty { "Проверки YouTube, Telegram, WhatsApp, Discord и UDP для звонков идут только через подключённый VLESS-сервер." })
+            if (report.details.isNotEmpty()) Text(report.details, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Button(onClick = { com.vlesscardvpn.core.Actions.diagnoseNetwork() }, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
+                Text("Проверить маршрут и звонки")
             }
+        }
+        Group("Видимость для провайдера") {
+            Hint("VPN шифрует содержимое, но провайдер видит IP первого узла, время и объём соединения. TLS-маскировка не скрывает зарубежный IP и не гарантирует нераспознаваемость VPN. Российский вход с зарубежным выходом требует отдельной проверенной цепочки; здесь автоматически не включается.")
+            if(s.ruWhitelist || s.ruAllDirect) Hint("RU-исключения включены: соответствующие прямые соединения и обычные DNS видны провайдеру. Расширение RU-списка — не маскировка зарубежного трафика.")
         }
         Group("Защита данных") {
             Hint(if (com.vlesscardvpn.BuildConfig.DEBUG) "Отладочная сборка: state.json не зашифрован для тестов. Для повседневного использования установите подписанный релиз."
@@ -114,74 +119,61 @@ fun SettingsScreen() {
             }
             Toggle("Анимация волн", "Не чаще 20 кадров/с. Замирает в фоне, при экономии энергии, низком заряде, нагреве и выключенной системной анимации; фон остаётся виден", s.oceanMotion) { v -> set { it.copy(oceanMotion = v) } }
             Toggle("Заставка при открытии", "Короткая морская заставка без голоса и звука. Коснитесь, чтобы сразу перейти к приложению. При работающем VPN пропускается", s.welcomeSound) { v -> set { it.copy(welcomeSound = v) } }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf("dark" to "Тёмная", "amoled" to "AMOLED", "you" to "Material You").forEach { (id, t) ->
+            Row(Modifier.horizontalScroll(rememberScrollState()),horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf("system" to "Системная", "light" to "Светлая", "dark" to "Тёмная", "amoled" to "AMOLED", "you" to "Material You").forEach { (id, t) ->
                     if (id != "you" || Build.VERSION.SDK_INT >= 31) FilterChip(selected = s.theme == id, onClick = { set { it.copy(theme = id) } }, label = { Text(t) })
                 }
             }
             Hint("AMOLED — чистый чёрный фон, экономит батарею на OLED-экранах. Material You — цвета ваших обоев (Android 12+).")
         }
+        Group("Удобство") { ExperienceSettings() }
         Group("Почему не работает?") {
             val sc = rememberCoroutineScope(); var diag by remember { mutableStateOf("") }; var running by remember { mutableStateOf(false) }
-            Hint(diag.ifEmpty { "Находит причину: белые списки, блокировка сервера по IP или по имени (SNI), «заморозка» загрузки после 16 КБ внутри VPN — и подсказывает, что поможет." })
+            Hint(diag.ifEmpty { "Проверяет выбранные VLESS-серверы, DNS и передачу данных через сервер. Прямые проверки и режимы обхода без сервера отключены." })
             Button(onClick = { running = true; sc.launch { diag = com.vlesscardvpn.core.Diagnose.report(Store.state.value.selected, com.vlesscardvpn.core.Tunnel.socks?.port); running = false } },
                 enabled = !running, modifier = Modifier.fillMaxWidth()) { Text(if (running) "Проверяю… (~15 с)" else "Найти причину") }
         }
-        // ---------------- DPI
-        Group("Обход DPI без сервера (ByeDPI + zapret)") {
-        val network = remember { Net.key(ctx) }
-        val current = DpiStrategies.resolve(s, network)
-        Hint("Используется в режимах «ByeDPI» и «Гибрид» и как маскировка «через ByeDPI» для серверов. Сейчас: ${current.label} (сеть «$network»).")
-        Button(onClick = { Actions.findDpi() }, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text("Подобрать обход для этой сети") }
-        LiveProgress { it.title == "Подбор обхода DPI" || it.title == "Проверка обхода DPI" || it.title.startsWith("Финал") }
-        val results by Actions.dpiResults.collectAsState()
-        var showAll by remember { mutableStateOf(false) }
-        StrategyRow("Авто — подобранная для сети", s.dpiStrategy == Settings.DPI_AUTO, null) { set { it.copy(dpiStrategy = Settings.DPI_AUTO) } }
-        StrategyRow("Своя строка (ниже)", s.dpiStrategy == DpiStrategies.CUSTOM_ID, results[DpiStrategies.CUSTOM_ID]) { set { it.copy(dpiStrategy = DpiStrategies.CUSTOM_ID) } }
-        val list = if (showAll) DpiStrategies.BUILT_IN else DpiStrategies.BUILT_IN.filter { it.own || results[it.id]?.ok == true || s.dpiStrategy == it.id }
-        list.forEach { st -> StrategyRow(st.label, s.dpiStrategy == st.id, results[st.id]) { set { it.copy(dpiStrategy = st.id) } } }
-        TextButton(onClick = { showAll = !showAll }) { Text(if (showAll) "Свернуть" else "Все ${DpiStrategies.BUILT_IN.size} стратегий") }
-        var args by remember(s.byeDpiArgs) { mutableStateOf(s.byeDpiArgs) }
-        val parsed = ByeDpiArgs.parse(args, s.byeDpiSni)
-        OutlinedTextField(args, { v -> args = v; if (ByeDpiArgs.parse(v, s.byeDpiSni).isSuccess) set { it.copy(byeDpiArgs = v) } },
-            label = { Text("Своя стратегия (строка из ByeByeDPI)") }, modifier = Modifier.fillMaxWidth(),
-            isError = parsed.isFailure, supportingText = {
-                val w = parsed.getOrNull()?.let { ByeDpiArgs.warnings(it) }.orEmpty()
-                (parsed.exceptionOrNull()?.message ?: w.firstOrNull())?.let { Text(it) }
-            })
-        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            (listOf(Settings.DEFAULT_BYEDPI) + ByeDpiArgs.EXAMPLES).distinct().forEach { e ->
-                AssistChip(onClick = { args = e; set { it.copy(byeDpiArgs = e) } }, label = { Text(e, fontSize = 11.sp) })
+        Group("Маскировка VLESS-сервера") {
+            val network = remember { Net.key(ctx) }
+            val current = DpiStrategies.resolve(s, network)
+            Hint("Параметры ByeDPI/zapret применяются только как транспортная маскировка подключения к VLESS-серверу. Самостоятельный выход в интернет без сервера отключён. Сейчас: ${current.label} · сеть «$network».")
+            Button(onClick = { Actions.findDpi() }, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text("Подобрать маскировку через VLESS") }
+            LiveProgress { it.title.contains("маскировк") || it.title.contains("Проверка маскировки") }
+            var showAll by remember { mutableStateOf(false) }
+            StrategyRow("Авто — подобранная для сети", s.dpiStrategy == Settings.DPI_AUTO, null) { set { it.copy(dpiStrategy = Settings.DPI_AUTO) } }
+            StrategyRow("Своя строка (ниже)", s.dpiStrategy == DpiStrategies.CUSTOM_ID, null) { set { it.copy(dpiStrategy = DpiStrategies.CUSTOM_ID) } }
+            val list = if (showAll) DpiStrategies.BUILT_IN else DpiStrategies.BUILT_IN.filter { it.own || s.dpiStrategy == it.id }
+            list.forEach { st -> StrategyRow(st.label, s.dpiStrategy == st.id, null) { set { it.copy(dpiStrategy = st.id) } } }
+            TextButton(onClick = { showAll = !showAll }) { Text(if (showAll) "Свернуть" else "Все ${DpiStrategies.BUILT_IN.size} транспортных масок") }
+            var args by remember(s.byeDpiArgs) { mutableStateOf(s.byeDpiArgs) }
+            val parsed = ByeDpiArgs.parse(args, s.byeDpiSni)
+            OutlinedTextField(args, { v -> args = v; if (ByeDpiArgs.parse(v, s.byeDpiSni).isSuccess) set { it.copy(byeDpiArgs = v) } },
+                label = { Text("Параметры маскировки VLESS") }, modifier = Modifier.fillMaxWidth(),
+                isError = parsed.isFailure, supportingText = {
+                    val warnings = parsed.getOrNull()?.let { ByeDpiArgs.warnings(it) }.orEmpty()
+                    (parsed.exceptionOrNull()?.message ?: warnings.firstOrNull())?.let { Text(it) }
+                })
+            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                (listOf(Settings.DEFAULT_BYEDPI) + ByeDpiArgs.EXAMPLES).distinct().forEach { e ->
+                    AssistChip(onClick = { args = e; set { it.copy(byeDpiArgs = e) } }, label = { Text(e, fontSize = 11.sp) })
+                }
             }
+            Hint("SNI маскировки — часть подключения к серверу; запросы к сайтам всё равно идут через VLESS.")
+            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                ByeDpiArgs.MASK_DOMAINS.forEach { d -> FilterChip(selected = s.byeDpiSni == d, onClick = { set { it.copy(byeDpiSni = d) } }, label = { Text(d) }) }
+            }
+            OutlinedButton(onClick = { Actions.testByeDpi() }, enabled = !busy) { Text("Проверить маски через сервер") }
         }
-        Hint("Домен маскировки (фейковый ClientHello: провайдер видит этот сайт)")
-        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            ByeDpiArgs.MASK_DOMAINS.forEach { d -> FilterChip(selected = s.byeDpiSni == d, onClick = { set { it.copy(byeDpiSni = d) } }, label = { Text(d) }) }
-        }
-        OutlinedButton(onClick = { Actions.testByeDpi() }, enabled = !busy) { Text("Проверить текущую") }
-        var hybrid by remember(s.hybridDomains) { mutableStateOf(s.hybridDomains.joinToString(", ")) }
-        OutlinedTextField(hybrid, { v -> hybrid = v; set { it.copy(hybridDomains = v.split(',', ' ', '\n').map { d -> d.trim() }.filter { d -> d.isNotEmpty() }) } },
-            label = { Text("Гибрид: эти сайты — через обход DPI (geosite:… или домены)") }, modifier = Modifier.fillMaxWidth())
-
-        // ---------------- hiding
-        }
-        Group("Скрытность") {
+                Group("Скрытность") {
         Toggle("Скрытый локальный прокси", "Случайный порт и пароль при каждом подключении — приложения не найдут прокси сканированием 10808 и не смогут им воспользоваться", s.stealthSocks) { v -> set { it.copy(stealthSocks = v) } }
         if (!s.stealthSocks) {
             var port by remember(s.socksPort) { mutableStateOf(s.socksPort.toString()) }
             OutlinedTextField(port, { v -> port = v.filter { it.isDigit() }.take(5); port.toIntOrNull()?.takeIf { it in 1024..65535 }?.let { p -> set { it.copy(socksPort = p) } } },
                 label = { Text("Порт SOCKS 127.0.0.1 (без пароля)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
         }
-        Toggle("Российские сайты напрямую", "Банки, Госуслуги, VK, Яндекс видят обычный российский IP, а не зарубежный VPN", s.ruDirect) { v -> set { it.copy(ruDirect = v) } }
-        if (s.ruDirect) Toggle("DNS для .ru — Яндекс", "Российские домены резолвятся как у обычного абонента; остальное — зашифрованным DNS через туннель", s.ruDns) { v -> set { it.copy(ruDns = v) } }
-        Toggle("Блокировать WebRTC/STUN", "Сайты не узнают адрес через WebRTC. Может сломать звонки WhatsApp/Discord", s.blockStun) { v -> set { it.copy(blockStun = v) } }
-        Toggle("Блокировать QUIC (UDP 443)", "Браузеры и YouTube пойдут по TCP+TLS, который маскируется. В режиме ByeDPI включено всегда", s.blockQuic) { v -> set { it.copy(blockQuic = v) } }
-        Hint("Маскировка поведения и устройства — не только пакеты")
-        Toggle("Российские приложения мимо VPN", "Сбер, Т-Банк, ВТБ, Госуслуги, Ozon, WB, Яндекс, VK, операторы… идут напрямую: видят обычного абонента и не ругаются на VPN", s.ruAppsDirect) { v -> set { it.copy(ruAppsDirect = v) } }
-        Toggle("Случайный адрес VPN-интерфейса", "Новый внутренний адрес при каждом подключении и нейтральное имя сеанса — нет постоянных признаков, по которым ищут VPN-клиенты", s.randomTun) { v -> set { it.copy(randomTun = v) } }
-        Toggle("Фон обычного пользователя", "Пока VPN включён, изредка (раз в 1–3 мин, ≤32 КБ) открывает обычный российский сайт напрямую: у провайдера обычная картина, а не один поток за границу", s.coverTraffic) { v -> set { it.copy(coverTraffic = v) } }
-        OutlinedButton(onClick = { set { it.copy(stealthSocks = true, ruDirect = true, ruDns = true, blockQuic = true, rotateMasks = true, ruAppsDirect = true, randomTun = true, coverTraffic = true, autoHeal = true, maskEvolution = true) } }) {
-            Text("Включить всю маскировку")
+        Hint("Прямые исключения, прокси без VPN и самостоятельный ByeDPI отключены. Все приложения и внешний интернет идут через VLESS; STUN/QUIC не блокируются, чтобы не мешать звонкам.")
+        OutlinedButton(onClick = { set { it.copy(stealthSocks = true, randomTun = true, autoHeal = true, maskEvolution = true) } }) {
+            Text("Включить безопасную маскировку")
         }
         Toggle("Нейтральное уведомление", "В шторке «Синхронизация · Активно» вместо названия VPN", s.quietNotification) { v -> set { it.copy(quietNotification = v) } }
         Hint("Иконка и название на рабочем столе")
@@ -190,18 +182,15 @@ fun SettingsScreen() {
                 FilterChip(selected = s.disguise == d.id, onClick = { set { it.copy(disguise = d.id) }; Apps.applyDisguise(ctx, d.id) }, label = { Text(d.title) })
             }
         }
-        OutlinedButton(onClick = { appsDialog = true }, modifier = Modifier.fillMaxWidth()) {
-            Text(if (s.apps.isEmpty()) "Приложения без VPN (банки, Госуслуги…)" else if (s.onlyApps) "Только через VPN: ${s.apps.size} прил." else "Без VPN: ${s.apps.size} прил.")
-        }
         OutlinedButton(onClick = {
             runCatching { ctx.startActivity(Intent(AndroidSettings.ACTION_VPN_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
         }, modifier = Modifier.fillMaxWidth()) { Text("Kill switch: «Постоянная VPN» + «Блокировать без VPN»") }
         Hint("В системных настройках VPN нажмите ⚙ у VLESS Card и включите оба переключателя: при обрыве интернет не пойдёт мимо VPN.")
-        if (s.alwaysVpn.isNotEmpty() || s.alwaysDirect.isNotEmpty()) {
-            Section("Сайты: всегда через VPN / напрямую")
-            Hint("Добавляются кнопкой на главном экране «Сайт не открывается?». Нажмите, чтобы убрать (действует со следующего подключения).")
-            (s.alwaysVpn.map { it to "через VPN" } + s.alwaysDirect.map { it to "напрямую" }).forEach { (h, w) ->
-                TextButton(onClick = { Actions.routeSite(h, "") }) { Text("✕  $h — $w", fontSize = 13.sp) }
+        if (s.alwaysVpn.isNotEmpty()) {
+            Section("Сайты, закреплённые за VLESS")
+            Hint("Все остальные сайты тоже идут через VLESS. Нажмите, чтобы убрать закрепление.")
+            s.alwaysVpn.forEach { host ->
+                TextButton(onClick = { Actions.routeSite(host, "") }) { Text("✕  $host — через VLESS", fontSize = 13.sp) }
             }
         }
         OutlinedButton(onClick = {
@@ -213,27 +202,7 @@ fun SettingsScreen() {
 
         // ---------------- servers
         }
-        Group("Tor — отдельный путь (встроенный, без Termux)") {
-            Hint("Tor уже встроен в приложение: Termux не нужен. Выбранные сервисы (Discord и др.) идут через собственный демон Tor поверх туннеля, выход ротируется сам.")
-            Toggle("Tor для сервисов", "Discord и другие выбранные сервисы идут через Tor поверх VPN: сайты видят адрес Tor-выхода, оператор — только маску VLESS", s.torRouting) { v -> set { it.copy(torRouting = v) } }
-            Toggle("Tor в Авто", "Если сервис перестаёт работать через все серверы — сам переключаю его на Tor, пока связь не восстановится", s.torAuto) { v -> set { it.copy(torAuto = v) } }
-            Toggle("Отдельный путь Tor", "Демон Tor ходит в интернет сам, минуя VPN: своё шифрование и мосты, работает даже при недоступных серверах", s.torDirect) { v -> set { it.copy(torDirect = v) } }
-            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                listOf("none" to "Без мостов", "obfs4" to "obfs4", "snowflake" to "Snowflake", "webtunnel" to "WebTunnel").forEach { (id, t) ->
-                    FilterChip(selected = s.torBridge == id, onClick = { set { it.copy(torBridge = id) } }, label = { Text(t) })
-                }
-            }
-            if (s.torBridge != "none") {
-                OutlinedButton(onClick = {
-                    runCatching { ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://bridges.torproject.org/options"))) }
-                }, modifier = Modifier.fillMaxWidth()) { Text("Получить мосты (bridges.torproject.org)") }
-                var bridges by remember { mutableStateOf(s.torBridgeLines) }
-                androidx.compose.material3.OutlinedTextField(bridges, { v -> bridges = v; set { it.copy(torBridgeLines = v) } },
-                    modifier = Modifier.fillMaxWidth(), label = { Text("Мосты: строки «Bridge …» (до 12)") }, minLines = 2, maxLines = 6)
-                Hint("Скопируйте строки «Bridge obfs4 …» / «Bridge webtunnel …» с bridges.torproject.org сюда — по одной в строке. Применится при следующем подключении.")
-            }
-            Toggle("Весь трафик через Tor", "Максимальная анонимность: всё через Tor поверх туннеля. Медленно — только когда анонимность важнее скорости", s.torAll) { v -> set { it.copy(torAll = v) } }
-        }
+        TorSettingsCard(s, ::set)
         Group("Нагрузка VPN и батарея") {
         val power by com.vlesscardvpn.core.PhonePower.state.collectAsState()
         val sensors by com.vlesscardvpn.core.PhonePower.sensors.collectAsState()
@@ -252,7 +221,7 @@ fun SettingsScreen() {
             listOf(10, 20, 30).forEach { n -> FilterChip(selected = s.batteryThreshold == n,
                 onClick = { set { it.copy(batteryThreshold = n) } }, label = { Text("Заряд ≤ $n%") }) }
         }
-        Toggle("Тихо с выключенным экраном", "Необязательные задачи спят; при включении экрана связь проверяется снова. Не зависит от крупных пакетов", s.quietScreen) { v -> set { it.copy(quietScreen = v) } }
+        Toggle("Тихо с выключенным экраном", "Необязательные задачи спят. В Авто проверка живости и восстановление продолжаются без загрузки видео; при включении экрана — полная перепроверка", s.quietScreen) { v -> set { it.copy(quietScreen = v) } }
         Toggle("Улучшения только на зарядке", "Поиск более быстрых серверов и эволюция ждут зарядку. Восстановление связи — всегда", s.chargeOnly) { v -> set { it.copy(chargeOnly = v) } }
         Toggle("Фоновые улучшения без тарификации", "Не тратить мобильный трафик на необязательные проверки; системная экономия трафика учитывается всегда", s.wifiMaintenance) { v -> set { it.copy(wifiMaintenance = v) } }
         Toggle("Не мешать активному трафику", "Отложить фоновые тесты при потоке свыше 40 КБ/с. Это оценка трафика, а не распознавание звонков", s.protectActiveTraffic) { v -> set { it.copy(protectActiveTraffic = v) } }
@@ -288,7 +257,7 @@ fun SettingsScreen() {
             if (g.isNotEmpty()) Text(g, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             TextButton(onClick = { com.vlesscardvpn.core.GpsMock.openDevSettings(ctx) }) { Text("Открыть параметры разработчика") }
         }
-        Toggle("Фоновое ускорение", "Само готовит серверы и маски при запуске, а при подключении раз в 20 минут проверяет и переходит на более быстрые. На мобильном — экономно", s.autoOptimize) { v -> set { it.copy(autoOptimize = v) } }
+        Toggle("Фоновое ускорение", "Готовит кандидатов и периодически сравнивает маршруты. В Авто поиск продолжается после подключения; применение требует заметного улучшения или восстановления связи. При нагрузке и ограничениях питания — пауза", s.autoOptimize) { v -> set { it.copy(autoOptimize = v) } }
         Toggle("Самовосстановление", "Если проверка после подключения не прошла: другая рабочая маскировка → новый подбор → (Авто) обход DPI без сервера", s.autoHeal) { v -> set { it.copy(autoHeal = v) } }
 
         }
@@ -334,6 +303,10 @@ fun SettingsScreen() {
         }
         MyMasksSection()
 
+        Group("Лаборатория маскировок") {
+        Toggle("Адаптивные Hello-эксперименты", "Эксперимент: выбор из восьми TLS/Hello-профилей: сглаженная измеренная задержка плюс исследование альтернатив; неизвестное не считается отказом. До двух вариантов на сервер. Может увеличить время поиска; не включает WebRTC/QUIC-протокол.", s.experimentalMaskLab) { v -> set { it.copy(experimentalMaskLab = v) } }
+        Hint("Только при неудаче обычного Auto. Рабочий маршрут не переключается ради эксперимента; для выбора нужны HTTPS и Telegram. В паспорте — обезличенные счётчики текущего сеанса.")
+        }
         Group("Подбор маскировки: что перебирать") {
         Hint("Ничего не отмечено — все виды. Меньше видов — быстрее подбор. Сервер перестаёт перебираться после 3 рабочих масок.")
         com.vlesscardvpn.xray.Masks.FAMILIES.forEach { (id, title) ->
@@ -352,8 +325,9 @@ fun SettingsScreen() {
 
         }
         Group("DNS через туннель") {
+        Toggle("Автовыбор DNS", "Первый успешный ответ от трёх шифрованных DNS через туннель. RU-DNS для прямых сайтов настраивается отдельно.", s.dnsAuto) { v -> set { it.copy(dnsAuto = v) } }
         Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            Settings.DNS_PRESETS.forEach { (n, u) -> FilterChip(selected = s.dnsUrl == u, onClick = { set { it.copy(dnsUrl = u) } }, label = { Text(n) }) }
+            Settings.DNS_PRESETS.forEach { (n, u) -> FilterChip(selected = !s.dnsAuto && s.dnsUrl == u, onClick = { set { it.copy(dnsUrl = u, dnsAuto = false) } }, label = { Text(n) }) }
         }
 
         }
@@ -392,7 +366,6 @@ fun SettingsScreen() {
         }
         Text(XrayCore.version(), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
-    if (appsDialog) AppsDialog(s, onDismiss = { appsDialog = false }) { apps, only -> set { it.copy(apps = apps, onlyApps = only) } }
     if (wipeDialog) AlertDialog(onDismissRequest = { wipeDialog = false },
         title = { Text("Стереть всё?") }, text = { Text("VPN отключится, удалятся локальные серверы, подписки, обучение, токены и настройки. Копии, которые вы сохраняли в GitHub или отправляли в заметки, не удаляются.") },
         confirmButton = { TextButton(onClick = { wipeDialog = false; com.vlesscardvpn.vpn.TunnelService.stop(ctx); Actions.wipe(); Apps.applyDisguise(ctx, "") }) { Text("Стереть", color = Bad) } },

@@ -1,0 +1,288 @@
+{
+  "passed": true,
+  "source_sha": "40c6e6f0ceb257b788d3b52a9613d61d9f2058a6",
+  "screenshots": [
+    {
+      "file": "background-deferred.png",
+      "sha256": "a5522a745e15f5cd7aafbc13622f2590d2f73d2cfbc804d1abaa1a7dea94a653"
+    },
+    {
+      "file": "background-finished.png",
+      "sha256": "b97bc2ad79216f06afa2bd984b7a004957ddc3a66c1756389fe9cf5af1dae29e"
+    },
+    {
+      "file": "background-power.png",
+      "sha256": "70e24640ca00237664b91a0a3cfbb942ee7d2afaef85d832514eff7a5732dcc1"
+    },
+    {
+      "file": "background-running.png",
+      "sha256": "db3b34280dc1772d2bc6baf66c0a90da3396fa9bcef81bcbf391229d0b755e3c"
+    },
+    {
+      "file": "connected.png",
+      "sha256": "358104f30bcc7b96b39a8e88a2d56b71853dd04ac69b4176e52e3692af73ab94"
+    },
+    {
+      "file": "error.png",
+      "sha256": "fa5d26a51a859c860da5941e61fb8286447decf061e86f155a5fdaa390938856"
+    },
+    {
+      "file": "idle-dark.png",
+      "sha256": "a40feec27ad697da4f8f0dc96e2e6ac1f8e43553edf755223b84cf8ed1c71289"
+    },
+    {
+      "file": "idle-light.png",
+      "sha256": "094149274d3be8146dede1bc907f1e6181e2846315120c4e0cf389943ec2c771"
+    },
+    {
+      "file": "large-narrow.png",
+      "sha256": "0139d79e98ffd161070ece289397d8875485b3acfca16ce19ef90d5eed02e876"
+    },
+    {
+      "file": "maintenance-confirm.png",
+      "sha256": "26f2dfc47fd91e78d1b11a37ef29297675837467ca49b5d131199c46d2f78dd0"
+    },
+    {
+      "file": "maintenance-preview.png",
+      "sha256": "fd5765a6007b11bb62614d96648a9104fe5ddce12d643cec57ec58f3d58948e7"
+    },
+    {
+      "file": "maintenance-result.png",
+      "sha256": "d6a420120c6ff64a74d01a408a7ddf8ee85224865d63a888ea18d8bbd5ed701f"
+    },
+    {
+      "file": "manual-progress-large.png",
+      "sha256": "b30fd18065ce742d077079640d2948e2c33d34f7937813c86d56068dda0218d8"
+    },
+    {
+      "file": "manual-progress.png",
+      "sha256": "2f57390af9a1067e705b341590df4a5b4c3c424871f872bd1986de0e64cd062d"
+    },
+    {
+      "file": "network-recovery.png",
+      "sha256": "e6f5ef886b255ef22455ad48c44fd9ddedd5546a2fa1d6c30c636fb9785f3a3f"
+    },
+    {
+      "file": "partial.png",
+      "sha256": "5df0c38342c313a37913d06e94fa394e90c8de5ea3d6cc6763b898ffa37b77b7"
+    },
+    {
+      "file": "ru-large.png",
+      "sha256": "0c60fff92b1af7af186344fd5e8c0852dc7708992a0eae81f554159651f2bd37"
+    },
+    {
+      "file": "ru-off.png",
+      "sha256": "ffc4d50489efb83b667475c16b45f9361d59b63eff1ce02a75cd98299c44c60c"
+    },
+    {
+      "file": "ru-on.png",
+      "sha256": "efad0b6bd6b838bc72e537c91b6dc9c50354fbd9683dddd905de3fa3f1a5664a"
+    },
+    {
+      "file": "ru-tor.png",
+      "sha256": "6ed5f7e6486a0e38e5dba45ff4b6da2c6618f4af8307ba2123389461cb91a837"
+    },
+    {
+      "file": "search-progress.png",
+      "sha256": "98610c28d644c3ecc7b6c93b6b5287bac67017c09cd76dc6595775a9710ecf19"
+    },
+    {
+      "file": "searching.png",
+      "sha256": "9e54e4a099100141ef53bdbb47e33e7e45d75a664022bdd25ecee12604c3c019"
+    },
+    {
+      "file": "services.png",
+      "sha256": "5ea226b412408df2c4ddba5b9c13a22ae3845cd7a32cae5e8d3ac9b404afc62c"
+    },
+    {
+      "file": "tor-country-large.png",
+      "sha256": "7a1ce680d65c9c50a290f6c9d54bebcabd259b1d4f41c5760a9ec33c224018b6"
+    },
+    {
+      "file": "tor-country-unknown.png",
+      "sha256": "7adf5d9782b2d8aa60c4e142f12536c8ec6760086c6a04845946b1d67a0fc72b"
+    },
+    {
+      "file": "tor-country.png",
+      "sha256": "10f5912c838900453a4919a5e004ce0007370c57dbab061de5420016e7e127f2"
+    },
+    {
+      "file": "tor-preferences-large.png",
+      "sha256": "f58334b62666e0c4e95173cf5ee5e161b9d49263279008c51c58a9369b14b845"
+    },
+    {
+      "file": "tor-preferences.png",
+      "sha256": "febaa1958e7746c5dc9ea86f6b7931baf877059c48eb281afe2346e12b9870bb"
+    },
+    {
+      "file": "wait-backoff.png",
+      "sha256": "95f647cbdb0337b86635fe2b9e6cc4ea1389e7fb0fc0d5ed11a2a4a71d4941a7"
+    },
+    {
+      "file": "wait-catalog.png",
+      "sha256": "d8b4684923344b600c7898420d83c52a4c2b975f44b5b941667461481e052a05"
+    },
+    {
+      "file": "wait-offline.png",
+      "sha256": "6f9152bcd11121c5540a125da66ebfd9dffa46be37419611d2cad9fbfebf8a13"
+    }
+  ],
+  "scope": "Individual visual review of application content in 31 synthetic Compose states; not a physical-device/live-network test. OS status-bar appearance in isolated component fixtures is outside this content review.",
+  "observations": [
+    {
+      "file": "background-deferred.png",
+      "passed": true,
+      "note": "Deferred traffic message wraps between the route and service cards without collision."
+    },
+    {
+      "file": "background-finished.png",
+      "passed": true,
+      "note": "Completion copy fits; status and service card remain visually separated."
+    },
+    {
+      "file": "background-power.png",
+      "passed": true,
+      "note": "Power/heat pause reason is readable and distinct from connection state."
+    },
+    {
+      "file": "background-running.png",
+      "passed": true,
+      "note": "Background comparison description fits available width."
+    },
+    {
+      "file": "connected.png",
+      "passed": true,
+      "note": "Primary disconnect action and route confirmation fit above scroll continuation."
+    },
+    {
+      "file": "error.png",
+      "passed": true,
+      "note": "Retry and repair actions visible; warning conveyed with words as well as color."
+    },
+    {
+      "file": "idle-dark.png",
+      "passed": true,
+      "note": "Application content fits; prominent connect action and readable secondary copy."
+    },
+    {
+      "file": "idle-light.png",
+      "passed": true,
+      "note": "White surface and blue CTA have clear hierarchy; no content overflow."
+    },
+    {
+      "file": "large-narrow.png",
+      "passed": true,
+      "note": "Large text wraps vertically in scrolling content; connect button uncut."
+    },
+    {
+      "file": "maintenance-confirm.png",
+      "passed": true,
+      "note": "Both destructive confirmation and cancel actions fit in dialog."
+    },
+    {
+      "file": "maintenance-preview.png",
+      "passed": true,
+      "note": "Own-cache scope and preview/delete action readable, no overlap."
+    },
+    {
+      "file": "maintenance-result.png",
+      "passed": true,
+      "note": "Deletion result and protected-file explanation fit in card."
+    },
+    {
+      "file": "manual-progress-large.png",
+      "passed": true,
+      "note": "Large title wraps; progress and separate stop action fully visible."
+    },
+    {
+      "file": "manual-progress.png",
+      "passed": true,
+      "note": "Full-width progress surface; stop action separate and readable."
+    },
+    {
+      "file": "network-recovery.png",
+      "passed": true,
+      "note": "Actual mobile-network rebuilding message visible in primary card."
+    },
+    {
+      "file": "partial.png",
+      "passed": true,
+      "note": "Attention state names failed checks, not only an amber color."
+    },
+    {
+      "file": "ru-large.png",
+      "passed": true,
+      "note": "Large whitelist copy wraps within surface; switch does not collide with title."
+    },
+    {
+      "file": "ru-off.png",
+      "passed": true,
+      "note": "Off-state copy matches switch and domain list fits."
+    },
+    {
+      "file": "ru-on.png",
+      "passed": true,
+      "note": "On-state direct-traffic and DNS notice readable."
+    },
+    {
+      "file": "ru-tor.png",
+      "passed": true,
+      "note": "All-through-Tor exception explained despite saved whitelist switch state."
+    },
+    {
+      "file": "search-progress.png",
+      "passed": true,
+      "note": "Progress and settings cards separate; no horizontal overflow."
+    },
+    {
+      "file": "searching.png",
+      "passed": true,
+      "note": "Cancel search stays visible above readable explanation."
+    },
+    {
+      "file": "services.png",
+      "passed": true,
+      "note": "HTTPS/DNS/Telegram statuses readable; probe scope disclaimer intact."
+    },
+    {
+      "file": "tor-country-large.png",
+      "passed": true,
+      "note": "German country name, flag and probe limitation fit large font."
+    },
+    {
+      "file": "tor-country-unknown.png",
+      "passed": true,
+      "note": "Unknown country is explicit, no fabricated location."
+    },
+    {
+      "file": "tor-country.png",
+      "passed": true,
+      "note": "Country name wraps cleanly with flag and measurement disclaimer."
+    },
+    {
+      "file": "tor-preferences-large.png",
+      "passed": true,
+      "note": "ISO input, save control and unsupported-hop limitation all fit large font."
+    },
+    {
+      "file": "tor-preferences.png",
+      "passed": true,
+      "note": "Country-list input, scope and reconnect requirement legible."
+    },
+    {
+      "file": "wait-backoff.png",
+      "passed": true,
+      "note": "Next wave explicitly says 5 seconds, not 30; cancel accessible by scrolling."
+    },
+    {
+      "file": "wait-catalog.png",
+      "passed": true,
+      "note": "Long catalogue-wait explanation wraps within card with clear spacing."
+    },
+    {
+      "file": "wait-offline.png",
+      "passed": true,
+      "note": "Offline pause reason and preserved probe counters readable."
+    }
+  ]
+}

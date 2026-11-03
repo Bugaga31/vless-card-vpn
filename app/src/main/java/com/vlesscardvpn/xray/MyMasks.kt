@@ -1,6 +1,9 @@
 package com.vlesscardvpn.xray
 
 import com.vlesscardvpn.model.Base64
+import com.vlesscardvpn.core.TpwsProfile
+import com.vlesscardvpn.core.DpiStrategies
+import com.vlesscardvpn.core.DpiEngine
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -14,6 +17,11 @@ object MyMasks {
     private val RANGE = Regex("^\\d{1,4}(-\\d{1,4})?$")
     private val LINK = Regex("vcmask://[A-Za-z0-9_\\-=]+(#[^\\s]*)?")
     private val SNI = Regex("^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$")
+    private fun orderedRange(value: String, minimum: Int): Boolean {
+        if (!RANGE.matches(value)) return false
+        val parts = value.split('-').map { it.toIntOrNull() ?: return false }
+        return parts.first() >= minimum && parts.last() >= parts.first()
+    }
     private val NOISE_KEYS = setOf("rand", "type", "packet", "delay")
 
     fun toJson(m: Mask): JSONObject = JSONObject().put("t", m.title).put("fp", m.fingerprint)
@@ -27,7 +35,7 @@ object MyMasks {
             if (m.noise.isNotEmpty()) put("n", m.noise)
             if (m.noiseJson.isNotEmpty()) put("nj", m.noiseJson)
             if (m.hop.isNotEmpty()) put("h", m.hop)
-            if (m.dpi == Masks.CURRENT_DPI) put("dpi", m.dpi)
+            if (m.dpi == Masks.CURRENT_DPI || m.dpi.startsWith("TPWS#")) put("dpi", m.dpi)
             if (m.sni.isNotEmpty()) put("sni", m.sni)
             if (m.alpn.isNotEmpty()) put("alpn", m.alpn)
             if (m.mss > 0) put("mss", m.mss)
@@ -42,16 +50,16 @@ object MyMasks {
         val fp = o.optString("fp", "chrome").ifEmpty { "chrome" }
         require(fp in Masks.FINGERPRINTS) { "Неизвестный отпечаток: $fp" }
         val packets = o.optString("p")
-        require(packets.isEmpty() || packets == "tlshello" || RANGE.matches(packets)) { "Пакеты: «tlshello» или диапазон вида 1-3" }
+        require(packets.isEmpty() || packets == "tlshello" || orderedRange(packets, 1)) { "Пакеты: «tlshello» или диапазон вида 1-3" }
         val length = o.optString("l"); val delay = o.optString("d")
         val lengths = o.optString("ls"); val delays = o.optString("ds")
         if (packets.isNotEmpty()) {
             if (lengths.isNotEmpty()) {
                 val a = lengths.split(','); val b = delays.split(',')
-                require(a.all { RANGE.matches(it.trim()) } && b.all { RANGE.matches(it.trim()) }) { "Лесенка: диапазоны через запятую, например 1-1,2-4,5-10" }
+                require(a.all { orderedRange(it.trim(), 1) } && b.all { orderedRange(it.trim(), 0) }) { "Лесенка: диапазоны через запятую, например 1-1,2-4,5-10" }
                 require(a.size == b.size) { "Лесенка: длин ${a.size}, а пауз ${b.size} — должно быть поровну" }
                 require(a.size <= 16) { "Лесенка: не больше 16 ступенек" }
-            } else require(RANGE.matches(length) && RANGE.matches(delay)) { "Дробление: укажите размер и паузу, например 10-30 и 5-10" }
+            } else require(orderedRange(length, 1) && orderedRange(delay, 0)) { "Дробление: укажите размер и паузу, например 10-30 и 5-10" }
         }
         val maxSplit = o.optString("ms")
         require(maxSplit.isEmpty() || maxSplit.toIntOrNull()?.let { it in 0..64 } == true) { "Макс. кусков: число 0-64" }
@@ -69,7 +77,17 @@ object MyMasks {
         }
         val hop = o.optString("h")
         require(hop.isEmpty() || hop == Masks.HOP_LOCAL || hop == Masks.HOP_WARP) { "Неизвестный режим смены порта" }
-        val dpi = o.optString("dpi").takeIf { it == Masks.CURRENT_DPI }.orEmpty()
+        val dpi = o.optString("dpi")
+        require(dpi.isEmpty() || dpi == Masks.CURRENT_DPI || TpwsProfile.decode(dpi) != null ||
+            DpiStrategies.BUILT_IN.any { it.id == dpi && it.engine == DpiEngine.TPWS }) {
+            "Неизвестный профиль DPI: нужен текущий движок или проверенный профиль tpws"
+        }
+        require(dpi.isEmpty() || dpi == Masks.CURRENT_DPI || packets.isEmpty()) {
+            "Фиксированный tpws и Xray-дробление не смешиваются: выберите один движок"
+        }
+        require(dpi.isEmpty() || (noise.isEmpty() && nj.isEmpty() && hop.isEmpty())) {
+            "Локальный TCP-движок DPI нельзя соединять с UDP-шумом или сменой портов"
+        }
         require(!(packets.isNotEmpty() && (noise.isNotEmpty() || nj.isNotEmpty() || hop.isNotEmpty()))) {
             "Дробление (TCP) и шум/порты (UDP) — для разных серверов: сделайте две маскировки"
         }

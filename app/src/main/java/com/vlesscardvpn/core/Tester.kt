@@ -7,9 +7,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
-import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -23,8 +21,9 @@ import java.net.ServerSocket
 import java.net.Socket
 import java.util.concurrent.TimeUnit
 
-data class Probe(val realMs: Int, val bigOk: Boolean?, val ytOk: Boolean?, val error: String = "", val tgOk: Boolean? = null, val kbps: Int = 0, val ytKbps: Int = 0) {
+data class Probe(val realMs: Int, val bigOk: Boolean?, val ytOk: Boolean?, val error: String = "", val tgOk: Boolean? = null, val kbps: Int = 0, val ytKbps: Int = 0, val bodyBytes: Long = 0, val bodyMs: Long = 0, val callsOk: Boolean? = null, val tgMs: Int = 0, val discordOk:Boolean?=null, val stableOk:Boolean?=null, val autoChecksKey:String="",val latencyOnlyOk:Boolean=false,val serviceNotes:Map<String,String> = emptyMap(),val instagramOk:Boolean?=null) {
     val works: Boolean get() = realMs > 0 && bigOk != false
+    fun latencyConsented()=if(latencyOnlyOk) copy(stableOk=true,callsOk=true) else this
 }
 
 /**
@@ -37,7 +36,7 @@ data class Probe(val realMs: Int, val bigOk: Boolean?, val ytOk: Boolean?, val e
  */
 object Tester {
     val SKIPPED = Probe(0, null, null, "пропущено")
-    private val mutex = Mutex()
+    // All temporary core users share ProbeArbiter, including chain and throughput probes.
     private val base: OkHttpClient by lazy {
         OkHttpClient.Builder().connectTimeout(8, TimeUnit.SECONDS).readTimeout(8, TimeUnit.SECONDS)
             .callTimeout(15, TimeUnit.SECONDS).retryOnConnectionFailure(false).build()
@@ -49,7 +48,7 @@ object Tester {
     val BIG_URLS = listOf("https://speed.cloudflare.com/__down?bytes=262144", "https://cachefly.cachefly.net/1mb.test")
     const val YT_URL = "https://www.youtube.com/generate_204"
     const val TG_URL = "https://api.telegram.org/"
-    const val BIG_BYTES = 200_000
+    const val BIG_BYTES = TransferProof.REQUIRED_BYTES
 
     /**
      * TCP ping of all servers at once: non-blocking sockets in one selector (no thread per server — the 96-thread pool
@@ -57,9 +56,13 @@ object Tester {
      */
     suspend fun tcp(servers: List<Server>, parallel: Int = 96, timeoutMs: Int = 2500, onEach: (Server, Int) -> Unit) = coroutineScope {
         val names = servers.map { it.address }.distinct()
-        val limit = PowerPolicy.cap(parallel, PhonePower.state.value.tcpParallel)
+        val limit = minOf(parallel.coerceAtLeast(1),ProbeConcurrencyPolicy.normalize(Store.state.value.settings.probeParallel))
         val sem = Semaphore(minOf(32, limit))
-        val ips = names.map { h -> async(Bg.io) { sem.withPermit { h to runCatching { InetAddress.getByName(h) }.getOrNull() } } }.awaitAll().toMap()
+        val ips = linkedMapOf<String, InetAddress?>()
+        for (chunk in names.chunked(64)) {
+            chunk.map { h -> async(Bg.io) { sem.withPermit { h to runCatching { InetAddress.getByName(RuntimeProbeAddress.host(h)) }.getOrNull() } } }
+                .awaitAll().forEach { (host, address) -> ips[host] = address }
+        }
         servers.filter { !it.isTcpBased }.forEach { onEach(it, if (ips[it.address] != null) 1 else 0) }
         val tcpList = servers.filter { it.isTcpBased }
         tcpList.filter { ips[it.address] == null }.forEach { onEach(it, 0) }
@@ -68,20 +71,30 @@ object Tester {
     }
 
     /** Bounded TCP hint, never an authenticated Reality/TLS verdict. Timeout is unknown, not a blacklist. */
-    suspend fun fastFilter(servers: List<Server>, budgetMs: Long = 600): Map<String, Int> = coroutineScope {
-        val sem = Semaphore(PowerPolicy.cap(6, PhonePower.state.value.tcpParallel))
-        servers.map { server -> async(Bg.io) { sem.withPermit {
-            val result = if (!server.isTcpBased) -1 else try {
-                kotlinx.coroutines.withTimeoutOrNull(budgetMs) {
-                    CancellableProbe.run { bind ->
-                        val socket = Socket(); bind { socket.close() }; val t = System.nanoTime()
-                        socket.use { it.connect(InetSocketAddress(InetAddress.getByName(server.address), server.port), budgetMs.toInt()) }
-                        ((System.nanoTime() - t) / 1_000_000).toInt().coerceAtLeast(1)
+    suspend fun fastFilter(servers: List<Server>, budgetMs: Long = 600, foreground: Boolean = false): Map<String, Int> = coroutineScope {
+        val plan = PhonePower.state.value
+        val sem = Semaphore(ProbeConcurrencyPolicy.normalize(Store.state.value.settings.probeParallel))
+        // Shared only inside this call: no stale DNS cache crosses a network change.
+        val names=servers.filter {it.isTcpBased}.map {RuntimeProbeAddress.host(it.address)}.distinct()
+            .associateWith {host->async(start=kotlinx.coroutines.CoroutineStart.LAZY) {ProbeDns.resolve(host,budgetMs)}}
+        servers.map { server -> async { sem.withPermit {
+            val result = if (!server.isTcpBased) -1 else {
+                val began=System.nanoTime()
+                kotlinx.coroutines.withTimeoutOrNull(budgetMs.coerceIn(1L,60000L)) {
+                    val addresses=names.getValue(RuntimeProbeAddress.host(server.address)).await()
+                        ?: return@withTimeoutOrNull -1
+                    val remaining=budgetMs-(System.nanoTime()-began)/1000000L
+                    StaggeredConnect.hint(DualStackOrder.order(addresses),remaining) {address,left->
+                        try {CancellableProbe.run {bind->
+                            val socket=Socket();bind {socket.close()}
+                            socket.use {it.connect(InetSocketAddress(address,server.port),left.coerceIn(1L,60000L).toInt())}
+                            true
+                        }} catch(e:kotlinx.coroutines.CancellationException) {throw e}
+                        catch(_:java.net.SocketTimeoutException) {null}
+                        catch(_:Exception) {false}
                     }
                 } ?: -1
-            } catch (e: kotlinx.coroutines.CancellationException) { throw e }
-              catch (e: java.net.SocketTimeoutException) { -1 }
-              catch (e: Exception) { 0 }
+            }
             server.id to result
         } } }.awaitAll().toMap()
     }
@@ -137,10 +150,13 @@ object Tester {
     }
 
     /** Requests through a local SOCKS port (the tester's or the running VPN's). */
-    fun probeSocks(port: Int, testUrl: String, big: Boolean = true, youtube: Boolean = true, attempts: Int = 2, budgetMs: Long = 0, onCall: ((okhttp3.Call) -> Unit)? = null): Probe {
+    fun probeSocks(port: Int, testUrl: String, big: Boolean = true, youtube: Boolean = true, telegram: Boolean = youtube, attempts: Int = 2, budgetMs: Long = 0, onCall: ((okhttp3.Call) -> Unit)? = null, calls: Boolean = false, user: String = "", pass: String = "", onCancel: ((() -> Unit) -> Unit)? = null, autoChecks:AutoCheckProfile?=null, connectivityBudgetMs:Long=0): Probe {
         val budgetDeadline = if (budgetMs > 0) System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(budgetMs.coerceAtMost(60000)) else Long.MAX_VALUE
-        fun boundedCall(client: OkHttpClient, request: Request): okhttp3.Call = client.newCall(request).also { call ->
-            if (budgetDeadline != Long.MAX_VALUE) call.timeout().timeout(TimeUnit.NANOSECONDS.toMillis((budgetDeadline-System.nanoTime()).coerceAtLeast(1)).coerceAtLeast(1),TimeUnit.MILLISECONDS)
+        fun boundedCall(client: OkHttpClient, request: Request, capMs:Long=0): okhttp3.Call = client.newCall(request).also { call ->
+            if (budgetDeadline != Long.MAX_VALUE || capMs>0) {
+                val left=if(budgetDeadline==Long.MAX_VALUE) Long.MAX_VALUE else TimeUnit.NANOSECONDS.toMillis((budgetDeadline-System.nanoTime()).coerceAtLeast(1))
+                call.timeout().timeout(FirstConnectivityBudget.remaining(left,capMs),TimeUnit.MILLISECONDS)
+            }
             onCall?.invoke(call)
         }
         val client = (if (attempts == 1) fast else base).newBuilder().apply {
@@ -149,13 +165,65 @@ object Tester {
             .proxy(Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", port))).build()
         val mediaClient = client.newBuilder().followRedirects(false).followSslRedirects(false).build()
         val tasks = mutableListOf<java.util.concurrent.Future<*>>()
+        val isolated=if(autoChecks!=null) ProbeServiceWorkers() else null
+        val servicePool=isolated?.executor ?: pool
+        val tgExecutor=isolated?.telegram ?: telegramPool
+        val notes=linkedMapOf<String,String>()
+        fun <T> await(f:java.util.concurrent.Future<T>?,ms:Long,fallback:T,id:String,known:(T)->Boolean={true}):T {
+            if(f==null) return fallback
+            val outcome=ProbeTasks.result(f,ms,fallback)
+            if(outcome.reason!=null) notes[id]=outcome.reason
+            else if(!known(outcome.value)) notes[id]="INCONCLUSIVE"
+            return outcome.value
+        }
         try {
+            // Independent service evidence starts with HTTPS, not after it. The same route/SOCKS only.
+            val tgF = if (autoChecks?.telegram ?: telegram) tgExecutor.submit<TelegramProbe.Result> {
+                val left=if(budgetDeadline==Long.MAX_VALUE) 3000L else
+                    TimeUnit.NANOSECONDS.toMillis((budgetDeadline-System.nanoTime()).coerceAtLeast(1)).coerceAtLeast(1)
+                TelegramProbe.measure(port,minOf(maxOf(3000L,AutoLatencyPolicy.MAX_MS.toLong()+100L),left),onCancel)
+            }.also {tasks+=it} else null
+            val deadline = if (budgetDeadline == Long.MAX_VALUE) System.nanoTime() + TimeUnit.SECONDS.toNanos(40) else budgetDeadline
+            fun remaining() = TimeUnit.NANOSECONDS.toMillis((deadline - System.nanoTime()).coerceAtLeast(1)).coerceAtLeast(1)
+            val ytF = if (autoChecks?.youtube ?: youtube) servicePool.submit<YouTubeMediaProbe.Result> {
+                YouTubeAccessProbe.check { boundedCall(mediaClient, it) }
+            }.also { tasks += it } else null
+            val relaxedCalls=java.util.concurrent.atomic.AtomicReference<Boolean?>(null)
+            val voiceNote=java.util.concurrent.atomic.AtomicReference<String?>(null)
+            val callF = if (autoChecks?.voice ?: calls) servicePool.submit<Boolean?> {
+                if(autoChecks?.voice==true) {
+                    val voiceDeadline=System.nanoTime()+TimeUnit.MILLISECONDS.toNanos(minOf(4000L,remaining()))
+                    val summary=VoiceAvailabilityProbe.check(AutoLatencyPolicy.MAX_MS,{
+                        minOf(remaining(),TimeUnit.NANOSECONDS.toMillis(voiceDeadline-System.nanoTime()).coerceAtLeast(0))
+                    }) {target,allowance->
+                        UdpCallProbe.train(port,user,pass,allowance,VoiceAvailabilityProbe.PACKETS,onCancel,target.host,target.port)
+                    }
+                    voiceNote.set(summary.reason)
+                    relaxedCalls.set(summary.ignoringLatency)
+                    summary.ok
+                } else UdpCallProbe.probe(port, user, pass, minOf(1800L, remaining()).toInt(), onCancel)
+            }.also { tasks += it } else null
+            val discordF = if(autoChecks?.discord==true) servicePool.submit<DiscordApiProbe.Result> {
+                DiscordRouteProbe.check(mediaClient, { boundedCall(mediaClient,it) }, ::remaining, onCancel)
+            }.also {tasks+=it} else null
+            val instagramF=if(autoChecks?.instagram==true) servicePool.submit<InstagramWebProbe.Result> {
+                InstagramWebProbe.check {boundedCall(mediaClient,it)}
+            }.also {tasks+=it} else null
+            // Start the complete series before waiting for HTTPS. Waiting for the first
+            // Telegram future consumes the same deadline, never a fresh per-service budget.
+            val stabilityF = if(autoChecks?.stability==true) tgExecutor.submit<StabilitySeriesProbe.Result> {
+                val first=ProbeTasks.await(tgF,remaining(),TelegramProbe.Result(null,0))
+                StabilitySeriesProbe.collect(LinkStabilityPolicy.Sample(first.ok,first.ms),::remaining,AutoLatencyPolicy.MAX_MS) { allowance ->
+                    val x=TelegramProbe.measure(port,allowance,onCancel)
+                    LinkStabilityPolicy.Sample(x.ok,x.ms)
+                }
+            }.also {tasks+=it} else null
             var best = Long.MAX_VALUE; var err = ""
             repeat(attempts.coerceIn(1, 3)) {
                 if (Thread.currentThread().isInterrupted) throw java.io.InterruptedIOException("Проверка отменена")
                 val t0 = System.nanoTime()
                 runCatching {
-                    boundedCall(client,Request.Builder().url(testUrl).header("User-Agent", UA).build()).execute().use { r ->
+                    boundedCall(client,Request.Builder().url(testUrl).header("User-Agent", UA).build(),connectivityBudgetMs).execute().use { r ->
                         check(ProbeResponsePolicy.connectivity(r.code, testUrl)) { "Unexpected connectivity HTTP ${r.code}" }
                         r.body?.byteStream()?.use { it.read(ByteArray(4096)) }
                     }
@@ -163,39 +231,51 @@ object Tester {
                 }.onFailure { err = Errors.human(it) }
             }
             if (best == Long.MAX_VALUE) return Probe(0, null, null, err)
-            val deadline = if (budgetDeadline == Long.MAX_VALUE) System.nanoTime() + TimeUnit.SECONDS.toNanos(40) else budgetDeadline
-            fun remaining() = TimeUnit.NANOSECONDS.toMillis((deadline - System.nanoTime()).coerceAtLeast(1)).coerceAtLeast(1)
-            val bigF = if (big) pool.submit<Pair<Boolean, Int>> { bigDownload(client,budgetDeadline,onCall) }.also { tasks += it } else null
-            val ytF = if (youtube) pool.submit<YouTubeMediaProbe.Result> {
-                YouTubeMediaProbe.check { boundedCall(mediaClient, it) }
-            }.also { tasks += it } else null
-            val tgF = if (youtube) pool.submit<Boolean?> {
-                TelegramProbe.check(port, minOf(3000, remaining()))
-            }.also { tasks += it } else null
-            val bigResult = ProbeTasks.await(bigF, remaining(), false to 0)
-            val ytResult = ProbeTasks.await(ytF, remaining(), YouTubeMediaProbe.Result(null))
-            val tgOk = if (tgF != null) ProbeTasks.await(tgF, remaining(), null) else null
-            return Probe(best.toInt().coerceAtLeast(1), if (bigF != null) bigResult.first else null, ytResult.ok, tgOk = tgOk, kbps = bigResult.second, ytKbps = ytResult.kbps)
+            val bigF = if (big) servicePool.submit<BodyResult> { bigDownload(client,budgetDeadline,onCall) }.also { tasks += it } else null
+            val tgResult = await(tgF, remaining(), TelegramProbe.Result(null,0),"telegram") {it.ok!=null}
+            val bigResult = await(bigF, remaining(), BodyResult(),"payload")
+            val ytResult = await(ytF, remaining(), YouTubeMediaProbe.Result(null),"youtube") {it.ok!=null}
+            if(ytF!=null && ytResult.reason.isNotBlank() && notes["youtube"] in listOf(null,"INCONCLUSIVE"))
+                notes["youtube"]=ytResult.reason
+            val callsOk = if (callF != null) await(callF, remaining(), null,"voice") {it!=null} else null
+            voiceNote.get()?.takeIf {notes["voice"]==null || notes["voice"]=="INCONCLUSIVE"}?.let {notes["voice"]=it}
+            val discordResult=await(discordF,remaining(),DiscordApiProbe.Result(null),"discord") {it.ok!=null}
+            if(discordF!=null && discordResult.ok==null && discordResult.reason.isNotBlank() && notes["discord"]=="INCONCLUSIVE")
+                notes["discord"]=discordResult.reason
+            val instagramResult=await(instagramF,remaining(),InstagramWebProbe.Result(null),"instagram") {it.ok!=null}
+            if(instagramF!=null && instagramResult.ok==null && instagramResult.reason.isNotBlank() && notes["instagram"]=="INCONCLUSIVE") notes["instagram"]=instagramResult.reason
+            val discordOk=discordResult.ok
+            val stabilityResult=await(stabilityF,remaining(),StabilitySeriesProbe.Result(null,null,"INCONCLUSIVE"),"stability") {it.stable!=null}
+            if(stabilityF!=null && stabilityResult.reason.isNotBlank() && notes["stability"] in listOf(null,"INCONCLUSIVE")) notes["stability"]=stabilityResult.reason
+            val stableOk=stabilityResult.stable
+            val result=Probe(best.toInt().coerceAtLeast(1), if (bigF != null) bigResult.ok else null, ytResult.ok, tgOk = tgResult.ok, tgMs = if(tgResult.ok==true) tgResult.ms else 0, kbps = bigResult.kbps, ytKbps = ytResult.kbps, bodyBytes = bigResult.bytes, bodyMs = bigResult.ms, callsOk = callsOk, discordOk=discordOk,stableOk=stableOk,serviceNotes=notes.toMap(),instagramOk=instagramResult.ok)
+            val measured=if(autoChecks!=null) LatencyOnlyProbe.proof(result,autoChecks,stabilityResult.ignoringLatency,relaxedCalls.get()) else result
+            return if(autoChecks!=null) measured.copy(autoChecksKey=AutoChecks.stamp(measured,autoChecks,AutoLatencyPolicy.MAX_MS)) else measured
         } finally {
             ProbeTasks.cancel(tasks)
+            isolated?.close()
             // Private dispatcher/pool: cancellation cannot cancel another probe or the live VPN's HTTP calls.
-            client.dispatcher.cancelAll(); client.connectionPool.evictAll()
+            client.dispatcher.cancelAll(); client.connectionPool.evictAll(); client.dispatcher.executorService.shutdown()
         }
     }
 
+    // Media downloads cannot occupy all workers needed to establish native Telegram evidence.
+    private val telegramPool = java.util.concurrent.Executors.newFixedThreadPool(12) { r -> Thread(r, "probe-tg").apply { isDaemon = true } }
     private val pool = java.util.concurrent.Executors.newFixedThreadPool(12) { r -> Thread(r, "probe").apply { isDaemon = true } }
 
     /** 256 KB through the server: (passed, kbit/s). A freeze (read timeout — the TSPU "16 KB" cut) fails at once, no second mirror. */
-    private fun bigDownload(client: OkHttpClient, deadline: Long = Long.MAX_VALUE, onCall: ((okhttp3.Call) -> Unit)? = null): Pair<Boolean, Int> {
+    private data class BodyResult(val ok: Boolean = false, val kbps: Int = 0, val bytes: Long = 0, val ms: Long = 0)
+
+    private fun bigDownload(client: OkHttpClient, deadline: Long = Long.MAX_VALUE, onCall: ((okhttp3.Call) -> Unit)? = null): BodyResult {
         for (url in BIG_URLS) {
             val t0 = System.nanoTime()
             try {
-                if (System.nanoTime() >= deadline) return false to 0
-                val n = download(client, url, deadline, onCall)
-                if (n >= BIG_BYTES) return true to (n * 8L * 1_000_000 / ((System.nanoTime() - t0) / 1000).coerceAtLeast(1) / 1000).toInt().coerceAtLeast(1)
-            } catch (e: java.io.InterruptedIOException) { return false to 0 } catch (e: Exception) { /* mirror down: next */ }
+                if (System.nanoTime() >= deadline) return BodyResult()
+                val sample = download(client, url, deadline, onCall)
+                if (sample.bytes >= BIG_BYTES) return BodyResult(true, minOf(sample.slowestKbps,TransferProof.rate(sample.bytes,System.nanoTime()-t0)), sample.bytes.toLong(), ((System.nanoTime()-t0)/1_000_000).coerceAtLeast(1))
+            } catch (e: java.io.InterruptedIOException) { return BodyResult() } catch (e: Exception) { /* mirror down: next */ }
         }
-        return false to 0
+        return BodyResult()
     }
 
     /** Cloudflare trace through the running tunnel: "on" / "plus" when traffic really goes through WARP, "off" otherwise, null = no answer. */
@@ -207,42 +287,46 @@ object Tester {
     }.getOrNull()
 
     /** DNS query (A record) in wire format, id = [id]. */
-    fun dnsQuery(host: String, id: Int = 0x5a5a): ByteArray {
-        val out = java.io.ByteArrayOutputStream()
-        out.write(byteArrayOf((id shr 8).toByte(), id.toByte(), 1, 0, 0, 1, 0, 0, 0, 0, 0, 0))
-        host.trimEnd('.').split('.').forEach { l -> val b = l.toByteArray(); out.write(b.size); out.write(b) }
-        out.write(byteArrayOf(0, 0, 1, 0, 1)); return out.toByteArray()
-    }
+    fun dnsQuery(host: String, id: Int = 0x5a5a): ByteArray = DnsWire.query(host, id)
 
     /**
      * The phone's DNS path as apps use it: SOCKS5 UDP ASSOCIATE → 1.1.1.1:53 → Xray's DNS. HTTP checks go via socks5h
      * (Xray resolves on the server side), so a dead DNS path used to look healthy while apps could not open anything.
      */
-    fun dnsViaSocks(port: Int, user: String = "", pass: String = "", host: String = "www.google.com"): Boolean = runCatching {
+    fun dnsViaSocks(port: Int, user: String = "", pass: String = "", host: String = "www.google.com", budgetMs: Int = 5000, onCancel: ((() -> Unit) -> Unit)? = null): Boolean = runCatching {
+        val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(budgetMs.coerceIn(1, 5000).toLong())
+        fun remaining(): Int {
+            val left = TimeUnit.NANOSECONDS.toMillis(deadline - System.nanoTime())
+            if (left <= 0) throw java.net.SocketTimeoutException("DNS deadline")
+            return left.toInt().coerceAtLeast(1)
+        }
         java.net.Socket().use { s ->
-            s.connect(InetSocketAddress("127.0.0.1", port), 2000); s.soTimeout = 5000
+            onCancel?.invoke { s.close() }
+            s.connect(InetSocketAddress("127.0.0.1", port), minOf(2000, remaining())); s.soTimeout = remaining()
             val o = s.getOutputStream(); val i = java.io.DataInputStream(s.getInputStream())
             o.write(if (user.isNotEmpty()) byteArrayOf(5, 1, 2) else byteArrayOf(5, 1, 0)); o.flush()
-            val m = ByteArray(2); i.readFully(m)
+            val m = ByteArray(2); i.readFully(m); check(m[0].toInt() == 5 && m[1].toInt() == if (user.isNotEmpty()) 2 else 0)
             if (m[1].toInt() == 2) {
-                val u = user.toByteArray(); val p = pass.toByteArray()
+                val u = user.toByteArray(); val p = pass.toByteArray(); check(u.size in 1..255 && p.size <= 255)
                 o.write(byteArrayOf(1, u.size.toByte()) + u + byteArrayOf(p.size.toByte()) + p); o.flush()
-                val r = ByteArray(2); i.readFully(r); check(r[1].toInt() == 0)
+                val r = ByteArray(2); i.readFully(r); check(r[0].toInt() == 1 && r[1].toInt() == 0)
             } else check(m[1].toInt() == 0)
             o.write(byteArrayOf(5, 3, 0, 1, 0, 0, 0, 0, 0, 0)); o.flush()
-            val h = ByteArray(4); i.readFully(h); check(h[1].toInt() == 0)
+            s.soTimeout = remaining()
+            val h = ByteArray(4); i.readFully(h); check(h[0].toInt() == 5 && h[1].toInt() == 0 && h[2].toInt() == 0)
             val addr = when (h[3].toInt()) { 1 -> ByteArray(4); 4 -> ByteArray(16); else -> error("atyp") }.also { i.readFully(it) }
-            val rport = i.readUnsignedShort()
+            val rport = i.readUnsignedShort(); check(rport > 0)
             val relay = InetAddress.getByAddress(addr).let { if (it.isAnyLocalAddress) InetAddress.getByName("127.0.0.1") else it }
             java.net.DatagramSocket().use { u ->
-                u.soTimeout = 5000
+                onCancel?.invoke { u.close(); s.close() }
+                u.connect(relay, rport)
+                u.soTimeout = remaining()
                 val q = dnsQuery(host, (System.nanoTime() and 0xffff).toInt())
                 val pkt = byteArrayOf(0, 0, 0, 1, 1, 1, 1, 1, 0, 53) + q
                 u.send(java.net.DatagramPacket(pkt, pkt.size, relay, rport))
                 val buf = ByteArray(1500); val dp = java.net.DatagramPacket(buf, buf.size); u.receive(dp)
-                val off = when (buf[3].toInt()) { 1 -> 10; 4 -> 22; else -> 7 + (buf[4].toInt() and 255) }
-                val an = ((buf[off + 6].toInt() and 255) shl 8) or (buf[off + 7].toInt() and 255)
-                dp.length > off + 12 && buf[off] == q[0] && buf[off + 1] == q[1] && an > 0
+                val response = DnsWire.payload(buf, dp.length)
+                response != null && DnsWire.hasAnswer(response, q)
             }
         }
     }.getOrDefault(false)
@@ -255,11 +339,14 @@ object Tester {
     }
 
     /** Country (ISO) the internet sees through the tunnel — Cloudflare trace «loc=». null = no answer. */
-    fun exitCountry(port: Int): String? = runCatching {
-        val client = fast.newBuilder().proxy(Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", port))).build()
-        client.newCall(Request.Builder().url("https://www.cloudflare.com/cdn-cgi/trace").header("User-Agent", UA).build()).execute().use { r ->
-            traceLoc(r.body?.string().orEmpty())
-        }
+    fun exitCountry(port: Int, budgetMs: Long = 0, onCall: ((okhttp3.Call) -> Unit)? = null): String? = runCatching {
+        val client = fast.newBuilder().dispatcher(okhttp3.Dispatcher()).connectionPool(okhttp3.ConnectionPool())
+            .proxy(Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", port)))
+            .apply {if(budgetMs>0)callTimeout(budgetMs,TimeUnit.MILLISECONDS)}.build()
+        try {
+            client.newCall(Request.Builder().url("https://www.cloudflare.com/cdn-cgi/trace").header("User-Agent", UA).build())
+                .also {onCall?.invoke(it)}.execute().use { r -> traceLoc(r.body?.string().orEmpty()) }
+        } finally { client.dispatcher.cancelAll();client.connectionPool.evictAll() }
     }.getOrNull()
     fun traceLoc(body: String): String? = body.lineSequence().firstOrNull { it.startsWith("loc=") }?.substringAfter('=')?.trim()?.uppercase()?.takeIf { it.length == 2 }
 
@@ -301,8 +388,9 @@ object Tester {
         return try {
             client.newCall(Request.Builder().url(url).header("User-Agent", UA).build()).execute().use { r ->
                 // a page that starts loading: DPI "16 KB freeze" shows up as a read timeout here
-                r.body?.byteStream()?.let { src -> val buf = ByteArray(16384); var t = 0; while (t < 40_000) { val n = src.read(buf); if (n < 0) break; t += n } }
-                SiteProbe(if (r.code == 403 || r.code == 451) "denied" else "ok", ((System.nanoTime() - t0) / 1_000_000).toInt(), r.code)
+                var received=0
+                r.body?.byteStream()?.let { src -> val buf = ByteArray(16384); while (received < 40_000) { val n = src.read(buf); if (n < 0) break; received += n } }
+                SiteProbe(ProbeResponsePolicy.site(r.code,received), ((System.nanoTime() - t0) / 1_000_000).toInt(), r.code)
             }
         } catch (e: Exception) {
             SiteProbe(when (e) {
@@ -316,49 +404,63 @@ object Tester {
     }
 
     /** Real download speed (kbit/s, 0 = failed) of several variants, one after another so they don't share the line. */
-    suspend fun speedMany(variants: List<Pair<Server, Mask?>>, byeDpiPort: Int?, dpiPorts: Map<String, Int>, seconds: Int = 3): List<Int> = mutex.withLock {
-        withContext(Bg.io) {
-            val ports = freePorts(variants.size)
-            val core = XrayCore.Instance("speed")
-            try {
-                runCatching { core.start(XrayConfigBuilder.testConfig(variants, ports, byeDpiPort, dpiPorts)) }
-                if (!core.running) return@withContext variants.map { 0 }
-                ports.map { p -> runCatching { (speed(p, seconds).mbps * 1000).toInt() }.getOrDefault(0) }
-            } finally { core.stop() }
+    suspend fun speedMany(variants: List<Pair<Server, Mask?>>, byeDpiPort: Int?, dpiPorts: Map<String, Int>, seconds: Int = 3): List<Int> =
+        variants.map { variant ->
+            ProbeArbiter.withPermit {
+                withContext(Bg.io) {
+                    val ports=freePorts(1)
+                    val core=XrayCore.Instance("speed")
+                    try {
+                        runCatching {core.start(XrayConfigBuilder.testConfig(listOf(variant),ports,byeDpiPort,dpiPorts))}
+                        if(!core.running) 0 else runCatching {(speed(ports[0],seconds).mbps*1000).toInt()}.getOrDefault(0)
+                    } finally {core.stop()}
+                }
+            }
         }
-    }
 
-    private fun download(client: OkHttpClient, url: String, deadline: Long = Long.MAX_VALUE, onCall: ((okhttp3.Call) -> Unit)? = null): Int =
+    private fun download(client: OkHttpClient, url: String, deadline: Long = Long.MAX_VALUE, onCall: ((okhttp3.Call) -> Unit)? = null): TransferProof.Sample =
         client.newCall(Request.Builder().url(url).header("User-Agent", UA)
             .header("Accept-Encoding", "identity").header("Cache-Control", "no-cache, no-store").build()).also { call ->
             if (deadline != Long.MAX_VALUE) call.timeout().timeout(TimeUnit.NANOSECONDS.toMillis((deadline-System.nanoTime()).coerceAtLeast(1)).coerceAtLeast(1),TimeUnit.MILLISECONDS)
             onCall?.invoke(call)
         }.execute().use { r ->
             check(ProbeResponsePolicy.download(r.code, r.header("Content-Type"), r.header("Content-Encoding"))) { "Invalid speed-test response" }
-            val src = r.body!!.byteStream(); val buf = ByteArray(16384); var total = 0
-            while (total < BIG_BYTES) { val n = src.read(buf); if (n < 0) break; total += n }
-            total
+            check(TransferProof.rangeValid(r.code,r.header("Content-Range"),BIG_BYTES)) { "Invalid download byte range" }
+            TransferProof.read(r.body!!.byteStream(),deadline)
         }
+
+    /** Serialize chain downloads with ordinary server/mask tests. Waiting is cancellable. */
+    suspend fun <T> exclusiveProbe(block: suspend () -> T): T = ProbeArbiter.withPermit { block() }
 
     /** Tests [variants] (server + mask) in parallel through one temporary Xray instance. */
     suspend fun real(
         variants: List<Pair<Server, Mask?>>, testUrl: String, byeDpiPort: Int?, dpiPorts: Map<String, Int> = emptyMap(), youtube: Boolean = true,
-        batch: Int = 32, parallel: Int = 12, attempts: Int = 2, big: Boolean = true,
+        batch: Int = 32, parallel: Int = 12, attempts: Int = 2, big: Boolean = true, telegram: Boolean = youtube, calls: Boolean = false, foreground: Boolean = false,
         /** Early stop: variants for which this returns true are not probed (reported as skipped). */
-        skip: (Int) -> Boolean = { false },
+        requireTelegram: Boolean = false, autoChecks:AutoCheckProfile?=null, skip: (Int) -> Boolean = { false },
         stopAfter: Int = Int.MAX_VALUE,
         budgetMs: Long = 0,
+        onStarted: ((Int) -> Unit)? = null,
         onEach: (Int, Probe) -> Unit,
-    ) = mutex.withLock {
-        withContext(Bg.io) {
+    ) = withContext(Bg.io) {
+        run {
+            val serviceBudget = if(autoChecks!=null) maxOf(budgetMs,6500L) else StrictProbeBudget.budget(budgetMs, foreground, requireTelegram, big, youtube, calls, attempts)
             val successes = java.util.concurrent.atomic.AtomicInteger()
             fun skipped(i: Int) = successes.get() >= stopAfter.coerceAtLeast(1) || skip(i) || (variants[i].first.protocol == "wireguard" && variants[i].first.secret in Tunnel.wireguardKeys)
-            fun report(i: Int, p: Probe) { if (p.works) successes.incrementAndGet(); onEach(i, p) }
+            fun accepted(p: Probe) = if(autoChecks!=null) autoChecks.accepts(p,AutoLatencyPolicy.MAX_MS) else p.works && (!requireTelegram || AutoLatencyPolicy.accepts(p))
+            fun report(i: Int, p: Probe) { if (accepted(p)) successes.incrementAndGet(); onEach(i, p) }
             // Bound config/socket footprint too, not merely simultaneous HTTP calls.
-            val effectiveBatch = PowerPolicy.cap(batch, if (PhonePower.state.value.realParallel <= 2) 4 else batch)
+            val plan = PhonePower.state.value
+            val selectedParallel = Store.state.value.settings.probeParallel
+            val probeLimit = ProbeConcurrencyPolicy.limit(parallel,selectedParallel,plan,foreground)
+            // Avoid creating 20 idle SOCKS/outbound routes for only five active workers.
+            val effectiveBatch = ProbeConcurrencyPolicy.batch(batch,probeLimit)
             for (all in chunks(variants, effectiveBatch)) {
                 val idx = all.filter { i -> if (skipped(i)) { onEach(i, SKIPPED); false } else true }
                 if (idx.isEmpty()) continue
+                ProbeArbiter.withPermit(foreground) {
+                // Re-evaluate skip after waiting; another successful batch may have satisfied stopAfter.
+                if(idx.all { skipped(it) }) {idx.forEach {onEach(it,SKIPPED)};return@withPermit}
                 val chunk = idx.map { variants[it] }
                 val ports = freePorts(chunk.size)
                 val core = XrayCore.Instance("test")
@@ -368,23 +470,27 @@ object Tester {
                     core.stop()
                     chunk.forEachIndexed { i, v ->
                         if (skipped(idx[i])) { onEach(idx[i], SKIPPED); return@forEachIndexed }
+                        onStarted?.invoke(idx[i])
                         val one = XrayCore.Instance("test1")
                         val p = freePorts(1)
                         val ok = runCatching { one.start(XrayConfigBuilder.testConfig(listOf(v), p, byeDpiPort, dpiPorts)) }.isSuccess && one.running
-                        try { report(idx[i], if (ok) CancellableProbe.run { bind -> probeSocks(p[0], testUrl, big = big, youtube = youtube, attempts = attempts, budgetMs = budgetMs, onCall = { call -> bind { call.cancel() } }) } else Probe(0, null, null, "конфиг не принят ядром")) }
+                        try { report(idx[i], if (ok) CancellableProbe.run { bind -> probeSocks(p[0], testUrl, big = big, youtube = youtube, telegram = telegram, attempts = attempts, budgetMs = serviceBudget, onCall = { call -> bind { call.cancel() } }, calls = calls, onCancel = bind, autoChecks=autoChecks, connectivityBudgetMs=FirstConnectivityBudget.cap(foreground,autoChecks!=null)) } else Probe(0, null, null, "конфиг не принят ядром")) }
                         finally { one.stop() }
                     }
-                    continue
+                    return@withPermit
                 }
                 try {
                     coroutineScope {
-                        ProbeRace.run(chunk.indices.toList(), PowerPolicy.cap(parallel, PhonePower.state.value.realParallel), stopAfter,
-                            skip = { i -> skipped(idx[i]) }, staggerMs = if (stopAfter == 1) 120 else 0,
-                            probe = { i -> CancellableProbe.run { bind -> probeSocks(ports[i], testUrl, big = big, youtube = youtube,
-                                attempts = attempts, budgetMs = budgetMs, onCall = { call -> bind { call.cancel() } }) } },
-                            onEach = { i, p -> report(idx[i], p) })
+                        // Re-read device safety after waiting for the shared test-core permit.
+                        val currentLimit=ProbeConcurrencyPolicy.limit(parallel,Store.state.value.settings.probeParallel,PhonePower.state.value,foreground)
+                        ProbeRace.run(chunk.indices.toList(), currentLimit, stopAfter,
+                            skip = { i -> skipped(idx[i]) }, staggerMs = ForegroundProbePlan.staggerMs(foreground,stopAfter),
+                            probe = { i -> onStarted?.invoke(idx[i]); CancellableProbe.run { bind -> probeSocks(ports[i], testUrl, big = big, youtube = youtube, telegram = telegram,
+                                attempts = attempts, budgetMs = serviceBudget, onCall = { call -> bind { call.cancel() } }, calls = calls, onCancel = bind, autoChecks=autoChecks, connectivityBudgetMs=FirstConnectivityBudget.cap(foreground,autoChecks!=null)) } },
+                            accepted = { accepted(it) }, onEach = { i, p -> report(idx[i], p) })
                     }
                 } finally { core.stop() }
+                }
             }
         }
     }
@@ -429,11 +535,18 @@ object Tester {
         it.timeout().timeout(TimeUnit.NANOSECONDS.toMillis((deadline - System.nanoTime()).coerceAtLeast(1)).coerceAtLeast(1), TimeUnit.MILLISECONDS)
     }
 
+    fun youtubeAccess(port:Int):YouTubeMediaProbe.Result {
+        val client=mediaClient(port)
+        val deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(6)
+        return try {YouTubeAccessProbe.check {mediaCall(client,it,deadline)}}
+        finally {client.dispatcher.cancelAll();client.connectionPool.evictAll();client.dispatcher.executorService.shutdown()}
+    }
+
     fun youtubeMedia(port: Int): YouTubeMediaProbe.Result {
         val client = mediaClient(port)
         val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(6)
         return try { YouTubeMediaProbe.check { mediaCall(client, it, deadline) } }
-        finally { client.dispatcher.cancelAll(); client.connectionPool.evictAll() }
+        finally { client.dispatcher.cancelAll(); client.connectionPool.evictAll(); client.dispatcher.executorService.shutdown() }
     }
 
     /** Compare the same signed video and sample size, never two HTML pages. No stored media URLs. */

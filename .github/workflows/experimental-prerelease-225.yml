@@ -1,0 +1,137 @@
+name: Experimental 1.2.114 — signed APK and emulator UI verification
+on:
+  push:
+    branches: ['experiment/prerelease-225-release']
+permissions:
+  contents: read
+env:
+  VERSION: beta-build-225
+concurrency:
+  group: experimental-prerelease-225
+  cancel-in-progress: true
+jobs:
+  source:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      sha: ${{ steps.source.outputs.sha }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+      - id: source
+        shell: python
+        run: |
+          import base64,gzip,json,pathlib,subprocess,os,hashlib
+          assert os.environ["GITHUB_REF"]=="refs/heads/experiment/prerelease-225-release"
+          subprocess.run(["git","merge-base","--is-ancestor","b21d3b93d11a78912cfafe613cb75ed5b2a01d4c","HEAD"],check=True)
+          p=json.loads(gzip.decompress(base64.b64decode("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")))
+          if not all(pathlib.Path(n).exists() and pathlib.Path(n).read_text()==c for n,c in p["files"].items()):
+              for name,want in p["base"].items():
+                  f=pathlib.Path(name);actual=hashlib.sha256(f.read_bytes()).hexdigest() if f.exists() else None
+                  assert actual==want,"Source changed before write: "+name
+              for name,content in p["files"].items():
+                  f=pathlib.Path(name);f.parent.mkdir(parents=True,exist_ok=True);f.write_text(content)
+              subprocess.run(["git","add",*p["files"]],check=True)
+              subprocess.run(["git","-c","user.name=github-actions[bot]","-c","user.email=41898282+github-actions[bot]@users.noreply.github.com","commit","-m","test: correct string literal in large-font action regression [skip ci]"],check=True)
+              subprocess.run(["git","push","origin","HEAD:experiment/prerelease-225-release"],check=True)
+          for name,content in p["files"].items():
+              assert pathlib.Path(name).read_text()==content,"Candidate content mismatch: "+name
+          sha=subprocess.check_output(["git","rev-parse","HEAD"],text=True).strip()
+          with open(os.environ["GITHUB_OUTPUT"],"a") as f:f.write("sha="+sha+"\n")
+  build:
+    needs: source
+    if: github.repository == 'Bugaga31/vless-card-vpn' && github.ref == 'refs/heads/experiment/prerelease-225-release'
+    runs-on: ubuntu-latest
+    timeout-minutes: 65
+    env:
+      CANDIDATE_SHA: ${{ needs.source.outputs.sha }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ needs.source.outputs.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407
+        with:
+          packages: platform-tools platforms;android-34 build-tools;34.0.0
+          log-accepted-android-sdk-licenses: false
+      - uses: gradle/actions/setup-gradle@d9c87d481d55275bb5441eef3fe0e46805f9ef70
+      - name: Restore native libraries
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: |
+            app/build/generated/byedpi
+            app/build/generated/hev
+            app/build/generated/byedpi-cache.json
+            app/build/generated/hev-cache.json
+          key: native-${{ runner.os }}-${{ runner.arch }}-ndk27.2.12479018-api24-all-${{ hashFiles('native/**', 'app/build.gradle.kts') }}
+      - name: Install pinned NDK
+        run: sdkmanager 'ndk;27.2.12479018'
+      - name: Compile release APKs and targeted JVM regressions
+        run: |
+          export GITHUB_RUN_NUMBER=225
+          chmod +x gradlew
+          ./gradlew -PbetaPreview=true -PemulatorAbis=true -PsplitAbi=true --no-daemon --max-workers=2 :app:assembleRelease :app:assembleDebug :app:testDebugUnitTest --tests "*HomeDataMapperTest" --tests "*HomeRuntimeTest" --tests "*HomeUiWiringTest" --tests "*AutoRecoveryR224Test" --tests "*RecoveryR207Test" --tests "*ServiceExpansionR223Test" --tests "*AutoProfileR223Test" --tests "*ByeDpiArgsTest" --tests "*SeriesDiagnosticsR222Test" --tests "*ServiceTransportR221Test" --tests "*ProbeConfigR221Test" --tests "*CallQualityR206Test" --tests "*UdpCallProbeR174Test" --tests "*ServiceErrorsR220Test" --tests "*UiReadabilityR220Test" --tests "*AssistantIsolationR220Test" --tests "*R84Test" --tests "*R85Test" --tests "*FirstConnectivityR219Test" --tests "*AutoFreshR218Test" --tests "*WatsonAutoR217Test" --tests "*ServiceMediaR217Test" --tests "*FlyRokiR216Test" --tests "*AutoRokiR216Test" --tests "*WatsonR215Test" --tests "*RequiredServicesR214Test" --tests "*TelegramSocksProbeTest" --tests "*ServiceMediaProbeTest" --tests "*ExperienceR187Test" --tests "*TorBridgeCatalogR163Test" --tests "*MandatoryBridgesR208Test" --tests "*FoundPresetR213Test" --tests "*FoundConnectR213Test" --tests "*FoundRouteR212Test" --tests "*RouteStabilityR206Test" --tests "*FastConnectR211Test" --tests "*ProbeConcurrencyR210Test" --tests "*SearchPacingR200Test" --tests "*SubscriptionQueueR199Test" --tests "*AutoLatencyR185Test" --tests "*AutoCampaignR175Test" --tests "*ForegroundAutoR176Test" --tests "*PoolLatencyR203Test" --tests "*PhoneRuntimePolicyTest" --tests "*PowerRoutingR192Test" --tests "*AutoCheckProfileR209Test" --tests "*PowerPolicy*"
+      - name: Sign with persistent Beta key
+        env:
+          KS_B64: ${{ secrets.BETA_KEYSTORE_B64 }}
+          KSP: ${{ secrets.BETA_KEYSTORE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          umask 077
+          trap 'rm -f beta.jks aligned.apk release/*.idsig' EXIT INT TERM
+          BT=$ANDROID_HOME/build-tools/34.0.0
+          echo "$KS_B64" | base64 -d > beta.jks
+          mkdir -p release
+          OUT=app/build/outputs/apk/release
+          sign() {
+            $BT/zipalign -f -p 4 "$1" aligned.apk
+            $BT/apksigner sign --ks beta.jks --ks-key-alias beta --ks-pass env:KSP --key-pass env:KSP \
+              --v1-signing-enabled true --v2-signing-enabled true --v3-signing-enabled true \
+              --min-sdk-version 21 --out "$2" aligned.apk
+          }
+          sign "$OUT/app-universal-release-unsigned.apk" release/VLESS-Card-Beta.apk
+          sign "$OUT/app-arm64-v8a-release-unsigned.apk" release/VLESS-Card-Beta-arm64.apk
+          rm -f beta.jks aligned.apk release/*.idsig
+      - name: Enable emulator KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Render actual Home UI on Android API 33
+        uses: reactivecircus/android-emulator-runner@4c44018e59b437e86cdfc41da381398f93ed8808
+        with:
+          api-level: 33
+          target: google_apis
+          arch: x86_64
+          disable-animations: true
+          emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
+          script: python3 tools/release-gates/ui_smoke_225.py
+      - name: Verify persistent signature and signed package integrity
+        shell: bash
+        run: |
+          set -o pipefail
+          python3 tools/release-gates/prepare_experimental_225.py 2>&1 | tee "$RUNNER_TEMP/package-check.log" || {
+            python3 -c 'import pathlib,os; s=pathlib.Path(os.environ["RUNNER_TEMP"],"package-check.log").read_text()[-5000:]; print("::error title=Package integrity check failed::"+s.replace("%","%25").replace("\n","%0A").replace("\r","%0D"))'
+            exit 1
+          }
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: beta-apk
+          path: release/
+      - name: Save UI screenshots and JVM reports
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: r225-ui-and-tests
+          path: |
+            ui-smoke-225/
+            app/build/reports/tests/testDebugUnitTest/
+            app/build/test-results/testDebugUnitTest/
+          if-no-files-found: warn

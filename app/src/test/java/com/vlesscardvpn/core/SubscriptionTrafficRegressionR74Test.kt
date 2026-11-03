@@ -37,13 +37,14 @@ class SubscriptionTrafficRegressionR74Test {
         assertEquals("", Traffic.line(Settings()).first)
     }
 
-    @Test fun deniedVerdicts() {
+    @Test fun siteVerdictsNeverOfferDirectRouting() {
         val ok = Tester.SiteProbe("ok", 100); val denied = Tester.SiteProbe("denied", 100, 403)
-        assertEquals("direct", Actions.siteVerdict("bank.ru", ok, denied, null).suggest)
-        val c = Actions.siteVerdict("chatgpt.com", denied, ok, null); assertEquals("vpn", c.suggest); assertTrue(c.good)
-        assertFalse(Actions.siteVerdict("chatgpt.com", denied, denied, null).good)
-        val rows = listOf("A" to Actions.siteVerdict("a", ok, ok, null), "B" to Actions.siteVerdict("b", denied, denied, null))
+        assertTrue(Actions.siteVerdict("bank.ru", ok).good)
+        assertTrue(Actions.siteVerdict("chatgpt.com", ok).suggest.isEmpty())
+        assertFalse(Actions.siteVerdict("chatgpt.com", denied).good)
+        val rows = listOf("A" to Actions.siteVerdict("a", ok), "B" to Actions.siteVerdict("b", denied))
         assertTrue(Actions.popularSummary(rows, true).contains("B"))
-        assertTrue(Actions.popularSummary(rows.take(1), true).startsWith("Через VPN работает всё"))
+        assertTrue(Actions.popularSummary(rows.take(1), true).startsWith("Через выбранный VLESS-сервер доступны все сервисы"))
+        assertTrue(Actions.popularSummary(rows, false).contains("без сервера отключены"))
     }
 }

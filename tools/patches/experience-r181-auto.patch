@@ -1,0 +1,395 @@
+--- a/app/src/main/java/com/vlesscardvpn/core/Actions.kt
++++ b/app/src/main/java/com/vlesscardvpn/core/Actions.kt
+@@ -484,7 +484,9 @@
+             // proven ones first, then one of every kind of trick (not a dozen variants of the same one)
+             val proven = base.filter { bucket(it) == 0 }.take(3).ifEmpty { base.take(1) }
+             val rest = Masks.diverse(base - proven.toSet())
+-            proven + fresh + rest
++            // A few light native variants before new mutants; expensive exploration remains available later.
++            val light = rest.filter { Masks.cost(it)<=1 && !it.viaByeDpi && !it.hasNoise }.take(4)
++            proven + light + fresh + (rest-light.toSet())
+         }
+         // Interleaved (1st mask of every server, then the 2nd…): parallel probes hit different servers, and a server
+         // that already has [enough] working masks stops early instead of trying all of them.
+@@ -503,7 +505,8 @@
+         progress.value = progress.value.copy(title = "Подбор маскировки")
+         val phases = variants.indices.groupBy { i -> val m = variants[i].second; when {
+             m == null -> 0
+-            bucket(m) == 0 -> 0 // already proven here; no need to rediscover it from scratch
++            Masks.cost(m) >= 3 -> 3 // tiny fragments / tiny MSS / long pauses do not delay cheap alternatives
++            bucket(m) == 0 -> 0 // previously useful, but not assumed fastest
+             m.viaByeDpi -> 2
+             Masks.isWarp(variants[i].first) || m.hasNoise -> 3
+             m.packets.isNotEmpty() || m.signature -> 1
+@@ -1250,8 +1253,8 @@
+         CloudSpeed.status.value = "Облако: ${CloudControl.count()} конфигураций; каталог ${eligible.size}; очередь волны ${cand.size}, остальные проверяются в фоне"
+         // Check the first bounded wave; continue if fewer than eight routes passed.
+         val passed = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+-        realTest(cand.take(12), "Авто: HTTPS и Telegram", big = false, attempts = 1, youtube = false, telegram = true, budgetMs = 6500L,onSuccess={ passed.add(it.id) })
+-        if (cand.size > 12 && passed.size < AutoEligibility.TOP) realTest(cand.drop(12).take(12), "Авто: HTTPS и Telegram", big = false, attempts = 1, youtube = false, telegram = true, budgetMs = 6500L,onSuccess={ passed.add(it.id) })
++        realTest(cand.take(12), "Авто: HTTPS и Telegram", big = false, attempts = 1, youtube = false, telegram = true, budgetMs = 6500L, stopAfter=if(connected) Int.MAX_VALUE else 1, foreground=!connected,onSuccess={ passed.add(it.id) })
++        if (cand.size > 12 && passed.isEmpty()) realTest(cand.drop(12).take(12), "Авто: HTTPS и Telegram", big = false, attempts = 1, youtube = false, telegram = true, budgetMs = 6500L, stopAfter=if(connected) Int.MAX_VALUE else 1, foreground=!connected,onSuccess={ passed.add(it.id) })
+         if (Net.key(app) != net || Net.underlying(app)?.toString() != network) return selectionNetworkChanged()
+         val ok = cand.filter { it.id in passed }
+         if (ok.isNotEmpty()) {
+@@ -1262,7 +1265,7 @@
+             val extra = preferred(st, st.servers.filter { server -> cand.none { it.id == server.id } })
+                 .sortedWith(compareByDescending<Server> { CloudSpeed.speedOf(Report.serverKey(it)) }
+                     .thenByDescending { CloudSpeed.prior(it) })
+-            val compared = chooseCompared(ok,null,extra) ?: return "Сравнение прервано: повторите Авто"
++            if(connected) chooseCompared(ok,null,extra) ?: return "Сравнение прервано: повторите Авто"
+             val primary = ServerChoice.automaticPrimary(st.settings.mode == Mode.AUTO,st.settings.balance == com.vlesscardvpn.model.Balance.LEAST_PING,GameSession.active())
+             selectBest(10, close = true, among = ok)
+             val after = Store.state.value.let { snapshot -> snapshot.selected.map {
+@@ -1514,6 +1517,10 @@
+         if (Net.key(app) != net || Net.underlying(app)?.toString() != network) return if (firstWaveOnly) "Сеть изменилась — результаты отброшены" else selectionNetworkChanged()
+         if (onFirst != null && firstFired.get()) return "Первый рабочий VLESS-маршрут найден — подключаюсь; сравнение продолжится после запуска"
+         if (firstWaveOnly) {
++            if(fastOk==0 && onFirst!=null) {
++                val rescued=quickMaskRescue(shortlist,net,network)
++                if(rescued!=null) { firstCallback?.invoke(rescued); return "Лёгкая маскировка: HTTPS и Telegram подтверждены — подключаюсь" }
++            }
+             return "Первая волна: проверено ${shortlist.size}, HTTPS+MTProto маршрутов $fastOk"
+         }
+         if (fastOk > 0) {
+@@ -1535,7 +1542,7 @@
+         states.flush()
+         val candidates = rest.filter { (tcp[it.id] ?: 0) > 0 }.sortedBy { tcp[it.id] }
+         passed.clear()
+-        val second = realTest(candidates, "Авто: запасные ${candidates.size} маршрутов", big = true, youtube = false,
++        val second = realTest(candidates, "Авто: запасные ${candidates.size} маршрутов", big = true, youtube = false, telegram = st.settings.mode == Mode.AUTO,
+             attempts = 1, stopAfter = Int.MAX_VALUE, budgetMs = ConnectPolicy.QUICK_BUDGET_MS,onSuccess={ passed.add(it.id) })
+         if (Net.key(app) != net || Net.underlying(app)?.toString() != network) return selectionNetworkChanged()
+         if (second > 0) { chooseCompared(candidates.filter { it.id in passed },onFirst, eligible.filter { it.id !in attempted }); deepPending = true }
+@@ -1544,6 +1551,42 @@
+ 
+     private fun expireUnreproducedSpeed(server: Server, net: String, at: Long) {
+         Store.setState(server.id) { ServerChoice.invalidateSpeed(it, net, at) }
++    }
++
++    /** Fast rescue after the first native batch failed. No download, source refresh, mutation or full mask sweep. */
++    private suspend fun quickMaskRescue(candidates:List<Server>, net:String, network:String?):Server? {
++        val start=Store.state.value
++        if(start.settings.mode!=Mode.AUTO) return null
++        val expected=candidates.associate {it.id to start.state(it).maskFor(net)}
++        val pinned=pinCertificates(candidates.take(2))
++        val variants=pinned.flatMap {s->MaskWarmStart.trials(s,expected[s.id].orEmpty(),start.settings).map{s to it}}
++        if(variants.isEmpty() || Net.key(app)!=net || Net.underlying(app)?.toString()!=network) return null
++        val winner=java.util.concurrent.atomic.AtomicReference<Pair<Int,Probe>?>(null)
++        progress.value=progress.value.copy(title="Авто: лёгкая маскировка Hello",message="До двух серверов · без тяжёлого дробления; нужны HTTPS и Telegram MTProto")
++        kotlinx.coroutines.withTimeoutOrNull(3800L) {
++            Tester.real(variants,start.settings.testUrl,null,youtube=false,telegram=true,requireTelegram=true,
++                foreground=true,batch=4,parallel=4,attempts=1,big=false,stopAfter=1,budgetMs=3500L) {i,p->
++                if(p.works && p.tgOk==true) winner.compareAndSet(null,i to p)
++            }
++        }
++        kotlinx.coroutines.currentCoroutineContext().ensureActive()
++        if(Net.key(app)!=net || Net.underlying(app)?.toString()!=network) return null
++        val (index,p)=winner.get() ?: return null
++        val (server,mask)=variants[index]
++        val stamp=System.currentTimeMillis()
++        var committed=false
++        Store.setState(server.id) {current->
++            if(current.maskFor(net)!=expected[server.id]) current else {
++                committed=true
++                current.copy(maskId=mask.id,netMasks=current.netMasks+(net to mask.id),realMs=p.realMs,bigOk=null,
++                    kbps=0,speedCheckedAt=0,speedNetwork="",speedMask="",tgOk=true,ytOk=null,
++                    serviceNetwork=net,serviceMask=mask.id,serviceCheckedAt=stamp,checkedAt=stamp,
++                    okCount=current.okCount+1)
++            }
++        }
++        if(!committed) return null
++        Store.recordMasks(net,listOf(mask.id to true))
++        return server
+     }
+ 
+     private suspend fun chooseCompared(candidates: List<Server>, onReady: ((Server) -> Unit)?,
+@@ -1626,7 +1669,7 @@
+             var sample: Probe? = null
+             kotlinx.coroutines.withTimeoutOrNull(2000L) {
+                 Tester.real(listOf(pinned to Masks.byId(id)),start.settings.testUrl,null,
+-                    youtube=false,batch=1,parallel=1,attempts=1,big=true,budgetMs=1900) { _,p -> sample=p }
++                    youtube=false,telegram=true,requireTelegram=true,batch=1,parallel=1,attempts=1,big=true,budgetMs=1900) { _,p -> sample=p }
+             }
+             val p = sample ?: continue
+             if (Net.key(app) != net || Net.underlying(app)?.toString() != network) return
+--- a/app/src/main/java/com/vlesscardvpn/core/AutoRoutePolicy.kt
++++ b/app/src/main/java/com/vlesscardvpn/core/AutoRoutePolicy.kt
+@@ -30,7 +30,7 @@
+         if (server.protocol !in setOf("vless", "vmess", "trojan")) return emptyList()
+         val allowed = Masks.searchOrder(false, server, settings.maskFamilies, settings.maskFps).map { it.id }.toSet()
+         val nativeChrome = server.fp.ifEmpty { "chrome" } == "chrome"
+-        return listOf("", "chrome.n", "chrome.hello.fast").filter { id ->
++        return listOf("", "chrome.n", "chrome.hello.coarse", "chrome.hello.fast").filter { id ->
+             id != current && (id.isEmpty() || id in allowed) &&
+                 !(nativeChrome && (id == "chrome.n" || id.isEmpty() && current == "chrome.n"))
+         }.take(2)
+@@ -38,7 +38,7 @@
+ 
+     /** Only an isolated, full successful download can replace the current mask. */
+     fun improved(current: ServerState, net: String, now: Long, sample: Probe): Boolean =
+-        sample.works && sample.bigOk == true && sample.kbps > 0 &&
++        sample.works && sample.tgOk == true && sample.bigOk == true && sample.kbps > 0 &&
+             ServerChoice.measuredSpeed(current, net, now).let { old ->
+                 old <= 0 || sample.kbps.toLong() >= old.toLong() * 120 / 100 && sample.kbps.toLong() - old >= 256
+             }
+@@ -46,5 +46,6 @@
+     fun apply(current: ServerState, net: String, mask: String, now: Long, sample: Probe): ServerState = current.copy(
+         maskId = mask, netMasks = current.netMasks + (net to mask),
+         realMs = sample.realMs, bigOk = sample.bigOk, kbps = sample.kbps,
++        tgOk = sample.tgOk, ytOk = null, serviceNetwork=net, serviceMask=mask, serviceCheckedAt=now,
+         speedNetwork = net, speedMask = mask, speedCheckedAt = now, checkedAt = now)
+ }
+--- /dev/null
++++ b/app/src/main/java/com/vlesscardvpn/core/ConnectionHistory.kt
+@@ -0,0 +1,31 @@
++package com.vlesscardvpn.core
++
++import android.os.SystemClock
++import kotlinx.coroutines.flow.MutableStateFlow
++import org.json.JSONArray
++import org.json.JSONObject
++
++/** Only fixed check names/outcomes, no addresses, network names, IDs, config, exception or log strings. Memory only. */
++object ConnectionHistory {
++    data class Event(val at:Long,val kind:String,val result:String)
++    val events=MutableStateFlow<List<Event>>(emptyList())
++    private val last=mutableMapOf<String,String>()
++    private val kinds=setOf("https","dns","telegram","youtube")
++    @Synchronized fun record(kind:String,value:Boolean?) {
++        if(kind !in kinds || value==null) return
++        val result=if(value) "PASS" else "FAIL"
++        if(last[kind]==result) return
++        last[kind]=result
++        events.value=(events.value+Event(SystemClock.elapsedRealtime(),kind,result)).takeLast(100)
++    }
++    @Synchronized fun boundary() {last.clear()}
++    @Synchronized fun clear() {events.value=emptyList();last.clear()}
++    fun report():String {
++        val now=SystemClock.elapsedRealtime()
++        return JSONObject().put("schema",1).put("version",com.vlesscardvpn.BuildConfig.VERSION_NAME)
++            .put("scope","local_socks_probe_transitions_current_process_only")
++            .put("contains_endpoints_or_keys",false).put("events",JSONArray().apply {
++                events.value.forEach {put(JSONObject().put("seconds_ago",((now-it.at).coerceAtLeast(0)/1000)).put("check",it.kind).put("result",it.result))}
++            }).toString(2)
++    }
++}
+--- a/app/src/main/java/com/vlesscardvpn/core/ConnectionPassport.kt
++++ b/app/src/main/java/com/vlesscardvpn/core/ConnectionPassport.kt
+@@ -10,15 +10,18 @@
+     data class Snapshot(val https: Check = Check(), val dns: Check = Check(), val telegram: Check = Check(), val youtube: Check = Check())
+     val state = MutableStateFlow(Snapshot())
+     private fun check(v: Boolean?) = Check(v,SystemClock.elapsedRealtime())
+-    @Synchronized fun clear() { state.value = Snapshot() }
++    @Synchronized fun clear() { state.value = Snapshot(); ConnectionHistory.boundary() }
+     @Synchronized fun full(https: Boolean, dns: Boolean?, telegram: Boolean?, youtube: Boolean?) {
+         state.value = Snapshot(check(https),check(dns),check(telegram),check(youtube))
++        ConnectionHistory.record("https",https); ConnectionHistory.record("dns",dns)
++        ConnectionHistory.record("telegram",telegram); ConnectionHistory.record("youtube",youtube)
+     }
+     @Synchronized fun light(https: Boolean, telegram: Boolean?, sampledTelegram: Boolean) {
++        ConnectionHistory.record("https",https); if(sampledTelegram) ConnectionHistory.record("telegram",telegram)
+         val s = state.value
+         state.value = s.copy(https=check(https),telegram=if(sampledTelegram) check(telegram) else s.telegram)
+     }
+-    @Synchronized fun dns(ok: Boolean) { state.value = state.value.copy(dns=check(ok)) }
++    @Synchronized fun dns(ok: Boolean) { state.value = state.value.copy(dns=check(ok)); ConnectionHistory.record("dns",ok) }
+     fun status(c: Check): String = when {
+         c.at <= 0 || c.value == null -> "UNKNOWN"
+         SystemClock.elapsedRealtime() < c.at || SystemClock.elapsedRealtime()-c.at > 90_000L -> "STALE"
+@@ -26,12 +29,15 @@
+         else -> "FAIL"
+     }
+     fun label(c: Check): String = when(status(c)) { "PASS" -> "отвечает"; "FAIL" -> "нет ответа"; "STALE" -> "замер устарел"; else -> "не подтверждено" }
++    fun age(c:Check): Long? = if(c.at<=0) null else ((SystemClock.elapsedRealtime()-c.at).coerceAtLeast(0)/1000)
+     fun report(): String {
+         val s=state.value
+         return JSONObject().put("schema",1).put("version",com.vlesscardvpn.BuildConfig.VERSION_NAME)
+             .put("scope","local_socks_chain_not_independent_app_tun_test")
+             .put("https",status(s.https)).put("dns_socks_udp",status(s.dns))
+             .put("telegram_sampled_mtproto",status(s.telegram)).put("youtube_sampled_media",status(s.youtube))
++            .put("sample_age_seconds",JSONObject().put("https",age(s.https) ?: JSONObject.NULL).put("dns",age(s.dns) ?: JSONObject.NULL)
++                .put("telegram",age(s.telegram) ?: JSONObject.NULL).put("youtube",age(s.youtube) ?: JSONObject.NULL))
+             .put("optional_optimization_paused",SessionHold.active()).put("contains_endpoints_or_keys",false).toString(2)
+     }
+ }
+--- /dev/null
++++ b/app/src/main/java/com/vlesscardvpn/core/MaskWarmStart.kt
+@@ -0,0 +1,19 @@
++package com.vlesscardvpn.core
++
++import com.vlesscardvpn.model.Server
++import com.vlesscardvpn.model.Settings
++import com.vlesscardvpn.xray.Mask
++import com.vlesscardvpn.xray.Masks
++
++/** Native TLS identity, bounded Hello-only fragmentation, no random SNI, noise, MSS clamp or extra engine. */
++object MaskWarmStart {
++    fun trials(server:Server,current:String,settings:Settings):List<Mask> {
++        if(server.protocol !in setOf("vless","vmess","trojan") || server.security !in setOf("tls","reality")) return emptyList()
++        val allowed=Masks.searchOrder(false,server,settings.maskFamilies,settings.maskFps).map{it.id}.toSet()
++        val fp=server.fp.ifEmpty{"chrome"}
++        return listOf("$fp.n","$fp.hello.fast","$fp.hello.balanced","$fp.hello.coarse","$fp.hello.mobile")
++            .filter{it!=current && it in allowed}.mapNotNull{Masks.byId(it)}
++            .filter{!it.viaByeDpi && !it.hasNoise && it.sni.isEmpty() && it.mss==0 && !it.mux}
++            .take(2)
++    }
++}
+--- /dev/null
++++ b/app/src/main/java/com/vlesscardvpn/core/ServerBrowser.kt
+@@ -0,0 +1,33 @@
++package com.vlesscardvpn.core
++
++import com.vlesscardvpn.model.Server
++import com.vlesscardvpn.model.ServerState
++
++object ServerBrowser {
++    val sorts=listOf("auto" to "По качеству","latency" to "По задержке","speed" to "По скорости","name" to "По имени","favorite" to "Избранные сверху")
++    val services=listOf("any" to "Любые результаты","telegram" to "Telegram: свежий ответ","youtube" to "YouTube: свежий ответ","insecure" to "Проверить TLS")
++    fun matches(s:Server,st:ServerState,protocol:String,service:String,network:String,now:Long):Boolean {
++        if(protocol.isNotEmpty() && s.protocol!=protocol) return false
++        return when(service) {
++            "telegram","youtube" -> AutoEligibility.serviceRank(st,network,now,setOf(service))==0
++            "insecure" -> s.insecure
++            else -> true
++        }
++    }
++    fun comparator(order:String,state:(Server)->ServerState,favorites:Set<String>):Comparator<Server> = when(order) {
++        "name" -> compareBy<Server>{it.name.lowercase(java.util.Locale.ROOT)}.thenBy{it.id}
++        "latency" -> compareBy<Server>{state(it).realMs.takeIf{n->n>0} ?: Int.MAX_VALUE}.thenBy{it.id}
++        "speed" -> compareByDescending<Server>{state(it).kbps.takeIf{n->n>0} ?: -1}.thenBy{it.id}
++        "favorite" -> compareBy<Server>{it.id !in favorites}.thenBy{state(it).score}.thenBy{it.id}
++        else -> compareBy<Server>{when {state(it).selected->0;state(it).works->1;state(it).tcpMs>0 && state(it).realMs<0->2;state(it).realMs<0 && state(it).tcpMs<0->3;else->4}}
++            .thenBy{state(it).score}.thenBy{state(it).tcpMs.takeIf{n->n>0} ?: Int.MAX_VALUE}.thenBy{it.id}
++    }
++    fun age(at:Long,now:Long):String = when {
++        at<=0->"не проверен"
++        now<at->"время не совпадает"
++        now-at<60_000->"меньше минуты назад"
++        now-at<3_600_000->"${(now-at)/60_000} мин назад"
++        now-at<86_400_000->"${(now-at)/3_600_000} ч назад"
++        else->"${(now-at)/86_400_000} дн назад"
++    }
++}
+--- a/app/src/main/java/com/vlesscardvpn/core/SessionHold.kt
++++ b/app/src/main/java/com/vlesscardvpn/core/SessionHold.kt
+@@ -7,7 +7,7 @@
+ object SessionHold {
+     val until = MutableStateFlow(0L)
+     fun active(): Boolean = until.value > SystemClock.elapsedRealtime()
+-    fun start() { until.value = SystemClock.elapsedRealtime() + 30 * 60_000L }
++    fun start(minutes:Int=30) { until.value = SystemClock.elapsedRealtime() + minutes.coerceIn(1,120) * 60_000L }
+     fun clear() { until.value = 0L }
+     fun minutesLeft(): Long = ((until.value-SystemClock.elapsedRealtime()).coerceAtLeast(0L)+59_999L)/60_000L
+ }
+--- a/app/src/main/java/com/vlesscardvpn/xray/Masks.kt
++++ b/app/src/main/java/com/vlesscardvpn/xray/Masks.kt
+@@ -127,6 +127,9 @@
+     private val FRAGMENTS = listOf(
+         listOf("n", "без дробления", "", "", "", ""),
+         listOf("hello.fast", "лёгкое Hello 100–200 байт · пауза 0–1 мс", "tlshello", "100-200", "0-1", "10"),
++        listOf("hello.balanced", "Hello 64–128 байт · пауза 0–1 мс · до 8 частей", "tlshello", "64-128", "0-1", "8"),
++        listOf("hello.coarse", "Hello 256–512 байт · без паузы · до 4 частей", "tlshello", "256-512", "0-0", "4"),
++        listOf("hello.mobile", "Hello 128–256 байт · пауза 0–2 мс · до 6 частей", "tlshello", "128-256", "0-2", "6"),
+         listOf("h1", "дробление Hello 1-3 байт", "tlshello", "1-3", "1-3", "0"),
+         listOf("h2", "дробление Hello 3-8", "tlshello", "3-8", "2-5", "0"),
+         listOf("h3", "дробление Hello 10-30", "tlshello", "10-30", "5-10", "0"),
+@@ -296,7 +299,10 @@
+         val ranges = m.delays.ifEmpty { m.delay }.split(',')
+         val pause = ranges.mapNotNull { it.trim().substringAfterLast('-').toIntOrNull() }.maxOrNull() ?: 0
+         // Heuristic startup overhead only; a real full-body sample still decides the winner.
+-        return when { pause > 60 -> 3; pause > 20 -> 2; pause > 1 -> 1; else -> 0 }
++        val minimum = m.lengths.ifEmpty { m.length }.split(',').mapNotNull { it.trim().substringBefore('-').toIntOrNull() }.minOrNull() ?: 0
++        val tiny = when { minimum in 1..8 -> 2; minimum in 9..32 -> 1; else -> 0 }
++        val broad = if(m.packets != "tlshello") 1 else 0
++        return tiny + broad + when { pause > 60 -> 3; pause > 20 -> 2; pause > 1 -> 1; else -> 0 }
+     }
+     fun cost(m: Mask): Int = fragmentCost(m) + (when { m.mss in 1..200 -> 3; m.mss in 201..400 -> 2; m.mss > 0 -> 1; else -> 0 }) + (if (m.mux) 1 else 0) + (if (m.viaByeDpi) 1 else 0)
+ 
+--- /dev/null
++++ b/tools/release-gates/prepare_experimental_181.py
+@@ -0,0 +1,84 @@
++import hashlib
++import json
++import os
++from pathlib import Path
++import re
++import subprocess
++import zipfile
++from verify_candidate import CERT, PACKAGE, require, verify_package, verify_signature
++
++
++def run(*args):
++    return subprocess.check_output(args, text=True, stderr=subprocess.STDOUT)
++
++
++def prepare(root, sha, run_id, docs):
++    bt = Path(os.environ["ANDROID_HOME"]) / "build-tools/34.0.0"
++    expected = {
++        "VLESS-Card-Beta.apk": "VLESS-Card-Beta-1.2.70-experimental.apk",
++        "VLESS-Card-Beta-arm64.apk": "VLESS-Card-Beta-1.2.70-experimental-arm64.apk",
++    }
++    report = {
++        "candidate_sha": sha,
++        "run_id": str(run_id),
++        "version": "1.2.70",
++        "version_code": 181,
++        "channel": "experimental",
++        "functional_checks": {
++            "unit_tests": "not_run_by_request",
++            "lint": "not_run_by_request",
++            "emulator": "not_run_by_request",
++            "physical_device": "not_run",
++        },
++        "apks": [],
++    }
++    sums = []
++    for old_name, new_name in expected.items():
++        apk = root / old_name
++        signature = run(str(bt / "apksigner"), "verify", "--min-sdk-version", "21", "--verbose", "--print-certs", str(apk))
++        verify_signature(signature)
++        run(str(bt / "zipalign"), "-c", "-p", "4", str(apk))
++        package = run(str(bt / "aapt2"), "dump", "badging", str(apk)).splitlines()[0]
++        verify_package(package, 181)
++        manifest = run(str(bt / "aapt2"), "dump", "xmltree", str(apk), "--file", "AndroidManifest.xml")
++        for attr in ("debuggable", "testOnly"):
++            require(not re.search(rf"android:{attr}[^\n]*0xffffffff", manifest), "Debug/test-only APK")
++        require("networkSecurityConfig" not in manifest, "Unexpected release network security override")
++        with zipfile.ZipFile(apk) as archive:
++            require(archive.testzip() is None, "Corrupt APK archive")
++            abi = "x86_64" if old_name == "VLESS-Card-Beta.apk" else "arm64-v8a"
++            for library in ("libTor.so", "libLyrebird.so", "libgojni.so", "libhev-socks5-tunnel.so"):
++                require(f"lib/{abi}/{library}" in archive.namelist(), f"Missing {abi} library: {library}")
++        digest = hashlib.sha256(apk.read_bytes()).hexdigest()
++        new_path = root / new_name
++        apk.rename(new_path)
++        report["apks"].append({
++            "file": new_name,
++            "sha256": digest,
++            "certificate_sha256": CERT,
++            "package": package,
++        })
++        sums.append(f"{digest}  {new_name}")
++    (root / "verification.json").write_text(json.dumps(report, indent=2) + "\n")
++    (root / "SHA256SUMS-Beta.txt").write_text("\n".join(sums) + "\n")
++    notice = f"""# Experimental prerelease — functional checks skipped
++
++This is an experimental build, not a stable release. Unit tests, lint, emulator checks and physical-device checks were not run by request. The release job compiled the app, signed both APKs, verified the persistent Beta certificate and checked APK package integrity.
++
++Commit: `{sha}`  
++Build: https://github.com/Bugaga31/vless-card-vpn/actions/runs/{run_id}  
++Package: `{PACKAGE}`, version 1.2.70, code 181.  
++The attached `verification.json` and `SHA256SUMS-Beta.txt` identify the exact signed files.
++
++Local passport outcomes are scoped probes, not a guarantee of account login, all Telegram DCs, media, calls, or the full application TUN path. Optional optimization hold never disables emergency healing. All functional checks were omitted by owner request.
++
++---
++
++"""
++    (root / "notes-experimental.md").write_text(notice + docs.read_text())
++
++
++if __name__ == "__main__":
++    require(os.environ.get("GITHUB_REPOSITORY") == "Bugaga31/vless-card-vpn", "Wrong repository")
++    require(os.environ.get("GITHUB_REF") == "refs/heads/experiment/prerelease-181", "Wrong experimental branch")
++    prepare(Path("release"), os.environ["CANDIDATE_SHA"], os.environ["GITHUB_RUN_ID"], Path("docs/release-1.2.70.md"))

@@ -47,9 +47,12 @@ object Assistant {
             has(q, "сайт", "билет", "страниц") && has(q, "не открыва", "не заход", "не грузит", "медленно гру", "долго гру") ->
                 Msg(false, "Пришлите адрес сайта (например, tickets.example.ru) — проверю его напрямую, через VPN и через обход DPI и сам направлю туда, где он открывается. " +
                     "Из Telegram: в открытой странице ⋮ → «Копировать ссылку» и вставьте сюда.")
+            // Device requests must win before generic acceleration/YouTube matching.
+            has(q,"телефон","устройств","смартфон","батаре","заряд","памят") && has(q,"ускор","разгон","оптимиз","охлад","остуди","снизь","эконом") ->
+                Msg(false,"Проверю датчики телефона и дам рекомендации. VPN, маски и выбранный параллелизм не меняю.",listOf(Btn("Диагностика телефона","!device")),auto=true)
             // ---- orders: done right away
             has(q, "ускор", "быстрее", "разгон", "оптимиз", "тормоз") && has(q, "ютуб", "youtube", "видео", "ютьюб") || has(q, "ускорь", "оптимизируй", "разгони") ->
-                Msg(false, "Ускоряю YouTube: включаю «Умный YouTube» и ускорение телефона, облегчаю тяжёлые маски, меряю реальную скорость лучших серверов и выбираю самые быстрые.", listOf(Btn("Ускорить YouTube", "!yt")), auto = true)
+                Msg(false, "Проверю скорость YouTube через VLESS и сравню проверенные серверы. Ускорение не гарантируется; настройки телефона не меняю.", listOf(Btn("Ускорить YouTube", "!yt")), auto = true)
             has(q, "облегч", "легкую маск", "легче маск") -> Msg(false, "Пробую лёгкие маски вместо тяжёлых (мелкие пакеты, один поток) — они быстрее.", listOf(Btn("Облегчить маски", "!lighten")), auto = true)
             has(q, "смени маск", "другую маск", "поменяй маск", "следующую маск", "переключи маск") -> Msg(false, "Переключаю серверы на следующую проверенную маску.", listOf(Btn("Сменить маску", "!nextmask")), auto = true)
             has(q, "кости", "брось кости", "случайную маск", "рандомную маск", "рулетка") -> Msg(false, "Брошу кости: случайная лёгкая маска на каждый выбранный сервер — самый быстрый способ найти работающую.", listOf(Btn("Бросить кости", "!dice"), Btn("Сменить маску", "!nextmask")), auto = true)
@@ -76,10 +79,9 @@ object Assistant {
             }
             has(q, "почему не работ", "почему не подкл", "диагност", "что не так", "в чём причин", "в чем причин", "заморозк") -> Msg(false, "Проверю причину: белые списки, блокировку серверов по IP или по имени (SNI) и «заморозку» загрузки внутри VPN.", listOf(Btn("Проверить", "!diag")), auto = true)
             has(q, "оживи", "нерабочие сервер", "мёртвые сервер", "мертвые сервер", "дохлые", "не работают сервер", "чистый ip", "чистые ip") -> Msg(false, "Попробую оживить нерабочие серверы за Cloudflare: тот же сервер часто отвечает на другом адресе Cloudflare, если оператор заблокировал только его IP.", listOf(Btn("Оживить", "!revive")), auto = true)
-            has(q, "белые списк", "белый спис", "белых спис", "вайтлист", "whitelist") -> Msg(false, "Проверю, включены ли белые списки у оператора: открою напрямую разрешённые, обычные и заблокированные сайты.", listOf(Btn("Проверить", "!wl")), auto = true)
+            has(q, "белые списк", "белый спис", "белых спис", "вайтлист", "whitelist") -> Msg(false, "Проверю доступность сайтов только через выбранный VLESS-сервер. Проверки напрямую отключены.", listOf(Btn("Проверить маршрут", "!wl")), auto = true)
             has(q, "охлад", "греет", "горяч", "нагрел", "нагрев", "температур", "перегр") -> Msg(false, cooling(f), listOf(Btn("Снизить нагрузку", "!cool")), auto = has(q, "охлади", "остуди", "снизь"))
-            has(q, "ускорь телефон", "ускорение телефона", "разгони телефон", "оптимизируй телефон", "автоускор") ->
-                Msg(false, "Ускоряю телефон в VPN: крупные пакеты (меньше работы процессору), блокировка рекламы (меньше трафика и батареи), лёгкие маски. Память и чужие приложения Android трогать не даёт — это делают только системные «очистки».", listOf(Btn("Ускорить", "!boostphone")), auto = true)
+            has(q,"автоускор") -> Msg(false,"Проверю датчики телефона; VPN не меняю.",listOf(Btn("Диагностика телефона","!device")),auto=true)
             has(q, "gps", "геолок", "местополож", "локаци", "геопоз", "жпс") -> {
                 val off = has(q, "выключи", "отключи", "убери", "верни")
                 Msg(false, if (off) "Выключаю подмену GPS — вернётся настоящее местоположение." else "Включаю GPS под страну сервера. Если Android не даст — подскажу, где разрешить.",
@@ -102,10 +104,10 @@ object Assistant {
             has(q, "тор", "tor", "лук", "луковичн", "onion", "анонимн") -> {
                 val off = has(q, "выключи", "отключи", "не надо", "убери")
                 when {
-                    off -> Msg(false, "Выключаю Tor-режим для сервисов: выбранные приложения снова пойдут через основной VPN-маршрут.", listOf(Btn("Применить", "!set torRouting off")), auto = true)
-                    has(q, "мост", "маски тор", "obfs", "снежинк", "snowflake", "бридж") -> Msg(false, "Мосты Tor (obfs4/snowflake) прячут сам факт подключения к Tor от оператора — полезно, когда Tor напрямую не соединяется. Транспорт obfs4 и webtunnel уже встроен в приложение (Snowflake — через Termux). Включаются в настройках Tor-режима.", listOf(Btn("Открыть настройки", "!settings")))
-                    has(q, "отдельн", "напрям", "мимо vpn", "свой путь") -> Msg(false, "Отдельный путь Tor: демон Tor исключается из VPN и ходит в интернет напрямую — своё шифрование и мосты, работает даже если серверы недоступны. Хорошо как запасной путь.", listOf(Btn("Включить", "!set torDirect on"), Btn("Мосты Tor", "тор мосты")))
-                    else -> Msg(false, "Tor-режим: выбранные сервисы пойдут через локальный Tor поверх VPN-туннеля (Tor в VLESS). Выход Tor сам ротируется каждые ~10 минут, страны выхода — по вашим привычкам.", listOf(Btn("Включить Tor", "!set torRouting on"), Btn("Мосты Tor", "тор мосты")))
+                    off -> Msg(false, "Выключаю Tor через VLESS.", listOf(Btn("Применить", "!set torAll off")), auto = true)
+                    has(q, "мост", "маски тор", "obfs", "снежинк", "snowflake", "бридж") -> Msg(false, "В приложение встроены мостовые транспорты obfs4 и WebTunnel. Они могут помочь при блокировке обычного Tor, но доступность у оператора не гарантируется. Snowflake и Meek не встроены. Мосты и ротация настраиваются в разделе Tor; он доступен и с главного экрана.", listOf(Btn("Открыть настройки", "!settings")))
+                    has(q, "отдельн", "напрям", "мимо vpn", "свой путь") -> Msg(false, "Отдельный Tor без VLESS отключён. Tor может работать только поверх проверенного VLESS-сервера; при недоступном сервере прямой выход не включается.", listOf(Btn("Tor через VLESS", "!set torAll on"), Btn("Мосты Tor", "тор мосты")))
+                    else -> Msg(false, "Tor подключается вторым шагом после VLESS: TCP идёт через Tor, UDP и звонки остаются на VLESS. Без рабочего VLESS-сервера Tor не стартует.", listOf(Btn("Включить Tor через VLESS", "!set torAll on"), Btn("Мосты Tor", "тор мосты")))
                 }
             }
             has(q, "привет", "здравств", "кто ты", "ты кто") -> Msg(false, HELLO, START)
@@ -123,14 +125,8 @@ object Assistant {
         }
     }
 
-    private fun cooling(f: Facts): String {
-        val ctx = appRef ?: return "Не удалось прочитать температуру."
-        val t = Thermal.tempC(ctx); val s = Thermal.status(ctx)
-        return "Телефон: ${Thermal.label(t, s).ifEmpty { "температура неизвестна" }}." +
-            (if (Thermal.cooling) " Сейчас я уже снижаю нагрузку." else "") +
-            "\nЧто могу: на время нагрева остановить фоновые проверки и эволюцию масок, включить крупные пакеты и лёгкие маски — VPN будет греть меньше. " +
-            "Охладить телефон сильнее помогут: снять чехол, не заряжать во время игры/видео, уменьшить яркость."
-    }
+    private fun cooling(f: Facts): String =
+        "Проверю температуру и дам советы по доступным датчикам. Не меняю VPN, маски, MTU или число параллельных проверок. Настройки других приложений автоматически не меняются."
 
     private fun phone(f: Facts): String {
         val p = f.phone ?: return "Не удалось прочитать данные телефона."
@@ -184,11 +180,11 @@ object Assistant {
         val up = e.filter { it.second > 0.05 }.take(4); val down = e.filter { it.second < -0.05 }.takeLast(3).reversed()
         return buildString {
             append("Сеть «${f.net}», по ${total(f)} проверкам масок.")
-            if (p0 != null) append(" Обычное соединение без хитростей прошло в ${pct(p0)} случаев" + if (p0 < 0.4) " — здесь явно режут." else if (p0 < 0.75) " — режут частично." else " — почти не режут.")
+            if (p0 != null) append(" Обычное соединение без хитростей прошло в ${pct(p0)} случаев" + if (p0 < 0.4) " — низкая доля успеха; сама по себе она не доказывает блокировку DPI." else if (p0 < 0.75) " — результаты нестабильны; причина ещё не установлена." else " — высокая доля успеха в этих измерениях, не гарантия доступности.")
             if (up.isNotEmpty()) append("\nПомогает: " + up.joinToString(", ") { "${it.first} (+${pct(it.second)})" } + ".")
             if (down.isNotEmpty()) append("\nМешает: " + down.joinToString(", ") { "${it.first} (−${pct(-it.second)})" } + ".")
             if (up.isEmpty() && down.isEmpty()) append("\nЗаметной разницы между приёмами нет — выбирайте по скорости.")
-            if (f.dpiKnown) append("\nДля этой сети уже подобран обход DPI без сервера.")
+            if (f.dpiKnown) append("\nЕсть история DPI-проверок; она не заменяет рабочий VLESS-сервер.")
         }
     }
 
@@ -202,10 +198,10 @@ object Assistant {
     }
 
     private fun youtube(f: Facts) = when {
-        f.ytDpi == true -> "В этой сети YouTube идёт напрямую через обход DPI — так оказалось быстрее, чем через серверы. Если начнёт тормозить, я сам верну серверы."
-        f.ytDpi == false -> "Здесь YouTube быстрее через серверы (или обход не открыл его), поэтому он идёт через VPN."
+        f.ytDpi == true -> "Сохранён старый результат сравнения DPI. Он не подтверждает текущий маршрут YouTube; прямой обход вместо VLESS не включается."
+        f.ytDpi == false -> "Есть прошлое сравнение в пользу сервера. Текущую доступность YouTube нужно подтвердить свежей сервисной проверкой."
         f.mode != Mode.AUTO -> "«Умный YouTube» работает только в режиме «Авто»."
-        else -> "Скорость YouTube через серверы и через обход DPI я сравню в фоне после подключения в этой сети."
+        else -> "Текущий результат YouTube ещё не подтверждён. Можно запустить проверку через выбранный VLESS-сервер."
     } + (f.best.firstOrNull()?.let { (n, _, k) -> if (k > 0) "\nЛучший сервер ($n) качает ${"%.1f".format(k / 1000.0)} Мбит/с" + if (k < 3000) " — для HD мало." else "." else "" } ?: "")
 
     private fun slow(f: Facts) = buildString {
@@ -220,8 +216,8 @@ object Assistant {
     private fun broken(f: Facts) = buildString {
         append(if (f.connected) "VPN подключён: ${f.check.ifEmpty { "проверяю…" }}" else "VPN выключен.")
         append("\nРаботают ${f.working} из ${f.servers} серверов.")
-        if (f.working == 0) append(if (f.dpiKnown) " Пока можно без сервера — через обход DPI (Авто включит сам)." else " Нужна проверка и подбор маскировки.")
-        if ((plainRate(f) ?: 1.0) < 0.4) append("\nВ сети «${f.net}» сильно режут — без маскировки почти ничего не пройдёт.")
+        if (f.working == 0) append(if (f.dpiKnown) " История DPI не заменяет рабочий VLESS-сервер; прямой выход не включается." else " Нужна проверка и подбор маскировки.")
+        if ((plainRate(f) ?: 1.0) < 0.4) append("\nНизкая доля успеха обычных проб в сети «${f.net}». Это не устанавливает причину: нужны отдельные DNS/TLS/HTTP результаты.")
     }
 
     private fun servers(f: Facts) = if (f.best.isEmpty()) "Рабочих серверов пока нет — нажмите «Проверить серверы»." else
@@ -272,6 +268,11 @@ object Assistant {
 
     /** Commands of the buttons; results come back as messages. */
     fun run(app: android.content.Context, cmd: String, quiet: Boolean = false) {
+        // Also intercept stale buttons saved before this version. Only local sensor advice.
+        AssistantDeviceCommands.execute(cmd) {
+            DeviceCoach.sample(app)
+            DeviceCoach.advice.value.map { it.text }
+        }?.let { post(Msg(false,it)); return }
         when {
             cmd.startsWith("!site ") -> {
                 val host = cmd.removePrefix("!site ")
@@ -302,15 +303,34 @@ object Assistant {
             }
             cmd == "!auto" -> { Store.update { it.copy(settings = it.settings.copy(mode = Mode.AUTO)) }; reconnect(app); post(Msg(false, "Режим «Авто» включён" + if (Tunnel.socks != null) " — переподключаюсь." else ". Нажмите «Подключить».")) }
             cmd == "!connect" -> {
-                if (Store.state.value.settings.proxyOnly || android.net.VpnService.prepare(app) == null) { com.vlesscardvpn.vpn.TunnelService.start(app); post(Msg(false, "Подключаюсь…")) }
+                if (android.net.VpnService.prepare(app) == null) { com.vlesscardvpn.vpn.TunnelService.start(app); post(Msg(false, "Подключаюсь…")) }
                 else post(Msg(false, "Нажмите «Подключить» на главной один раз — Android спросит разрешение на VPN, дальше смогу сам."))
             }
             cmd == "!disconnect" -> { com.vlesscardvpn.vpn.TunnelService.stop(app); post(Msg(false, "VPN отключён.")) }
             cmd.startsWith("!set ") -> {
                 val (key, v) = cmd.removePrefix("!set ").split(" ").let { it[0] to (it.getOrNull(1) == "on") }
-                Store.update { s -> s.copy(settings = when (key) { "blockAds" -> s.settings.copy(blockAds = v); "blockQuic" -> s.settings.copy(blockQuic = v); "gps" -> s.settings.copy(gpsSpoof = v); "torRouting" -> s.settings.copy(torRouting = v); "torAuto" -> s.settings.copy(torAuto = v); "torDirect" -> s.settings.copy(torDirect = v); "warpChain" -> s.settings.copy(warpChain = v); "autopilot" -> s.settings.copy(autopilot = v); "appAware" -> s.settings.copy(appAware = v); else -> s.settings.copy(turbo = v) }) }
+                Store.update { s -> s.copy(settings = when (key) {
+                    "blockAds" -> s.settings.copy(blockAds = v)
+                    "blockQuic" -> s.settings.copy(blockQuic = v)
+                    "blockStun" -> s.settings.copy(blockStun = v)
+                    "gps" -> s.settings.copy(gpsSpoof = v)
+                    "torRouting", "torAll" -> s.settings.copy(torAll = v, torRouting = false, torDirect = false)
+                    "torAuto" -> s.settings.copy(torAuto = v)
+                    "torDirect" -> s.settings.copy(torDirect = v)
+                    "warpChain" -> s.settings.copy(warpChain = v)
+                    "autopilot" -> s.settings.copy(autopilot = v)
+                    "appAware" -> s.settings.copy(appAware = v)
+                    else -> s.settings.copy(turbo = v)
+                }) }
                 reconnect(app)
-                post(Msg(false, (when (key) { "blockAds" -> "Блокировка рекламы"; "blockQuic" -> "Блокировка QUIC"; "gps" -> "Подмена GPS"; "warpChain" -> "WARP через сервер"; "autopilot" -> "Автопилот"; "appAware" -> "Подстройка под приложения"; "torRouting" -> "Tor для сервисов"; "torAuto" -> "Tor в Авто"; "torDirect" -> "Отдельный путь Tor"; else -> "Ускорение телефона" }) + if (v) " включена." else " выключена."))
+                val message = when (key) {
+                    "torDirect" -> "Tor без VLESS отключён; используйте Tor через VLESS."
+                    "blockStun" -> "Фильтрация STUN отключена, чтобы не прерывать звонки."
+                    "blockQuic" -> "QUIC-фильтрация отключена; UDP остаётся внутри VLESS."
+                    "torRouting", "torAll" -> "Tor через VLESS " + if (v) "включён." else "выключен."
+                    else -> (when (key) { "blockAds" -> "Блокировка рекламы"; "gps" -> "Подмена GPS"; "warpChain" -> "WARP через сервер"; "autopilot" -> "Автопилот"; "appAware" -> "Подстройка под приложения"; "torAuto" -> "Tor в Авто"; else -> "Ускорение телефона" }) + if (v) " включена." else " выключена."
+                }
+                post(Msg(false, message))
                 if (v && key == "autopilot") { Actions.boostYoutube(); post(Msg(false, "Начал улучшать соединение — результат напишу здесь.")) }
                 if (v && key == "gps") post(Msg(false, "Подмена GPS работает, пока включён VPN: телефон «окажется» в столице страны сервера. Нужно один раз разрешить: Параметры разработчика → «Приложение для фиктивных местоположений» → VLESS Card." +
                     GpsMock.state.value.let { if (it.isNotEmpty()) "\nСейчас: $it" else "" }, listOf(Btn("Открыть параметры разработчика", "!devsettings"))))
@@ -326,18 +346,6 @@ object Assistant {
             cmd == "!wl" -> scope.launch {
                 val r = Whitelist.check()
                 post(Msg(false, Whitelist.report(r), if (r.verdict == Whitelist.Verdict.WHITELIST) listOf(Btn("Подобрать маскировку", "!masks")) else emptyList()))
-            }
-            cmd == "!cool" -> {
-                Store.update { it.copy(settings = it.settings.copy(autoCool = true, turbo = true)) }; Thermal.cooling = true; reconnect(app)
-                if (Store.summary.value.heavyMask) Actions.lighten()
-                post(Msg(false, "Снизил нагрузку: фоновые проверки на паузе, крупные пакеты включены" + (if (Store.summary.value.heavyMask) ", ищу лёгкую маску" else "") + ". Когда телефон остынет, сам всё верну."))
-            }
-            cmd == "!boostphone" -> {
-                Store.update { it.copy(settings = it.settings.copy(turbo = true, blockAds = true, autoCool = true)) }; reconnect(app)
-                if (Store.summary.value.heavyMask) Actions.lighten()
-                post(Msg(false, "Готово: ускорение и блокировка рекламы включены, охлаждение следит за температурой." +
-                    (if (PhoneInfo.collect(app).batteryOptimized) " Ещё: Android ограничивает VPN в фоне — разрешите работу без ограничений." else ""),
-                    if (PhoneInfo.collect(app).batteryOptimized) listOf(Btn("Разрешить работу в фоне", "!battery")) else emptyList()))
             }
             cmd == "!devsettings" -> { GpsMock.openDevSettings(app); post(Msg(false, "Если пункта нет — включите режим разработчика: О телефоне → 7 раз нажать «Номер сборки».")) }
             cmd == "!usage" -> { AppWatch.openAccess(app); post(Msg(false, "Найдите VLESS Card и включите доступ.")) }
