@@ -5,14 +5,18 @@ import com.vlesscardvpn.model.ServerState
 
 /** Labels are hints, not IP geolocation. Never silently fall back to a known Russian exit in Auto. */
 object AutoEligibility {
-    fun allowed(server: Server): Boolean = !server.name.contains("🇷🇺") && Countries.of(server.name) != "RU"
+    fun allowed(server: Server): Boolean = ServerOnlyPolicy.userRoute(server) && !server.name.contains("🇷🇺") && Countries.of(server.name) != "RU"
+    fun vlessServer(server: Server): Boolean = allowed(server) && !com.vlesscardvpn.xray.Masks.isWarp(server)
     const val TOP = 8
-    /** Every returned route is handed to Xray's multi-outbound pool, not held as a hidden spare. */
+    const val ACTIVE = 1
+    /** Only the chosen stable primary carries traffic; validated alternatives remain reserves. */
     fun connectedPool(servers: List<Server>, state: (Server) -> ServerState, net: String, now: Long, gaming: Boolean): List<Server> =
-        servers.distinctBy { it.id }.filter { allowed(it) && state(it).works }.let { routes ->
-            if (gaming) routes.sortedBy { ServerChoice.latencyScore(state(it).evidenceFor(net),state(it).realMs) }
-            else routes.sortedWith(ServerChoice.downloadOrder(state,net,now))
-        }.let(::independent).take(TOP)
+        servers.distinctBy { it.id }.filter { vlessServer(it) && state(it).works && !RouteStabilityMemory.session.cooling(net,it.id,state(it).maskFor(net),now) }.let { candidates ->
+            val routes = servicePool(candidates, state, net, now)
+            val usable = routes
+            if (gaming) usable.sortedBy { ServerChoice.latencyScore(state(it).evidenceFor(net),state(it).realMs) }
+            else usable.sortedWith(ServerChoice.downloadOrder(state,net,now))
+        }.let(::independent).let { AutoPrimaryPolicy.choose(it,state,net,now,gaming) }.take(ACTIVE)
     /** WireGuard endpoints of one account are alternatives, not independent channels.
      *  Same for the rest of the catalog: one /24 subnet or one SNI is a single blocking
      *  blast radius (community RKN scanners harvest by ASN and by TLS fingerprint), so
@@ -25,6 +29,11 @@ object AutoEligibility {
             freshSecret && freshSubnet && (s.sni.isBlank() || snis.add(s.sni))
         }
     }
+    /** Manual selections are explicit; diversity pruning belongs to Auto, not manual masks. */
+    fun launchPool(servers: List<Server>, automatic: Boolean): List<Server> {
+        val remote = servers.distinctBy { it.id }.filter(ServerOnlyPolicy::userRoute)
+        return if (automatic) independent(remote.filter(::vlessServer)) else remote
+    }
     private fun String.isIpv4(): Boolean {
         val parts = split('.')
         return parts.size == 4 && parts.all { p -> p.toIntOrNull() in 0..255 }
@@ -36,15 +45,26 @@ object AutoEligibility {
         return st.copy(servers=keep, states=st.states.filterKeys { it in ids },
             settings=st.settings.copy(netServers=st.settings.netServers.mapValues { (_,v) -> v.filter { it in ids } }))
     }
-    fun serviceRank(s: ServerState, net: String, now: Long): Int {
+    fun serviceRank(s: ServerState, net: String, now: Long, services: Set<String> = setOf("youtube", "telegram")): Int {
+        val relevant = services.intersect(setOf("youtube", "telegram"))
+        if (relevant.isEmpty()) return 1
         if (s.serviceNetwork != net || s.serviceMask != s.maskFor(net) || s.serviceCheckedAt <= 0 ||
             now < s.serviceCheckedAt || now - s.serviceCheckedAt > 5 * 60000L) return 1
-        if (s.ytOk == false || s.tgOk == false) return 2
-        return if (s.ytOk == true && s.tgOk == true) 0 else 1
+        val results = relevant.map { if (it == "youtube") s.ytOk else s.tgOk }
+        if (results.any { it == false }) return 2
+        return if (results.all { it == true }) 0 else 1
     }
+    fun telegramRank(s: ServerState, net: String, now: Long): Int = serviceRank(s, net, now, setOf("telegram"))
     fun <T> servicePool(list: List<T>, state: (T) -> ServerState, net: String, now: Long): List<T> {
-        // Unknown is not failed. One fully tested route must not discard seven HTTPS-working routes.
-        // Explicit current-network failures stay out when any non-failed option exists.
-        return list.filter { serviceRank(state(it),net,now) != 2 }.ifEmpty { list }
+        // HTTPS alone is not proof that a native Telegram connection works.
+        // Unknown, expired and different-mask samples must be revalidated before Auto selects them.
+        val profile=AutoChecks.current
+        return list.filter { val s=state(it)
+            val strict=AutoChecks.fresh(s.autoChecksKey,profile,AutoLatencyPolicy.MAX_MS,s.autoChecksAt,now) &&
+                s.realMs in 1..AutoLatencyPolicy.MAX_MS && (!profile.telegram || s.tgOk==true && s.tgMs in 1..AutoLatencyPolicy.MAX_MS) &&
+                (!profile.youtube || s.ytOk==true)
+            s.works && s.serviceNetwork==net && s.serviceMask==s.maskFor(net) &&
+                (strict || SlowRouteConsent.permits(it as? Server,s,net,now))
+        }
     }
 }

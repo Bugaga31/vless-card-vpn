@@ -17,7 +17,7 @@ class TorAllRoutingR160Test {
         val cfg = JSONObject(XrayConfigBuilder.vpnConfig(listOf(LinkParser.parse(reality)!! to null), Settings(torAll = true, torRouting = true), null))
         val outbounds = cfg.getJSONArray("outbounds").let { o -> (0 until o.length()).map { o.getJSONObject(it).optString("tag") } }
         assertTrue("tor outbound present", "tor" in outbounds)
-        val default = rules(cfg.toString()).last { it.has("network") && it.optString("network") == "tcp,udp" }
+        val default = rules(cfg.toString()).last { it.has("network") && it.optString("network") == "tcp" }
         assertEquals("tor", default.optString("outboundTag"))
     }
 
@@ -30,7 +30,7 @@ class TorAllRoutingR160Test {
     @Test fun torAllKeepsRuDirectAndBlock() {
         val cfg = XrayConfigBuilder.vpnConfig(listOf(LinkParser.parse(reality)!! to null), Settings(torAll = true, torRouting = true, ruDirect = true, blockAds = true, blockTrackers = true), null)
         val r = rules(cfg)
-        assertTrue("ru direct", r.any { it.optJSONArray("ip")?.optString(0) == "geoip:ru" && it.optString("outboundTag") == "direct" })
+        assertFalse("RU direct must not bypass uplink", r.any { it.optJSONArray("ip")?.optString(0) == "geoip:ru" && it.optString("outboundTag") == "direct" })
         assertTrue("ads blocked", r.any { it.optString("outboundTag") == "block" })
         assertTrue("dns 853 blocked", r.any { it.optString("port") == "853" && it.optString("outboundTag") == "block" })
     }

@@ -1,0 +1,71 @@
+{
+  "passed": true,
+  "source_sha": "a5b0555c9d60547004839afb4555c3ff4465b7fa",
+  "run_id": "40830131854",
+  "method": "assistant_opened_each_png_individually",
+  "scope": "Production Compose synthetic states on Android33; no UI redesign in r191; fixture-only cache deletion, not user phone/TUN/operator DPI. Debug 1.0.2 is harness, release 1.2.80.",
+  "screenshots": [
+    {
+      "file": "connected.png",
+      "sha256": "f086e2974f39a79d5066823fabe8c7a39ceaa5c07503756c74b3c5fb5ee549c6"
+    },
+    {
+      "file": "error.png",
+      "sha256": "a80ee735d4b87573600091f6ce84e34bcf842b46395f85076d17802df39bb2d6"
+    },
+    {
+      "file": "idle-dark.png",
+      "sha256": "d8f8de3b42b1f26716c96f1fe5ab75fc3928f05e8009426a42ae242c36452f44"
+    },
+    {
+      "file": "idle-light.png",
+      "sha256": "4835eda4a0bab294901e848f96b057b49437cba0bd35af592e2591bbfb9a3b0e"
+    },
+    {
+      "file": "large-narrow.png",
+      "sha256": "5963744e377e6a4281e125140a2e2034e74361fc07a8604cc4a31a5d2b139663"
+    },
+    {
+      "file": "maintenance-confirm.png",
+      "sha256": "7742a0426d5760bb5b4ce8617de3faa434ee83ac29f5434f2e884657124f58d6"
+    },
+    {
+      "file": "maintenance-preview.png",
+      "sha256": "6c8d9a72546508c055d8011691c2b73168c965ad6d6e66777030c37cd17d6c17"
+    },
+    {
+      "file": "maintenance-result.png",
+      "sha256": "de24febd5091f29ba6b529eb5210fdfc2d6bdaecce976687b24cb4550ed6414d"
+    },
+    {
+      "file": "partial.png",
+      "sha256": "bcab99a9ab0e2eabcfb368271004a3e2ce73a5adbb2fc97f6db6e2c395835fa7"
+    },
+    {
+      "file": "search-progress.png",
+      "sha256": "14d59e4cd42c90506c367ab6857a71a6d7c0ba84d57ac8a415baa84e0af4eb44"
+    },
+    {
+      "file": "searching.png",
+      "sha256": "d52c8f22cd7e1da17429dad58d0c817aaa8be3c5ddfe6507e033c4f8cb076dcb"
+    },
+    {
+      "file": "services.png",
+      "sha256": "32a53e817a8d0efaa0c1a579ba4b322714aa61a3524017856cf8b2d2755c62df"
+    }
+  ],
+  "observations": {
+    "connected.png": "Primary Disconnect fully visible; compact card and status fit before navigation.",
+    "error.png": "Retry action and failure explanation visible without overlap.",
+    "idle-dark.png": "Two-line heading, full Connect action and explanation visible; readable contrast.",
+    "idle-light.png": "White card, dark text and blue action remain readable; no clipping.",
+    "large-narrow.png": "Primary Connect action fully visible at 150 percent font/narrow viewport; detail text continues below and is scrollable.",
+    "maintenance-confirm.png": "Exact fixture count and bytes, preservation scope and confirm/cancel actions visible.",
+    "maintenance-preview.png": "Count/bytes shown before deletion; scan/review actions visible. Known minor grammar issue 1 файлов remains, not redesigned.",
+    "maintenance-result.png": "Actual fixture deletion and skipped count readable; no RAM/phone acceleration claim. Same minor count grammar remains.",
+    "partial.png": "Warning says checks incomplete; Disconnect remains visible.",
+    "search-progress.png": "Unknown-total and parallel HTTPS/Telegram explanation readable. Title is clipped by scroll position, not layout overflow; searching.png shows title.",
+    "searching.png": "Cancel button fully visible; progress card heading visible below overview.",
+    "services.png": "All service outcomes and local-only scope readable; Telegram 700ms is amber slow, not green success."
+  }
+}

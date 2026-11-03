@@ -1,0 +1,80 @@
+name: Rapid emergency server and mask wave R233 (verification only)
+on:
+  push:
+    branches: ['experiment/rapid-switch-r233']
+permissions:
+  contents: read
+concurrency:
+  group: rapid-switch-r233
+  cancel-in-progress: true
+jobs:
+  source:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      sha: ${{ steps.source.outputs.sha }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+      - id: source
+        shell: python
+        run: |
+          import base64,gzip,json,pathlib,subprocess,os,hashlib
+          assert os.environ['GITHUB_REF']=='refs/heads/experiment/rapid-switch-r233'
+          subprocess.run(['git','merge-base','--is-ancestor','5c586657e17943103ce87b7cb4cab11e97639a37','HEAD'],check=True)
+          p=json.loads(gzip.decompress(base64.b64decode('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')))
+          if not all(pathlib.Path(n).exists() and pathlib.Path(n).read_text()==c for n,c in p['files'].items()):
+              for n,want in p['base'].items():
+                  f=pathlib.Path(n)
+                  assert (hashlib.sha256(f.read_bytes()).hexdigest() if f.exists() else None)==want, 'Concurrent source change: '+n
+              for n,c in p['files'].items():
+                  f=pathlib.Path(n);f.parent.mkdir(parents=True,exist_ok=True);f.write_text(c)
+              subprocess.run(['git','add',*p['files']],check=True)
+              subprocess.run(['git','-c','user.name=github-actions[bot]','-c','user.email=41898282+github-actions[bot]@users.noreply.github.com','commit','-m','test: expect one-second Auto confirmation without removing two-miss gate [skip ci]'],check=True)
+              subprocess.run(['git','push','origin','HEAD:experiment/rapid-switch-r233'],check=True)
+          sha=subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip()
+          with open(os.environ['GITHUB_OUTPUT'],'a') as f:f.write('sha='+sha+'\n')
+  verify:
+    needs: source
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ needs.source.outputs.sha }}
+          persist-credentials: false
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407
+        with:
+          packages: platform-tools platforms;android-34 build-tools;34.0.0
+          log-accepted-android-sdk-licenses: false
+      - uses: gradle/actions/setup-gradle@d9c87d481d55275bb5441eef3fe0e46805f9ef70
+      - name: Restore native libraries
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: |
+            app/build/generated/byedpi
+            app/build/generated/hev
+            app/build/generated/byedpi-cache.json
+            app/build/generated/hev-cache.json
+          key: native-${{ runner.os }}-${{ runner.arch }}-ndk27.2.12479018-api24-all-${{ hashFiles('native/**', 'app/build.gradle.kts') }}
+      - name: Install pinned NDK
+        run: sdkmanager 'ndk;27.2.12479018'
+      - name: Android compilation and targeted regressions
+        run: |
+          export GITHUB_RUN_NUMBER=233
+          chmod +x gradlew
+          ./gradlew -PbetaPreview=true -PemulatorAbis=true --no-daemon --max-workers=2 :app:compileDebugKotlin :app:testDebugUnitTest --tests "*RapidSwitchR233Test" --tests "*ConnectedQuietR231Test" --tests "*FastRecoveryR230Test" --tests "*QuietWatsonR228Test" --tests "*ResponsiveAutoR227Test" --tests "*LatencyMigrationR227Test" --tests "*AutomaticWorkR226Test" --tests "*YouTubeAccessR226Test" --tests "*YouTubeLoadingR226Test" --tests "*TpwsProfileR226Test" --tests "*HomeDataMapperTest" --tests "*HomeRuntimeTest" --tests "*HomeUiWiringTest" --tests "*AutoRecoveryR224Test" --tests "*RecoveryR207Test" --tests "*ServiceExpansionR223Test" --tests "*AutoProfileR223Test" --tests "*ByeDpiArgsTest" --tests "*SeriesDiagnosticsR222Test" --tests "*ServiceTransportR221Test" --tests "*ProbeConfigR221Test" --tests "*CallQualityR206Test" --tests "*UdpCallProbeR174Test" --tests "*ServiceErrorsR220Test" --tests "*UiReadabilityR220Test" --tests "*AssistantIsolationR220Test" --tests "*R84Test" --tests "*R85Test" --tests "*FirstConnectivityR219Test" --tests "*AutoFreshR218Test" --tests "*WatsonAutoR217Test" --tests "*ServiceMediaR217Test" --tests "*FlyRokiR216Test" --tests "*AutoRokiR216Test" --tests "*WatsonR215Test" --tests "*RequiredServicesR214Test" --tests "*TelegramSocksProbeTest" --tests "*ServiceMediaProbeTest" --tests "*ExperienceR187Test" --tests "*TorBridgeCatalogR163Test" --tests "*MandatoryBridgesR208Test" --tests "*FoundPresetR213Test" --tests "*FoundConnectR213Test" --tests "*FoundRouteR212Test" --tests "*RouteStabilityR206Test" --tests "*FastConnectR211Test" --tests "*ProbeConcurrencyR210Test" --tests "*SearchPacingR200Test" --tests "*SubscriptionQueueR199Test" --tests "*AutoLatencyR185Test" --tests "*AutoCampaignR175Test" --tests "*ForegroundAutoR176Test" --tests "*PoolLatencyR203Test" --tests "*PhoneRuntimePolicyTest" --tests "*PowerRoutingR192Test" --tests "*AutoCheckProfileR209Test" --tests "*PowerPolicy*"
+      - name: Save test reports (not an APK release)
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: r233-targeted-test-reports
+          path: |
+            app/build/test-results/testDebugUnitTest
+            app/build/reports/tests/testDebugUnitTest

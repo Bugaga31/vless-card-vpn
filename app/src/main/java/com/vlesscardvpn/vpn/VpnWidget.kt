@@ -30,7 +30,8 @@ class VpnWidget : AppWidgetProvider() {
 
         /** Text and colour of the widget for a state (pure — tested). */
         fun look(state: Tunnel.State, checkOk: Boolean?, route: String, message: String): Triple<Int, String, String> = when (state) {
-            Tunnel.State.CONNECTED -> if (checkOk == false) Triple(R.drawable.widget_btn_warn, "Подключено · нет интернета", "Нажмите в приложении «Починить»")
+            Tunnel.State.CONNECTED -> if (checkOk == false) Triple(R.drawable.widget_btn_warn, "Подключено · есть проблемы", "Откройте приложение: часть проверок не прошла")
+                else if (checkOk == null) Triple(R.drawable.widget_btn_busy, "Проверяю маршрут…", route)
                 else Triple(R.drawable.widget_btn_on, "Подключено", route.ifEmpty { "Нажмите, чтобы отключить" })
             Tunnel.State.CONNECTING -> Triple(R.drawable.widget_btn_busy, "Подключение…", message.ifEmpty { "Подбираю сервер и маску" })
             Tunnel.State.ERROR -> Triple(R.drawable.widget_btn_warn, "Ошибка", message.ifEmpty { "Нажмите, чтобы попробовать снова" })
@@ -47,7 +48,7 @@ class VpnWidget : AppWidgetProvider() {
             v.setInt(R.id.w_btn, "setBackgroundResource", bg)
             v.setTextViewText(R.id.w_title, title)
             v.setTextViewText(R.id.w_sub, sub)
-            val needsPermission = !Store.state.value.settings.proxyOnly && VpnService.prepare(ctx) != null
+            val needsPermission = VpnService.prepare(ctx) != null
             val click = if (needsPermission) PendingIntent.getActivity(ctx, 0, Intent(ctx, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
                 else PendingIntent.getBroadcast(ctx, 1, Intent(ctx, VpnWidget::class.java).setAction(TOGGLE), PendingIntent.FLAG_IMMUTABLE)
             v.setOnClickPendingIntent(R.id.w_btn, click)

@@ -24,17 +24,20 @@ object TorProbes {
             .callTimeout(timeoutMs.toLong(), TimeUnit.MILLISECONDS)
             .build()
         return try {
-            val t0 = System.currentTimeMillis()
+            val t0 = System.nanoTime()
             client.newCall(Request.Builder().url(TRACE_URL).build()).execute().use { resp ->
                 if (!resp.isSuccessful) return null
-                val body = resp.body?.string() ?: return null
+                val source = resp.body?.source() ?: return null
+                source.request(8193)
+                if (source.buffer.size > 8192) return null
+                val body = source.readUtf8()
                 val loc = body.lineSequence()
                     .firstOrNull { it.startsWith("loc=") }
                     ?.removePrefix("loc=")
                     ?.lowercase()
-                    ?.takeIf { it.length == 2 && it != "t1" }
+                    ?.takeIf { it.matches(Regex("[a-z]{2}")) }
                     ?: return null
-                val latency = (System.currentTimeMillis() - t0).toInt()
+                val latency = ((System.nanoTime() - t0) / 1_000_000L).coerceIn(1, Int.MAX_VALUE.toLong()).toInt()
                 latency to loc
             }
         } catch (e: Exception) {

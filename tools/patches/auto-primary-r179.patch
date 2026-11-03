@@ -1,0 +1,199 @@
+--- /dev/null
++++ b/app/src/main/java/com/vlesscardvpn/core/AutoPrimaryPolicy.kt
+@@ -0,0 +1,24 @@
++package com.vlesscardvpn.core
++
++import com.vlesscardvpn.model.Server
++import com.vlesscardvpn.model.ServerState
++
++/** One stable primary; other measured routes stay as reserves, not random connection destinations. */
++object AutoPrimaryPolicy {
++    fun choose(ranked: List<Server>, state: (Server) -> ServerState, net: String, now: Long, gaming: Boolean): List<Server> {
++        val leader = ranked.firstOrNull() ?: return emptyList()
++        val current = ranked.firstOrNull { state(it).selected } ?: return listOf(leader)
++        if (current.id == leader.id) return listOf(current)
++        if (gaming) {
++            val old = state(current).realMs
++            val next = state(leader).realMs
++            return listOf(if (old > 0 && next > 0 && next <= old * 0.8 && old - next >= 15) leader else current)
++        }
++        val old = ServerChoice.measuredSpeed(state(current),net,now).toLong()
++        val next = ServerChoice.measuredSpeed(state(leader),net,now).toLong()
++        // No proof of an improvement means no speed-only reconnect. Failed/expired service
++        // routes are removed before this policy, so stability never preserves a known failure.
++        val worthwhile = next > 0 && (old <= 0 || next >= old * 125 / 100 && next - old >= 256)
++        return listOf(if (worthwhile) leader else current)
++    }
++}
+--- /dev/null
++++ b/app/src/main/java/com/vlesscardvpn/core/TelegramRouteMemory.kt
+@@ -0,0 +1,23 @@
++package com.vlesscardvpn.core
++
++/** Bounded session-only failure memory. Keys never leave the device or mix networks/masks. */
++object TelegramRouteMemory {
++    private data class Failure(val at: Long, val streak: Int)
++    private val failures = linkedMapOf<Triple<String,String,String>,Failure>()
++    @Synchronized fun record(net: String, id: String, mask: String, result: Boolean?, now: Long) {
++        if (result == null) return
++        val key = Triple(net,id,mask)
++        if (result) { failures.remove(key); return }
++        val old = failures.remove(key)
++        val streak = if (old != null && now >= old.at && now-old.at <= 30*60000L) (old.streak+1).coerceAtMost(5) else 1
++        failures[key] = Failure(now,streak)
++        while (failures.size > 512) failures.remove(failures.keys.first())
++    }
++    @Synchronized fun cooling(net: String, id: String, mask: String, now: Long): Boolean {
++        val key = Triple(net,id,mask)
++        val f = failures[key] ?: return false
++        if (now < f.at) { failures.remove(key); return false }
++        val duration = minOf(300000L,15000L * (1L shl (f.streak-1)))
++        return now-f.at < duration
++    }
++}
+--- a/app/src/main/java/com/vlesscardvpn/core/AutoEligibility.kt
++++ b/app/src/main/java/com/vlesscardvpn/core/AutoEligibility.kt
+@@ -8,14 +8,15 @@
+     fun allowed(server: Server): Boolean = ServerOnlyPolicy.userRoute(server) && !server.name.contains("🇷🇺") && Countries.of(server.name) != "RU"
+     fun vlessServer(server: Server): Boolean = allowed(server) && !com.vlesscardvpn.xray.Masks.isWarp(server)
+     const val TOP = 8
+-    /** Every returned route is handed to Xray's multi-outbound pool, not held as a hidden spare. */
++    const val ACTIVE = 1
++    /** Only the chosen stable primary carries traffic; validated alternatives remain reserves. */
+     fun connectedPool(servers: List<Server>, state: (Server) -> ServerState, net: String, now: Long, gaming: Boolean): List<Server> =
+         servers.distinctBy { it.id }.filter { vlessServer(it) && state(it).works }.let { candidates ->
+             val routes = servicePool(candidates, state, net, now)
+             val usable = routes
+             if (gaming) usable.sortedBy { ServerChoice.latencyScore(state(it).evidenceFor(net),state(it).realMs) }
+             else usable.sortedWith(ServerChoice.downloadOrder(state,net,now))
+-        }.let(::independent).take(TOP)
++        }.let(::independent).let { AutoPrimaryPolicy.choose(it,state,net,now,gaming) }.take(ACTIVE)
+     /** WireGuard endpoints of one account are alternatives, not independent channels.
+      *  Same for the rest of the catalog: one /24 subnet or one SNI is a single blocking
+      *  blast radius (community RKN scanners harvest by ASN and by TLS fingerprint), so
+--- a/app/src/main/java/com/vlesscardvpn/core/Actions.kt
++++ b/app/src/main/java/com/vlesscardvpn/core/Actions.kt
+@@ -412,6 +412,7 @@
+                 if (Net.key(app) != net || Net.underlying(app)?.toString() != underlying) return@real
+                 val s = variants[i].first
+                 val speedSample = ServerChoice.acceptsSpeedSample(p.kbps, parallel)
++                if (telegram && p.works) TelegramRouteMemory.record(net,s.id,st.state(s).maskFor(net),p.tgOk,System.currentTimeMillis())
+                 val routeReady = p.works && (st.settings.mode != Mode.AUTO || !telegram || p.tgOk == true)
+                 val firstSuccess = routeReady && ok.incrementAndGet() == 1
+                 if (routeReady) onSuccess?.invoke(s)
+@@ -1136,8 +1137,8 @@
+         val current = used.filter(AutoEligibility::vlessServer).take(4)
+         val alternatives = preferred(snapshot, snapshot.servers.filter { s ->
+             AutoEligibility.vlessServer(s) && used.none { it.id == s.id }
+-        }).sortedWith(compareBy<Server> { AutoEligibility.telegramRank(snapshot.state(it),net,stamp) }
+-            .thenBy { snapshot.state(it).score })
++        }).sortedWith(compareBy<Server> { TelegramRouteMemory.cooling(net,it.id,snapshot.state(it).maskFor(net),stamp) }
++            .thenBy { AutoEligibility.telegramRank(snapshot.state(it),net,stamp) }.thenBy { snapshot.state(it).score })
+         val candidates = (current + ServerChoice.diverse(alternatives, 8)).distinctBy { it.id }
+         val passed = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+         kotlinx.coroutines.withTimeoutOrNull(18_000L) {
+@@ -1477,7 +1478,8 @@
+         ).mapIndexed { i, server -> server.id to i }.toMap()
+         val first = ConnectPolicy.candidates(eligible, cloud, remembered, cooling = { server ->
+             val e = st.state(server).evidenceFor(net)
+-            probeMemory.cooling(net, server.id, st.state(server).maskFor(net), time) ||
++            TelegramRouteMemory.cooling(net, server.id, st.state(server).maskFor(net), time) ||
++                probeMemory.cooling(net, server.id, st.state(server).maskFor(net), time) ||
+                 (e.streak > 0 && time >= e.at && time - e.at < ProbeMemory.cooldownMs(e.streak))
+         }, serviceRank = { server -> AutoEligibility.telegramRank(st.state(server),net,time) }) { s -> learned[s.id] ?: Int.MAX_VALUE }
+         val cachedGood = first.filter { st.state(it).evidenceFor(net).let { e -> e.successes > 0 && e.streak == 0 && time >= e.at && time - e.at < 1800000 } }.map { it.id }.toSet()
+@@ -1511,7 +1513,7 @@
+         if (Net.key(app) != net || Net.underlying(app)?.toString() != network) return if (firstWaveOnly) "Сеть изменилась — результаты отброшены" else selectionNetworkChanged()
+         if (onFirst != null && firstFired.get()) return "Первый рабочий VLESS-маршрут найден — подключаюсь; сравнение продолжится после запуска"
+         if (firstWaveOnly) {
+-            return "Первая волна: проверено ${shortlist.size}, HTTPS-ответов $fastOk"
++            return "Первая волна: проверено ${shortlist.size}, HTTPS+MTProto маршрутов $fastOk"
+         }
+         if (fastOk > 0) {
+             chooseCompared(shortlist.filter { it.id in passed }, onFirst, eligible.filter { s -> shortlist.none { it.id == s.id } })
+@@ -1783,7 +1785,8 @@
+             val pool = preferred(st, all)
+             val ranked = if (st.settings.mode == Mode.AUTO && !gaming)
+                 pool.sortedWith(ServerChoice.downloadOrder({ st.state(it) },netKey,rankTime)) else pool.sortedBy(spread)
+-            val sorted = ranked.distinctBy { if (it.protocol == "wireguard") "wg:" + it.secret else it.id }.take(if (st.settings.mode == Mode.AUTO) AutoEligibility.TOP else if (primary) 1 else n)
++            val stable = if (st.settings.mode == Mode.AUTO) AutoPrimaryPolicy.choose(ranked,{st.state(it)},netKey,rankTime,gaming) else ranked
++            val sorted = stable.distinctBy { if (it.protocol == "wireguard") "wg:" + it.secret else it.id }.take(if (st.settings.mode == Mode.AUTO) AutoEligibility.ACTIVE else if (primary) 1 else n)
+             val favs = if (st.settings.mode != Mode.AUTO && close && !primary) all.filter { it.id in st.settings.favorites } else emptyList()
+             val best = ((if (st.settings.mode != Mode.AUTO && close && !primary) closeOnes(sorted.map(spread)).let { k -> sorted.take(k) } else sorted) + favs).map { it.id }.toSet()
+             c = best.size
+--- a/app/src/main/java/com/vlesscardvpn/vpn/TunnelService.kt
++++ b/app/src/main/java/com/vlesscardvpn/vpn/TunnelService.kt
+@@ -249,8 +249,8 @@
+                     .let { l -> l.take(Actions.closeOnes(l.map { st.state(it).score })) }
+             }
+             if (settings.mode == Mode.AUTO) {
+-                // Retain eight working outbounds, including routes discovered after the first success.
+-                // Xray's selected balancer distributes connections; this is not bandwidth bonding.
++                // Stable single-primary Auto: keep verified alternatives out of the active balancer.
++                // A native app no longer gets a different exit on every new connection.
+                 val candidates = Actions.preferred(st, (selected + st.servers.filter { st.state(it).works }).distinctBy { it.id })
+                 val usable = com.vlesscardvpn.core.AutoEligibility.servicePool(candidates,{st.state(it)},network,System.currentTimeMillis())
+                 selected = com.vlesscardvpn.core.AutoEligibility.connectedPool(usable,{st.state(it)},network,
+@@ -548,7 +548,7 @@
+                 if (sinceNet < 90_000L && !netHardDone) { netHardDone = true; hardRestart("новая сеть, а интернет не пошёл", force = true); return@launch }
+                 if (System.currentTimeMillis() - lastHard > 5 * 60_000L) { hardRestart("после переподключения интернет не пошёл"); return@launch }
+             }
+-            if (p.works) { healStep = 0; dpiHeals = 0; connectFails = 0; scheduleOptimize(if (com.vlesscardvpn.core.Actions.deepPending || usedServers.size < com.vlesscardvpn.core.AutoEligibility.TOP) 5_000 else 60_000); com.vlesscardvpn.core.AppWatch.start(this@TunnelService, reconnect = { scope.launch { lock.withLock { connect(soft = true) } } }, maintenanceReconnect = { scheduleMaintenanceReconnect() }, connectedAt = { connectedElapsed }); watchdog(); standbyScout(); coverTraffic(); torLoop(); serviceRoutes(); autoChainScout() } else heal()
++            if (p.works) { healStep = 0; dpiHeals = 0; connectFails = 0; scheduleOptimize(if (com.vlesscardvpn.core.Actions.deepPending || usedServers.size < com.vlesscardvpn.core.AutoEligibility.ACTIVE) 5_000 else 60_000); com.vlesscardvpn.core.AppWatch.start(this@TunnelService, reconnect = { scope.launch { lock.withLock { connect(soft = true) } } }, maintenanceReconnect = { scheduleMaintenanceReconnect() }, connectedAt = { connectedElapsed }); watchdog(); standbyScout(); coverTraffic(); torLoop(); serviceRoutes(); autoChainScout() } else heal()
+         }
+     }
+ 
+@@ -852,7 +852,7 @@
+                 if (startupRemaining > 0) { delay(startupRemaining); continue }
+                 if (!com.vlesscardvpn.core.PhonePower.refresh(this@TunnelService).allowLight) { delay(60_000); continue }
+                 if (Store.state.value.settings.protectActiveTraffic && userActive() &&
+-                    !(Store.state.value.settings.mode == Mode.AUTO && usedServers.size < com.vlesscardvpn.core.AutoEligibility.TOP)) { delay(60_000); continue } // hot phone: no background re-tests
++                    !(Store.state.value.settings.mode == Mode.AUTO && usedServers.size < com.vlesscardvpn.core.AutoEligibility.ACTIVE)) { delay(60_000); continue } // hot phone: no background re-tests
+                 if (chainMeasuring || usedChain != null) { delay(60_000);continue }
+                 val result = runCatching { Store.busy { Actions.optimize() } }.getOrElse {
+                     if (it is kotlinx.coroutines.CancellationException) throw it
+@@ -875,7 +875,7 @@
+                 }
+                 calm = if (Actions.lastOptimizeSwitched) 0 else minOf(calm + 1, 3)
+                 // sleep until the next pass, or wake early (45 s) when the network changes
+-                val incomplete = Store.state.value.settings.mode == Mode.AUTO && usedServers.size < com.vlesscardvpn.core.AutoEligibility.TOP
++                val incomplete = Store.state.value.settings.mode == Mode.AUTO && usedServers.size < com.vlesscardvpn.core.AutoEligibility.ACTIVE
+                 val next = if (incomplete) 30_000L else longArrayOf(60_000L,120_000L,180_000L,300_000L)[calm]
+                 if (kotlinx.coroutines.withTimeoutOrNull(next) { optKick.receive() } != null) { calm = 0; delay(5_000) }
+             }
+@@ -941,7 +941,7 @@
+                         Tunnel.status.value = cur.copy(check = "HTTPS отвечает, Telegram MTProto — нет. Перепроверяю и подбираю маршрут…", checkOk = false)
+                     }
+                     if (telegramMiss >= 2) { repairTelegramRoute(); telegramMiss = 0 }
+-                    else if (live.tgOk == true && (wasFailing || Tunnel.status.value.checkOk == null)) verifySoon(0)
++                    else if (live.tgOk == true && (wasFailing || Tunnel.status.value.checkOk != true)) verifySoon(0)
+                 }
+                 if (!ok && !Actions.online()) {
+                     miss = 0
+--- a/app/src/main/java/com/vlesscardvpn/ui/HomeScreen.kt
++++ b/app/src/main/java/com/vlesscardvpn/ui/HomeScreen.kt
+@@ -135,7 +135,7 @@
+                             busy && cfg.torAll -> "Проверяю HTTPS и Telegram; Tor строит цепочку отдельно."
+                             busy -> "Авто выбирает маршрут после HTTPS и ответа Telegram MTProto. Если готового нет, поиск продолжится."
+                             on && cfg.torAll -> "VPN работает; первая Tor-цепочка может собираться дольше пяти секунд."
+-                            on -> "Сравнение скорости резервов продолжается после подключения."
++                            on -> "Один устойчивый маршрут; проверенные резервы — для восстановления. Мелкий выигрыш скорости не вызывает переключение."
+                             else -> "Авто начинает с сохранённых маршрутов и памяти этой сети."
+                         }, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                     }
+--- a/docs/release-1.2.68.md
++++ b/docs/release-1.2.68.md
+@@ -9,6 +9,13 @@
+ - Восстановление Telegram ограничено одной попыткой в минуту, не переключает маршрут во время обнаруженного звонка и отбрасывает результаты после смены сети/ядра. Прямой обход не добавлен. Тор-маршруты не приписывают Telegram-сбой обычному VLESS-пулу.
+ - Все подписки версии 1.2.67 сохранены.
+ 
++## Дополнительные эксперименты Авто
++- Один активный primary вместо распределения соединений Telegram между несколькими выходами; проверенные альтернативы остаются резервами. Ручной режим «Серверы» не меняется.
++- Защита от переключений ради мелких колебаний: смена исправного primary по скорости требует свежего измерения с выигрышем не менее 25% и 256 Кбит/с. В игровом режиме — минимум 20% и 15 мс по задержке. Заведомо отказавший или просроченный сервисный маршрут не удерживается этим правилом.
++- Память явных MTProto-отказов отдельно для сети, сервера и маски: кандидат откладывается на 15–240 секунд в зависимости от повторов, но не блокируется навсегда. Успех снимает отсрочку; неопределённая проба не считается отказом. Это только локальная память текущего процесса.
++- Планировщик больше не считает один активный primary «недобранными восемью каналами» и не ускоряет фоновые проверки только из-за этого.
++- После восстановления MTProto повторно обновляется полный статус, чтобы предупреждение не оставалось навсегда после временного сбоя.
++
+ ## Границы
+ Это экспериментальное изменение, не подтверждённое исправление на телефоне пользователя. MTProto-проба проверяет unauthenticated req_pq/resPQ на выборке DC, без Telegram-аккаунта; не доказывает вход в аккаунт, работу всех DC, загрузок, видео или звонков. Периодическая проба выполняется через локальный SOCKS и не является независимым тестом пути Telegram-приложение → TUN.
+ 

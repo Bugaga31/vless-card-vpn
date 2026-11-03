@@ -54,8 +54,14 @@ class ConfigTest {
     }
 
     @Test fun maskCatalog() {
-        assertEquals(556, Masks.ALL.size)
-        assertEquals(161, Masks.ALL.count { it.viaByeDpi && it.dpi != Masks.CURRENT_DPI })
+        assertEquals(675, Masks.ALL.size) // Includes 7 fingerprints × 3 explicit tpws Hello profiles.
+        Masks.FINGERPRINTS.forEach { fp -> listOf("balanced","coarse","mobile").forEach { profile ->
+            assertNotNull(Masks.byId("$fp.hello.$profile")); assertNotNull(Masks.byId("$fp.hello.$profile.b"))
+        } }
+        val fastIds = Masks.FINGERPRINTS.flatMap { listOf("$it.hello.fast", "$it.hello.fast.b") }.toSet()
+        assertEquals(fastIds, Masks.ALL.filter { ".hello.fast" in it.id }.map { it.id }.toSet())
+        fastIds.forEach { id -> val mask = Masks.byId(id)!!; assertEquals("0-1", mask.delay); assertEquals("10", mask.maxSplit) }
+        assertEquals(182, Masks.ALL.count { it.viaByeDpi && it.dpi != Masks.CURRENT_DPI })
         val r = LinkParser.parse(reality)!!
         val ws = LinkParser.parse(links[1])!!
         val m = listOf(r to Masks.byId("chrome.d:BYEDPI#VCARD_CASCADE"), ws to Masks.byId("firefox.d:TPWS#VCARD_SHRED"), ws to Masks.byId("edge.h2.b"))
@@ -83,7 +89,7 @@ class ConfigTest {
         assertEquals("proxy-0", outs.getJSONObject(0).getString("tag"))
         dump("vpn-all", c.toString())
         dump("vpn-single", XrayConfigBuilder.vpnConfig(listOf(servers[0] to Masks.byId("firefox.h4.b")), Settings(), 1080))
-        dump("vpn-byedpi", XrayConfigBuilder.vpnConfig(emptyList(), Settings(mode = Mode.BYEDPI), 1080))
+        try { XrayConfigBuilder.vpnConfig(emptyList(),Settings(mode=Mode.BYEDPI),1080); org.junit.Assert.fail("serverless route accepted") } catch(e:IllegalArgumentException) { assertTrue(e.message!!.contains("сервер")) }
         dump("vpn-hybrid", XrayConfigBuilder.vpnConfig(listOf(servers[0] to null, servers[1] to null), Settings(mode = Mode.HYBRID, balance = com.vlesscardvpn.model.Balance.LEAST_LOAD), 1080))
         val variants = Masks.ALL.map { servers[0] to it } + servers.map { it to null }
         dump("test", XrayConfigBuilder.testConfig(variants, variants.indices.map { 20000 + it }, 1080))
@@ -104,17 +110,17 @@ class ConfigTest {
         // Vision (reality) and XHTTP must not get mux; WS/gRPC/Trojan do.
         assertFalse(byTag[0].has("mux")); assertTrue(byTag[1].has("mux")); assertFalse(byTag[2].has("mux"))
         val dns = c.getJSONObject("dns").getJSONArray("servers")
-        assertEquals("77.88.8.8", dns.getJSONObject(0).getString("address"))
+        assertTrue(dns.getJSONObject(0).getString("address").startsWith("https://"))
         val rules = c.getJSONObject("routing").getJSONArray("rules").toString()
         assertTrue(rules.contains("3478,5349,19302-19309"))
         assertTrue(rules.contains("\"port\":\"443\""))
         dump("vpn-stealth", c.toString())
-        dump("vpn-byedpi-auth", XrayConfigBuilder.vpnConfig(emptyList(), Settings(mode = Mode.BYEDPI), 1080, auth))
+        try { XrayConfigBuilder.vpnConfig(emptyList(),Settings(mode=Mode.BYEDPI),1080); org.junit.Assert.fail("serverless route accepted") } catch(e:IllegalArgumentException) { assertTrue(e.message!!.contains("сервер")) }
     }
 
     @Test fun dpiStrategies() {
         val all = com.vlesscardvpn.core.DpiStrategies.BUILT_IN
-        assertEquals(28, all.size)
+        assertEquals(31, all.size)
         assertEquals(all.size, all.map { it.id }.toSet().size)
         assertEquals(10, all.count { it.own })
         all.forEach { s ->
@@ -195,12 +201,10 @@ class ConfigTest {
         val svc = JSONObject(XrayConfigBuilder.vpnConfig(listOf(r to null), Settings(services = listOf("youtube", "telegram")), null))
         val rules = svc.getJSONObject("routing").getJSONArray("rules")
         val last = rules.getJSONObject(rules.length() - 1)
-        assertEquals("direct", last.getString("outboundTag"))
-        assertTrue(rules.toString().contains("geosite:youtube")); assertTrue(rules.toString().contains("geoip:telegram"))
+        assertEquals("proxy-0", last.getString("outboundTag"))
+        assertTrue(rules.toString().contains("geoip:telegram")); assertFalse(rules.toString().contains("byedpi"))
         dump("vpn-services", svc.toString())
-        val auto = JSONObject(XrayConfigBuilder.vpnConfig(emptyList(), Settings(mode = Mode.AUTO), 1080))
-        assertTrue(auto.toString().contains("\"outboundTag\":\"byedpi\""))
-        dump("vpn-auto-dpi", auto.toString())
+        try {XrayConfigBuilder.vpnConfig(emptyList(),Settings(mode=Mode.AUTO),1080);org.junit.Assert.fail("Auto accepted no server")}catch(e:IllegalArgumentException){assertTrue(e.message!!.contains("сервер"))}
         val st = com.vlesscardvpn.model.ServerState(maskId = "chrome.n", netMasks = mapOf("Моб.: Beeline" to "chrome.l1"))
         assertEquals("chrome.l1", st.maskFor("Моб.: Beeline")); assertEquals("chrome.n", st.maskFor("Wi-Fi"))
         assertEquals(st, com.vlesscardvpn.model.ServerState.fromJson(st.toJson()))

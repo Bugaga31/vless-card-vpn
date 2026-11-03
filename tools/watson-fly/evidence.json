@@ -1,0 +1,55 @@
+{
+  "source": "https://archive.ics.uci.edu/dataset/967/phiusiil+phishing+url+dataset",
+  "attribution": "Prasad, A. & Chandra, S. (2024), PhiUSIIL, UCI, CC BY 4.0",
+  "raw_sha256": "a236549cd369cd80bd478ff8e1779cbf44c58d5c3f79f7a51a1adbed7d06d1c6",
+  "feature_source_sha256": "eead325b5d72dc9381b183c7174b4186472264c3d84cd77472f64214ec589649",
+  "graph_sha256": "b3f94ee800f9555cb02f7c397c183af7e24e11ac5fb735e871849de997dd5b84",
+  "train_rows": 163274,
+  "validation_rows": 37366,
+  "test_rows": 34730,
+  "split": "SHA256 seeded registrable-domain bucket 70/15/15, PSL ICANN+PRIVATE; no group overlap",
+  "validation": {
+    "n": 37366,
+    "phishing": 17078,
+    "legitimate": 20288,
+    "tp": 16909,
+    "fp": 202,
+    "tn": 20086,
+    "fn": 169,
+    "recall": 0.9901042276613187,
+    "precision": 0.9881947285371983,
+    "fpr": 0.009956624605678234
+  },
+  "test": {
+    "n": 34730,
+    "phishing": 14532,
+    "legitimate": 20198,
+    "tp": 14386,
+    "fp": 194,
+    "tn": 20004,
+    "fn": 146,
+    "recall": 0.9899532067162125,
+    "precision": 0.9866941015089163,
+    "fpr": 0.009604911377364096
+  },
+  "threshold": 0.08906609103078958,
+  "training_epochs": 300,
+  "features": 40,
+  "network_requests_to_samples": 0,
+  "comparison_plan": {
+    "delivery": "prose",
+    "reason": "Engineering model artifact, no current-malware, device or battery comparison; no effectiveness chart justified."
+  },
+  "limitations": [
+    "Historical 2024 single-source labels, not verified active threats or 2026 generalization.",
+    "Domain separation is not separation by campaign, provider, brand or time.",
+    "No current Russian-language, short-link, redirect-chain, QR, APK, message or call validation.",
+    "URL lexical features only; HTTPS and lexical patterns are not evidence of safety or malice.",
+    "Score not calibrated; low score means unknown, never safe.",
+    "No automatic blocking or production deployment; independent external test required.",
+    "VPN metadata normally does not reveal full encrypted HTTPS URL path/query.",
+    "Artificial input projection/readout on restricted graph, not whole-brain emulation.",
+    "Independent model, not proof of improvement over previous model.",
+    "Deployed as additional advisory only; no automatic blocking."
+  ]
+}

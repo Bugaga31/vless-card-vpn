@@ -4,15 +4,16 @@ import com.vlesscardvpn.model.Server
 import com.vlesscardvpn.model.LinkParser
 
 /**
- * Tor as a regular card in the deck: a synthetic SOCKS5 server pointing at the
- * local Termux Tor instance (embedded daemon libTor.so from the APK is started
- * automatically when Termux is absent). Rotations happen behind the card — the
- * app only sees a SOCKS proxy that changes exits over time.
+ * Tor exposes a loopback SOCKS port; the embedded daemon sends its relay traffic
+ * through the dedicated Xray VLESS-upstream listener. An unmanaged Tor instance is
+ * accepted only when its control port confirms that same upstream.
  */
 object TorCard {
     const val CARD_NAME = "Tor · ротатор"
     const val DEFAULT_SOCKS_PORT = 9050
     const val DEFAULT_CONTROL_PORT = 9091
+    const val DEFAULT_UPSTREAM_PORT = 19052
+    const val DEFAULT_PT_UPSTREAM_PORT = 19053
 
     /** Termux data dir where torrc + cookie live. */
     const val TERMUX_TORRC_PATH = "/data/data/com.termux/files/usr/etc/tor/torrc"
@@ -20,14 +21,25 @@ object TorCard {
     /** Termux data dir holding the ControlPort authentication cookie. */
     const val TERMUX_COOKIE_PATH = "/data/data/com.termux/files/usr/var/lib/tor/control_auth_cookie"
 
-    /** Control cookie: Termux instance first, then the embedded daemon's own cookie. */
-    fun readCookieHex(ctx: android.content.Context?): String? {
-        runCatching { return TorControl.readCookieHex(TERMUX_COOKIE_PATH) }
-        if (ctx != null) runCatching {
-            return TorControl.readCookieHex(java.io.File(java.io.File(ctx.filesDir, "tor"), "cookie").absolutePath)
-        }
-        return null
+    data class ControlEndpoint(val cookieHex: String, val port: Int)
+
+    fun controlEndpoints(ctx: android.content.Context?, embeddedPort: Int = DEFAULT_CONTROL_PORT): List<ControlEndpoint> {
+        val termux = runCatching { TorControl.readCookieHex(TERMUX_COOKIE_PATH) }.getOrNull()
+        val embedded = ctx?.let { context -> runCatching {
+            TorControl.readCookieHex(java.io.File(java.io.File(context.filesDir, "tor"), "cookie").absolutePath)
+        }.getOrNull() }
+        return controlEndpoints(termux, embedded, embeddedPort)
     }
+
+    fun controlEndpoints(termuxCookie: String?, embeddedCookie: String?, embeddedPort: Int = DEFAULT_CONTROL_PORT): List<ControlEndpoint> =
+        buildList {
+            termuxCookie?.takeIf(::validCookie)?.let { add(ControlEndpoint(it, TorControl.DEFAULT_CONTROL_PORT)) }
+            embeddedCookie?.takeIf(::validCookie)?.let { add(ControlEndpoint(it, embeddedPort)) }
+        }.distinctBy { it.port to it.cookieHex }
+
+    fun readCookieHex(ctx: android.content.Context?): String? = controlEndpoints(ctx).firstOrNull()?.cookieHex
+
+    private fun validCookie(value: String): Boolean = value.length == 64 && value.all { it in "0123456789abcdefABCDEF" }
 
     /** Preferred exit countries, best first (measured by the app's own probes). */
     fun preferredCountries() = listOf("de", "nl", "fi", "se", "ch")
@@ -63,7 +75,7 @@ object TorCard {
 
     /** libTor.so ships inside the APK (Tor Browser for Android) — Tor needs no Termux. */
     fun available(ctx: android.content.Context): Boolean =
-        java.io.File(nativeDir(ctx), "libTor.so").let { it.isFile && it.canExecute() }
+        android.os.Build.VERSION.SDK_INT >= 26 && java.io.File(nativeDir(ctx), "libTor.so").let { it.isFile && it.canExecute() }
 
     /** Absolute torrc inside the app's private dir; embedded daemon reads it directly. */
     fun torrcPath(ctx: android.content.Context) =
@@ -75,23 +87,41 @@ object TorCard {
      * come from bridges.torproject.org, as with Termux.
      */
     fun torrcEmbedded(ctx: android.content.Context, controlPort: Int = DEFAULT_CONTROL_PORT,
-                      socksPort: Int = DEFAULT_SOCKS_PORT, bridge: String = "none", bridgeLines: List<String> = emptyList()): String {
+                      socksPort: Int = DEFAULT_SOCKS_PORT, bridge: String = "none", bridgeLines: List<String> = emptyList(),
+                      upstreamHttpPort: Int = DEFAULT_UPSTREAM_PORT, ptProxyPort: Int = DEFAULT_PT_UPSTREAM_PORT): String {
         val dir = java.io.File(ctx.filesDir, "tor")
+        val geoDir=java.io.File(dir,"geo198").apply {mkdirs()}
+        for(name in listOf("geoip","geoip6")) {
+            val file=java.io.File(geoDir,name)
+            if(!file.isFile || file.length()==0L) {
+                val tmp=java.io.File(geoDir,"$name.part")
+                ctx.assets.open(name).use {input->tmp.outputStream().use {input.copyTo(it)}}
+                check(tmp.renameTo(file)) {"Cannot install Tor GeoIP"}
+            }
+        }
         return torrcEmbedded(java.io.File(dir, "data").absolutePath, java.io.File(dir, "cookie").absolutePath,
-            nativeDir(ctx), controlPort, socksPort, bridge, bridgeLines)
+            nativeDir(ctx), controlPort, socksPort, bridge, bridgeLines, upstreamHttpPort, ptProxyPort) +
+            TorCountryPolicy.config(com.vlesscardvpn.core.Store.state.value.settings.torExitCountries) +
+            "GeoIPFile ${java.io.File(geoDir, "geoip").absolutePath}\nGeoIPv6File ${java.io.File(geoDir, "geoip6").absolutePath}\n"
     }
 
     /** Pure overload — testable on the JVM without an Android context. */
     fun torrcEmbedded(dataDir: String, cookieFile: String, nativeBinDir: String,
                       controlPort: Int = DEFAULT_CONTROL_PORT,
                       socksPort: Int = DEFAULT_SOCKS_PORT, bridge: String = "none",
-                      bridgeLines: List<String> = emptyList()): String = buildString {
+                      bridgeLines: List<String> = emptyList(), upstreamHttpPort: Int = DEFAULT_UPSTREAM_PORT,
+                      ptProxyPort: Int = DEFAULT_PT_UPSTREAM_PORT): String = buildString {
+        require(bridge in EMBEDDED_BRIDGES) { "Unsupported embedded Tor transport" }
+        require(upstreamHttpPort in 1024..65535 && upstreamHttpPort != socksPort && upstreamHttpPort != controlPort)
+        require(ptProxyPort in 1024..65535 && ptProxyPort != socksPort && ptProxyPort != controlPort && ptProxyPort != upstreamHttpPort)
+        validateBridgeLines(bridgeLines)
         appendLine("SocksPort 127.0.0.1:$socksPort")
         appendLine("ControlPort 127.0.0.1:$controlPort")
         appendLine("CookieAuthentication 1")
         appendLine("CookieAuthFile $cookieFile")
         appendLine("DataDirectory $dataDir")
         appendLine("SafeLogging 1")
+        appendLine("HTTPSProxy 127.0.0.1:$upstreamHttpPort")
         val bin = nativeBinDir
         when (bridge) {
             "obfs4", "webtunnel" -> {
@@ -106,12 +136,15 @@ object TorCard {
     /** Starts the embedded daemon; returns the process (caller keeps it alive). */
     fun startEmbedded(ctx: android.content.Context, bridge: String = "none",
                       controlPort: Int = DEFAULT_CONTROL_PORT, socksPort: Int = DEFAULT_SOCKS_PORT,
-                      bridgeLines: List<String> = emptyList()): java.lang.Process {
+                      bridgeLines: List<String> = emptyList(), upstreamHttpPort: Int = DEFAULT_UPSTREAM_PORT,
+                      ptProxyPort: Int = DEFAULT_PT_UPSTREAM_PORT): java.lang.Process {
+        if (android.os.Build.VERSION.SDK_INT < 26) error("Embedded Tor requires Android 8+")
         val dir = java.io.File(ctx.filesDir, "tor"); dir.mkdirs()
-        java.io.File(dir, "torrc").writeText(torrcEmbedded(ctx, controlPort, socksPort, bridge, bridgeLines))
+        java.io.File(dir, "torrc").writeText(torrcEmbedded(ctx, controlPort, socksPort, bridge, bridgeLines, upstreamHttpPort, ptProxyPort))
         val b = java.lang.ProcessBuilder(listOf(java.io.File(nativeDir(ctx), "libTor.so").absolutePath,
             "-f", java.io.File(dir, "torrc").absolutePath))
             .redirectOutput(java.io.File(dir, "tor.log")).redirectErrorStream(true)
+        if (bridge != "none") b.environment()["TOR_PT_PROXY"] = "socks5://127.0.0.1:$ptProxyPort"
         return b.start()
     }
 
@@ -119,30 +152,106 @@ object TorCard {
     fun portUp(socksPort: Int = DEFAULT_SOCKS_PORT): Boolean =
         runCatching { java.net.Socket().use { it.connect(java.net.InetSocketAddress("127.0.0.1", socksPort), 200); true } }.getOrDefault(false)
 
+    /** Only a daemon launched by this process under the mandatory-bridge guard can prove readiness. */
+    @Synchronized
+    fun ownsRunningEmbedded(): Boolean = embedded?.let { process ->
+        !stopping && runCatching { process.exitValue(); false }.getOrDefault(true)
+    } ?: false
+
+    /** Reject an already occupied unowned listener before Xray can route app traffic to it. */
+    fun requireOwnedOrFree(port:Int=DEFAULT_SOCKS_PORT) {
+        require(port in 1..65535)
+        check(!portUp(port) || port==DEFAULT_SOCKS_PORT && ownsRunningEmbedded()) {
+            "Порт Tor занят внешним процессом. Остановите внешний Tor: обязательные мосты не подтверждены"
+        }
+    }
+
     /** Starts the embedded daemon unless a local Tor already answers on [socksPort]. */
+    @Synchronized
     fun ensureStarted(ctx: android.content.Context, bridge: String = "none",
                       controlPort: Int = DEFAULT_CONTROL_PORT, socksPort: Int = DEFAULT_SOCKS_PORT,
-                      bridgeLines: List<String> = emptyList()): java.lang.Process? {
-        if (!available(ctx) || portUp(socksPort)) return null
-        return runCatching { startEmbedded(ctx, bridge, controlPort, socksPort, bridgeLines).also { embedded = it } }.getOrNull()
+                      bridgeLines: List<String> = emptyList(), upstreamHttpPort: Int = DEFAULT_UPSTREAM_PORT,
+                      ptProxyPort: Int = DEFAULT_PT_UPSTREAM_PORT): java.lang.Process? {
+        val ticket = generation.get()
+        require(bridge in setOf("obfs4","webtunnel") && bridgeLines.isNotEmpty()) {
+            "Tor требует мосты obfs4 или WebTunnel; запуск без мостов запрещён"
+        }
+        require(bridgeLines.all { TorBridgeCatalog.normalize(it)?.startsWith("Bridge $bridge ")==true }) {
+            "Нет корректного списка мостов выбранного транспорта"
+        }
+        require(bridge in EMBEDDED_BRIDGES) { "Unsupported embedded Tor transport" }
+        validateBridgeLines(bridgeLines)
+        val desired = torrcEmbedded(ctx, controlPort, socksPort, bridge, bridgeLines, upstreamHttpPort, ptProxyPort)
+        val owned = embedded
+        if (owned != null) {
+            val same = runCatching { java.io.File(torrcPath(ctx)).readText() == desired }.getOrDefault(false)
+            val alive = runCatching { owned.exitValue(); false }.getOrDefault(true)
+            if (alive && same && !stopping) return null
+            owned.destroy()
+            // Called from Dispatchers.IO: bounded wait avoids reusing a retiring listener.
+            val until = System.nanoTime() + 1_000_000_000L
+            while (runCatching { owned.exitValue(); false }.getOrDefault(true) && System.nanoTime() < until) Thread.sleep(25)
+            check(runCatching { owned.exitValue(); true }.getOrDefault(false)) { "Previous Tor process is still stopping" }
+            embedded = null
+        }
+        if (portUp(socksPort)) {
+            check(com.vlesscardvpn.core.Store.state.value.settings.torExitCountries.isBlank()) {
+                "Выбор страны поддерживается для встроенного Tor; остановите внешний Tor"
+            }
+            val endpoints = controlEndpoints(ctx, controlPort)
+            check(endpoints.isNotEmpty()) { "Tor port occupied without control authentication" }
+            val accepted = endpoints.any { endpoint ->
+                val control = TorControl("127.0.0.1", endpoint.port)
+                try {
+                    control.connect(endpoint.cookieHex)
+                    val upstream = control.getConf("HTTPSProxy")?.trim('"')
+                    bridge == "none" && upstream == "127.0.0.1:$upstreamHttpPort" && control.getConf("ExitNodes").isNullOrBlank()
+                } catch (_: Exception) { false } finally { control.close() }
+            }
+            check(accepted) { "Tor is already running without the VLESS upstream proxy" }
+            return null
+        }
+        check(available(ctx)) { "Embedded Tor unavailable for this device" }
+        check(generation.get() == ticket) { "Tor startup cancelled" }
+        val process = startEmbedded(ctx, bridge, controlPort, socksPort, bridgeLines, upstreamHttpPort, ptProxyPort)
+        stopping = false
+        embedded = process
+        if (generation.get() != ticket) { process.destroy(); error("Tor startup cancelled") }
+        return process
+    }
+
+    private fun validateBridgeLines(lines: List<String>) {
+        require(lines.size <= 12 && lines.all { line -> line.length <= 4096 && line.none { it.code < 32 || it.code == 127 } }) {
+            "Invalid bridge line"
+        }
     }
 
     /** Stops the embedded daemon (Termux tor is managed by Termux itself). */
-    fun stopEmbedded() { embedded?.let { runCatching { it.destroy() } }; embedded = null }
+    fun invalidateStartup() { generation.incrementAndGet() }
+    fun stopEmbedded() { generation.incrementAndGet(); stopping = true; embedded?.let { runCatching { it.destroy() } } }
+    private val generation = java.util.concurrent.atomic.AtomicLong()
+    @Volatile private var stopping = false
     @Volatile private var embedded: java.lang.Process? = null
 
     /**
-     * torrc for Termux: SOCKS on loopback, authenticated control port, safe defaults.
-     * [bridge] picks a pluggable transport: obfs4/snowflake hide the Tor handshake from
-     * DPI that blocks the tor protocol itself (the same reason the app masks VLESS).
+     * torrc for a manually managed Tor: Tor stays on loopback and uses the same VLESS proxy.
+     * Pluggable transports need TOR_PT_PROXY in their process environment; the app's embedded
+     * daemon is the supported bridged path because it sets that environment safely.
      */
     fun torrc(controlPort: Int = DEFAULT_CONTROL_PORT, socksPort: Int = DEFAULT_SOCKS_PORT,
-              allowLan: Boolean = false, bridge: String = "none", bridgeLines: List<String> = emptyList()): String = buildString {
+              allowLan: Boolean = false, bridge: String = "none", bridgeLines: List<String> = emptyList(),
+              upstreamHttpPort: Int = DEFAULT_UPSTREAM_PORT, ptProxyPort: Int = DEFAULT_PT_UPSTREAM_PORT): String = buildString {
+        require(bridge in BRIDGES) { "Unsupported Tor transport" }
+        require(upstreamHttpPort in 1024..65535 && upstreamHttpPort != socksPort && upstreamHttpPort != controlPort)
+        require(ptProxyPort in 1024..65535 && ptProxyPort != socksPort && ptProxyPort != controlPort && ptProxyPort != upstreamHttpPort)
+        validateBridgeLines(bridgeLines)
         val socksBind = if (allowLan) "0.0.0.0:$socksPort" else "127.0.0.1:$socksPort"
         appendLine("SocksPort $socksBind")
         appendLine("ControlPort 127.0.0.1:$controlPort")
         appendLine("CookieAuthentication 1")
         appendLine("SafeLogging 1")
+        appendLine("HTTPSProxy 127.0.0.1:$upstreamHttpPort")
+        if (bridge != "none") appendLine("# Set TOR_PT_PROXY=socks5://127.0.0.1:$ptProxyPort for the managed transport")
         when (bridge) {
             "snowflake" -> {
                 appendLine("ClientTransportPlugin snowflake exec /data/data/com.termux/files/usr/bin/snowflake-client -url https://1098762253-765532153-cloudflare-voip.tor-project.org/ -front cdn.sstatic.net -ice stun:stun.l.google.com:19302,stun:stun.voipgate.com:3478,stun:stun.voys.nl:3478 utls-imitate=hellorandomizedalpn")

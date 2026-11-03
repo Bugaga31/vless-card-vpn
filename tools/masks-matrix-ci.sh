@@ -1,20 +1,30 @@
 #!/usr/bin/env bash
 # Host-side check: real Xray-core servers (REALITY/TLS/WS/gRPC/XHTTP/Trojan/SS/VMess) × every app mask, incl. ByeDPI front.
 set -euo pipefail
+STAGE=setup
+on_exit() {
+  rc=$?
+  if [ "$rc" -ne 0 ]; then echo "::error title=Matrix bounded failure::stage=$STAGE; exit=$rc"; fi
+  if [ -n "${ORIGIN:-}" ]; then kill "$ORIGIN" 2>/dev/null || true; fi
+}
+trap on_exit EXIT
 # The matrix listens on 30000-34000: keep the kernel's ephemeral ports (32768+) out of the way, or one clash kills the client.
 sudo sysctl -qw net.ipv4.ip_local_port_range="40000 60999" || true
+STAGE=fetch-runtime
 curl -fsSL -o /tmp/xray.zip https://github.com/XTLS/Xray-core/releases/download/v26.9.30/Xray-linux-64.zip
 mkdir -p /tmp/xray /tmp/srv /tmp/xcfg && unzip -qo /tmp/xray.zip -d /tmp/xray
 X=/tmp/xray/xray
+STAGE=generate-fixtures
 KEYS=$($X x25519); PRIV=$(echo "$KEYS" | sed -n 's/^PrivateKey: //p'); PBK=$(echo "$KEYS" | sed -n 's/^Password (PublicKey): //p')
-openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -keyout /tmp/srv.key -out /tmp/srv.crt -days 2 -subj "/CN=test.local" -addext "subjectAltName=DNS:test.local,IP:127.0.0.1" 2>/dev/null
+openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -keyout /tmp/srv.key -out /tmp/srv.crt -days 2 -subj "/CN=test.local" -addext "subjectAltName=DNS:test.local,IP:127.0.0.1,IP:192.0.2.2" 2>/dev/null
 export MATRIX_CHECK_URL=https://127.0.0.1:18443/generate_204 MATRIX_DOWNLOAD_URL=https://127.0.0.1:18443/bytes MATRIX_CA=/tmp/srv.crt
 python3 tools/e2e/matrix-origin.py >/tmp/matrix-origin.log 2>&1 & ORIGIN=$!
-trap 'kill "$ORIGIN" 2>/dev/null || true' EXIT
 P=$(openssl x509 -in /tmp/srv.crt -outform der | sha256sum | cut -d' ' -f1)
 U=a00975c5-597e-4c22-a7a7-a84ce5e0691e
 sed -e "s#@PRIV@#$PRIV#g" -e "s#@U@#$U#g" tools/e2e/matrix-server.json > /tmp/srv/server.json
+python3 tools/e2e/matrix_wireguard.py /tmp/srv/server.json
 $X run -c /tmp/srv/server.json > /tmp/srv/server.log 2>&1 &
+STAGE=compile-native
 gcc -D_DEFAULT_SOURCE -std=c99 -O2 native/byedpi/{packets,main,conev,proxy,desync,mpool,extend}.c -o /tmp/byedpi
 # the host build aborts now and then under 24-way load: keep it running
 # `|| true`: under `set -e` one abort used to end this loop, and every later ".b" variant failed.
@@ -35,7 +45,9 @@ wireguard://iMKDJbeES0wVjl014e%2BVHdsv6vbOtdqgTCw4imW%2FhU4%3D@127.0.0.1:8450?pu
 socks5://mu:mp@127.0.0.1:8451#socks
 L
 chmod +x gradlew
-XRAY_MATRIX_OFFERED_ONLY=1 XRAY_CONFIG_DUMP=/tmp/xcfg XRAY_LOCAL_LINKS=/tmp/links.txt ./gradlew --no-daemon -q :app:testDebugUnitTest --tests 'com.vlesscardvpn.ConfigTest' --tests 'com.vlesscardvpn.R62Test'
+STAGE=generate-matrix
+XRAY_MATRIX_OFFERED_ONLY=1 XRAY_CONFIG_DUMP=/tmp/xcfg XRAY_LOCAL_LINKS=/tmp/links.txt ./gradlew --no-daemon -q :app:testDebugUnitTest --tests 'com.vlesscardvpn.ConfigTest' --tests 'com.vlesscardvpn.CryptoWarpRegressionR62Test'
+STAGE=start-engines
 # One engine per fixed strategy (the app's own argv: VLESS Card, zapret, ByeDPI); servers are on loopback.
 while read -r eng args; do
   if [ "$eng" = TPWS ]; then VCVPN_TPWS_ALLOW_LOCAL=1 /tmp/tpws $args > /dev/null 2>&1 &
@@ -44,6 +56,7 @@ while read -r eng args; do
 done < <(cat /tmp/xcfg/dpi-engines.txt; echo)
 sleep 1
 # VLESS Card × Xray no-server strategies: real HTTPS to the internet through each engine.
+STAGE=xray-no-server
 XOK=0; XALL=0
 while read -r eng args; do
   [ "$eng" = XRAY ] || continue
@@ -51,9 +64,13 @@ while read -r eng args; do
   if curl -s -o /dev/null -m 15 -w '%{http_code}' -x socks5h://127.0.0.1:$port https://www.youtube.com/ | grep -q '^[23]'; then XOK=$((XOK+1)); else echo "xray engine $port failed"; fi
 done < <(cat /tmp/xcfg/dpi-engines.txt; echo)
 echo "Xray no-server strategies: $XOK/$XALL carry HTTPS"
+echo "::notice title=Matrix bounded counters::xray-no-server pass=$XOK; total=$XALL"
 [ "$XOK" -eq "$XALL" ] || { echo "xray strategies failed"; exit 1; }
+STAGE=validate-configs
 for f in /tmp/xcfg/*.json; do case $f in */warp-*) continue;; esac; echo "$(basename $f): $($X run -test -c $f 2>&1 | tail -1)"; done
+STAGE=local-mask-transfer
 KEEP_CLIENT=1 bash tools/xray-local-e2e.sh $X /tmp/xcfg  # offered masks only; baseline must work
+STAGE=evaluate-local-masks
 # Only masks the app offers for each server type (Masks.compatible) must pass.
 python3 - <<'PY' || MFAIL=1
 import sys
@@ -92,6 +109,7 @@ if bad and len(bad) <= 120:
     fixed = sum(res); print(f"retry: {fixed} of {len(bad)} failed offered masks passed on the second try")
     bad = [l for l, r in zip(bad, res) if not r]; fail -= fixed; ok += fixed
 print(f"offered direct masks: ok={ok} fail={fail}; via ByeDPI: ok={bok} fail={bfail}")
+print(f"::notice title=Matrix bounded counters::direct-pass={ok}; direct-fail={fail}; byedpi-pass={bok}; byedpi-fail={bfail}")
 for b in bad[:30]: print(b)
 print("fixed strategies in front of servers (ok/fail):")
 for sid, (o, f) in sorted(per.items()): print(f"  {sid}: {o}/{f}")
@@ -100,6 +118,7 @@ for sid, (o, f) in sorted(per.items()): print(f"  {sid}: {o}/{f}")
 fake_only = {'BYEDPI#MASK_FAKE', 'BYEDPI#MASK_FAKE_RAND'}
 dpi_ok = sum(o for s, (o, f) in per.items() if s not in fake_only); dpi_all = sum(o + f for s, (o, f) in per.items() if s not in fake_only)
 print(f"fixed strategies (without fake-only): ok={dpi_ok}/{dpi_all}")
+print(f"::notice title=Matrix bounded counters::fixed-strategies-pass={dpi_ok}; total={dpi_all}")
 if dpi_all and dpi_ok < dpi_all * 0.8: print("too many fixed-strategy failures"); sys.exit(1)
 # Direct masks must all work; ByeDPI-front variants are flaky under 24-way parallel load in CI
 # (the app tests every mask live before using it, so a flaky one is simply not chosen).
@@ -108,10 +127,15 @@ PY
 
 [ -f /tmp/xcfg/client.pid ] && kill "$(cat /tmp/xcfg/client.pid)" 2>/dev/null || true
 sleep 1
+STAGE=wireguard-transfer
 python3 - <<'PY' || MFAIL=1
 # WireGuard: one tunnel per key at a time (parallel tunnels with one key make the server roam), so each WG
 # variant gets its own Xray instance here, sequentially, instead of the parallel matrix.
-import json, subprocess, time, os
+import json, subprocess, time, os, sys
+sys.path.insert(0, 'tools/e2e')
+from matrix_wireguard import wireguard_url
+wg_check = wireguard_url(os.environ['MATRIX_CHECK_URL'])
+wg_download = wireguard_url(os.environ['MATRIX_DOWNLOAD_URL'])
 cfg = json.load(open('/tmp/xcfg/local-matrix.json'))
 rows = [l.split() for l in open('/tmp/xcfg/local-matrix.txt')]
 wok = wall = 0
@@ -122,27 +146,38 @@ with open('/tmp/xcfg/wg-result.txt', 'w') as out:
         ob = [o for o in cfg['outbounds'] if o['tag'] == tag][0]
         json.dump({"inbounds": [{"port": 24900, "listen": "127.0.0.1", "protocol": "socks", "settings": {"auth": "noauth"}}], "outbounds": [ob]}, open('/tmp/wg1.json', 'w'))
         p = subprocess.Popen(['/tmp/xray/xray', 'run', '-c', '/tmp/wg1.json'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL); time.sleep(1.5)
-        a = subprocess.run(['curl', '--noproxy', '', '-s', '-o', '/dev/null', '-m', '15', '-w', '%{http_code}', '--socks5-hostname', '127.0.0.1:24900', os.environ['MATRIX_CHECK_URL'], '--cacert', os.environ['MATRIX_CA']], capture_output=True, text=True).stdout
-        b = subprocess.run(['curl', '--noproxy', '', '-s', '-o', '/dev/null', '-m', '25', '-w', '%{size_download}', '--socks5-hostname', '127.0.0.1:24900', os.environ['MATRIX_DOWNLOAD_URL'], '--cacert', os.environ['MATRIX_CA']], capture_output=True, text=True).stdout
+        a = subprocess.run(['curl', '--noproxy', '', '-s', '-o', '/dev/null', '-m', '15', '-w', '%{http_code}', '--socks5-hostname', '127.0.0.1:24900', wg_check, '--cacert', os.environ['MATRIX_CA']], capture_output=True, text=True).stdout
+        b = subprocess.run(['curl', '--noproxy', '', '-s', '-o', '/dev/null', '-m', '25', '-w', '%{size_download}', '--socks5-hostname', '127.0.0.1:24900', wg_download, '--cacert', os.environ['MATRIX_CA']], capture_output=True, text=True).stdout
         p.kill(); p.wait()
         ok = a == '204' and b.isdigit() and int(b) >= 262144
         wall += 1; wok += ok
         print(('OK' if ok else 'FAIL'), port, name, mask, a, b, file=out)
+        if not ok:
+            # Only registered mask ID and transfer predicates, never configs or response bodies.
+            import re
+            safe_mask = mask if re.fullmatch(r'[A-Za-z0-9_.:#-]{1,120}', mask) else 'redacted'
+            print(f"::error title=Matrix bounded WireGuard failure::mask={safe_mask}; check204={a == '204'}; body262144={b.isdigit() and int(b) >= 262144}")
 print(f"WireGuard (sequential, own instance): {wok}/{wall}")
+print(f"::notice title=Matrix bounded counters::wireguard-pass={wok}; total={wall}")
 print(open('/tmp/xcfg/wg-result.txt').read())
 if wall == 0 or wok != wall: raise SystemExit('WireGuard variants failed')
 PY
 
 
+# The named JVM generator must have run before contacting the external WARP service.
+STAGE=validate-warp-fixtures
+[ -s /tmp/xcfg/warp-masks.txt ] || { echo "::error title=Matrix bounded failure::missing-warp-fixture-manifest"; exit 1; }
 # Real Cloudflare WARP from the runner: every WireGuard/WARP mask the app offers (noise, QUIC/DTLS/RTP look-alikes, port hopping).
+STAGE=warp-register
 K=$($X wg); WPRIV=$(echo "$K" | sed -n 's/PrivateKey: //p'); WPUB=$(echo "$K" | sed -n 's/.*PublicKey): //p')
 R=$(curl -s -m 20 -X POST https://api.cloudflareclient.com/v0a2158/reg -H 'User-Agent: okhttp/3.12.1' -H 'CF-Client-Version: a-6.30-3596' -H 'Content-Type: application/json' \
   -d "{\"key\":\"$WPUB\",\"install_id\":\"\",\"fcm_token\":\"\",\"tos\":\"$(date -u +%Y-%m-%dT%H:%M:%S.000Z)\",\"type\":\"Android\",\"locale\":\"en_US\"}")
 echo "$R" | jq -e '.config.interface.addresses.v4 and .config.client_id and .config.peers[0].public_key' >/dev/null || { echo "WARP registration returned no usable account"; exit 1; }
 WPEER=$(echo "$R" | jq -r .config.peers[0].public_key)
 WV4=$(echo "$R" | jq -r .config.interface.addresses.v4); WRES=$(echo "$R" | jq -r .config.client_id | base64 -d | od -An -tu1 | awk '{print $1","$2","$3}')
+STAGE=warp-transfer
 WOK=0; WALL=0
-while read -r id; do
+while IFS= read -r id || [ -n "$id" ]; do
   [ -n "$id" ] || continue
   sed -e "s#@WPRIV@#$WPRIV#" -e "s#@WV4@#$WV4#" -e "s#\[11,22,33\]#[$WRES]#" /tmp/xcfg/warp-$id.json > /tmp/w1.json
   python3 - "$WPEER" <<'PEER'
@@ -159,6 +194,8 @@ PEER
   kill $WP 2>/dev/null || true; wait $WP 2>/dev/null || true; WALL=$((WALL+1))
   if [ "$c" = 200 ] && grep -q '^warp=on' /tmp/warp-trace.txt; then WOK=$((WOK+1)); echo "WARP OK $id"; else echo "WARP FAIL $id ($c) $(tail -1 /tmp/w1.log)"; fi
 done < /tmp/xcfg/warp-masks.txt
+echo "::notice title=Matrix bounded counters::warp-pass=$WOK; total=$WALL"
 echo "WARP masks: $WOK/$WALL carry HTTPS through real Cloudflare WARP; ByeDPI restarts: $(cat /tmp/bd-restarts 2>/dev/null | wc -l)"
 [ "$WOK" -ge $((WALL * 8 / 10)) ] || { echo "too many WARP masks fail"; exit 1; }
+STAGE=final-contract
 exit ${MFAIL:-0}

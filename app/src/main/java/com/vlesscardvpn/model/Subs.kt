@@ -7,6 +7,7 @@ object Subs {
     private fun gh(path: String) = "https://raw.githubusercontent.com/$path"
     private const val IG = "igareck/vpn-configs-for-russia/main"
     const val DIMAN = "https://gist.githubusercontent.com/Diman331/8c868070c0b5a5ec0c7d94507717b67b/raw/subscription.txt"
+    const val OVI_FULL = "https://raw.githubusercontent.com/OVI-vpn/bs/main/full.txt"
     const val CLOUD_WORKS = "https://raw.githubusercontent.com/Bugaga31/vless-card-vpn/servers/works.txt"
     const val RU = "Для России"
     const val WL = "Белые списки (мобильный интернет)"
@@ -43,6 +44,26 @@ object Subs {
         SubSource(gh("Mosifree/-FREE2CONFIG/main/Reality"), "FREE2CONFIG · Reality", WORLD),
         SubSource(gh("MhdiTaheri/V2rayCollector/main/sub/mix"), "V2rayCollector", WORLD),
         SubSource(gh("SoliSpirit/v2ray-configs/main/Protocols/vless.txt"), "SoliSpirit · VLESS", WORLD),
+        // Additional public files: fetch/format checked, not availability evidence. Opt-in sources.
+        SubSource("https://raw.githubusercontent.com/s0ulcoil/HavenVPN/refs/heads/main/Haven", "HavenVPN", WORLD),
+        SubSource("https://raw.githubusercontent.com/opti4riponty-arch/VLESS-Co/refs/heads/main/VLESS%20%26%20Co", "VLESS & Co", WORLD),
+        SubSource("https://raw.githubusercontent.com/flaafix/AetrisVPN/refs/heads/main/AetrisVPN.txt", "AetrisVPN", WORLD),
+        SubSource("https://raw.githubusercontent.com/flaafix/AetrisVPN-black-list/refs/heads/main/configs.txt", "AetrisVPN · blacklist", WORLD),
+        SubSource("https://raw.githubusercontent.com/flaafix/AetrisVPN-white-list-lite/refs/heads/main/AetrisVPN.txt", "AetrisVPN · whitelist lite", WL, whitelist = true),
+        SubSource("https://gitverse.ru/api/repos/IvanBudko/Tarantul/raw/branch/master/tarantul.txt", "Tarantul", WORLD),
+        SubSource("https://gitverse.ru/api/repos/Catlerok_glasha/catwhiteMIRROR/raw/branch/master/configs.txt", "catwhiteMIRROR", WL, whitelist = true),
+        SubSource("https://gitverse.ru/api/repos/Pizduk/PizdukVPN/raw/branch/master/Mixer", "Mixer", WORLD),
+        SubSource("https://hub.mos.ru/akelladejavu/bunker/-/raw/main/BEST_LIST.txt", "bunker · BEST_LIST", WORLD),
+        SubSource("https://hub.mos.ru/akelladejavu/bunker/-/raw/main/WHITE_LIST.txt", "bunker · WHITE_LIST", WL, whitelist = true),
+        // Requested 2026-10-28. A format check is not proof of reachability on the user's ISP.
+        SubSource(OVI_FULL, "OVI VPN · Full", WORLD, default = true),
+        SubSource("https://raw.githubusercontent.com/OVI-vpn/bs/main/premium.txt", "OVI VPN · Premium (пусто при проверке 28.10)", WORLD),
+        SubSource("https://pozor.bond/sub/0bsk0rfna3rr", "pozor · 0bsk0rfna3rr (404 при проверке 28.10)", WORLD),
+        SubSource("https://pozor.bond/sub/0qjvewd7qynv", "pozor · 0qjvewd7qynv (404 при проверке 28.10)", WORLD),
+        SubSource("https://pozor.bond/sub/5rnwokp4nqcw", "pozor · 5rnwokp4nqcw (404 при проверке 28.10)", WORLD),
+        SubSource("https://pozor.bond/sub/wfe5og2pse0p", "pozor · wfe5og2pse0p (404 при проверке 28.10)", WORLD),
+        SubSource("https://pozor.bond/sub/f02gu3tqgql1", "pozor · f02gu3tqgql1 (404 при проверке 28.10)", WORLD),
+        SubSource("https://pozor.bond/sub/2sdfe56lna", "pozor · 2sdfe56lna (404 при проверке 28.10)", WORLD),
     )
     private val byUrl = CATALOG.associateBy { it.url }
     fun find(url: String): SubSource? = byUrl[url]
@@ -53,7 +74,10 @@ object Subs {
 
     private val RAW = Regex("https://raw\\.githubusercontent\\.com/([^/]+)/([^/]+)/([^/]+)/(.+)")
     fun mirrors(url: String): List<String> {
-        val m = RAW.find(url) ?: return listOf(url)
+        // Never forward tokens/query strings or authenticated URLs to a public mirror.
+        val uri = runCatching { java.net.URI(url) }.getOrNull() ?: return listOf(url)
+        if (uri.rawUserInfo != null || uri.rawQuery != null || uri.rawFragment != null) return listOf(url)
+        val m = RAW.matchEntire(url) ?: return listOf(url)
         val (owner, repo, branch, path) = m.destructured
         return buildList {
             add(url)

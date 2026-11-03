@@ -4,12 +4,8 @@ import org.json.JSONArray
 import org.json.JSONObject
 import kotlin.random.Random
 
-/**
- * «Эволюция масок» (VLESS Card only): the TSPU learns fixed fragment sizes and noise shapes, so a built-in list
- * goes stale. Every mask search also tries a few mutants of masks that already passed on this network (other
- * piece sizes, pauses, ladder steps, fingerprint, noise shape, port hopping). Mutants that pass are kept
- * (Settings.autoMasks) and become parents of the next generation, so the masks drift away from what the DPI knows.
- * Without parents (a fresh install or nothing passed yet), random shapes are generated.
+/** Parameter search, not proof of DPI resistance. Only measured compatible winners may be adopted.
+ * The broad manual generator below is separate from the bounded automatic Hello neighbourhood.
  */
 object MaskLab {
     const val PREFIX = "auto:"
@@ -100,7 +96,7 @@ object MaskLab {
             if (rnd.nextInt(8) == 0) { if (p.tfo) o.remove("tfo") else o.put("tfo", true) }
             if (rnd.nextInt(10) == 0) { if (p.ipv6) o.remove("v6") else o.put("v6", true) }
             // «белый» SNI: another allowed site (whitelist mode — only allowed names pass)
-            if (rnd.nextInt(if (com.vlesscardvpn.core.Whitelist.last.value?.verdict == com.vlesscardvpn.core.Whitelist.Verdict.WHITELIST) 3 else 9) == 0) {
+            if (rnd.nextInt(9) == 0) {
                 if (p.sni.isNotEmpty() && rnd.nextInt(3) == 0) o.remove("sni") else o.put("sni", Masks.WHITE_POOL[rnd.nextInt(Masks.WHITE_POOL.size)])
             }
             if (o.has("dpi")) { o.remove("mss"); o.remove("tfo"); o.remove("v6") } // through a local DPI engine the MSS of 127.0.0.1 means nothing
