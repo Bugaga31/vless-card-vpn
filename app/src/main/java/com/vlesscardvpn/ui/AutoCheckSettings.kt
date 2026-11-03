@@ -9,6 +9,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import com.vlesscardvpn.core.*
 
 @Composable
@@ -26,7 +29,24 @@ fun AutoCheckSettings() {
                     modifier=Modifier.semantics {contentDescription="Проверять одновременно до $n серверов"},label={Text(n.toString())})
             }
         }
-        Text("По умолчанию 5. Сейчас до $slots одновременно; выбранный предел $parallel. Новый лимит действует со следующей волны. Внутренняя оптимизация, нагрев и звонки больше не урезают выбранное число; системные ограничения Android остаются.",style=MaterialTheme.typography.bodyMedium)
+        var typed by remember(parallel) {mutableStateOf(parallel.toString())}
+        val parsed=ProbeConcurrencyPolicy.parse(typed)
+        OutlinedTextField(value=typed,onValueChange={text->
+                typed=text.filter(Char::isDigit).take(4)
+                ProbeConcurrencyPolicy.parse(typed)?.let {n->if(n!=parallel) Store.update {state->state.copy(settings=state.settings.copy(probeParallel=n))}}
+            },
+            label={Text("Своё число, 1–${ProbeConcurrencyPolicy.MAX}")},singleLine=true,isError=parsed==null,
+            supportingText={Text(if(parsed==null) "Введите целое число от 1 до ${ProbeConcurrencyPolicy.MAX}" else "Больше ${ProbeConcurrencyPolicy.MAX} сохраняется как ${ProbeConcurrencyPolicy.MAX}")},
+            keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.Number,imeAction=ImeAction.Done),
+            modifier=Modifier.fillMaxWidth().semantics {contentDescription="Своё число одновременных проверок"})
+        val inFlight by produceState(ProbeInFlight.current to ProbeInFlight.peak) {
+            while(true) {value=ProbeInFlight.current to ProbeInFlight.peak;kotlinx.coroutines.delay(1000)}
+        }
+        val ceiling=ProbeConcurrencyPolicy.deviceCeiling
+        Text("По умолчанию ${ProbeConcurrencyPolicy.DEFAULT}. Выбранный предел $parallel" +
+            (if(slots<parallel) "; на этом устройстве (32-битный процесс) не больше $ceiling" else "") +
+            ". Сейчас выполняется ${inFlight.first}, максимум с запуска приложения ${inFlight.second}. Это фактическое число маршрутов в работе, а не обещание: в волне не бывает больше кандидатов, чем найдено серверов. Новый лимит действует со следующей волны.",style=MaterialTheme.typography.bodyMedium)
+        Text("Каждая одновременная проверка — отдельный маршрут в тестовом ядре, свои сокеты и несколько потоков. Сотни проверок сильнее нагружают процессор, память и батарею и могут нагреть телефон; это не измерено на реальных устройствах. Если телефон греется или Авто ведёт себя хуже, уменьшите число.",style=MaterialTheme.typography.bodyMedium)
         Text("В одном тестовом ядре создаются только проверяемые маршруты. Первый подходящий сервер останавливает ненужные пробы; это снижает лишнюю нагрузку, но не гарантирует отсутствие нагрева.",style=MaterialTheme.typography.bodyMedium)
         Text("Что проверять в Авто",style=MaterialTheme.typography.titleMedium)
         Text("ROKI · эксперимент на подграфе FlyWire. Учится на завершённых проверках этой сессии и меняет только порядок кандидатов после 8 результатов. Не целый мозг мухи; неизвестные проверки не разрешает.",style=MaterialTheme.typography.bodyMedium)

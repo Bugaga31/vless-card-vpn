@@ -165,9 +165,11 @@ object Tester {
             .proxy(Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", port))).build()
         val mediaClient = client.newBuilder().followRedirects(false).followSslRedirects(false).build()
         val tasks = mutableListOf<java.util.concurrent.Future<*>>()
-        val isolated=if(autoChecks!=null) ProbeServiceWorkers() else null
-        val servicePool=isolated?.executor ?: pool
-        val tgExecutor=isolated?.telegram ?: telegramPool
+        // Per-probe workers for manual checks too: a shared 12-thread pool queued YouTube/Telegram
+        // tasks behind other candidates and turned queue wait into false timeouts above 12 routes.
+        val isolated=ProbeServiceWorkers()
+        val servicePool=isolated.executor
+        val tgExecutor=isolated.telegram
         val notes=linkedMapOf<String,String>()
         fun <T> await(f:java.util.concurrent.Future<T>?,ms:Long,fallback:T,id:String,known:(T)->Boolean={true}):T {
             if(f==null) return fallback
@@ -267,15 +269,11 @@ object Tester {
             return if(autoChecks!=null) measured.copy(autoChecksKey=AutoChecks.stamp(measured,autoChecks,AutoLatencyPolicy.MAX_MS)) else measured
         } finally {
             ProbeTasks.cancel(tasks)
-            isolated?.close()
+            isolated.close()
             // Private dispatcher/pool: cancellation cannot cancel another probe or the live VPN's HTTP calls.
             client.dispatcher.cancelAll(); client.connectionPool.evictAll(); client.dispatcher.executorService.shutdown()
         }
     }
-
-    // Media downloads cannot occupy all workers needed to establish native Telegram evidence.
-    private val telegramPool = java.util.concurrent.Executors.newFixedThreadPool(12) { r -> Thread(r, "probe-tg").apply { isDaemon = true } }
-    private val pool = java.util.concurrent.Executors.newFixedThreadPool(12) { r -> Thread(r, "probe").apply { isDaemon = true } }
 
     /** 256 KB through the server: (passed, kbit/s). A freeze (read timeout — the TSPU "16 KB" cut) fails at once, no second mirror. */
     private data class BodyResult(val ok: Boolean = false, val kbps: Int = 0, val bytes: Long = 0, val ms: Long = 0)
@@ -574,7 +572,7 @@ object Tester {
             val b = YouTubeMediaProbe.measure(url) { mediaCall(dpi, it, deadline) }
             a.kbps to b.kbps
         } finally {
-            listOf(server, dpi).forEach { it.dispatcher.cancelAll(); it.connectionPool.evictAll() }
+            listOf(server, dpi).forEach { it.dispatcher.cancelAll(); it.connectionPool.evictAll(); it.dispatcher.executorService.shutdown() }
         }
     }
 

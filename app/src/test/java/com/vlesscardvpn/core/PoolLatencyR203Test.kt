@@ -9,7 +9,8 @@ class PoolLatencyR203Test {
  private fun nodes()=(1..100).map {Server("s$it","vless","host$it.test",443,"key",security="tls",source="sub${(it-1)/10}")}
  @Test fun firstPortionTwenty(){assertEquals(20,ConnectPolicy.FIRST)}
  @Test fun nextPortionTwenty(){assertEquals(20,ConnectPolicy.NEXT)}
- @Test fun shortlistDoesNotShrinkToEight(){assertEquals(20,ConnectPolicy.shortlistLimit(true))}
+ @Test fun shortlistDoesNotShrinkToEight(){assertEquals(20,ConnectPolicy.shortlistLimit(true));assertEquals(20,ConnectPolicy.shortlistLimit(true,5))}
+ @Test fun firstWaveWidensToSelectedCeiling(){assertEquals(100,ConnectPolicy.firstWave(100));assertEquals(1000,ConnectPolicy.firstWave(1000));assertEquals(20,ConnectPolicy.firstWave(3));assertEquals(100,ConnectPolicy.shortlistLimit(true,100))}
  @Test fun optionalPoolLimitUnchanged(){assertEquals(AutoEligibility.TOP,ConnectPolicy.shortlistLimit(false));assertEquals(8,AutoEligibility.TOP)}
  @Test fun fastStartRequestsTwenty(){assertEquals(20,ConnectPolicy.fastStart().candidates)}
  @Test fun portionRetainsEverySource(){val n=nodes();val w=SubscriptionQueue.window(n,(0..9).map{"sub$it"},ConnectPolicy.FIRST);assertEquals(20,w.size);assertEquals(10,w.map{it.source}.toSet().size);assertTrue(w.groupingBy{it.source}.eachCount().values.all{it==2})}
