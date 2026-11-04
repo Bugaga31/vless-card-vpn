@@ -19,7 +19,9 @@ class RouteStabilityMemory(private val capacity:Int=512) {
         val failed=e.samples.count {it.ok==false}
         val assessment=LinkStabilityPolicy.summarize(e.samples,maxMs)
         // One timeout does not quarantine a server. Require repeated failure or repeated bad spread/latency.
-        val bad=e.samples.size>=3 && (failed>=2 || failed==0 && assessment.stable==false)
+        // Карантин — за повторные сбои или реальное превышение допуска по медиане, а не за разброс ответов.
+        val slow = (assessment.medianMs ?: 0) > maxMs
+        val bad=e.samples.size>=3 && (failed>=2 || failed==0 && assessment.stable==false && slow)
         e.badWindows=if(bad) (e.badWindows+1).coerceAtMost(3) else 0
         val newly=e.badWindows>=3 && now>=e.until
         if(newly) {e.until=now+QUARANTINE_MS;e.badWindows=0}

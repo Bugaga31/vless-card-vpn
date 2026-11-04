@@ -9,10 +9,12 @@ object LinkStabilityPolicy {
         val good = bounded.filter { it.ok == true && it.ms > 0 }.map { it.ms }.sorted()
         val unknown = bounded.count { it.ok == null || it.ok == true && it.ms <= 0 }
         val spread = good.takeIf { it.isNotEmpty() }?.let { it.last() - it.first() }
+        // Разброс — не приговор: допускаем до половины медианы (минимум 150 мс) и одну «неизвестную» пробу.
+        val spreadAllowance = maxOf(150, (good.lastOrNull() ?: 0) / 2)
         val stable = when {
             bounded.any { it.ok == false } -> false
-            bounded.size < 3 || unknown > 0 -> null
-            else -> good.size == bounded.size && good.last() <= maxMs && (spread ?: Int.MAX_VALUE) <= 150
+            good.size < 3 || unknown > 1 -> null
+            else -> good.last() <= maxMs && (spread ?: Int.MAX_VALUE) <= spreadAllowance
         }
         return Summary(bounded.size, good.size, unknown, good.takeIf { it.isNotEmpty() }?.let { it[it.size / 2] }, spread, stable)
     }

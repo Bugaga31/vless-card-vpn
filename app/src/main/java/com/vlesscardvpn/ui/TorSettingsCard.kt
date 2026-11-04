@@ -1,6 +1,8 @@
 package com.vlesscardvpn.ui
 
 import androidx.compose.animation.animateContentSize
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
@@ -220,6 +222,12 @@ fun TorCountryPreferences(settings:Settings,set:((Settings)->Settings)->Unit) {
  val countries=runCatching {TorCountryPolicy.parse(text)}.getOrNull()
  Column(verticalArrangement=Arrangement.spacedBy(8.dp)) {
   Text("Страна выхода Tor",style=MaterialTheme.typography.titleMedium)
+  Row(Modifier.horizontalScroll(rememberScrollState()),horizontalArrangement=Arrangement.spacedBy(6.dp)) {
+   listOf("" to "Любая","RU" to "🇷🇺 Россия","NL" to "🇳🇱 NL","DE" to "🇩🇪 DE","FI" to "🇫🇮 FI","SE" to "🇸🇪 SE","TR" to "🇹🇷 TR","US" to "🇺🇸 US").forEach { (id,t) ->
+    FilterChip(selected = text.uppercase().split(",").map{it.trim()}.filter{it.isNotEmpty()} == (if(id.isEmpty()) emptyList() else listOf(id)),
+     onClick = { text = id; set { it.copy(torExitCountries = id) } }, label = { Text(t) })
+   }
+  }
   OutlinedTextField(value=text,onValueChange={if(it.length<=200) text=it},modifier=Modifier.fillMaxWidth(),
    label={Text("ISO-коды: US, DE, NL")},isError=countries==null,
    supportingText={Text("Пусто — любая страна. Несколько кодов — допустимые выходы, не порядок узлов.")})
