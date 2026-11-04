@@ -15,7 +15,8 @@ class RouteStabilityR206Test {
  @Test fun singleGoodDoesNotClearQuarantine(){val m=RouteStabilityMemory();val t=quarantine(m);m.record("wifi","a","m",good(),t+1,1000);assertTrue(m.cooling("wifi","a","m",t+2))}
  @Test fun unknownDoesNotBan(){val m=RouteStabilityMemory();repeat(8){m.record("wifi","a","m",LinkStabilityPolicy.Sample(null,0),1000L+it,1000)};assertFalse(m.cooling("wifi","a","m",1010))}
  @Test fun stableSlowPermittedWithinUserGate(){val m=RouteStabilityMemory();repeat(8){m.record("wifi","a","m",LinkStabilityPolicy.Sample(true,900),1000L+it,1000)};assertFalse(m.cooling("wifi","a","m",1010))}
- @Test fun repeatedVarianceQuarantined(){val m=RouteStabilityMemory();repeat(7){m.record("wifi","a","m",LinkStabilityPolicy.Sample(true,if(it%2==0)100 else 400),1000L+it,1000)};assertTrue(m.cooling("wifi","a","m",1010))}
+ @Test fun varianceAloneDoesNotQuarantine(){val m=RouteStabilityMemory();repeat(7){m.record("wifi","a","m",LinkStabilityPolicy.Sample(true,if(it%2==0)100 else 400),1000L+it,1000)};assertFalse(m.cooling("wifi","a","m",1010))}
+ @Test fun slowVarianceQuarantined(){val m=RouteStabilityMemory();repeat(7){m.record("wifi","a","m",LinkStabilityPolicy.Sample(true,if(it%2==0)1500 else 2600),1000L+it,1000)};assertTrue(m.cooling("wifi","a","m",1010))}
  @Test fun clockRollbackClears(){val m=RouteStabilityMemory();quarantine(m);assertFalse(m.cooling("wifi","a","m",100))}
  @Test fun boundedMap(){val m=RouteStabilityMemory(1);quarantine(m);m.record("wifi","b","m",good(),1010,1000);assertFalse(m.cooling("wifi","a","m",1011))}
  @Test fun ordinarySingleHopOnly(){assertTrue(RouteStabilityMemory.mayAttribute(true,1,PowerPolicy.Plan()));assertFalse(RouteStabilityMemory.mayAttribute(true,2,PowerPolicy.Plan()));assertFalse(RouteStabilityMemory.mayAttribute(false,1,PowerPolicy.Plan()))}

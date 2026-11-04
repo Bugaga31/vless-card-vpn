@@ -23,7 +23,7 @@ class RuGeoR204Test {
  @Test fun broadTldsAreExplicitOptIn(){assertTrue("domain:ru" in RuGeoPolicy.domains(on));assertTrue(RuGeoPolicy.domains(Settings()).isEmpty());assertTrue(RuGeoPolicy.domains(on.copy(torRouting=true,services=listOf("youtube"))).isEmpty())}
  @Test fun exactSharedCdnHostIsNotWildcard(){val d=RuGeoPolicy.domains(on);assertTrue("full:kp-config-smart-tv.akamaized.net" in d);assertFalse("domain:akamaized.net" in d)}
  @Test fun offHasNoIpRules(){assertTrue(RuGeoPolicy.ips(Settings()).isEmpty());assertEquals(-1,ipIndex(rules(Settings())))}
- @Test fun torAllDisablesBothLists(){val s=on.copy(torAll=true);assertTrue(RuWhitelistPolicy.rules(s).isEmpty());assertTrue(RuGeoPolicy.ips(s).isEmpty());assertEquals(-1,ipIndex(rules(s)))}
+ @Test fun torAllKeepsRussianIpsDirect(){val s=on.copy(torAll=true);assertTrue(RuGeoPolicy.ips(s).isNotEmpty());assertTrue(ipIndex(rules(s))>=0)}
  @Test fun whitelistAndBroadModeIndependent(){assertTrue(RuGeoPolicy.domains(on.copy(ruWhitelist=false)).isNotEmpty());assertFalse(RuWhitelistPolicy.rules(Settings()).isEmpty())}
  @Test fun forceVpnTldRemovedFromDirectDns(){val d=RuGeoPolicy.domains(on.copy(alwaysVpn=listOf("private.example.ru")));assertFalse("domain:ru" in d);assertTrue("domain:su" in d)}
  @Test fun forceVpnExactRemoved(){val d=RuGeoPolicy.domains(on.copy(alwaysVpn=listOf("kp-config-smart-tv.akamaized.net")));assertFalse("full:kp-config-smart-tv.akamaized.net" in d)}
