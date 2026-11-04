@@ -47,8 +47,8 @@ jobs:
           ./gradlew --no-daemon --max-workers=2 :app:testDebugUnitTest :app:assembleDebug :vpn-test-probe:testDebugUnitTest :vpn-test-probe:assembleDebug
       - name: Xray-core for the host-side servers
         run: |
-          curl -fsSL -o /tmp/xray.zip https://github.com/XTLS/Xray-core/releases/download/v26.9.30/Xray-linux-64.zip
-          echo "f851110beaff16e78d643f0ccfd9524b4a44dfd59bae3e34bb52bba378f7690e  /tmp/xray.zip" | sha256sum -c -
+          curl -fsSL -o /tmp/xray.zip https://github.com/XTLS/Xray-core/releases/download/v26.10.31/Xray-linux-64.zip
+          echo "e4bd9119f50ae7c41658b1abd0679ae06f98bd864a2907ff33f2f2cf7081b214  /tmp/xray.zip" | sha256sum -c -
           mkdir -p /tmp/xray && unzip -qo /tmp/xray.zip -d /tmp/xray && /tmp/xray/xray version | head -1
       - name: Automatic DNS failover (closed loopback fixtures)
         run: python3 tools/e2e/dns-failover-smoke.py --xray /tmp/xray/xray --config /tmp/dns-auto-config.json

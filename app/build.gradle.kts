@@ -19,8 +19,8 @@ val splitAbi = providers.gradleProperty("splitAbi").orNull == "true"
 val targetAbis = if (armOnly) listOf("arm64-v8a", "armeabi-v7a") else listOf("arm64-v8a", "armeabi-v7a", "x86_64", "x86")
 
 // Xray-core for Android (2dust/AndroidLibXrayLite), pinned by version and SHA-256.
-val xrayVersion = "v26.9.30"
-val xraySha256 = "cf71680b776b9ca583747ba652f816b047a655eab875d8951e6141636d88bbd6"
+val xrayVersion = "v26.10.31"
+val xraySha256 = "2efdf731b1ed624eb1cb0d5a4d0aa95c0672e89f9702226d1ba2dc90308630b6"
 val xrayAar = layout.buildDirectory.file("xray/libv2ray-$xrayVersion.aar")
 val torVersion = "15.0.26"
 val torApks = mapOf(

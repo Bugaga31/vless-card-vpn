@@ -12,7 +12,7 @@ class OceanEnergyRegressionR137Test {
         battery: Int = 80, charging: Boolean = false, temp: Double = 30.0, thermal: Int = 0, scale: Float = 1f) =
         O.animate(motion, foreground, saver, battery, charging, temp, thermal, scale)
     @Test fun coreVersionBeforeUseDoesNotLoadNativeCode() {
-        assertTrue(com.vlesscardvpn.core.XrayCore.version().contains("26.9.30"))
+        assertTrue(com.vlesscardvpn.core.XrayCore.version().contains("26.10.31"))
     }
     @Test fun seaDoesNotAnimateInBackgroundSaverOrReducedMotion() {
         assertTrue(enabled())
