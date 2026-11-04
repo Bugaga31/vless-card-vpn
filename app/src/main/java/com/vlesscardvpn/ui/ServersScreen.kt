@@ -4,6 +4,8 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
@@ -144,10 +146,19 @@ private fun AddDialog(onDismiss: () -> Unit, onAdd: (String) -> Unit) {
             Column {
                 OutlinedTextField(value = text, onValueChange = { text = it }, modifier = Modifier.fillMaxWidth().heightIn(min = 120.dp, max = 260.dp),
                     placeholder = { Text("Ссылки vless:// vmess:// trojan:// ss:// hysteria2:// wireguard:// socks://, WireGuard .conf (WARP), Xray JSON, текст подписки, маскировки vcmask://, настройка сети vcnet:// или резервная копия vcbackup://") })
+                val pick = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+                    uri?.let { u ->
+                        val t = runCatching {
+                            ctx.contentResolver.openInputStream(u)?.bufferedReader()?.use { r -> r.readText() }
+                        }.getOrNull()
+                        if (!t.isNullOrBlank()) text = t
+                    }
+                }
                 TextButton(onClick = {
                     val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                     text = cm.primaryClip?.getItemAt(0)?.coerceToText(ctx)?.toString().orEmpty()
                 }) { Text("Вставить из буфера") }
+                TextButton(onClick = { pick.launch(arrayOf("*/*")) }) { Text("Из файла") }
                 Text("Ссылку на подписку (https://…) добавьте в Настройках → Подписки.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         },
