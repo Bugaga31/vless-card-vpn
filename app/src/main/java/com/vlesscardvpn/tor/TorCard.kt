@@ -75,18 +75,28 @@ object TorCard {
      * come from bridges.torproject.org, as with Termux.
      */
     fun torrcEmbedded(ctx: android.content.Context, controlPort: Int = DEFAULT_CONTROL_PORT,
-                      socksPort: Int = DEFAULT_SOCKS_PORT, bridge: String = "none", bridgeLines: List<String> = emptyList()): String {
+                      socksPort: Int = DEFAULT_SOCKS_PORT, bridge: String = "none", bridgeLines: List<String> = emptyList(),
+                      exitCountry: String = ""): String {
         val dir = java.io.File(ctx.filesDir, "tor")
         return torrcEmbedded(java.io.File(dir, "data").absolutePath, java.io.File(dir, "cookie").absolutePath,
-            nativeDir(ctx), controlPort, socksPort, bridge, bridgeLines)
+            nativeDir(ctx), controlPort, socksPort, bridge, bridgeLines, exitCountry)
+    }
+
+    /** `ExitNodes {ru}` + StrictNodes: выход строго в выбранной стране (пусто — Tor решает сам). */
+    private fun StringBuilder.exitNodes(country: String) {
+        val cc = country.trim().lowercase()
+        if (cc.length != 2 || !cc.all { it in 'a'..'z' }) return
+        appendLine("ExitNodes {$cc}")
+        appendLine("StrictNodes 1")
     }
 
     /** Pure overload — testable on the JVM without an Android context. */
     fun torrcEmbedded(dataDir: String, cookieFile: String, nativeBinDir: String,
                       controlPort: Int = DEFAULT_CONTROL_PORT,
                       socksPort: Int = DEFAULT_SOCKS_PORT, bridge: String = "none",
-                      bridgeLines: List<String> = emptyList()): String = buildString {
+                      bridgeLines: List<String> = emptyList(), exitCountry: String = ""): String = buildString {
         appendLine("SocksPort 127.0.0.1:$socksPort")
+        exitNodes(exitCountry)
         appendLine("ControlPort 127.0.0.1:$controlPort")
         appendLine("CookieAuthentication 1")
         appendLine("CookieAuthFile $cookieFile")
@@ -106,9 +116,9 @@ object TorCard {
     /** Starts the embedded daemon; returns the process (caller keeps it alive). */
     fun startEmbedded(ctx: android.content.Context, bridge: String = "none",
                       controlPort: Int = DEFAULT_CONTROL_PORT, socksPort: Int = DEFAULT_SOCKS_PORT,
-                      bridgeLines: List<String> = emptyList()): java.lang.Process {
+                      bridgeLines: List<String> = emptyList(), exitCountry: String = ""): java.lang.Process {
         val dir = java.io.File(ctx.filesDir, "tor"); dir.mkdirs()
-        java.io.File(dir, "torrc").writeText(torrcEmbedded(ctx, controlPort, socksPort, bridge, bridgeLines))
+        java.io.File(dir, "torrc").writeText(torrcEmbedded(ctx, controlPort, socksPort, bridge, bridgeLines, exitCountry))
         val b = java.lang.ProcessBuilder(listOf(java.io.File(nativeDir(ctx), "libTor.so").absolutePath,
             "-f", java.io.File(dir, "torrc").absolutePath))
             .redirectOutput(java.io.File(dir, "tor.log")).redirectErrorStream(true)
@@ -122,9 +132,9 @@ object TorCard {
     /** Starts the embedded daemon unless a local Tor already answers on [socksPort]. */
     fun ensureStarted(ctx: android.content.Context, bridge: String = "none",
                       controlPort: Int = DEFAULT_CONTROL_PORT, socksPort: Int = DEFAULT_SOCKS_PORT,
-                      bridgeLines: List<String> = emptyList()): java.lang.Process? {
+                      bridgeLines: List<String> = emptyList(), exitCountry: String = ""): java.lang.Process? {
         if (!available(ctx) || portUp(socksPort)) return null
-        return runCatching { startEmbedded(ctx, bridge, controlPort, socksPort, bridgeLines).also { embedded = it } }.getOrNull()
+        return runCatching { startEmbedded(ctx, bridge, controlPort, socksPort, bridgeLines, exitCountry).also { embedded = it } }.getOrNull()
     }
 
     /** Stops the embedded daemon (Termux tor is managed by Termux itself). */
