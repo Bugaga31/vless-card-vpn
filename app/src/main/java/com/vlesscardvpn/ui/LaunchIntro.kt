@@ -3,6 +3,7 @@ package com.vlesscardvpn.ui
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -16,6 +17,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
@@ -49,7 +51,11 @@ import com.vlesscardvpn.core.Store
         }
     }
     val scheme = MaterialTheme.colorScheme
-    Box(Modifier.fillMaxSize().background(scheme.background), contentAlignment = Alignment.Center) {
+    val dismiss by rememberUpdatedState(onDismiss)
+    // Opaque to touch as well as to the eye: nothing may fall through to Home underneath (the intro also stays
+    // on top while it fades out), and a tap anywhere skips it.
+    Box(Modifier.fillMaxSize().background(scheme.background).pointerInput(Unit) { detectTapGestures { dismiss() } },
+        contentAlignment = Alignment.Center) {
         Canvas(Modifier.fillMaxSize()) {
             drawRect(Brush.radialGradient(listOf(accent.copy(alpha = .08f), scheme.background),
                 center = center, radius = size.maxDimension * .65f))
