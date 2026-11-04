@@ -421,11 +421,22 @@ class TunnelService : VpnService() {
             // Embedded daemon (no Termux needed); Termux instance wins when its cookie is readable.
             runCatching {
                 com.vlesscardvpn.tor.TorCard.ensureStarted(this@TunnelService, st.torBridge,
-                    bridgeLines = st.torBridgeLines.lines().map { it.trim() }.filter { it.startsWith("Bridge ") }.take(12))
+                    bridgeLines = st.torBridgeLines.lines().map { it.trim() }.filter { it.startsWith("Bridge ") }.take(12),
+                    entryCountry = st.torEntryCountry, exitCountry = st.torExitCountry)
             }
             val cookie = runCatching { com.vlesscardvpn.tor.TorCard.readCookieHex(this@TunnelService) }.getOrNull()
             if (cookie == null) { Log.i("TOR", "no control cookie, rotator idle"); return@launch }
-            if (!st.torRotation) return@launch
+            // Apply the user's country choice to an already-running Termux daemon too.
+            // A pinned exit is intentionally not overridden by the automatic exit rotator.
+            runCatching {
+                val control = com.vlesscardvpn.tor.TorControl("127.0.0.1", com.vlesscardvpn.tor.TorCard.DEFAULT_CONTROL_PORT)
+                try {
+                    control.connect(cookie)
+                    control.setCountryPreferences(st.torEntryCountry, st.torExitCountry)
+                    control.signalNewNym()
+                } finally { control.close() }
+            }.onFailure { Log.i("TOR", "country preference not applied: ${it.message}") }
+            if (!st.torRotation || st.torExitCountry.isNotBlank()) return@launch
             val rotator = com.vlesscardvpn.tor.TorRotator(
                 com.vlesscardvpn.tor.TorControl("127.0.0.1", com.vlesscardvpn.tor.TorCard.DEFAULT_CONTROL_PORT),
                 countries = com.vlesscardvpn.tor.TorCard.preferredCountries(Store.state.value.servers),
