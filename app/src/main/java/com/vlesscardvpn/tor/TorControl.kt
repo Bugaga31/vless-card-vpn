@@ -40,6 +40,28 @@ open class TorControl(private val host: String = "127.0.0.1", private val port: 
         if (!r.startsWith("250")) throw IOException("SETCONF failed: $r")
     }
 
+    /** Apply optional country preferences; an empty value restores Tor's torrc/default choice. */
+    open fun setCountryPreferences(entryCountry: String, exitCountry: String) {
+        fun normalize(value: String): String? {
+            val code = value.trim().lowercase()
+            if (code.isEmpty()) return null
+            require(Regex("^[a-z]{2}$").matches(code)) { "Invalid Tor country code" }
+            return code
+        }
+        val entry = normalize(entryCountry)
+        val exit = normalize(exitCountry)
+        val reset = command("RESETCONF", "EntryNodes", "ExitNodes", "StrictNodes")
+        if (!reset.startsWith("250")) throw IOException("RESETCONF failed: $reset")
+        val options = mutableListOf<String>()
+        entry?.let { options += "EntryNodes=\"{$it}\"" }
+        exit?.let { options += "ExitNodes=\"{$it}\"" }
+        if (entry != null || exit != null) options += "StrictNodes=1"
+        if (options.isNotEmpty()) {
+            val result = command("SETCONF", *options.toTypedArray())
+            if (!result.startsWith("250")) throw IOException("SETCONF failed: $result")
+        }
+    }
+
     /** true when at least one circuit is established. */
     fun circuitEstablished(): Boolean = try {
         command("GETINFO", "status/circuit-established").contains("status/circuit-established=1")

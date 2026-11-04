@@ -34,6 +34,22 @@ class TorCardTorcR154Test {
     }
 
     @Test
+    fun `torrc pins selected entry and exit countries strictly`() {
+        val rc = TorCard.torrc(entryCountry = "DE", exitCountry = "nl")
+        assertTrue(rc.contains("EntryNodes {de}"))
+        assertTrue(rc.contains("ExitNodes {nl}"))
+        assertTrue(rc.contains("StrictNodes 1"))
+    }
+
+    @Test
+    fun `torrc ignores malformed country codes`() {
+        val rc = TorCard.torrc(entryCountry = "de;ExitNodes=*", exitCountry = "")
+        assertFalse(rc.contains("ExitNodes"))
+        assertFalse(rc.contains("EntryNodes"))
+        assertFalse(rc.contains("StrictNodes"))
+    }
+
+    @Test
     fun `torrc keeps socks and control ports and cookie auth`() {
         val rc = TorCard.torrc(controlPort = 9055, socksPort = 9060)
         assertTrue(rc.contains("SocksPort 127.0.0.1:9060"))

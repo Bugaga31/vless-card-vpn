@@ -53,6 +53,24 @@ class TorControlTest {
     }
 
     @Test
+    fun `sets selected entry and exit countries strictly`() {
+        val fake = FakeControl().apply { start(); awaitPort() }
+        try {
+            val control = TorControl("127.0.0.1", fake.server.localPort)
+            control.connect("01")
+            control.setCountryPreferences("DE", "nl")
+            control.close()
+            val commands = fake.received.toString()
+            assertTrue("RESETCONF EntryNodes ExitNodes StrictNodes" in commands)
+            assertTrue("SETCONF EntryNodes=\"{de}\" ExitNodes=\"{nl}\" StrictNodes=1" in commands)
+        } finally {
+            fake.stopped = true
+            fake.server.close()
+            Thread.sleep(100)
+        }
+    }
+
+    @Test
     fun `authenticates with cookie and issues newnym`() {
         val fake = FakeControl().apply { start(); awaitPort() }
         try {
