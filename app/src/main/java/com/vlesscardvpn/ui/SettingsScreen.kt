@@ -233,6 +233,13 @@ fun SettingsScreen() {
                     modifier = Modifier.fillMaxWidth(), label = { Text("Мосты: строки «Bridge …» (до 12)") }, minLines = 2, maxLines = 6)
                 Hint("Скопируйте строки «Bridge obfs4 …» / «Bridge webtunnel …» с bridges.torproject.org сюда — по одной в строке. Применится при следующем подключении.")
             }
+            Text("Страна выхода Tor", fontSize = 14.sp)
+            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                listOf("" to "Авто", "ru" to "🇷🇺 Россия", "nl" to "🇳🇱 NL", "de" to "🇩🇪 DE", "fi" to "🇫🇮 FI", "se" to "🇸🇪 SE", "tr" to "🇹🇷 TR").forEach { (id, t) ->
+                    FilterChip(selected = s.torExit == id, onClick = { set { it.copy(torExit = id) } }, label = { Text(t) })
+                }
+            }
+            Hint("Выход строго в выбранной стране (ExitNodes + StrictNodes). «Россия» — сайты видят российский адрес Tor, зарубежные сервисы — что вы из РФ. Применяется при следующем запуске Tor.")
             Toggle("Весь трафик через Tor", "Максимальная анонимность: всё через Tor поверх туннеля. Медленно — только когда анонимность важнее скорости", s.torAll) { v -> set { it.copy(torAll = v) } }
         }
         Group("Нагрузка VPN и батарея") {

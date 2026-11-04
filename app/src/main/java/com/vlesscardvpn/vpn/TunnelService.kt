@@ -421,7 +421,8 @@ class TunnelService : VpnService() {
             // Embedded daemon (no Termux needed); Termux instance wins when its cookie is readable.
             runCatching {
                 com.vlesscardvpn.tor.TorCard.ensureStarted(this@TunnelService, st.torBridge,
-                    bridgeLines = st.torBridgeLines.lines().map { it.trim() }.filter { it.startsWith("Bridge ") }.take(12))
+                    bridgeLines = st.torBridgeLines.lines().map { it.trim() }.filter { it.startsWith("Bridge ") }.take(12),
+                    exitCountry = st.torExit)
             }
             val cookie = runCatching { com.vlesscardvpn.tor.TorCard.readCookieHex(this@TunnelService) }.getOrNull()
             if (cookie == null) { Log.i("TOR", "no control cookie, rotator idle"); return@launch }
