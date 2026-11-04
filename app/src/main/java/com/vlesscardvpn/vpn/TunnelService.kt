@@ -700,7 +700,7 @@ class TunnelService : VpnService() {
                 if (sinceNet < 90_000L && !netHardDone) { netHardDone = true; hardRestart("новая сеть, а интернет не пошёл", force = true); return@launch }
                 if (System.currentTimeMillis() - lastHard > 5 * 60_000L) { hardRestart("после переподключения интернет не пошёл"); return@launch }
             }
-            if (p.works) { healStep = 0; dpiHeals = 0; connectFails = 0; scheduleOptimize(if (com.vlesscardvpn.core.Actions.deepPending || usedServers.size < com.vlesscardvpn.core.AutoEligibility.ACTIVE) 5_000 else 60_000); if(st.mode!=Mode.AUTO) com.vlesscardvpn.core.AppWatch.start(this@TunnelService, reconnect = { scope.launch { lock.withLock { connect(soft = true, reason = SoftReason.APP_REPAIR) } } }, maintenanceReconnect = { scheduleMaintenanceReconnect() }, connectedAt = { connectedElapsed }); watchdog(); standbyScout(); coverTraffic(); torLoop(); serviceRoutes(); if(st.mode!=Mode.AUTO) autoChainScout() } else heal()
+            if (p.works) { healStep = 0; dpiHeals = 0; connectFails = 0; scheduleOptimize(60_000); if(st.mode!=Mode.AUTO) com.vlesscardvpn.core.AppWatch.start(this@TunnelService, reconnect = { scope.launch { lock.withLock { connect(soft = true, reason = SoftReason.APP_REPAIR) } } }, maintenanceReconnect = { scheduleMaintenanceReconnect() }, connectedAt = { connectedElapsed }); watchdog(); standbyScout(); coverTraffic(); torLoop(); serviceRoutes(); if(st.mode!=Mode.AUTO) autoChainScout() } else heal()
         }
     }
 
@@ -1438,7 +1438,7 @@ class TunnelService : VpnService() {
                 val cur = Tunnel.status.value
                 Tunnel.status.value = cur.copy(check = "HTTPS есть, Telegram пока не подтверждён. Рабочий резерв не найден; повторю поиск автоматически", checkOk = false)
                 Actions.deepPending = true
-                scheduleOptimize(5_000)
+                scheduleOptimize(60_000)
             }
         }
     }
@@ -1680,12 +1680,12 @@ class TunnelService : VpnService() {
     /** Speed right in the notification (every 10 s, only with the screen on — nothing runs while the phone sleeps). */
     private fun liveNotification(route: String) {
         liveJob?.cancel()
-        if (Store.state.value.settings.quietNotification) return
+        if (Store.state.value.settings.quietNotification || !Store.state.value.settings.notifSpeed) return
         liveJob = scope.launch {
             val uid = android.os.Process.myUid()
             var rx = android.net.TrafficStats.getUidRxBytes(uid); var tx = android.net.TrafficStats.getUidTxBytes(uid); var t = System.nanoTime()
             while (Tunnel.status.value.state == Tunnel.State.CONNECTED) {
-                delay(10_000)
+                delay(30_000)
                 if (!(getSystemService(android.os.PowerManager::class.java)?.isInteractive ?: true)) {
                     com.vlesscardvpn.core.PhonePower.state.first { it.screenInteractive }
                     rx = android.net.TrafficStats.getUidRxBytes(uid); tx = android.net.TrafficStats.getUidTxBytes(uid); t = System.nanoTime(); continue
