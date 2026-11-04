@@ -22,11 +22,11 @@ val targetAbis = if (armOnly) listOf("arm64-v8a", "armeabi-v7a") else listOf("ar
 val xrayVersion = "v26.10.31"
 val xraySha256 = "2efdf731b1ed624eb1cb0d5a4d0aa95c0672e89f9702226d1ba2dc90308630b6"
 val xrayAar = layout.buildDirectory.file("xray/libv2ray-$xrayVersion.aar")
-val torVersion = "15.0.26"
+val torVersion = "16.0"
 val torApks = mapOf(
-    "arm64-v8a" to Triple("tor-browser-android-aarch64", "76cab5bed1def6289eacc6a6acad62156d5aae74669e69af5eb63ae76692b306", listOf("libTor.so", "libLyrebird.so", "libConjure.so")),
-    "armeabi-v7a" to Triple("tor-browser-android-armv7", "a6479ad4f871081a4b66107523188cb2523b4fd4fff1c04f5cee0b10e83b1af2", listOf("libTor.so", "libLyrebird.so", "libConjure.so")),
-    "x86_64" to Triple("tor-browser-android-x86_64", "5b292e0fa91ed40a30435058f79f2bb88481e0be43d430761aa586c36cd156c7", listOf("libTor.so", "libLyrebird.so")),
+    "arm64-v8a" to Triple("tor-browser-android-aarch64", "2e24d41a54161ee3791477ba021de847844f224231055b2651f93930a0a7573f", listOf("libTor.so", "libLyrebird.so", "libConjure.so")),
+    "armeabi-v7a" to Triple("tor-browser-android-armv7", "b55982271cae356dd89e6eea34ec06ca78764078dc03af2bd975ddac34bfc66e", listOf("libTor.so", "libLyrebird.so", "libConjure.so")),
+    "x86_64" to Triple("tor-browser-android-x86_64", "f9e79971bc2245f98da6d661915f30a5bd6552a2cf72a9fab6f371d999876df1", listOf("libTor.so", "libLyrebird.so")),
 )
 val fetchXray by tasks.registering {
     outputs.file(xrayAar)
@@ -44,16 +44,21 @@ val fetchXray by tasks.registering {
 }
 val fetchTor by tasks.registering {
     outputs.dir(layout.buildDirectory.dir("generated/tor"))
+    outputs.dir(layout.buildDirectory.dir("generated/tor-pins"))
     doLast {
         val out = layout.buildDirectory.dir("generated/tor").get().asFile
         fun sha(f: File) = MessageDigest.getInstance("SHA-256").digest(f.readBytes()).joinToString("") { "%02x".format(it) }
-        fun valid(abi: String, libs: List<String>) = libs.all { l ->
+        // Libraries extracted from an older pinned APK must not survive a version bump: the marker (outside jniLibs)
+        // names the APK hash they came from.
+        val pins = layout.buildDirectory.dir("generated/tor-pins").get().asFile
+        fun valid(abi: String, libs: List<String>, want: String) = File(pins, "$abi.sha256").let { it.isFile && it.readText() == want } &&
+            libs.all { l ->
             val f = File(out, "$abi/$l"); f.isFile && f.length() > 1_000_000 &&
                 f.readBytes().copyOfRange(0, 4).contentEquals(byteArrayOf(0x7f.toByte(), 'E'.code.toByte(), 'L'.code.toByte(), 'F'.code.toByte()))
         }
         for ((abi, spec) in torApks) {
             val (name, want, libs) = spec
-            if (valid(abi, libs)) continue
+            if (valid(abi, libs, want)) continue
             val tmp = File(out, "$abi.apk.part"); tmp.parentFile.mkdirs()
             // Older pinned versions leave dist; the official archive retains identical bytes.
             // Never drop pinning, substitute a newer version, or continue on checksum failure.
@@ -79,6 +84,7 @@ val fetchTor by tasks.registering {
                     z.getInputStream(e).use { input -> File(dir, l).outputStream().use { input.copyTo(it) } }
                 }
             }
+            pins.mkdirs(); File(pins, "$abi.sha256").writeText(want)
             tmp.delete()
         }
     }
