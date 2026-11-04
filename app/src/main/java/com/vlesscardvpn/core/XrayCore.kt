@@ -36,7 +36,7 @@ object XrayCore {
         initialized = true
     }
 
-    fun version(): String = if (!initialized) "Xray 26.9.30 · запуск по необходимости" else runCatching { Libv2ray.checkVersionX() }.getOrDefault("?")
+    fun version(): String = if (!initialized) "Xray 26.10.31 · запуск по необходимости" else runCatching { Libv2ray.checkVersionX() }.getOrDefault("?")
 
     private val diagnosticIds = java.util.concurrent.atomic.AtomicLong()
 

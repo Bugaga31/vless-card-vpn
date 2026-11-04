@@ -18,6 +18,8 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PowerSettingsNew
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
@@ -103,11 +105,22 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
         val color = when { on && status.checkOk == false -> Warn; on && status.checkOk == null -> Accent; on -> Good; busy -> Accent; else -> MaterialTheme.colorScheme.primary }
         ConnectionOverview(status, cfg.hideServerNames, if(cfg.torAll) "Tor через VLESS" else if(cfg.mode==Mode.AUTO) "Авто" else "Выбранные серверы") {
             val action=com.vlesscardvpn.core.HomePresentation.action(on,busy)
-            Button(onClick={if(action==com.vlesscardvpn.core.HomePresentation.Action.CONNECT) onConnect() else onDisconnect()},
-                modifier=Modifier.fillMaxWidth().heightIn(min=56.dp),contentPadding=PaddingValues(16.dp)) {
+            val connect=action==com.vlesscardvpn.core.HomePresentation.Action.CONNECT
+            // One large target: filled while disconnected, calm tonal with a status outline once a route is running.
+            Button(onClick={if(connect) onConnect() else onDisconnect()},
+                modifier=Modifier.fillMaxWidth().heightIn(min=60.dp),shape=RoundedCornerShape(20.dp),
+                contentPadding=PaddingValues(horizontal=20.dp,vertical=16.dp),
+                border=if(connect) null else androidx.compose.foundation.BorderStroke(1.5.dp,color),
+                colors=if(connect) ButtonDefaults.buttonColors() else ButtonDefaults.buttonColors(
+                    containerColor=MaterialTheme.colorScheme.surfaceVariant,contentColor=MaterialTheme.colorScheme.onSurface)) {
+                if(action==com.vlesscardvpn.core.HomePresentation.Action.CANCEL)
+                    CircularProgressIndicator(Modifier.size(22.dp),color=LocalContentColor.current,strokeWidth=2.5.dp)
+                else Icon(Icons.Filled.PowerSettingsNew,null,Modifier.size(24.dp))
+                Spacer(Modifier.width(12.dp))
                 Text(when(action) {com.vlesscardvpn.core.HomePresentation.Action.CONNECT->"Подключить"
                     com.vlesscardvpn.core.HomePresentation.Action.CANCEL->"Отменить"
-                    com.vlesscardvpn.core.HomePresentation.Action.DISCONNECT->"Отключить"},style=MaterialTheme.typography.titleMedium)
+                    com.vlesscardvpn.core.HomePresentation.Action.DISCONNECT->"Отключить"},
+                    style=MaterialTheme.typography.titleMedium,fontWeight=FontWeight.SemiBold)
             }
         }
         Text("${BuildConfig.VERSION_NAME} · " + if (cfg.stealthSocks) "Локальный прокси защищён паролем" else "SOCKS 127.0.0.1:${cfg.socksPort}",
@@ -181,7 +194,7 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
         }
         Spacer(Modifier.height(20.dp))
         var opts by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
-        Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+        Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
             Column(Modifier.padding(14.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 Row(Modifier.fillMaxWidth().heightIn(min=48.dp).semantics { stateDescription=if(opts) "Развёрнуто" else "Свёрнуто" }.clickable(role=Role.Button) { opts = !opts }, verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
@@ -190,7 +203,7 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
                             "VPN", "все приложения", "весь интернет через сервер").joinToString(" · "),
                             fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
                     }
-                    Text(if (opts) "▴" else "▾", fontSize = 18.sp, color = Accent)
+                    Icon(if (opts) androidx.compose.material.icons.Icons.Filled.ExpandLess else androidx.compose.material.icons.Icons.Filled.ExpandMore, null, tint = Accent)
                 }
                 if (opts) {
                     Spacer(Modifier.height(10.dp))
@@ -215,10 +228,11 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
                 Text("Защищённый VPN · все приложения · весь внешний трафик через сервер",
                     fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
             }
+            }
         }
         Spacer(Modifier.height(12.dp))
-
-        Card(Modifier.fillMaxWidth().clickable { openServers() }, shape = RoundedCornerShape(14.dp),
+        // A sibling card, not nested inside «Как подключаться» (the same colour made both look like one block).
+        Card(Modifier.fillMaxWidth().clickable { openServers() }, shape = RoundedCornerShape(20.dp),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
                 Column(Modifier.padding(14.dp)) {
                     Text(when {
@@ -241,7 +255,6 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
                     if (sum.heavyMask) Text("Маскировка «тяжёлая» (мелкие пакеты) — видео может тормозить. После подключения сам поищу лёгкую", fontSize = 14.sp, color = Warn)
                 }
             }
-        }
         if (status.state == Tunnel.State.CONNECTED && sum.selectedCount > 0) {
             Spacer(Modifier.height(10.dp))
             OutlinedButton(onClick = { Actions.findMasks(Store.state.value.selected) }, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
@@ -390,19 +403,6 @@ private fun pick(c: String, onChange: () -> Unit) {
     Store.update { it.copy(settings = it.settings.copy(country = c)) }
     if (Store.state.value.settings.mode == Mode.AUTO) Actions.selectBest(com.vlesscardvpn.core.AutoEligibility.TOP, close = false)
     onChange()
-}
-
-/** Single stable action: cancellation remains available, without a continuous glow/pulse. */
-@Composable
-private fun PowerButton(on:Boolean,busy:Boolean,color:Color,onClick:()->Unit) {
-    val title=when {on->"Отключить";busy->"Отменить поиск";else->"Подключить"}
-    Button(onClick=onClick,modifier=Modifier.fillMaxWidth().heightIn(min=56.dp),
-        shape=RoundedCornerShape(12.dp),colors=ButtonDefaults.buttonColors(
-            containerColor=if(on || busy) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.primary,
-            contentColor=if(on || busy) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onPrimary)) {
-        Icon(Icons.Filled.PowerSettingsNew,null,modifier=Modifier.size(24.dp))
-        Spacer(Modifier.width(10.dp));Text(title,fontSize=17.sp,fontWeight=FontWeight.SemiBold)
-    }
 }
 
 /** Session: time and traffic as three tiles. */

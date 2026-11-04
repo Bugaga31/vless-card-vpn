@@ -12,24 +12,34 @@ for scale in 1.0 1.3; do
   adb shell monkey -p "$PKG" -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1
   if [ "$scale" = 1.0 ]; then dst=home-ocean.png; else dst=home-large-text.png; fi
   found=0
+  intro_seen=0
   last_operation=waiting
   for n in $(seq 1 15); do
     sleep 2
     # An intro frame is not a ready home frame. Require the Compose hierarchy too.
-    # Remove stale files first; failed adb calls must not leave accepted old evidence.
+    # Remove stale files first (host and device): a dump that fails without a non-zero exit
+    # (for example "could not get idle state") must not leave the previous frame as fresh evidence.
     rm -f /tmp/vcard-ui.xml "$dst"
     last_operation=hierarchy-dump
+    timeout 5s adb shell rm -f /sdcard/vcard-ui.xml >/dev/null 2>&1 || continue
     timeout 12s adb shell uiautomator dump /sdcard/vcard-ui.xml >/dev/null 2>&1 || continue
     last_operation=hierarchy-read
     timeout 5s adb shell cat /sdcard/vcard-ui.xml > /tmp/vcard-ui.xml || continue
-    # A fresh launch may still show the real, skippable intro. Use its exact app-owned
-    # enabled button, not fixed coordinates or a hidden app preference/debug bypass.
+    test -s /tmp/vcard-ui.xml || continue
+    # A fresh launch may still show the real intro. It hides itself ~1.4 s after its first frame, so a tap
+    # computed from an older dump can land on Home instead (on small screens: the Auto profile sheet).
+    # Wait for it; tap its exact app-owned enabled button only if it stays through three fresh dumps.
     if xy=$(python3 tools/release-gates/intro_button.py /tmp/vcard-ui.xml "$PKG"); then
-      last_operation=intro-dismiss
-      read -r x y <<< "$xy"
-      timeout 5s adb shell input tap "$x" "$y" || continue
+      intro_seen=$((intro_seen+1))
+      last_operation=intro-wait
+      if [ "$intro_seen" -ge 3 ]; then
+        last_operation=intro-dismiss
+        read -r x y <<< "$xy"
+        timeout 5s adb shell input tap "$x" "$y" || continue
+      fi
       continue
     fi
+    intro_seen=0
     last_operation=screenshot
     timeout 5s adb exec-out screencap -p > "$dst" || continue
     last_operation=home-evidence
@@ -37,17 +47,21 @@ for scale in 1.0 1.3; do
     then found=1; break; fi
   done
   if [ "$found" != 1 ]; then
-    python3 - "$dst" "$PKG" "$last_operation" <<'PYDIAG'
+    python3 - "$dst" "$PKG" "$last_operation" "$scale" <<'PYDIAG'
 import json,sys,xml.etree.ElementTree as E
 from pathlib import Path
 sys.path.insert(0,'tools/release-gates')
 from check_screenshot import check_png
-r={'last_operation':sys.argv[3],'app_nodes':0,'app_label_nodes':0,'system_dialog':False,'png_nonblank':False}
+r={'last_operation':sys.argv[3],'font_scale':sys.argv[4],'app_nodes':0,'app_label_nodes':0,'system_dialog':False,'png_nonblank':False}
 try:
     nodes=list(E.parse('/tmp/vcard-ui.xml').getroot().iter('node'))
     r['app_nodes']=sum(n.get('package')==sys.argv[2] for n in nodes)
     r['app_label_nodes']=sum(n.get('package')==sys.argv[2] and bool(n.get('text') or n.get('content-desc')) for n in nodes)
     r['system_dialog']=any('permissioncontroller' in n.get('package','') for n in nodes)
+    # Which required home labels are missing; no other UI text is logged.
+    labels={v.strip() for n in nodes if n.get('package')==sys.argv[2] for v in (n.get('text',''),n.get('content-desc',''))}
+    r['missing']=[x for x in ('Подключить','Главная','Серверы') if x not in labels]
+    r['intro']='Открыть приложение' in labels
 except (OSError,E.ParseError):pass
 try:check_png(Path(sys.argv[1]).read_bytes());r['png_nonblank']=True
 except Exception:pass

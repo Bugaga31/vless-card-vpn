@@ -238,7 +238,7 @@ fun SettingsScreen(openAssistant: () -> Unit = {}) {
         Balance.values().forEach { b ->
             Row(verticalAlignment = Alignment.CenterVertically) { RadioButton(selected = s.balance == b, onClick = { set { it.copy(balance = b) } }); Text(b.title) }
         }
-        Toggle("Мультиплексирование (mux)", "Меньше новых соединений — меньше рукопожатий, которые видит DPI. Не для Vision/XHTTP", s.mux) { v -> set { it.copy(mux = v) } }
+        Toggle("Мультиплексирование (mux)", "Меньше новых соединений — меньше рукопожатий, которые видит DPI. Проверки серверов идут с тем же mux. Не для Vision, XHTTP и SOCKS", s.mux) { v -> set { it.copy(mux = v) } }
         Toggle("Менять маскировку при каждом подключении", "Случайная из рабочих, найденных «Подобрать маскировку», — у трафика нет постоянного отпечатка", s.rotateMasks) { v -> set { it.copy(rotateMasks = v) } }
         Toggle("Блокировать рекламу и трекеры", "Блокирует отдельные рекламные домены. Рекламу внутри видео YouTube гарантированно не удаляет: она может идти с теми же адресами, что и видео. При сбое сайта выключите", s.blockAds) { v -> set { it.copy(blockAds = v) } }
         Toggle("Режим «Не отслеживается»", "Режет мобильную телеметрию (Firebase/Crashlytics/Sentry/AppsFlyer/TikTok-аналитика) и DoT 853 — приложения не могут обойти DNS приложения и слить телеметрию мимо VPN", s.blockTrackers) { v -> set { it.copy(blockTrackers = v) } }

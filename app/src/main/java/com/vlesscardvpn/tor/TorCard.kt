@@ -121,6 +121,10 @@ object TorCard {
         appendLine("CookieAuthFile $cookieFile")
         appendLine("DataDirectory $dataDir")
         appendLine("SafeLogging 1")
+        // Phone flash: keep state/consensus writes rare. Every start is user activity, so Tor never comes up dormant
+        // after a long idle period and the first site does not wait for circuits to be rebuilt.
+        appendLine("AvoidDiskWrites 1")
+        appendLine("DormantCanceledByStartup 1")
         appendLine("HTTPSProxy 127.0.0.1:$upstreamHttpPort")
         val bin = nativeBinDir
         when (bridge) {
