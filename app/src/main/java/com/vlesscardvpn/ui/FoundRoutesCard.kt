@@ -1,5 +1,7 @@
 package com.vlesscardvpn.ui
 
+import androidx.compose.foundation.shape.RoundedCornerShape
+
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -42,19 +44,22 @@ fun FoundRoutesCard(onConnectFound:()->Unit) {
     }
     val automatic=app.settings.mode==Mode.AUTO
     val connected=status.state==Tunnel.State.CONNECTED
-    if(automatic) Card(Modifier.fillMaxWidth().padding(vertical=6.dp),
-        colors=CardDefaults.cardColors(containerColor=MaterialTheme.colorScheme.secondaryContainer)) {
-        Column(Modifier.padding(12.dp),verticalArrangement=Arrangement.spacedBy(6.dp)) {
+    // Nothing to act on (no found routes, or VPN already up) and no attempt history: a quiet two-line card
+    // instead of a highlighted block with a disabled button and several disclaimers.
+    val quiet=(count==0 || connected) && attempt.run<=0
+    if(automatic) Card(Modifier.fillMaxWidth().padding(vertical=6.dp),shape=RoundedCornerShape(20.dp),
+        colors=CardDefaults.cardColors(containerColor=if(quiet) MaterialTheme.colorScheme.surface else MaterialTheme.colorScheme.secondaryContainer)) {
+        Column(Modifier.padding(horizontal=16.dp,vertical=14.dp),verticalArrangement=Arrangement.spacedBy(6.dp)) {
             Text(if(app.settings.torAll) "Найденные VLESS для Tor" else "Уже найденные серверы",style=MaterialTheme.typography.titleMedium)
             Text("Ранее рабочих: $count · с текущим допуском: $ready",style=MaterialTheme.typography.bodyMedium.copy(fontFeatureSettings="tnum"))
-            Text("Допуск учитывает профиль и контекст; подтверждённое вами превышение задержки учитывается отдельно от строгого лимита. Это не число готовых Tor-выходов.",style=MaterialTheme.typography.bodySmall)
+            if(!quiet) Text("Допуск учитывает профиль и контекст; подтверждённое вами превышение задержки учитывается отдельно от строгого лимита. Это не число готовых Tor-выходов.",style=MaterialTheme.typography.bodySmall)
             Text(when {
                 connected->"VPN уже подключён. Для смены маршрута сначала отключитесь."
                 app.settings.torAll && count>0->"Найденных VLESS: $count. Подготовлю один upstream и запущу Tor через сохранённые мосты. Это не число готовых Tor-выходов. Готовность цепочки проверяется отдельно; прямого обхода нет."
                 count==0->"В «Рабочих» пока нет подходящих для Авто серверов. Запустите проверку или общий поиск."
                 else->"В «Рабочих»: $count. Возьму готовый маршрут или перепроверю только найденные — без нового поиска по каталогу. Выбранные сервисы остаются обязательными."
-            },style=MaterialTheme.typography.bodyMedium)
-            Button(onClick={
+            },style=MaterialTheme.typography.bodyMedium,color=if(quiet) MaterialTheme.colorScheme.onSurfaceVariant else LocalContentColor.current)
+            if(!quiet) Button(onClick={
                 val current=Store.state.value;val net=Net.key(ctx)
                 val ready=AutoEligibility.servicePool(current.servers,current::state,net,System.currentTimeMillis())
                 val candidate=offer
@@ -81,7 +86,7 @@ fun FoundRoutesCard(onConnectFound:()->Unit) {
                 }
                 Text("Это история последней попытки, не текущий допуск. Непроверенные кандидаты не считаются нерабочими.",style=MaterialTheme.typography.bodySmall)
             }
-            Text("Допуск: ${AutoLatencyRange.text(AutoLatencyRange.safe(app.settings.autoLatencyMinMs,app.settings.autoLatencyMaxMs))} мс; быстрее нижней границы тоже подходит.",style=MaterialTheme.typography.bodyMedium)
+            if(!quiet) Text("Допуск: ${AutoLatencyRange.text(AutoLatencyRange.safe(app.settings.autoLatencyMinMs,app.settings.autoLatencyMaxMs))} мс; быстрее нижней границы тоже подходит.",style=MaterialTheme.typography.bodyMedium)
         }
     }
     val pinned=confirm
