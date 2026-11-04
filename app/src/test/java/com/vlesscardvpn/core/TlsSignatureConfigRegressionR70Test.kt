@@ -55,7 +55,14 @@ class TlsSignatureConfigRegressionR70Test {
         val c = JSONObject(XrayConfigBuilder.vpnConfig(listOf(ca to null), Settings(), null))
         val dns = c.getJSONObject("dns")
         val servers = dns.getJSONArray("servers").toString()
-        listOf("https://1.1.1.1/dns-query", "https://8.8.8.8/dns-query", "https://9.9.9.9/dns-query", "\"8.8.8.8\"").forEach { assertTrue(it, servers.contains(it.replace("/", "\\/")) || servers.contains(it)) }
+        listOf("https://1.1.1.1/dns-query", "https://8.8.8.8/dns-query", "https://9.9.9.9/dns-query").forEach { assertTrue(it, servers.contains(it.replace("/", "\\/")) || servers.contains(it)) }
+        assertTrue(dns.getBoolean("enableParallelQuery"))
+        for (i in 0 until dns.getJSONArray("servers").length()) {
+            val upstream = dns.getJSONArray("servers").getJSONObject(i)
+            if (upstream.has("domains")) {
+                assertEquals("77.88.8.8", upstream.getString("address")); assertTrue(upstream.getBoolean("skipFallback"))
+            } else assertTrue(upstream.getString("address").startsWith("https://"))
+        }
         assertEquals("8.8.8.8", dns.getJSONObject("hosts").getString("dns.google"))
         assertTrue(c.getJSONArray("outbounds").toString().contains("nonIPQuery"))
     }

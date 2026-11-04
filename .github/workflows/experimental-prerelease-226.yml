@@ -1,0 +1,140 @@
+name: Experimental 1.2.115 — signed APK and emulator UI verification
+on:
+  push:
+    branches: ['experiment/prerelease-226-release']
+permissions:
+  contents: read
+env:
+  VERSION: beta-build-226
+concurrency:
+  group: experimental-prerelease-226
+  cancel-in-progress: true
+jobs:
+  source:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      sha: ${{ steps.source.outputs.sha }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+      - id: source
+        shell: python
+        run: |
+          import base64,gzip,json,pathlib,subprocess,os,hashlib
+          assert os.environ["GITHUB_REF"]=="refs/heads/experiment/prerelease-226-release"
+          subprocess.run(["git","merge-base","--is-ancestor","4d4b22bf288a786fe20f96f8639aaab8db51edbf","HEAD"],check=True)
+          p=json.loads(gzip.decompress(base64.b64decode("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")))
+          if not all(pathlib.Path(n).exists() and pathlib.Path(n).read_text()==c for n,c in p["files"].items()):
+              for name,want in p["base"].items():
+                  f=pathlib.Path(name);actual=hashlib.sha256(f.read_bytes()).hexdigest() if f.exists() else None
+                  assert actual==want,"Source changed before write: "+name
+              for name,content in p["files"].items():
+                  f=pathlib.Path(name);f.parent.mkdir(parents=True,exist_ok=True);f.write_text(content)
+              subprocess.run(["git","add",*p["files"]],check=True)
+              subprocess.run(["git","-c","user.name=github-actions[bot]","-c","user.email=41898282+github-actions[bot]@users.noreply.github.com","commit","-m","test: preserve native executable paths containing equals in Android fixture [skip ci]"],check=True)
+              subprocess.run(["git","push","origin","HEAD:experiment/prerelease-226-release"],check=True)
+          for name,content in p["files"].items():
+              assert pathlib.Path(name).read_text()==content,"Candidate content mismatch: "+name
+          sha=subprocess.check_output(["git","rev-parse","HEAD"],text=True).strip()
+          with open(os.environ["GITHUB_OUTPUT"],"a") as f:f.write("sha="+sha+"\n")
+  build:
+    needs: source
+    if: github.repository == 'Bugaga31/vless-card-vpn' && github.ref == 'refs/heads/experiment/prerelease-226-release'
+    runs-on: ubuntu-latest
+    timeout-minutes: 65
+    env:
+      CANDIDATE_SHA: ${{ needs.source.outputs.sha }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ needs.source.outputs.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407
+        with:
+          packages: platform-tools platforms;android-34 build-tools;34.0.0
+          log-accepted-android-sdk-licenses: false
+      - uses: gradle/actions/setup-gradle@d9c87d481d55275bb5441eef3fe0e46805f9ef70
+      - name: Restore native libraries
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: |
+            app/build/generated/byedpi
+            app/build/generated/hev
+            app/build/generated/byedpi-cache.json
+            app/build/generated/hev-cache.json
+          key: native-${{ runner.os }}-${{ runner.arch }}-ndk27.2.12479018-api24-all-${{ hashFiles('native/**', 'app/build.gradle.kts') }}
+      - name: Install pinned NDK
+        run: sdkmanager 'ndk;27.2.12479018'
+      - name: Compile release APKs and targeted JVM regressions
+        run: |
+          export GITHUB_RUN_NUMBER=226
+          chmod +x gradlew
+          ./gradlew -PbetaPreview=true -PemulatorAbis=true -PsplitAbi=true --no-daemon --max-workers=2 :app:assembleRelease :app:assembleDebug :app:testDebugUnitTest --tests "*AutomaticWorkR226Test" --tests "*YouTubeAccessR226Test" --tests "*YouTubeLoadingR226Test" --tests "*TpwsProfileR226Test" --tests "*HomeDataMapperTest" --tests "*HomeRuntimeTest" --tests "*HomeUiWiringTest" --tests "*AutoRecoveryR224Test" --tests "*RecoveryR207Test" --tests "*ServiceExpansionR223Test" --tests "*AutoProfileR223Test" --tests "*ByeDpiArgsTest" --tests "*SeriesDiagnosticsR222Test" --tests "*ServiceTransportR221Test" --tests "*ProbeConfigR221Test" --tests "*CallQualityR206Test" --tests "*UdpCallProbeR174Test" --tests "*ServiceErrorsR220Test" --tests "*UiReadabilityR220Test" --tests "*AssistantIsolationR220Test" --tests "*R84Test" --tests "*R85Test" --tests "*FirstConnectivityR219Test" --tests "*AutoFreshR218Test" --tests "*WatsonAutoR217Test" --tests "*ServiceMediaR217Test" --tests "*FlyRokiR216Test" --tests "*AutoRokiR216Test" --tests "*WatsonR215Test" --tests "*RequiredServicesR214Test" --tests "*TelegramSocksProbeTest" --tests "*ServiceMediaProbeTest" --tests "*ExperienceR187Test" --tests "*TorBridgeCatalogR163Test" --tests "*MandatoryBridgesR208Test" --tests "*FoundPresetR213Test" --tests "*FoundConnectR213Test" --tests "*FoundRouteR212Test" --tests "*RouteStabilityR206Test" --tests "*FastConnectR211Test" --tests "*ProbeConcurrencyR210Test" --tests "*SearchPacingR200Test" --tests "*SubscriptionQueueR199Test" --tests "*AutoLatencyR185Test" --tests "*AutoCampaignR175Test" --tests "*ForegroundAutoR176Test" --tests "*PoolLatencyR203Test" --tests "*PhoneRuntimePolicyTest" --tests "*PowerRoutingR192Test" --tests "*AutoCheckProfileR209Test" --tests "*PowerPolicy*"
+      - name: Sign with persistent Beta key
+        env:
+          KS_B64: ${{ secrets.BETA_KEYSTORE_B64 }}
+          KSP: ${{ secrets.BETA_KEYSTORE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          umask 077
+          trap 'rm -f beta.jks aligned.apk release/*.idsig' EXIT INT TERM
+          BT=$ANDROID_HOME/build-tools/34.0.0
+          echo "$KS_B64" | base64 -d > beta.jks
+          mkdir -p release
+          OUT=app/build/outputs/apk/release
+          sign() {
+            $BT/zipalign -f -p 4 "$1" aligned.apk
+            $BT/apksigner sign --ks beta.jks --ks-key-alias beta --ks-pass env:KSP --key-pass env:KSP \
+              --v1-signing-enabled true --v2-signing-enabled true --v3-signing-enabled true \
+              --min-sdk-version 21 --out "$2" aligned.apk
+          }
+          sign "$OUT/app-universal-release-unsigned.apk" release/VLESS-Card-Beta.apk
+          sign "$OUT/app-arm64-v8a-release-unsigned.apk" release/VLESS-Card-Beta-arm64.apk
+          rm -f beta.jks aligned.apk release/*.idsig
+      - name: Enable emulator KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Render actual Home UI on Android API 33
+        uses: reactivecircus/android-emulator-runner@4c44018e59b437e86cdfc41da381398f93ed8808
+        with:
+          api-level: 33
+          target: google_apis
+          arch: x86_64
+          disable-animations: true
+          emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
+          script: |
+            python3 tools/release-gates/tpws_native_226.py --adb
+            python3 tools/release-gates/ui_smoke_226.py
+      - name: Verify persistent signature and signed package integrity
+        shell: bash
+        run: |
+          set -o pipefail
+          python3 tools/release-gates/prepare_experimental_226.py 2>&1 | tee "$RUNNER_TEMP/package-check.log" || {
+            python3 -c 'import pathlib,os; s=pathlib.Path(os.environ["RUNNER_TEMP"],"package-check.log").read_text()[-5000:]; print("::error title=Package integrity check failed::"+s.replace("%","%25").replace("\n","%0A").replace("\r","%0D"))'
+            exit 1
+          }
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: beta-apk
+          path: release/
+      - name: Save UI screenshots and JVM reports
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: r226-ui-and-tests
+          path: |
+            ui-smoke-226/
+            tpws-native-226/
+            app/build/reports/tests/testDebugUnitTest/
+            app/build/test-results/testDebugUnitTest/
+          if-no-files-found: warn

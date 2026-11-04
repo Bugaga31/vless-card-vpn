@@ -12,20 +12,29 @@ import java.net.Socket
  * SIGNAL NEWNYM, SETCONF ExitNodes, GETINFO status/circuit-established.
  * Speaks the raw line protocol — no dependencies beyond a TCP socket.
  */
-open class TorControl(private val host: String = "127.0.0.1", private val port: Int = DEFAULT_CONTROL_PORT) {
+open class TorControl(private val host: String = "127.0.0.1", private val port: Int = DEFAULT_CONTROL_PORT, private val timeoutMs: Int = 5000) {
+    init { require(timeoutMs in 100..5000) }
     private var socket: Socket? = null
     private var reader: BufferedReader? = null
     private var out: java.io.OutputStream? = null
 
     open fun connect(cookieHex: String) {
+        require(cookieHex.isNotEmpty() && cookieHex.length % 2 == 0 && cookieHex.all { it in "0123456789abcdefABCDEF" }) { "Invalid control cookie" }
+        close()
         val s = Socket()
-        s.connect(InetSocketAddress(host, port), 5000)
-        s.soTimeout = 5000
-        socket = s
-        reader = BufferedReader(InputStreamReader(s.getInputStream(), Charsets.US_ASCII))
-        out = s.getOutputStream()
-        val auth = command("AUTHENTICATE", cookieHex)
-        if (!auth.startsWith("250")) throw IOException("Tor auth failed: $auth")
+        try {
+            s.connect(InetSocketAddress(host, port), timeoutMs)
+            s.soTimeout = timeoutMs
+            socket = s
+            reader = BufferedReader(InputStreamReader(s.getInputStream(), Charsets.US_ASCII))
+            out = s.getOutputStream()
+            val auth = command("AUTHENTICATE", cookieHex)
+            if (!auth.startsWith("250 ")) throw IOException("Tor authentication rejected")
+        } catch (e: Exception) {
+            runCatching { s.close() }
+            socket = null; reader = null; out = null
+            throw e
+        }
     }
 
     open fun signalNewNym() {
@@ -35,9 +44,24 @@ open class TorControl(private val host: String = "127.0.0.1", private val port: 
 
     open fun setExitCountries(countries: List<String>) {
         if (countries.isEmpty()) return
+        require(countries.all { it.matches(Regex("[a-zA-Z]{2}")) }) { "Invalid exit country" }
         val value = countries.joinToString(",") { "{${it.lowercase()}}" }
         val r = command("SETCONF", "ExitNodes=\"$value\"")
         if (!r.startsWith("250")) throw IOException("SETCONF failed: $r")
+    }
+
+    open fun getConf(key: String): String? {
+        require(key.matches(Regex("[A-Za-z0-9]+"))) { "Invalid Tor configuration key" }
+        val response = command("GETCONF", key)
+        if (!response.startsWith("250")) throw IOException("GETCONF failed: $response")
+        return response.lineSequence().map(String::trim).firstOrNull { it.startsWith("250 $key=") }
+            ?.substringAfter('=' )?.trim()?.trim('"')
+    }
+
+    /** Remove our previous country preference after a physical-network/session change. */
+    open fun clearExitCountries() {
+        val r = command("RESETCONF", "ExitNodes")
+        if (!r.startsWith("250 ")) throw IOException("RESETCONF failed: $r")
     }
 
     /** true when at least one circuit is established. */
@@ -48,7 +72,6 @@ open class TorControl(private val host: String = "127.0.0.1", private val port: 
     }
 
     open fun close() {
-        runCatching { command("QUIT") }
         runCatching { socket?.close() }
         socket = null; reader = null; out = null
     }
@@ -56,7 +79,8 @@ open class TorControl(private val host: String = "127.0.0.1", private val port: 
     /** Sends a command, returns the joined multi-line reply (last-data line prefixed by '250 '). */
     @Throws(IOException::class)
     fun command(vararg parts: String): String {
-        val s = socket ?: throw IOException("not connected")
+        require(parts.isNotEmpty() && parts.all { part -> part.all { it.code in 32..126 } }) { "Invalid control command" }
+        if (socket == null) throw IOException("not connected")
         val line = parts.joinToString(" ")
         out!!.write((line + "\r\n").toByteArray(Charsets.US_ASCII))
         out!!.flush()

@@ -1,0 +1,5 @@
+{
+  "ready": true,
+  "scope": "Owner requested experimental VLESS Card 1.2.62 prerelease, not stable publication. Server-only user routes: no standalone ByeDPI/direct fallback; Tor TCP requires selected remote-server uplink and UDP stays on server. Deferred service eligibility rejects every explicit service FAIL. Preserves stored settings for rollback while applying server-only runtime restrictions. Includes bounded fast-start, voice-call switch protection and quieter background work inherited from audited Zo draft. Requires existing JVM, lint, signing certificate, security, emulator install/upgrade and E2E gates on final SHA before publishing a prerelease. No physical phone, operator network or real Tor bootstrap success is claimed.",
+  "physical_phone_tested": false
+}

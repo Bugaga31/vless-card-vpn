@@ -30,14 +30,14 @@ class TelegramSocksProbeTest {
                         3 -> ByteArray(input.readUnsignedByte()).also(input::readFully).toString(Charsets.UTF_8)
                         else -> error("unexpected address type $type")
                     }
-                    assertEquals("149.154.167.51", address); assertEquals(443, input.readUnsignedShort())
+                    assertTrue(address in setOf("149.154.167.51","149.154.175.50")); assertEquals(443, input.readUnsignedShort())
                     out.write(byteArrayOf(5, 0, 0, 1, 127, 0, 0, 1, 0, 1)); out.flush()
                     val req = ByteArray(42); input.readFully(req)
                     assertEquals(239, req[0].toInt() and 255); assertEquals(10, req[1].toInt())
                     val nonce = req.copyOfRange(26, 42)
                     val response = ByteBuffer.allocate(84).order(ByteOrder.LITTLE_ENDIAN)
-                        .putLong(0).putLong(1).putInt(64).putInt(0x05162463).put(nonce).put(ByteArray(16))
-                        .put(8).put(ByteArray(8)).put(ByteArray(3)).putInt(0x1cb5c415).putInt(1).putLong(1).array()
+                        .putLong(0).putLong(1).putInt(64).putInt(0x05162463).put(nonce).put(ByteArray(16) { 1 })
+                        .put(8).put(ByteArray(8).apply { this[7]=15 }).put(ByteArray(3)).putInt(0x1cb5c415).putInt(1).putLong(1).array()
                     out.write(21); out.write(response); out.flush()
                 } } catch (e: Throwable) { error.set(e) }
             }

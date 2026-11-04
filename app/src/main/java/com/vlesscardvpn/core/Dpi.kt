@@ -1,5 +1,6 @@
 package com.vlesscardvpn.core
 
+import com.vlesscardvpn.xray.Masks
 import android.content.Context
 import android.os.Build
 import com.vlesscardvpn.model.Settings
@@ -107,6 +108,9 @@ object DpiStrategies {
         bye("MASK_FAKE", "маскировка фейк-SNI", "--disorder", "1", "--fake", "-1", "--ttl", "8", "--fake-sni", S, "--fake-tls-mod", "orig"),
         bye("MASK_FAKE_RAND", "маскировка + случайный TLS", "--fake", "-1", "--ttl", "8", "--fake-sni", S, "--fake-tls-mod", "rand,orig"),
         tpws("MSS", "малый MSS", "--mss=88", "--split-pos=1"),
+        tpws("HELLO_RECORD", "TLS-запись + мягкий split · первый блок", "--tlsrec=sniext+1", "--split-pos=1,midsld", "--tamper-cutoff=n2"),
+        tpws("HELLO_MULTISPLIT", "границы SNI + disorder · первый блок", "--split-pos=1,host,midsld,endhost", "--disorder=tls", "--tamper-cutoff=n2"),
+        tpws("HELLO_MID_RECORD", "TLS-запись в середине домена · первый блок", "--tlsrec=midsld", "--split-pos=1", "--tamper-cutoff=n2"),
         // VLESS Card × Xray-core: TCP fragmentation of the ClientHello inside the app (no extra binary, works on any ABI).
         XRAY_LADDER,
         xr("DUST", "пыль Hello 1-5 байт", "packets=tlshello", "length=1-5", "delay=0-1"),
@@ -120,6 +124,7 @@ object DpiStrategies {
 
     fun byId(id: String?, s: Settings): DpiStrategy? = when {
         id == null || id == "" || id == Settings.DPI_AUTO -> null
+        id.startsWith(TpwsProfile.PREFIX) -> TpwsProfile.decode(id)?.let { DpiStrategy(id, "zapret tpws · свой профиль", DpiEngine.TPWS, it) }
         id == CUSTOM_ID -> custom(s.byeDpiArgs, s.byeDpiSni)
         id.startsWith(DpiEvo.PREFIX) -> DpiEvo.decode(id)
         else -> BUILT_IN.firstOrNull { it.id == id }
@@ -195,6 +200,7 @@ class DpiProxy(private val context: Context) : AutoCloseable {
             port = p; strategy = s
             return@withContext p
         }
+        if (Build.VERSION.SDK_INT < 26) error("Native DPI requires Android 8+")
         val b = ProcessBuilder(listOf(exe(s.engine).absolutePath) + s.argv(p, mask))
             .redirectOutput(File("/dev/null")).redirectError(File("/dev/null"))
         if (allowLocal) b.environment()["VCVPN_TPWS_ALLOW_LOCAL"] = "1"
@@ -213,7 +219,7 @@ class DpiProxy(private val context: Context) : AutoCloseable {
         } catch (e: Throwable) { close(); throw e }
     }
 
-    val alive: Boolean get() = process?.isAlive == true || xray?.running == true
+    val alive: Boolean get() = (Build.VERSION.SDK_INT >= 26 && process?.isAlive == true) || xray?.running == true
 
     /**
      * The engine process died (not closed by us): start it again on the same port, so Xray's dialer and the
@@ -221,6 +227,7 @@ class DpiProxy(private val context: Context) : AutoCloseable {
      */
     suspend fun reviveIfDead(): Boolean {
         val (s, mask, local) = last ?: return true
+        if (Build.VERSION.SDK_INT < 26) return true
         val dead = process?.let { !it.isAlive } ?: return true // Xray strategies run in-process
         if (!dead) return true
         val p = port
@@ -266,6 +273,27 @@ class DpiSet(private val context: Context) : AutoCloseable {
         return this
     }
 
+    /** Optional chain challenger must not make a working server depend on DPI startup. */
+    suspend fun warmCurrent(s: Settings, network: String, allowLocal: Boolean) {
+        if (currentPort != null) return
+        val cur = DpiStrategies.resolve(s, network)
+        val p = DpiProxy(context)
+        try {
+            val port = p.start(cur, s.byeDpiSni, allowLocal)
+            currentPort = port; current = cur; procs += p
+        } catch (e: Exception) {
+            p.close()
+            if (e is kotlinx.coroutines.CancellationException) throw e
+        }
+    }
+
+    /** Process liveness only; listener readiness was checked during native startup. Not route proof. */
+    fun runtimeEngine(id:String): Pair<String,Boolean> {
+        val port=if(id==Masks.CURRENT_DPI) currentPort else ports[id]
+        val p=procs.firstOrNull {port!=null && it.port==port}
+        return (p?.strategy?.engine?.title ?: "DPI") to (p?.alive==true)
+    }
+    var onRuntimeChange:(()->Unit)?=null
     private var watch: kotlinx.coroutines.Job? = null
 
     /** Every 2 s: a crashed ByeDPI / zapret process is restarted on its port (logged for the e2e and diagnostics). */
@@ -274,13 +302,18 @@ class DpiSet(private val context: Context) : AutoCloseable {
         watch = scope.launch(Dispatchers.IO) {
             while (isActive) {
                 delay(2000)
-                for (p in procs.toList()) if (!p.alive && p.reviveIfDead())
-                    android.util.Log.i("E2E", "dpi engine revived: ${p.strategy?.id} port=${p.port} times=${p.revived}")
+                onRuntimeChange?.invoke()
+                for (p in procs.toList()) if (!p.alive) {
+                    // Invalidate observations before restarting, not after returning to green.
+                    onRuntimeChange?.invoke()
+                    if (p.reviveIfDead()) android.util.Log.i("E2E", "dpi engine revived: ${p.strategy?.id} port=${p.port} times=${p.revived}")
+                }
+                onRuntimeChange?.invoke()
             }
         }
     }
 
-    override fun close() { watch?.cancel(); watch = null; procs.forEach { it.close() }; procs.clear(); ports.clear(); currentPort = null; current = null }
+    override fun close() { onRuntimeChange=null; watch?.cancel(); watch = null; procs.forEach { it.close() }; procs.clear(); ports.clear(); currentPort = null; current = null }
 }
 
 /**

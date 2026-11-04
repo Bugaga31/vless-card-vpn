@@ -9,6 +9,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.collect
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.Lifecycle
@@ -16,27 +17,66 @@ import com.vlesscardvpn.ui.AppUi
 import com.vlesscardvpn.vpn.TunnelService
 
 class MainActivity : ComponentActivity() {
+    private var foundStart=false
+    private var batteryOffer: android.app.AlertDialog? = null
     private val vpnPermission = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { r ->
         if (r.resultCode == RESULT_OK) start()
+        else {foundStart=false;com.vlesscardvpn.core.SlowRouteConsent.clear()}
     }
 
     /** Auto mode prepares servers/masks/DPI first (Actions.autoConnect), the other modes connect right away. */
     private fun start() {
-        if (com.vlesscardvpn.core.Store.state.value.settings.mode == com.vlesscardvpn.model.Mode.AUTO)
+        val found=foundStart;foundStart=false
+        if(found) {com.vlesscardvpn.core.Actions.connectFound {TunnelService.start(this)};return}
+        if (com.vlesscardvpn.tor.TorConnectionPolicy.needsAutoSearch(com.vlesscardvpn.core.Store.state.value.settings))
             com.vlesscardvpn.core.Actions.autoConnect { TunnelService.start(this) }
         else TunnelService.start(this)
     }
     private val notifPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
 
     fun connect() {
-        // Proxy mode has no TUN: no VPN permission needed.
-        if (com.vlesscardvpn.core.Store.state.value.settings.proxyOnly) { start(); return }
+        foundStart=false
+        // Stored legacy proxyOnly cannot bypass Android VPN consent.
         val intent = VpnService.prepare(this)
         if (intent != null) vpnPermission.launch(intent) else start()
     }
 
+    fun connectFound() {
+        foundStart=true
+        val intent=VpnService.prepare(this)
+        if(intent!=null) vpnPermission.launch(intent) else start()
+    }
+
+    override fun onSaveInstanceState(outState:Bundle) {
+        outState.putBoolean("foundStart",foundStart)
+        super.onSaveInstanceState(outState)
+    }
+
+    /** Offered only after connection and while this activity is resumed; declining never stops VPN. */
+    private fun offerVpnBatteryExemption() {
+        val prefs = getSharedPreferences("vpn_background_offer", MODE_PRIVATE)
+        val exempt = Build.VERSION.SDK_INT < 23 || runCatching {
+            (getSystemService(POWER_SERVICE) as android.os.PowerManager).isIgnoringBatteryOptimizations(packageName)
+        }.getOrDefault(true)
+        if (!com.vlesscardvpn.core.VpnBatteryPromptPolicy.shouldOffer(Build.VERSION.SDK_INT,
+                com.vlesscardvpn.core.Tunnel.status.value.state == com.vlesscardvpn.core.Tunnel.State.CONNECTED,
+                exempt, prefs.getBoolean("offered", false), BuildConfig.DEBUG)) return
+        if (isFinishing || isDestroyed) return
+        // Persist before showing, so rotation or reconnect cannot produce repeated permission prompts.
+        prefs.edit().putBoolean("offered", true).apply()
+        batteryOffer = android.app.AlertDialog.Builder(this)
+            .setTitle("VPN без остановок в фоне")
+            .setMessage("Разрешить VLESS Card работать без ограничений батареи? Это может помочь Android не останавливать VPN при выключенном экране, но увеличивать расход батареи. Скорость серверов не меняется. Решение подтвердите в системном окне. Позже это доступно в разделе «Телефон».")
+            .setPositiveButton("Разрешить в Android") { _, _ ->
+                com.vlesscardvpn.core.DeviceCoach.open(this, "vpnBattery")
+            }
+            .setNegativeButton("Не сейчас", null)
+            .show()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        foundStart=savedInstanceState?.getBoolean("foundStart",false) ?: false
         if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED)
             notifPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
         com.vlesscardvpn.core.Actions.init(this)
@@ -44,15 +84,19 @@ class MainActivity : ComponentActivity() {
         com.vlesscardvpn.core.Updater.schedule(this)
         com.vlesscardvpn.core.Updater.check(ctx = this)
         lifecycleScope.launch {
-            repeatOnLifecycle(Lifecycle.State.STARTED) {
-                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                    while (true) { runCatching { com.vlesscardvpn.core.DeviceCoach.sample(applicationContext) }; kotlinx.coroutines.delay(60000) }
-                }
+            repeatOnLifecycle(Lifecycle.State.RESUMED) {
+                com.vlesscardvpn.core.Tunnel.status.collect { offerVpnBatteryExemption() }
             }
         }
-        setContent { AppUi(onConnect = { connect() }, onDisconnect = { com.vlesscardvpn.core.Actions.cancelPrepare(); TunnelService.stop(this) }) }
-        e2e(intent)
+        setContent { AppUi(onConnectFound = {connectFound()}, onConnect = { connect() }, onDisconnect = { com.vlesscardvpn.core.Actions.cancelPrepare(); TunnelService.stop(this) }) }
+        e2e(intent, restored = savedInstanceState != null)
         importFrom(intent)
+    }
+
+    override fun onStop() {
+        batteryOffer?.dismiss()
+        batteryOffer = null
+        super.onStop()
     }
 
     override fun onNewIntent(intent: android.content.Intent) { super.onNewIntent(intent); e2e(intent); importFrom(intent) }
@@ -83,17 +127,41 @@ class MainActivity : ComponentActivity() {
     }
 
     /** Debug builds only: hooks for the emulator end-to-end check (tools/e2e-android.sh). */
-    private fun e2e(i: android.content.Intent?) {
+    private fun e2e(i: android.content.Intent?, restored: Boolean = false) {
         if (!BuildConfig.DEBUG || i == null) return
-        if (i.getBooleanExtra("e2e_reload", false)) com.vlesscardvpn.core.Store.reload(this)
-        if (i.getBooleanExtra("e2e_connect", false)) connect()
-        if (i.getBooleanExtra("e2e_disconnect", false)) TunnelService.stop(this)
-        if (i.getBooleanExtra("e2e_test", false)) com.vlesscardvpn.core.Actions.testAll()
-        if (i.getBooleanExtra("e2e_dpi", false)) com.vlesscardvpn.core.Actions.findDpi()
-        if (i.getBooleanExtra("e2e_optimize", false)) kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
-            android.util.Log.i("E2E", "optimize result=${runCatching { com.vlesscardvpn.core.Actions.optimize() }.getOrElse { "error " + it.message }}")
+        // Consume before any side effect (including permission prompts/recreation).
+        val commands = com.vlesscardvpn.core.E2ECommands.consume(
+            listOf("e2e_chain", "e2e_reload", "e2e_connect", "e2e_disconnect", "e2e_test", "e2e_dpi", "e2e_optimize", "e2e_warp", "e2e_masks"), restored,
+            { key -> i.getBooleanExtra(key, false) }, { key -> i.removeExtra(key); Unit })
+        if (restored) android.util.Log.i("E2E", "fixture activity restored")
+        if ("e2e_chain" in commands) startService(android.content.Intent(this,TunnelService::class.java).putExtra("e2e_chain_check",true))
+        if ("e2e_reload" in commands) {
+            com.vlesscardvpn.core.Store.reload(this)
+            val st = com.vlesscardvpn.core.Store.state.value
+            android.util.Log.i("E2E", "fixture state mode=${st.settings.mode} servers=${st.servers.size} selected=${st.selected.size}")
         }
-        if (i.getBooleanExtra("e2e_warp", false)) com.vlesscardvpn.core.Actions.setupWarp()
-        if (i.getBooleanExtra("e2e_masks", false)) com.vlesscardvpn.core.Actions.findMasks(com.vlesscardvpn.core.Store.state.value.servers)
+        if ("e2e_connect" in commands) {
+            android.util.Log.i("E2E", "fixture connect permission=${VpnService.prepare(this) != null}")
+            connect()
+        }
+        if ("e2e_disconnect" in commands) TunnelService.stop(this)
+        if ("e2e_test" in commands) com.vlesscardvpn.core.Actions.testAll()
+        if ("e2e_dpi" in commands) com.vlesscardvpn.core.Actions.findDpi()
+        if ("e2e_optimize" in commands) kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+            // Test action waits for the previous bounded foreground action, rather than
+            // treating optimize()'s busy early return as a failed route repair.
+            val idle = kotlinx.coroutines.withTimeoutOrNull(60_000) {
+                while (com.vlesscardvpn.core.Actions.running.value) kotlinx.coroutines.delay(100)
+                true
+            } == true
+            val result = if (idle) runCatching { com.vlesscardvpn.core.Actions.optimize() }
+                .getOrElse { "error " + it.javaClass.simpleName } else "error BusyTimeout"
+            val selected = com.vlesscardvpn.core.Store.state.value.selected
+            val dead = selected.any { it.name == "e2e-dead" }
+            val good = selected.count { it.name in setOf("e2e-reality", "e2e-ws-tls", "e2e-xhttp") }
+            android.util.Log.i("E2E", "optimize result=$result dead_selected=$dead good_selected=$good")
+        }
+        if ("e2e_warp" in commands) com.vlesscardvpn.core.Actions.setupWarp()
+        if ("e2e_masks" in commands) com.vlesscardvpn.core.Actions.findMasks(com.vlesscardvpn.core.Store.state.value.servers)
     }
 }

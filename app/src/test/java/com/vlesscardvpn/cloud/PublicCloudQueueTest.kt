@@ -8,7 +8,7 @@ class PublicCloudQueueTest {
     @Test fun cloudNotBuriedBehindThousandsOfUnmeasuredRoutes() {
         val list=(0..2000).map(::node)
         val got=ConnectPolicy.candidates(list,listOf(list[1900],list[1901]),emptySet()) { if(it==list[0])0 else 100 }
-        assertEquals(list[0],got.first());assertEquals(8,got.size)
+        assertEquals(list[0],got.first());assertEquals(20,got.size)
         assertTrue(got.take(3).containsAll(listOf(list[1900],list[1901])))
     }
     @Test fun absentOrCoolingCloudCannotJumpQueue() {
