@@ -43,7 +43,7 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="vless" /><data android:scheme="vmess" /><data android:scheme="trojan" /><data android:scheme="ss" />
-                <data android:scheme="hysteria2" /><data android:scheme="hy2" /><data android:scheme="vcmask" /><data android:scheme="vcnet" />
+                <data android:scheme="hysteria2" /><data android:scheme="hy2" /><data android:scheme="tuic" /><data android:scheme="anytls" /><data android:scheme="vcmask" /><data android:scheme="vcnet" />
                 <data android:scheme="vcbackup" />
             </intent-filter>
             <!-- «Поделиться» → VLESS Card: a text with links. -->

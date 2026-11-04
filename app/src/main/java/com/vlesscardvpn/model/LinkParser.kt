@@ -5,7 +5,7 @@ import java.net.URLDecoder
 
 /** Parses share links and subscription bodies (plain or base64) into [Server]s. Never throws. */
 object LinkParser {
-    private val schemes = listOf("vless://", "vmess://", "trojan://", "ss://", "hysteria2://", "hy2://", "wireguard://", "wg://", "socks://", "socks5://")
+    private val schemes = listOf("vless://", "vmess://", "trojan://", "ss://", "hysteria2://", "hy2://", "tuic://", "anytls://", "wireguard://", "wg://", "socks://", "socks5://")
 
     fun parseMany(text: String, source: String = ""): List<Server> {
         var body = text.trim().removePrefix("\uFEFF")
@@ -24,6 +24,8 @@ object LinkParser {
             l.startsWith("vless://", true) -> standard(l, "vless", source)
             l.startsWith("trojan://", true) -> standard(l, "trojan", source)
             l.startsWith("hysteria2://", true) || l.startsWith("hy2://", true) -> standard(l, "hysteria2", source)
+            l.startsWith("tuic://", true) -> standard(l, "tuic", source)
+            l.startsWith("anytls://", true) -> standard(l, "anytls", source)
             l.startsWith("vmess://", true) -> vmess(l, source)
             l.startsWith("ss://", true) -> shadowsocks(l, source)
             l.startsWith("wireguard://", true) || l.startsWith("wg://", true) -> wireguard(l, source)
