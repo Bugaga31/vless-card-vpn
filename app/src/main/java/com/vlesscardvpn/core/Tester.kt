@@ -36,6 +36,8 @@ data class Probe(val realMs: Int, val bigOk: Boolean?, val ytOk: Boolean?, val e
  */
 object Tester {
     val SKIPPED = Probe(0, null, null, "пропущено")
+    /** The live tunnel muxes every muxable outbound when Settings.mux is on; probes must measure the same thing. */
+    private fun probeMux(): Boolean = Store.state.value.settings.mux
     // All temporary core users share ProbeArbiter, including chain and throughput probes.
     private val base: OkHttpClient by lazy {
         OkHttpClient.Builder().connectTimeout(8, TimeUnit.SECONDS).readTimeout(8, TimeUnit.SECONDS)
@@ -426,7 +428,7 @@ object Tester {
                     val ports=freePorts(1)
                     val core=XrayCore.Instance("speed")
                     try {
-                        runCatching {core.start(XrayConfigBuilder.testConfig(listOf(variant),ports,byeDpiPort,dpiPorts))}
+                        runCatching {core.start(XrayConfigBuilder.testConfig(listOf(variant),ports,byeDpiPort,dpiPorts,probeMux()))}
                         if(!core.running) 0 else runCatching {(speed(ports[0],seconds).mbps*1000).toInt()}.getOrDefault(0)
                     } finally {core.stop()}
                 }
@@ -479,7 +481,7 @@ object Tester {
                 val chunk = idx.map { variants[it] }
                 val ports = freePorts(chunk.size)
                 val core = XrayCore.Instance("test")
-                val started = runCatching { core.start(XrayConfigBuilder.testConfig(chunk, ports, byeDpiPort, dpiPorts)) }
+                val started = runCatching { core.start(XrayConfigBuilder.testConfig(chunk, ports, byeDpiPort, dpiPorts, probeMux())) }
                 if (started.isFailure || !core.running) {
                     // A broken link must not hide the others: fall back to one instance per variant.
                     core.stop()
@@ -488,7 +490,7 @@ object Tester {
                         onStarted?.invoke(idx[i])
                         val one = XrayCore.Instance("test1")
                         val p = freePorts(1)
-                        val ok = runCatching { one.start(XrayConfigBuilder.testConfig(listOf(v), p, byeDpiPort, dpiPorts)) }.isSuccess && one.running
+                        val ok = runCatching { one.start(XrayConfigBuilder.testConfig(listOf(v), p, byeDpiPort, dpiPorts, probeMux())) }.isSuccess && one.running
                         try { report(idx[i], if (ok) CancellableProbe.run { bind -> probeSocks(p[0], testUrl, big = big, youtube = youtube, telegram = telegram, attempts = attempts, budgetMs = serviceBudget, onCall = { call -> bind { call.cancel() } }, calls = calls, onCancel = bind, autoChecks=autoChecks, connectivityBudgetMs=FirstConnectivityBudget.cap(foreground,autoChecks!=null)) } else Probe(0, null, null, "конфиг не принят ядром")) }
                         finally { one.stop() }
                     }

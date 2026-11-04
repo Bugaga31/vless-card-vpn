@@ -94,8 +94,12 @@ object XrayConfigBuilder {
         return o
     }
 
-    /** Mux is incompatible with XTLS Vision, XHTTP (has its own) and UDP transports. */
-    fun muxable(s: Server): Boolean = s.isTcpBased && s.flow.isEmpty() && s.network != "xhttp" && s.protocol != "hysteria2"
+    /**
+     * Mux is incompatible with XTLS Vision, XHTTP (has its own) and UDP transports. Plain SOCKS servers do not
+     * speak Mux.Cool at all: a muxed outbound would ask them for the fake host v1.mux.cool and every connection fails.
+     */
+    fun muxable(s: Server): Boolean = s.protocol in MUX_PROTOCOLS && s.isTcpBased && s.flow.isEmpty() && s.network != "xhttp"
+    private val MUX_PROTOCOLS = setOf("vless", "vmess", "trojan", "shadowsocks")
 
     private fun stream(s: Server, mask: Mask?): JSONObject {
         val st = JSONObject()
@@ -414,14 +418,16 @@ object XrayConfigBuilder {
      * Test config: one SOCKS inbound per (server, mask) variant on consecutive loopback ports, each routed to its own
      * outbound. Lets the app test many servers/masks in parallel through one Xray instance.
      */
-    fun testConfig(variants: List<Pair<Server, Mask?>>, ports: List<Int>, byeDpiPort: Int?, dpiPorts: Map<String, Int> = emptyMap()): String {
+    fun testConfig(variants: List<Pair<Server, Mask?>>, ports: List<Int>, byeDpiPort: Int?, dpiPorts: Map<String, Int> = emptyMap(),
+                   mux: Boolean = false): String {
         require(ports.size == variants.size)
         val c = base()
         val ins = JSONArray(); val outs = JSONArray(); val rules = JSONArray()
         variants.forEachIndexed { i, (s, m) ->
             ins.put(JSONObject().put("tag", "t$i").put("listen", "127.0.0.1").put("port", ports[i]).put("protocol", "socks")
                 .put("settings", JSONObject().put("auth", "noauth").put("udp", true).put("ip", "127.0.0.1")))
-            outs.put(outbound(s, "v$i", resolveMask(m, byeDpiPort, dpiPorts)))
+            // Same mux decision as vpnConfig: a probe must not pass a server that the live tunnel then runs differently.
+            outs.put(outbound(s, "v$i", resolveMask(m, byeDpiPort, dpiPorts), mux))
             rules.put(JSONObject().put("inboundTag", arr("t$i")).put("outboundTag", "v$i"))
         }
         dpiOutbounds(outs, byeDpiPort, dpiPorts)
