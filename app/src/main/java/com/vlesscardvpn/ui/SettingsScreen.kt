@@ -218,6 +218,9 @@ fun SettingsScreen() {
             Toggle("Tor для сервисов", "Discord и другие выбранные сервисы идут через Tor поверх VPN: сайты видят адрес Tor-выхода, оператор — только маску VLESS", s.torRouting) { v -> set { it.copy(torRouting = v) } }
             Toggle("Tor в Авто", "Если сервис перестаёт работать через все серверы — сам переключаю его на Tor, пока связь не восстановится", s.torAuto) { v -> set { it.copy(torAuto = v) } }
             Toggle("Отдельный путь Tor", "Демон Tor ходит в интернет сам, минуя VPN: своё шифрование и мосты, работает даже при недоступных серверах", s.torDirect) { v -> set { it.copy(torDirect = v) } }
+            TorCountrySelector("Начальная страна (вход)", s.torEntryCountry) { code -> set { it.copy(torEntryCountry = code) } }
+            TorCountrySelector("Конечная страна (выход)", s.torExitCountry) { code -> set { it.copy(torExitCountry = code) } }
+            Hint("Авто оставляет выбор Tor. При заданной стране узлы выбираются строго; если подходящих реле нет, соединение может не установиться. Выбор страны входа ограничивает guard-реле и может снизить анонимность; обычно лучше оставить вход на «Авто». Изменения применятся после переподключения Tor; заданный выход отключает авто-ротацию страны.")
             Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 listOf("none" to "Без мостов", "obfs4" to "obfs4", "snowflake" to "Snowflake", "webtunnel" to "WebTunnel").forEach { (id, t) ->
                     FilterChip(selected = s.torBridge == id, onClick = { set { it.copy(torBridge = id) } }, label = { Text(t) })
@@ -455,6 +458,30 @@ private val folded = androidx.compose.runtime.mutableStateMapOf<String, Boolean>
         }
     }
 }
+
+private val TOR_COUNTRY_CHOICES: List<Pair<String, String>> by lazy {
+    listOf("" to "Авто") + java.util.Locale.getISOCountries().map { code ->
+        val normalized = code.lowercase()
+        normalized to java.util.Locale("", code).getDisplayCountry(java.util.Locale.forLanguageTag("ru"))
+    }.filter { it.second.isNotBlank() }.sortedBy { it.second }
+}
+
+@Composable
+private fun TorCountrySelector(title: String, selectedCode: String, onSelect: (String) -> Unit) {
+    var expanded by remember { mutableStateOf(false) }
+    val selected = TOR_COUNTRY_CHOICES.firstOrNull { it.first == selectedCode }?.second ?: "Авто"
+    Box(Modifier.fillMaxWidth()) {
+        OutlinedButton(onClick = { expanded = true }, modifier = Modifier.fillMaxWidth()) {
+            Text("$title: $selected")
+        }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            TOR_COUNTRY_CHOICES.forEach { (code, name) ->
+                DropdownMenuItem(text = { Text(name) }, onClick = { onSelect(code); expanded = false })
+            }
+        }
+    }
+}
+
 @Composable private fun Section(t: String) = Text(t, fontWeight = FontWeight.SemiBold, fontSize = 16.sp, modifier = Modifier.padding(top = 8.dp))
 @Composable private fun Hint(t: String) = Text(t, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
 
