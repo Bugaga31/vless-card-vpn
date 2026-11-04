@@ -147,8 +147,8 @@ fun ConnectionOverview(status:Tunnel.Status,hideRoute:Boolean,modeLabel:String,c
                     horizontalArrangement=Arrangement.spacedBy(12.dp)) {
                     Icon(Icons.Filled.Tune,null,tint=MaterialTheme.colorScheme.primary)
                     Column(Modifier.weight(1f)) {
-                        Text("Профиль Авто",style=MaterialTheme.typography.titleSmall)
-                        Text("${AutoChecks.label(profile)} · до ${settings.autoLatencyMaxMs} мс · ${ProbeConcurrencyPolicy.normalize(settings.probeParallel)} проб",
+                        Text("Профиль Авто: ${AutoChecks.label(profile)}",style=MaterialTheme.typography.titleSmall)
+                        Text("до ${settings.autoLatencyMaxMs} мс · ${ProbeConcurrencyPolicy.normalize(settings.probeParallel)} проб",
                             style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     Icon(Icons.Filled.ChevronRight,null,tint=MaterialTheme.colorScheme.onSurfaceVariant)
