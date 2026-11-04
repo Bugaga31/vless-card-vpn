@@ -30,3 +30,11 @@
 ## Not verified
 
 - Real phones. Only emulators and Robolectric.
+
+## CI notes from the re-runs
+
+- Run 41902601547 (#228): everything before `quality / e2e (33)` passed; that job failed only in the `warp` case —
+  a free account was registered, but 0 of 4 Cloudflare WARP endpoints answered from that runner. The same build passed
+  the `warp` case on API 29 in the same run, and API 33 passed it in #227 with the same Xray core.
+- Run 41905886566 (#229): `quality / e2e (33)` hit «Timeout waiting for emulator to boot» on the first attempt and on the
+  fresh-AVD retry (same runner). No app code ran there.
