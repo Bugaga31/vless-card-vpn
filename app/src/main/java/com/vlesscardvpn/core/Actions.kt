@@ -100,11 +100,18 @@ object Actions {
 
     /** Body + what the subscription says about itself (headers). */
     private fun fetchFull(url: String): Pair<String, com.vlesscardvpn.model.SubInfo?>? {
+        val torUp = runCatching { com.vlesscardvpn.tor.TorCard.portUp() }.getOrDefault(false)
+        val torFirst = torUp && Store.state.value.settings.torRouting
+        val viaTor = if (torUp) http.newBuilder()
+            .proxy(Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", com.vlesscardvpn.tor.TorCard.DEFAULT_SOCKS_PORT)))
+            .connectTimeout(25, TimeUnit.SECONDS).readTimeout(40, TimeUnit.SECONDS).build() else null
         val clients = buildList {
+            if (torFirst && viaTor != null) add(viaTor)
             add(http)
             val socks = Tunnel.socks
             if (socks != null && Tunnel.status.value.state == Tunnel.State.CONNECTED)
                 add(http.newBuilder().proxy(Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", socks.port))).build())
+            if (!torFirst && viaTor != null) add(viaTor)
         }
         for (c in clients) for (u in Settings.mirrors(url)) {
             var info: com.vlesscardvpn.model.SubInfo? = null
