@@ -184,6 +184,7 @@ fun SettingsScreen() {
             Text("Включить всю маскировку")
         }
         Toggle("Нейтральное уведомление", "В шторке «Синхронизация · Активно» вместо названия VPN", s.quietNotification) { v -> set { it.copy(quietNotification = v) } }
+        Toggle("Скорость в уведомлении", "Обновлять ↓↑ раз в 30 секунд (по умолчанию выключено — уведомление не дёргается)", s.notifSpeed) { v -> set { it.copy(notifSpeed = v) } }
         Hint("Иконка и название на рабочем столе")
         Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             Apps.DISGUISES.forEach { d ->

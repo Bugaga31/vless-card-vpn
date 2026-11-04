@@ -47,6 +47,8 @@ data class Settings(
     val apps: List<String> = emptyList(),
     val onlyApps: Boolean = false,
     val quietNotification: Boolean = false,
+    /** Живая скорость в уведомлении (обновление раз в 30 с). По умолчанию выключено. */
+    val notifSpeed: Boolean = false,
     val disguise: String = "",
     /** Only these services (Services ids: youtube, telegram…) go through the VPN; empty = all traffic. */
     val services: List<String> = emptyList(),
@@ -162,7 +164,7 @@ data class Settings(
         .put("dpiStrategy", dpiStrategy).put("dpiRemembered", JSONObject(dpiRemembered as Map<*, *>))
         .put("stealthSocks", stealthSocks).put("blockStun", blockStun).put("blockQuic", blockQuic).put("mux", mux).put("rotateMasks", rotateMasks)
         .put("ruDns", ruDns).put("apps", JSONArray(apps)).put("onlyApps", onlyApps)
-        .put("quietNotification", quietNotification).put("disguise", disguise)
+        .put("quietNotification", quietNotification).put("notifSpeed", notifSpeed).put("disguise", disguise)
         .put("services", JSONArray(services)).put("autoHeal", autoHeal).put("autoUpdateSubs", autoUpdateSubs).put("lastSubRefresh", lastSubRefresh)
         .put("proxyOnly", proxyOnly).put("lanShare", lanShare).put("perApp", perApp)
         .put("maskFamilies", JSONArray(maskFamilies)).put("maskFps", JSONArray(maskFps))
@@ -226,7 +228,7 @@ data class Settings(
                 stealthSocks = o.optBoolean("stealthSocks", d.stealthSocks), blockStun = o.optBoolean("blockStun", d.blockStun),
                 blockQuic = o.optBoolean("blockQuic", d.blockQuic), mux = o.optBoolean("mux", d.mux), rotateMasks = o.optBoolean("rotateMasks", d.rotateMasks), ruDns = o.optBoolean("ruDns", d.ruDns),
                 apps = list("apps", d.apps), onlyApps = o.optBoolean("onlyApps", d.onlyApps),
-                quietNotification = o.optBoolean("quietNotification", d.quietNotification), disguise = o.optString("disguise", d.disguise),
+                quietNotification = o.optBoolean("quietNotification", d.quietNotification), notifSpeed = o.optBoolean("notifSpeed", d.notifSpeed), disguise = o.optString("disguise", d.disguise),
                 services = list("services", d.services), autoHeal = o.optBoolean("autoHeal", d.autoHeal),
                 autoUpdateSubs = o.optBoolean("autoUpdateSubs", d.autoUpdateSubs), lastSubRefresh = o.optLong("lastSubRefresh", 0),
                 proxyOnly = o.optBoolean("proxyOnly", false), lanShare = o.optBoolean("lanShare", false), perApp = o.optBoolean("perApp", true),
