@@ -105,7 +105,10 @@ fun AppUi(onConnect: () -> Unit, onDisconnect: () -> Unit, onConnectFound:()->Un
                 } }
             }
         }
-        if (intro) LaunchIntro(onDismiss = { intro = false })
+        // The intro hides itself after 1.4 s. Fading out on top keeps catching a tap that was aimed at
+        // «Открыть приложение» a moment too late, instead of letting it open whatever Home has underneath.
+        androidx.compose.animation.AnimatedVisibility(intro, enter = androidx.compose.animation.EnterTransition.None,
+            exit = androidx.compose.animation.fadeOut(tween(450)), label = "intro") { LaunchIntro(onDismiss = { intro = false }) }
         }
     }
 }
