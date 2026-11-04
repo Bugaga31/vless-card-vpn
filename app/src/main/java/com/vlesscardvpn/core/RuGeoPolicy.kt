@@ -3,7 +3,8 @@ import com.vlesscardvpn.model.Settings
 
 /** Opt-in broad direct policy, never enabled by importing VPN subscriptions. */
 object RuGeoPolicy {
-    fun enabled(s: Settings) = s.ruAllDirect && !s.torAll
+    // RU-адреса идут напрямую даже когда включён Tor: банки/Госуслуги не должны видеть выход Tor.
+    fun enabled(s: Settings) = s.ruAllDirect
     private fun exclusions(s: Settings) = (s.alwaysVpn + if(s.torRouting) Services.domains(s.services) else emptyList())
         .map {it.removePrefix("domain:").removePrefix("full:").trim().trimEnd('.').lowercase()}
     fun domains(s: Settings): List<String> {
