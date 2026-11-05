@@ -73,6 +73,8 @@ object Masks {
     /** Wider pool of allowed names for the mask evolution (all present in the open whitelist geosite-cheburnet, MIT). */
     val WHITE_POOL = WHITE_SNI + listOf("mail.ru", "yandex.ru", "wildberries.ru", "avito.ru", "sberbank.ru", "2gis.ru", "rutube.ru",
         "kinopoisk.ru", "dzen.ru", "max.ru", "tbank.ru", "ok.ru", "vkvideo.ru", "x5.ru")
+    /** 1.2.135: more cover names for pinned TLS (the same open whitelist as [WHITE_POOL]). */
+    val EXTRA_SNI = listOf("mail.ru", "rutube.ru", "dzen.ru", "max.ru")
     val ALPNS = listOf("h2,http/1.1", "http/1.1")
     val MSS_VALUES = listOf(536, 300, 120, 88)
 
@@ -157,6 +159,12 @@ object Masks {
         listOf("h7", "дробление Hello 1-2 байта, пауза 10-30", "tlshello", "1-2", "10-30", "4"),
         listOf("p7", "дробление 2 пакетов 30-80", "1-2", "30-80", "3-8", "0"),
         listOf("l7", "лесенка Фибоначчи 1,1,2,3,5,8,13,21", "tlshello", "", "", "0", "1-1,1-1,2-2,3-3,5-5,8-8,13-13,21-21", "1-1,1-1,2-2,3-3,5-5,8-8,13-13,21-21"),
+        // 1.2.135: shapes without a fixed rhythm that cost almost nothing — a two-piece Hello (SNI and the rest apart),
+        // a growing wave, a short burst around the SNI and a light split of the first packets.
+        listOf("hello.split", "Hello на 2 части: 80–120 байт + остальное", "tlshello", "", "", "3", "80-120,1000-1500", "0-1,0-0"),
+        listOf("hello.wave", "Hello волной 16→96→400 байт", "tlshello", "", "", "4", "16-24,96-160,400-800", "0-1,0-1,0-0"),
+        listOf("l8", "всплеск у SNI: 2 крупных + 3 по 2–4 байта", "tlshello", "", "", "0", "40-60,40-60,2-4,2-4,2-4,500-900", "0-1,0-1,1-2,1-2,1-2,0-1"),
+        listOf("p8", "дробление 1-го пакета 40-80 байт без паузы", "1-1", "40-80", "0-1", "4"),
     )
 
     /** (id, title, noise items as JSON) — sent before the first UDP datagram; servers drop them. */
@@ -181,6 +189,10 @@ object Masks {
         // 1.2.45: QUIC-привет от имени гос-сайта и маркетплейса — трафик, который TSPU не режет никогда
         listOf("z15", "настоящий QUIC-привет к gosuslugi.ru (HTTP/3)", QuicInitial.noise("gosuslugi.ru")),
         listOf("z16", "настоящий QUIC-привет к ozon.ru + мусор AmneziaWG", QuicInitial.noise("ozon.ru", junk = 3)),
+        // 1.2.135: QUIC-привет к почте и видео (HTTP/3, который TSPU пропускает) и смешанный мусор AmneziaWG
+        listOf("z17", "настоящий QUIC-привет к mail.ru (HTTP/3)", QuicInitial.noise("mail.ru")),
+        listOf("z18", "настоящий QUIC-привет к rutube.ru + мусор AmneziaWG", QuicInitial.noise("rutube.ru", junk = 3)),
+        listOf("z19", "AmneziaWG: 2 больших + 3 мелких", """[{"rand":"600-1100","delay":"1-3"},{"rand":"600-1100","delay":"1-3"},{"rand":"8-32","delay":"1-2"},{"rand":"8-32","delay":"1-2"},{"rand":"8-32","delay":"1-2"}]"""),
         listOf("z9", "AmneziaWG: 10 пакетов 50-1000 байт", """[{"rand":"50-1000","delay":"1-2"},{"rand":"50-1000","delay":"1-2"},{"rand":"50-1000","delay":"1-2"},{"rand":"50-1000","delay":"1-2"},{"rand":"50-1000","delay":"1-2"},{"rand":"50-1000","delay":"1-2"},{"rand":"50-1000","delay":"1-2"},{"rand":"50-1000","delay":"1-2"},{"rand":"50-1000","delay":"1-2"},{"rand":"50-1000","delay":"1-2"}]"""),
     )
     const val HOP_LOCAL = "hl"
@@ -204,7 +216,7 @@ object Masks {
         for (n in WG_NOISES) add(Mask("chrome.${n[0]}", "WireGuard: " + n[1], "chrome", noise = n[0]))
         for (h in listOf(HOP_LOCAL to "смена порта каждые 10-20 с", HOP_WARP to "прыжки по 54 портам WARP")) {
             add(Mask("chrome.${h.first}", "WireGuard: " + h.second, "chrome", hop = h.first))
-            for (n in listOf("z1", "z5", "z6", "z7", "z9", "z10", "z11", "z12", "z13", "z14", "z15", "z16")) add(Mask("chrome.$n.${h.first}", "WireGuard: " + ((NOISES + WG_NOISES).first { it[0] == n }[1]) + " + " + h.second, "chrome", noise = n, hop = h.first))
+            for (n in listOf("z1", "z5", "z6", "z7", "z9", "z10", "z11", "z12", "z13", "z14", "z15", "z16", "z17", "z18")) add(Mask("chrome.$n.${h.first}", "WireGuard: " + ((NOISES + WG_NOISES).first { it[0] == n }[1]) + " + " + h.second, "chrome", noise = n, hop = h.first))
         }
         // VLESS Card signature masks: not splitting by Xray, but other things the TSPU looks at.
         for (d in WHITE_SNI) add(Mask("vc.sni.$d", "Фирменная: белый SNI $d", "chrome", sni = d))
@@ -246,6 +258,19 @@ object Masks {
         add(Mask("vc.turbo.v6.tfo", "Турбо: IPv6 + быстрый старт", "chrome", tfo = true, ipv6 = true))
         add(Mask("vc.turbo.sni.v6", "Турбо: белый SNI ya.ru + IPv6", "chrome", sni = "ya.ru", ipv6 = true))
         add(Mask("vc.turbo.mux.v6", "Турбо: один поток + IPv6", "chrome", mux = true, ipv6 = true))
+        // 1.2.135: more zero-cost signature masks — fast open and IPv6 with a light Hello, ALPN + fast open, more white SNI
+        add(Mask("vc.tfo.fast", "Фирменная: быстрый старт + лёгкое Hello", "chrome", "tlshello", "100-200", "0-1", "10", tfo = true))
+        add(Mask("vc.v6.fast", "Фирменная: IPv6 + лёгкое Hello", "chrome", "tlshello", "100-200", "0-1", "10", ipv6 = true))
+        add(Mask("vc.alpn.br.tfo", "Фирменная: ALPN браузера + быстрый старт", "chrome", alpn = "h2,http/1.1", tfo = true))
+        add(Mask("vc.alpn.11.tfo", "Фирменная: Safari, ALPN HTTP/1.1 + быстрый старт", "safari", alpn = "http/1.1", tfo = true))
+        add(Mask("vc.turbo.alpn.v6", "Турбо: ALPN браузера + IPv6", "chrome", alpn = "h2,http/1.1", ipv6 = true))
+        for (d in EXTRA_SNI) {
+            add(Mask("vc.sni.$d", "Фирменная: белый SNI $d", "chrome", sni = d))
+            add(Mask("vc.sni.$d.fast", "SNI $d · лёгкое Hello", "chrome", packets = "tlshello", length = "100-200", delay = "0-1", sni = d))
+        }
+        add(Mask("vc.turbo.sni.ya.tfo", "Турбо: белый SNI ya.ru + быстрый старт", "chrome", sni = "ya.ru", tfo = true))
+        add(Mask("vc.mux.tfo", "Фирменная: один поток + быстрый старт", "chrome", mux = true, tfo = true))
+        add(Mask("vc.mss536.fast", "Фирменная: MSS 536 + лёгкое Hello", "firefox", "tlshello", "100-200", "0-1", "10", mss = 536))
         // Xray-engine strategies duplicate the outbound's own fragment masks, so they are not offered in front of servers.
         for (st in com.vlesscardvpn.core.DpiStrategies.BUILT_IN.filter { it.engine != com.vlesscardvpn.core.DpiEngine.XRAY }) for (fp in FINGERPRINTS)
             add(Mask("$fp.d:${st.id}", FP_TITLES.getValue(fp) + " + " + st.label, fp, dpi = st.id))
@@ -337,7 +362,12 @@ object Masks {
             // own VLESS Card masking and zapret in front of the server connection
             "chrome.d:BYEDPI#VCARD_CASCADE", "chrome.d:BYEDPI#VK_ADAPTIVE", "chrome.d:BYEDPI#YANDEX_ADAPTIVE", "firefox.d:TPWS#VCARD_SHRED", "chrome.d:BYEDPI#VCARD_SHRED", "safari.d:BYEDPI#VCARD_STEALTH",
             "chrome.d:BYEDPI#VCARD_RECVER", "chrome.d:TPWS#SPLIT_DISORDER", "firefox.d:TPWS#TLSREC", "chrome.d:BYEDPI#OOB_THEN_DISORDER",
-            "safari.d:TPWS#HOST_DISORDER", "chrome.d:BYEDPI#MULTI_DISORDER", "chrome.d:TPWS#TLSREC_OOB", "firefox.d:BYEDPI#MASK_AUTO_FAKE")
+            "safari.d:TPWS#HOST_DISORDER", "chrome.d:BYEDPI#MULTI_DISORDER", "chrome.d:TPWS#TLSREC_OOB", "firefox.d:BYEDPI#MASK_AUTO_FAKE",
+            // 1.2.135 additions: after the proven order, ahead of the untried bulk of the same weight
+            "vc.tfo.fast", "vc.turbo.sni.ya.tfo", "vc.alpn.br.tfo", "chrome.hello.split", "vc.sni.mail.ru.fast", "vc.sni.rutube.ru.fast",
+            "vc.v6.fast", "vc.turbo.alpn.v6", "vc.alpn.11.tfo", "vc.sni.dzen.ru.fast", "vc.sni.max.ru.fast", "vc.sni.mail.ru", "vc.sni.rutube.ru",
+            "vc.sni.dzen.ru", "vc.sni.max.ru", "firefox.hello.split", "safari.hello.wave", "chrome.p8", "vc.mux.tfo", "vc.mss536.fast",
+            "chrome.z17", "chrome.z18", "chrome.z19", "chrome.z17.hw", "chrome.z18.hl", "chrome.l8")
         // own masks right after the plain baseline: the user made them for this network
         // light masks first (stable: the curated order stays inside each weight); own masks keep their place up front
         val ordered = (listOfNotNull(byId["chrome.n"]) + custom + cloudById.values + (first.mapNotNull { byId[it] } + ALL).distinct().filter { !it.custom }.sortedBy { cost(it) }).distinct()

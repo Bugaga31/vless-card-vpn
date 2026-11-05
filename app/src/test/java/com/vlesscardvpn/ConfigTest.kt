@@ -54,7 +54,7 @@ class ConfigTest {
     }
 
     @Test fun maskCatalog() {
-        assertEquals(675, Masks.ALL.size) // Includes 7 fingerprints × 3 explicit tpws Hello profiles.
+        assertEquals(754, Masks.ALL.size) // Includes 7 fingerprints × 3 explicit tpws Hello profiles; 1.2.135: +4 fragment shapes ×14, +3 WG noises, +4 hop combos, +16 signature masks.
         Masks.FINGERPRINTS.forEach { fp -> listOf("balanced","coarse","mobile").forEach { profile ->
             assertNotNull(Masks.byId("$fp.hello.$profile")); assertNotNull(Masks.byId("$fp.hello.$profile.b"))
         } }
@@ -179,7 +179,7 @@ class ConfigTest {
         val all = listOf(wg, wc, sk) + js
         all.forEach { sv -> Masks.searchOrder(true, sv).forEach { m -> assertTrue("${sv.name} ${m.id}", Masks.compatible(m, sv)) } }
         assertEquals(listOf("chrome.n"), Masks.searchOrder(true, js[0]).map { it.id })
-        assertEquals(30, Masks.searchOrder(true, wg).size) // plain + 4 turbo + 4 UDP noise + 10 WireGuard noise (2 real QUIC Initial) + port hopping (×9)
+        assertEquals(35, Masks.searchOrder(true, wg).size) // plain + 4 UDP noise + 15 WireGuard noise (real QUIC Initial too) + local port hopping (×15)
         val c = XrayConfigBuilder.vpnConfig(all.map { it to Masks.byId(if (!it.isTcpBased && it.protocol != "xray") "chrome.z2" else "chrome.n") }, Settings(), null)
         assertTrue(c.contains("\"noise\"")); assertTrue(c.contains("\"secretKey\""))
         dump("vpn-formats", c)

@@ -21,7 +21,7 @@ class HandoffLatencyR201Test {
  @Test fun duplicateIdsDoNotConsumeProbeSlots(){val a=s("a");assertEquals(listOf(a),AutoHandoffPolicy.prioritize(listOf(a,a),setOf(a.id)))}
  @Test fun fastQueueBoundedAtEight(){assertEquals(8,AutoHandoffPolicy.prioritize((1..100).map {s("s$it")},emptySet()).size)}
  @Test fun emptyFastQueueIsSafe(){assertTrue(AutoHandoffPolicy.prioritize(emptyList(),setOf("missing")).isEmpty())}
- @Test fun probeDeadlineLeavesCleanupRoom(){assertEquals(4500L,AutoHandoffPolicy.PROBE_WINDOW_MS);assertEquals(6500L,AutoHandoffPolicy.TOTAL_MS);assertTrue(AutoHandoffPolicy.PROBE_WINDOW_MS<AutoHandoffPolicy.TOTAL_MS)}
+ @Test fun probeDeadlineLeavesCleanupRoom(){assertEquals(7000L,AutoHandoffPolicy.PROBE_WINDOW_MS);assertEquals(9000L,AutoHandoffPolicy.TOTAL_MS);assertTrue(AutoHandoffPolicy.PROBE_BUDGET_MS<AutoHandoffPolicy.PROBE_WINDOW_MS);assertTrue(AutoHandoffPolicy.PROBE_WINDOW_MS<AutoHandoffPolicy.TOTAL_MS)}
  @Test fun duplicateNetworkEventsDoNotCreateNewRevision(){val g=NetworkHandoff();val n=NetworkHandoff.Snapshot("1","cell","p");g.seed(n);assertNull(g.update(n))}
  @Test fun sameHandleChangedPathInvalidatesOldRevision(){val g=NetworkHandoff();g.seed(null);val c=g.update(NetworkHandoff.Snapshot("1","cell","a"))!!;g.update(NetworkHandoff.Snapshot("1","cell","b"));assertFalse(g.valid(c.revision))}
  @Test fun stalePathCannotQualifyNewRoute(){assertFalse(NetworkObservation.accepts(NetworkHandoff.Snapshot("1","cell","a"),NetworkHandoff.Snapshot("1","cell","b")))}

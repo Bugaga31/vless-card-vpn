@@ -169,7 +169,7 @@ fun TorSettingsCard(settings: Settings, set: ((Settings) -> Settings) -> Unit) {
             if (settings.torBridge !in TorCard.EMBEDDED_BRIDGES) Text("Выберите obfs4 или WebTunnel. Tor без мостов не запускается; прежние настройки будут обновлены при подключении.", color = MaterialTheme.colorScheme.error)
             if (settings.torBridge != "none") {
                 Text("$parsed корректных мостов ${settings.torBridge} · максимум 12", fontWeight = FontWeight.Medium)
-                TorOption("Автообновление мостов", "Список igareck TOP100: раз в 6 часов при работе Tor, повтор ошибки не чаще 15 минут. Источник увидит запрос; старые мосты сохранятся при сбое.", auto) { value ->
+                TorOption("Автообновление мостов", "Список igareck TOP100: раз в 6 часов при работе Tor (сначала через VPN), повтор ошибки не чаще 15 минут. Если мосты перестали отвечать, Tor сам переподключится и возьмёт другие из сохранённого списка. Источник увидит запрос; старые мосты сохранятся при сбое.", auto) { value ->
                     auto = value; TorBridgeUpdates.setEnabled(ctx, value)
                     if (value) scope.launch { TorBridgeUpdates.refresh(ctx) }
                 }
@@ -180,7 +180,7 @@ fun TorSettingsCard(settings: Settings, set: ((Settings) -> Settings) -> Unit) {
                 Button(onClick = { refresh() }, enabled = !loading, modifier = Modifier.fillMaxWidth()) {
                     Text(if (loading) "Обновляю список…" else "Обновить мосты сейчас")
                 }
-                Text("Новый список применяется при следующем подключении — текущая цепочка не обрывается. TOP100 не гарантирует доступность или скорость.", style = MaterialTheme.typography.bodyMedium)
+                Text("Новый список применяется при следующем подключении — рабочая цепочка не обрывается. Пропала связь через мосты — сначала Tor переподключается сам, потом берёт другие мосты (не чаще 3 раз за 30 минут). TOP100 не гарантирует доступность или скорость.", style = MaterialTheme.typography.bodyMedium)
                 TextButton(onClick = { editing = !editing }) { Text(if (editing) "Скрыть ручной ввод" else "Вставить свои мосты") }
                 if (editing) {
                     OutlinedTextField(value = settings.torBridgeLines, onValueChange = { v -> set { it.copy(torBridgeLines = v) } },

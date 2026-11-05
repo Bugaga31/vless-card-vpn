@@ -15,6 +15,28 @@ import java.util.concurrent.TimeUnit
 object TorProbes {
     private const val TRACE_URL = "https://www.cloudflare.com/cdn-cgi/trace"
 
+    /**
+     * Route health, not exit quality: any HTTP answer through Tor (a Cloudflare challenge page too) proves that
+     * bridges, circuit and exit work. The request also gives an idle daemon a reason to build a circuit.
+     */
+    fun reachable(socksPort: Int = TorCard.DEFAULT_SOCKS_PORT, timeoutMs: Int = 10_000): Boolean {
+        val client = OkHttpClient.Builder()
+            .proxy(Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", socksPort)))
+            .connectTimeout(timeoutMs.toLong(), TimeUnit.MILLISECONDS)
+            .readTimeout(timeoutMs.toLong(), TimeUnit.MILLISECONDS)
+            .callTimeout(timeoutMs.toLong(), TimeUnit.MILLISECONDS)
+            .followRedirects(false).followSslRedirects(false)
+            .build()
+        return try {
+            client.newCall(Request.Builder().url(TRACE_URL).build()).execute().use { it.code in 100..599 }
+        } catch (e: Exception) {
+            false
+        } finally {
+            client.dispatcher.executorService.shutdown()
+            client.connectionPool.evictAll()
+        }
+    }
+
     /** [latencyMs, ISO country code] of the Tor exit, or null when the circuit is not working. */
     fun exitInfo(socksPort: Int = TorCard.DEFAULT_SOCKS_PORT, timeoutMs: Int = 8000): Pair<Int, String>? {
         val client = OkHttpClient.Builder()

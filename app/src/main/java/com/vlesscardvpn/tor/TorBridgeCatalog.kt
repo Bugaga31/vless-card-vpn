@@ -77,9 +77,18 @@ object TorBridgeCatalog {
         require(result.isNotEmpty()) { "No valid bridges for selected transport" }
         return result
     }
-    suspend fun fetch(): Parsed = withContext(Dispatchers.IO) {
-        val client=OkHttpClient.Builder().callTimeout(8,TimeUnit.SECONDS).connectTimeout(4,TimeUnit.SECONDS)
-            .followRedirects(false).followSslRedirects(false).build()
+    /**
+     * [socksPort]: the running tunnel's own loopback SOCKS — the source is often unreachable on the bare Russian
+     * network while the VPN works. null = direct. Redirects stay off on both paths; the body is bounded the same way.
+     */
+    suspend fun fetch(socksPort: Int? = null, timeoutSec: Long = 8): Parsed = withContext(Dispatchers.IO) {
+        val builder=OkHttpClient.Builder().callTimeout(timeoutSec,TimeUnit.SECONDS).connectTimeout(minOf(4,timeoutSec),TimeUnit.SECONDS)
+            .followRedirects(false).followSslRedirects(false)
+        if(socksPort!=null) {
+            require(socksPort in 1..65535)
+            builder.proxy(java.net.Proxy(java.net.Proxy.Type.SOCKS,java.net.InetSocketAddress("127.0.0.1",socksPort)))
+        }
+        val client=builder.build()
         try {
             client.newCall(Request.Builder().url(SOURCE).header("Accept","text/plain").build()).execute().use { r ->
                 check(r.code==200) { "Bridge source HTTP ${r.code}" }
