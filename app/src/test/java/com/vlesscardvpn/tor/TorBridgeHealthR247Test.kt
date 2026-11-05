@@ -135,7 +135,7 @@ class TorBridgeHealthR247Test {
         val s = listOf(File("app/$path"), File(path)).first { it.exists() }.readText()
         val watch = s.substringAfter("private suspend fun watchTorBootstrap(").substringBefore("private var torJob")
         assertTrue(watch.contains("superviseTor(bridge, lines, ::reachable)"))
-        assertTrue(watch.contains("TorBridgeUpdates.replacementFor(this@TunnelService, bridge, lines)"))
+        assertTrue(watch.contains("TorBridgeUpdates.replacementFor(this@TunnelService, bridge, lines, control?.entryGuards())"))
         assertTrue(watch.contains("torHealth.allowRestart("))
         // a suspected loss is confirmed by a real request before anything is restarted
         val supervise = watch.substringAfter("private suspend fun superviseTor(")
