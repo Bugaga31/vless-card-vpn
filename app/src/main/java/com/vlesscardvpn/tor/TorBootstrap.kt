@@ -97,21 +97,31 @@ object TorBootstrap {
     }
 
     /**
-     * One daemon start: STALLED when progress has not grown for [stallMs] (silent or blocked bridges).
-     * Pure and clock-injected; a restarted daemon needs a new [Watch].
+     * One daemon start: STALLED when neither the progress nor Tor's read traffic has moved for [stallMs] (silent or
+     * blocked bridges). Bytes still arriving — a slow consensus download on a weak mobile link — are not a stall,
+     * up to [hardStallMs] without any progress. Pure and clock-injected; a restarted daemon needs a new [Watch].
      */
-    class Watch(private val stallMs: Long = STALL_MS) {
+    class Watch(private val stallMs: Long = STALL_MS, private val hardStallMs: Long = HARD_STALL_MS) {
         private var best = -1
         private var since = Long.MIN_VALUE
+        private var progressAt = Long.MIN_VALUE
         private var started = Long.MIN_VALUE
-        fun observe(phase: Phase?, now: Long): Verdict {
+        private var mark = -1L
+        /** [bytesRead]: `GETINFO traffic/read` of the same daemon; null = unknown (progress alone decides). */
+        fun observe(phase: Phase?, now: Long, bytesRead: Long? = null): Verdict {
             if (started == Long.MIN_VALUE) started = now
             if (phase != null && phase.done) return Verdict.DONE
-            if (phase != null && phase.progress > best) { best = phase.progress; since = now }
+            if (phase != null && phase.progress > best) { best = phase.progress; since = now; progressAt = now }
+            if (bytesRead != null && bytesRead >= 0) {
+                // A smaller counter is a restarted daemon: start counting again instead of claiming activity.
+                if (mark < 0 || bytesRead < mark) mark = bytesRead
+                else if (bytesRead - mark >= ACTIVE_BYTES) { mark = bytesRead; since = now }
+            }
             val quietFrom = if (since == Long.MIN_VALUE) started else since
+            val progressFrom = if (progressAt == Long.MIN_VALUE) started else progressAt
             return when {
-                now < quietFrom -> Verdict.STARTING // clock went back: never claim a stall
-                now - quietFrom >= stallMs -> Verdict.STALLED
+                now < quietFrom || now < progressFrom -> Verdict.STARTING // clock went back: never claim a stall
+                now - quietFrom >= stallMs || now - progressFrom >= hardStallMs -> Verdict.STALLED
                 best < 0 -> Verdict.STARTING
                 else -> Verdict.PROGRESS
             }
@@ -119,6 +129,10 @@ object TorBootstrap {
         val progress: Int get() = best.coerceAtLeast(0)
     }
 
+    /** Read traffic that counts as activity between two progress steps (a dead bridge set reads next to nothing). */
+    const val ACTIVE_BYTES = 16 * 1024L
+    /** Even with traffic, this long without any progress is a stall. */
+    const val HARD_STALL_MS = 4 * 60_000L
     const val STALL_MS = 60_000L
     /** Polling stops after this even without DONE: the circuit check keeps reporting the route state. */
     const val WATCH_MAX_MS = 10 * 60_000L

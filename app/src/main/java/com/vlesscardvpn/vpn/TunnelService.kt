@@ -871,12 +871,15 @@ class TunnelService : VpnService() {
                 val phase = try {
                     (control ?: reachable().also { control = it })?.bootstrap()
                 } catch (_: java.io.IOException) { control?.close(); control = null; null }
-                val verdict = watch.observe(phase, android.os.SystemClock.elapsedRealtime())
+                // Bytes still arriving (a slow consensus download) are progress too, not a reason to swap bridges.
+                val verdict = watch.observe(phase, android.os.SystemClock.elapsedRealtime(), control?.trafficRead())
                 val expired = android.os.SystemClock.elapsedRealtime() - began >= com.vlesscardvpn.tor.TorBootstrap.WATCH_MAX_MS
                 if (verdict == com.vlesscardvpn.tor.TorBootstrap.Verdict.DONE || expired) {
                     if (verdict == com.vlesscardvpn.tor.TorBootstrap.Verdict.DONE) {
                         com.vlesscardvpn.core.TorBootstrapStatus.publish(ticket, phase, stalled = false)
                         torHealth.recovered()
+                        // Tor's own verdict per bridge: the next rotation keeps these and skips the dead ones.
+                        com.vlesscardvpn.tor.TorBridgeUpdates.noteHealth(this@TunnelService, bridge, lines, control?.entryGuards())
                         // The circuit exists now: confirm the route at once instead of waiting for the next watchdog pass.
                         if (Tunnel.status.value.checkOk != true) verifySoon(0)
                     }
@@ -898,7 +901,7 @@ class TunnelService : VpnService() {
                     stallHandled = true
                     if (torHealth.canRestart(android.os.SystemClock.elapsedRealtime())) {
                         com.vlesscardvpn.core.TorBootstrapStatus.publish(ticket, phase, true, com.vlesscardvpn.core.TorBootstrapStatus.Hint.REFRESHING)
-                        val fresh = com.vlesscardvpn.tor.TorBridgeUpdates.replacementFor(this@TunnelService, bridge, lines)
+                        val fresh = com.vlesscardvpn.tor.TorBridgeUpdates.replacementFor(this@TunnelService, bridge, lines, control?.entryGuards())
                         kotlinx.coroutines.currentCoroutineContext().ensureActive()
                         if (fresh != null && Store.state.value.settings.torBridge == bridge && Tunnel.status.value.state == Tunnel.State.CONNECTED &&
                             torHealth.allowRestart(android.os.SystemClock.elapsedRealtime()) && restart(fresh)) {
@@ -931,6 +934,7 @@ class TunnelService : VpnService() {
      */
     private suspend fun superviseTor(bridge: String, lines: List<String>, reachable: () -> com.vlesscardvpn.tor.TorControl?): List<String>? {
         var control: com.vlesscardvpn.tor.TorControl? = null
+        var noted: Map<String, String>? = null
         fun kick(why: String) {
             val c = control ?: reachable().also { control = it } ?: return
             try { c.kickNetwork(); runCatching { c.signalActive() }; Log.i("TOR", "network kick: $why") }
@@ -952,6 +956,9 @@ class TunnelService : VpnService() {
                         else com.vlesscardvpn.tor.TorBridgeHealth.state(circuit, it.networkLive())
                     } catch (_: java.io.IOException) { it.close(); control = null; null }
                 }
+                if (healthy == true) c?.entryGuards()?.takeIf { it != noted }?.let { guards ->
+                    noted = guards; com.vlesscardvpn.tor.TorBridgeUpdates.noteHealth(this@TunnelService, bridge, lines, guards)
+                }
                 val action = torHealth.observe(healthy, Net.underlying(this@TunnelService) != null, android.os.SystemClock.elapsedRealtime())
                 if (action == com.vlesscardvpn.tor.TorBridgeHealth.Action.NONE) continue
                 // Tor's flags lag behind and an idle daemon has no circuit to show: one real request decides.
@@ -959,7 +966,8 @@ class TunnelService : VpnService() {
                 if (Tunnel.status.value.state != Tunnel.State.CONNECTED) return null
                 if (action == com.vlesscardvpn.tor.TorBridgeHealth.Action.KICK ||
                     !torHealth.canRestart(android.os.SystemClock.elapsedRealtime())) { kick("route lost"); continue }
-                val fresh = com.vlesscardvpn.tor.TorBridgeUpdates.replacementFor(this@TunnelService, bridge, lines)
+                val guards = (control ?: reachable().also { control = it })?.entryGuards()
+                val fresh = com.vlesscardvpn.tor.TorBridgeUpdates.replacementFor(this@TunnelService, bridge, lines, guards)
                 kotlinx.coroutines.currentCoroutineContext().ensureActive()
                 if (fresh == null || Store.state.value.settings.torBridge != bridge ||
                     !torHealth.allowRestart(android.os.SystemClock.elapsedRealtime())) { kick("route lost, nothing new to take"); continue }
@@ -991,7 +999,10 @@ class TunnelService : VpnService() {
                 kotlinx.coroutines.currentCoroutineContext().ensureActive()
                 val active = Store.state.value.settings
                 if (active.torBridge != st.torBridge || (!active.torRotation && !active.torRouting && !active.torAll && !(active.mode==Mode.AUTO && active.autoChainSearch && active.torAuto))) return@launch
-                val startedLines = com.vlesscardvpn.tor.TorBridgeCatalog.selected(active.torBridgeLines, active.torBridge)
+                // Still nothing usable after asking the source: Tor Project's built-in bridges instead of no Tor at all.
+                val startedLines = runCatching { com.vlesscardvpn.tor.TorBridgeCatalog.selected(active.torBridgeLines, active.torBridge) }.getOrNull()
+                    ?: com.vlesscardvpn.tor.TorBridgeUpdates.adoptBuiltins(this@TunnelService, active.torBridge)
+                    ?: com.vlesscardvpn.tor.TorBridgeCatalog.selected(Store.state.value.settings.torBridgeLines, active.torBridge)
                 val started = com.vlesscardvpn.tor.TorCard.ensureStarted(this@TunnelService, active.torBridge, bridgeLines = startedLines)
                 // A reused daemon still holds connections through the previous core's upstream listeners.
                 val upstreamChanged = started == null && torUpstreamCore !== core

@@ -110,6 +110,24 @@ open class TorControl(private val host: String = "127.0.0.1", private val port: 
         null
     }
 
+    /** `GETINFO traffic/read`: bytes the daemon has read from the network since it started; null when unknown. */
+    open fun trafficRead(): Long? = try {
+        Regex("traffic/read=(\\d{1,18})").find(command("GETINFO", "traffic/read"))?.groupValues?.get(1)?.toLongOrNull()
+    } catch (e: IOException) {
+        null
+    }
+
+    /**
+     * `GETINFO entry-guards`: Tor's own verdict on each bridge it sampled, fingerprint to «up», «down»,
+     * «never-connected» or «unusable» ([TorBridgeMemory.parseGuards]). null when the daemon cannot answer.
+     */
+    open fun entryGuards(): Map<String, String>? = try {
+        val r = command("GETINFO", "entry-guards")
+        if (r.startsWith("250")) TorBridgeMemory.parseGuards(r) else null
+    } catch (e: IOException) {
+        null
+    }
+
     /** Leaves dormant mode at once (an idle daemon otherwise builds no circuit after a kick). */
     open fun signalActive() {
         val r = command("SIGNAL", "ACTIVE")

@@ -25,28 +25,82 @@ object TorBridgeUpdates {
     // No guard lock here: Store.wipe owns Store's lock, while refresh locks guard before Store.update.
     fun consentCleared() { generation.incrementAndGet(); tried.clear(); status.value = "Автообновление выключено · согласие сброшено" }
 
-    /** Valid lines of the last fetched catalog for [transport] (re-validated: prefs are only a cache). */
+    /**
+     * Valid lines of the last fetched catalog for [transport] (re-validated: prefs are only a cache), then Tor
+     * Project's built-in bridges as the last resort of a rotation.
+     */
     fun pool(ctx: Context, transport: String): List<String> =
-        prefs(ctx).getString("pool:$transport", null).orEmpty().lineSequence()
+        (prefs(ctx).getString("pool:$transport", null).orEmpty().lineSequence()
             .mapNotNull { TorBridgeCatalog.normalize(it) }.filter { it.startsWith("Bridge $transport ") }
-            .distinct().take(TorBridgeRefreshPolicy.POOL_MAX).toList()
+            .distinct().take(TorBridgeRefreshPolicy.POOL_MAX).toList() + TorBuiltinBridges.lines(transport)).distinct()
+
+    /** Tor's remembered verdicts for [transport] ([TorBridgeMemory]); cleared with the app data. */
+    fun memory(ctx: Context, transport: String): TorBridgeMemory.State {
+        val p = prefs(ctx)
+        return TorBridgeMemory.decode(p.getString("good:$transport", null), p.getString("bad:$transport", null), transport)
+    }
+
+    /** Records what Tor said about the running [lines]; written only when something changed. */
+    fun noteHealth(ctx: Context, transport: String, lines: List<String>, guards: Map<String, String>?, now: Long = System.currentTimeMillis()) {
+        if (guards.isNullOrEmpty() || transport !in setOf("obfs4", "webtunnel")) return
+        val app = ctx.applicationContext
+        synchronized(guard) {
+            val ticket = generation.get()
+            val before = memory(app, transport)
+            val after = TorBridgeMemory.note(before, lines, guards, now)
+            if (after != before && ticket == generation.get()) prefs(app).edit()
+                .putString("good:$transport", TorBridgeMemory.encodeGood(after))
+                .putString("bad:$transport", TorBridgeMemory.encodeBad(after)).apply()
+        }
+    }
+
+    /**
+     * A start with no usable bridge of [transport] (nothing pasted yet, the source unreachable): Tor Project's
+     * built-in bridges go in front of the user's text instead of no Tor at all. Same guard as a rotation; returns
+     * the lines to start with, or null (no built-ins for the transport, updates off, or the list changed meanwhile).
+     */
+    fun adoptBuiltins(ctx: Context, transport: String): List<String>? {
+        val app = ctx.applicationContext
+        val builtins = TorBuiltinBridges.lines(transport)
+        if (builtins.isEmpty() || !enabled(app)) return null
+        return synchronized(guard) {
+            val ticket = generation.get()
+            val before = Store.state.value.settings
+            if (before.torBridge != transport || runCatching { TorBridgeCatalog.selected(before.torBridgeLines, transport) }.isSuccess) return@synchronized null
+            val text = (builtins + listOfNotNull(before.torBridgeLines.takeIf { it.isNotBlank() })).joinToString("\n")
+            if (runCatching { TorBridgeCatalog.selected(text, transport) }.getOrNull() != builtins) return@synchronized null
+            var applied = false
+            Store.update { state ->
+                val active = state.settings
+                if (ticket != generation.get() || !enabled(app) || active.torBridge != transport || active.torBridgeLines != before.torBridgeLines) state
+                else { applied = true; state.copy(settings = active.copy(torBridgeLines = text)) }
+            }
+            if (applied) status.value = "Своих мостов $transport нет, список не загрузился · Tor запущен со встроенными мостами Tor Project"
+            builtins.takeIf { applied }
+        }
+    }
 
     /**
      * Swaps [failing] for untried bridges of the saved catalog, under the same guard as a refresh: consent on, the
      * transport and the user's list unchanged meanwhile. Returns the applied lines, or null when nothing new exists.
      */
-    fun rotate(ctx: Context, transport: String, failing: List<String>): List<String>? {
+    fun rotate(ctx: Context, transport: String, failing: List<String>, guards: Map<String, String>? = null): List<String>? {
         val app = ctx.applicationContext
         if (!enabled(app)) return null
         val pool = pool(app, transport)
+        val now = System.currentTimeMillis()
+        val memory = memory(app, transport)
+        val keep = guards?.let { TorBridgeMemory.working(failing, it) }.orEmpty()
+        val bad = TorBridgeMemory.bad(memory, now)
         return synchronized(guard) {
             val ticket = generation.get()
             val before = Store.state.value.settings
             if (before.torBridge != transport) return@synchronized null
             val seen = tried.getOrPut(transport) { java.util.Collections.synchronizedSet(linkedSetOf()) }
             seen += failing
-            val next = TorBridgeRefreshPolicy.rotation(pool, transport, failing, seen)
-                ?: run { seen.clear(); seen += failing; TorBridgeRefreshPolicy.rotation(pool, transport, failing, seen) }
+            fun attempt(skip: Set<String>) = TorBridgeRefreshPolicy.rotation(pool, transport, failing, seen, keep = keep, good = memory.good, bad = skip)
+            // Untried first; then the whole saved catalog again; recently failed bridges only when nothing else is left.
+            val next = attempt(bad) ?: run { seen.clear(); seen += failing; attempt(bad) } ?: attempt(emptySet())
                 ?: return@synchronized null
             var applied = false
             Store.update { state ->
@@ -54,7 +108,12 @@ object TorBridgeUpdates {
                 if (ticket != generation.get() || !enabled(app) || active.torBridge != transport || active.torBridgeLines != before.torBridgeLines) state
                 else { applied = true; state.copy(settings = active.copy(torBridgeLines = next.joinToString("\n"))) }
             }
-            if (applied) status.value = "Мосты $transport не отвечали · Tor переподключён с другими ${next.size} из сохранённого списка"
+            if (applied) {
+                val builtin = TorBuiltinBridges.lines(transport).toSet().let { b -> next.count { it in b } }
+                status.value = (if (keep.isEmpty()) "Мосты $transport не отвечали · Tor переподключён с другими ${next.size} из сохранённого списка"
+                    else "Часть мостов $transport не отвечала · рабочие (${keep.size}) оставлены, остальные заменены из сохранённого списка") +
+                    (if (builtin > 0) " · встроенных мостов Tor Project: $builtin" else "")
+            }
             next.takeIf { applied }
         }
     }
@@ -63,14 +122,15 @@ object TorBridgeUpdates {
      * Bridges for restarting a stalled or lost Tor: a fresh source list when one is due (consent and the stalled
      * cadence still apply), otherwise untried bridges from the saved catalog. null = nothing different to try.
      */
-    suspend fun replacementFor(ctx: Context, transport: String, failing: List<String>): List<String>? {
-        if (refresh(ctx, stalled = true)) {
+    suspend fun replacementFor(ctx: Context, transport: String, failing: List<String>, guards: Map<String, String>? = null): List<String>? {
+        noteHealth(ctx, transport, failing, guards)
+        if (refresh(ctx, stalled = true, keep = guards?.let { TorBridgeMemory.working(failing, it) }.orEmpty())) {
             val current = Store.state.value.settings
             val fresh = runCatching { TorBridgeCatalog.selected(current.torBridgeLines, transport) }.getOrNull()
             if (current.torBridge == transport && fresh != null && fresh.toSet() != failing.toSet()) return fresh
         }
         currentCoroutineContext().ensureActive()
-        return rotate(ctx, transport, failing)
+        return rotate(ctx, transport, failing, guards)
     }
     fun lastUpdated(ctx: Context, transport: String) = prefs(ctx).getLong("success:$transport", 0)
     fun enabled(ctx: Context) = prefs(ctx).getBoolean("enabled", true)
@@ -84,7 +144,7 @@ object TorBridgeUpdates {
      * [stalled]: the running start made no progress on the saved bridges; the source may be asked earlier than the
      * 6-hour cadence (see [TorBridgeRefreshPolicy.dueWhenStalled]). Returns true when a new list was saved.
      */
-    suspend fun refresh(ctx: Context, manual: Boolean = false, stalled: Boolean = false): Boolean = mutex.withLock {
+    suspend fun refresh(ctx: Context, manual: Boolean = false, stalled: Boolean = false, keep: List<String> = emptyList()): Boolean = mutex.withLock {
         val app = ctx.applicationContext
         val settings = Store.state.value.settings
         val transport = settings.torBridge
@@ -120,7 +180,8 @@ object TorBridgeUpdates {
                     val avoid = if (stalled && !manual) runCatching { TorBridgeCatalog.selected(settings.torBridgeLines, transport).toSet() }
                         .getOrDefault(emptySet()) else emptySet()
                     val replacement = TorBridgeRefreshPolicy.replacement(catalog, transport, settings.torBridgeLines,
-                        active.torBridge, active.torBridgeLines, manual || enabled(app), ticket, generation.get(), avoid)
+                        active.torBridge, active.torBridgeLines, manual || enabled(app), ticket, generation.get(), avoid,
+                        keep = if (stalled && !manual) keep else emptyList(), bad = TorBridgeMemory.bad(memory(app, transport), now))
                     if (replacement == null) state else {
                         applied = true
                         state.copy(settings = active.copy(torBridgeLines = replacement))
