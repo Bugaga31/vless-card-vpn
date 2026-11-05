@@ -382,6 +382,9 @@ class TunnelService : VpnService() {
             usedTorRoute = com.vlesscardvpn.tor.TorRoutePolicy.active(settings) || measuredChain?.choice?.chain?.layout?.tor == true
             appliedAutoWeights = com.vlesscardvpn.core.SpeedBalance.fingerprint(downloadSpeeds,downloadLatencies)
             Tunnel.socks = socks
+            // The app's own bridge-list requests take Tor's uplink (straight to VLESS): with all TCP through Tor the
+            // main SOCKS would send them into the very Tor that is waiting for bridges.
+            Tunnel.torUplink = if (XrayConfigBuilder.torUplinks(settings)) com.vlesscardvpn.tor.TorCard.DEFAULT_PT_UPSTREAM_PORT else null
             if (BuildConfig.DEBUG) Log.i("E2E", "pool size=${used.size} ids=${used.map { it.first.id }}")
             if (BuildConfig.DEBUG) Log.i("E2E", "runtime primary-port=${used.firstOrNull()?.first?.port ?: 0}")
             Log.i("E2E", "socks port=${socks.port} auth=${socks.auth} dpi=${dpiLabel.ifEmpty { "-" }} fixed=${set.ports.keys} mode=${settings.mode} services=${settings.services} proxy=$proxy")
@@ -835,7 +838,7 @@ class TunnelService : VpnService() {
         var ticket = startTicket
         var began = android.os.SystemClock.elapsedRealtime()
         var lines = startedLines
-        var watch = com.vlesscardvpn.tor.TorBootstrap.Watch()
+        var watch = com.vlesscardvpn.tor.TorBootstrap.Watch(bridges = startedLines.size)
         var stallHandled = false
         var restarted = false
         var pendingKick = kickFirst
@@ -856,6 +859,7 @@ class TunnelService : VpnService() {
                 try {
                     com.vlesscardvpn.tor.TorCard.ensureStarted(this@TunnelService, bridge, bridgeLines = fresh)
                     torUpstreamCore = core
+                    com.vlesscardvpn.tor.TorBridgeUpdates.resetHealth()
                     return true
                 } catch (e: Exception) {
                     if (e is kotlinx.coroutines.CancellationException) throw e
@@ -887,7 +891,7 @@ class TunnelService : VpnService() {
                     val fresh = superviseTor(bridge, lines, ::reachable) ?: return
                     if (!restart(fresh)) return
                     Log.i("TOR", "lost route: restarted with other bridges")
-                    lines = fresh; watch = com.vlesscardvpn.tor.TorBootstrap.Watch(); stallHandled = false; restarted = true
+                    lines = fresh; watch = com.vlesscardvpn.tor.TorBootstrap.Watch(bridges = fresh.size); stallHandled = false; restarted = true
                     began = android.os.SystemClock.elapsedRealtime()
                     ticket = com.vlesscardvpn.core.TorBootstrapStatus.begin(bridge)
                     com.vlesscardvpn.core.TorBootstrapStatus.publish(ticket, null, false, com.vlesscardvpn.core.TorBootstrapStatus.Hint.RESTARTED)
@@ -906,7 +910,7 @@ class TunnelService : VpnService() {
                         if (fresh != null && Store.state.value.settings.torBridge == bridge && Tunnel.status.value.state == Tunnel.State.CONNECTED &&
                             torHealth.allowRestart(android.os.SystemClock.elapsedRealtime()) && restart(fresh)) {
                             Log.i("TOR", "stalled start: restarted with other bridges")
-                            lines = fresh; watch = com.vlesscardvpn.tor.TorBootstrap.Watch(); stallHandled = false; restarted = true
+                            lines = fresh; watch = com.vlesscardvpn.tor.TorBootstrap.Watch(bridges = fresh.size); stallHandled = false; restarted = true
                             began = android.os.SystemClock.elapsedRealtime()
                             com.vlesscardvpn.core.TorBootstrapStatus.publish(ticket, null, false, com.vlesscardvpn.core.TorBootstrapStatus.Hint.RESTARTED)
                             delay(1_000L)
@@ -1006,7 +1010,7 @@ class TunnelService : VpnService() {
                 val started = com.vlesscardvpn.tor.TorCard.ensureStarted(this@TunnelService, active.torBridge, bridgeLines = startedLines)
                 // A reused daemon still holds connections through the previous core's upstream listeners.
                 val upstreamChanged = started == null && torUpstreamCore !== core
-                if (started != null) torHealth = com.vlesscardvpn.tor.TorBridgeHealth()
+                if (started != null) { torHealth = com.vlesscardvpn.tor.TorBridgeHealth(); com.vlesscardvpn.tor.TorBridgeUpdates.resetHealth() }
                 torUpstreamCore = core
                 val bootTicket = com.vlesscardvpn.core.TorBootstrapStatus.begin(active.torBridge)
                 launch { watchTorBootstrap(bootTicket, active.torBridge, startedLines, kickFirst = upstreamChanged) }
@@ -1870,7 +1874,7 @@ class TunnelService : VpnService() {
         // stop() joins the native worker; only the VpnService owns/closes the retained TUN fd.
         TProxyService.stop()
         com.vlesscardvpn.core.MaskRuntimeEvidence.stop(keepTun,error?.isNotEmpty()==true)
-        core?.stop(); core = null; Tunnel.wireguardKeys = emptySet()
+        core?.stop(); core = null; Tunnel.wireguardKeys = emptySet(); Tunnel.torUplink = null
         dpi?.close(); dpi = null; Tunnel.byeDpiPort = null
         if (!keepTun) { Tunnel.socks = null; runCatching { tun?.close() }; tun = null }
         if (error != null) {

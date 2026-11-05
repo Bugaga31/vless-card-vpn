@@ -100,8 +100,10 @@ object TorBootstrap {
      * One daemon start: STALLED when neither the progress nor Tor's read traffic has moved for [stallMs] (silent or
      * blocked bridges). Bytes still arriving — a slow consensus download on a weak mobile link — are not a stall,
      * up to [hardStallMs] without any progress. Pure and clock-injected; a restarted daemon needs a new [Watch].
+     * [bridges]: how many bridges this start was given. When Tor itself reports that it could not connect to any of
+     * them ([allBridgesFailed]) and nothing moved for [EARLY_STALL_MS], the start is STALLED without waiting [stallMs].
      */
-    class Watch(private val stallMs: Long = STALL_MS, private val hardStallMs: Long = HARD_STALL_MS) {
+    class Watch(private val stallMs: Long = STALL_MS, private val hardStallMs: Long = HARD_STALL_MS, private val bridges: Int = 0) {
         private var best = -1
         private var since = Long.MIN_VALUE
         private var progressAt = Long.MIN_VALUE
@@ -122,6 +124,7 @@ object TorBootstrap {
             return when {
                 now < quietFrom || now < progressFrom -> Verdict.STARTING // clock went back: never claim a stall
                 now - quietFrom >= stallMs || now - progressFrom >= hardStallMs -> Verdict.STALLED
+                now - quietFrom >= minOf(EARLY_STALL_MS, stallMs) && allBridgesFailed(phase, bridges) -> Verdict.STALLED
                 best < 0 -> Verdict.STARTING
                 else -> Verdict.PROGRESS
             }
@@ -129,6 +132,22 @@ object TorBootstrap {
         val progress: Int get() = best.coerceAtLeast(0)
     }
 
+    /**
+     * Tor's own verdict that the bridges are dead: still at a connecting phase (no bridge ever completed a handshake
+     * in this start), Tor recommends warning the user — it does so when every bridge connection has closed — and at
+     * least as many connection failures as bridges were given (Tor counts up to its own threshold of 10).
+     */
+    fun allBridgesFailed(phase: Phase?, bridges: Int): Boolean =
+        bridges > 0 && phase != null && phase.warning && phase.recommendWarn && phase.tag in CONNECTING_TAGS &&
+            phase.count >= bridges.coerceIn(2, PROBLEM_THRESHOLD)
+
+    /** Phases before any bridge answered: a failure here is never a slow download. */
+    val CONNECTING_TAGS = setOf("starting", "conn_pt", "conn_done_pt", "conn_proxy", "conn_done_proxy", "conn", "conn_done", "handshake",
+        "ap_conn_pt", "ap_conn_done_pt", "ap_conn_proxy", "ap_conn_done_proxy", "ap_conn", "ap_conn_done", "ap_handshake")
+    /** Tor's BOOTSTRAP_PROBLEM_THRESHOLD: from this many failures it recommends a warning on its own. */
+    const val PROBLEM_THRESHOLD = 10
+    /** Quiet time before Tor's «no bridge answered» verdict is acted on (lets a slow first answer arrive). */
+    const val EARLY_STALL_MS = 20_000L
     /** Read traffic that counts as activity between two progress steps (a dead bridge set reads next to nothing). */
     const val ACTIVE_BYTES = 16 * 1024L
     /** Even with traffic, this long without any progress is a stall. */

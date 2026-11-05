@@ -30,6 +30,7 @@ fun TorSettingsCard(settings: Settings, set: ((Settings) -> Settings) -> Unit) {
     val scope = rememberCoroutineScope()
     var auto by remember { mutableStateOf(TorBridgeUpdates.enabled(ctx)) }
     val updateStatus by TorBridgeUpdates.status.collectAsState()
+    val bridgeHealth by TorBridgeUpdates.health.collectAsState()
     val vpn by Tunnel.status.collectAsState()
     var loading by remember { mutableStateOf(false) }
     var checking by remember { mutableStateOf(false) }
@@ -78,7 +79,7 @@ fun TorSettingsCard(settings: Settings, set: ((Settings) -> Settings) -> Unit) {
                 shape = RoundedCornerShape(16.dp)) {
                 Text(if (settings.mode == com.vlesscardvpn.model.Mode.AUTO && settings.torAll && settings.torBridge in setOf("obfs4","webtunnel") && settings.torNetworkRecommendations && settings.torRotation && settings.torFastOnly && !settings.torDirect) "Автонастройка включена" else "Настроить Tor автоматически")
             }
-            Text("Tor → только с мостами igareck или вашими мостами, поверх VLESS. При первом включении список загружается с raw.githack.com; источник видит запрос. Без рабочих мостов прямого обхода нет. Первая цепочка может строиться дольше пяти секунд.",
+            Text("Tor → только с мостами (Tor Project, igareck или вашими), поверх VLESS. При первом включении мосты загружаются с bridges.torproject.org (только через VPN) и raw.githack.com; источники видят запрос. Без рабочих мостов прямого обхода нет. Первая цепочка может строиться дольше пяти секунд.",
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surface) {
                 Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -155,7 +156,7 @@ fun TorSettingsCard(settings: Settings, set: ((Settings) -> Settings) -> Unit) {
                 Text("Параметры ротации и транспорта применяются при следующем подключении. Tor работает поверх VLESS; при отсутствии сервера маршрут не переключается напрямую.", style = MaterialTheme.typography.bodyMedium)
             }
             TorOption("Весь TCP-трафик через Tor", "Tor работает вторым шагом после выбранного VLESS-сервера; UDP, включая звонки, остаётся на VLESS-маршруте. Если VLESS недоступен, VPN не уходит напрямую.", settings.torAll) { v -> set { if (v) TorConnectionPolicy.selectTor(it) else it.copy(torAll = false) } }
-            Text("Обязательные мосты · igareck", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            Text("Обязательные мосты · Tor Project и igareck", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
             listOf("obfs4" to "obfs4 · маскировка Tor", "webtunnel" to "WebTunnel · HTTPS-транспорт").forEach { (id, label) ->
                 Surface(onClick = { circuit = null; set { it.copy(torBridge = id) } }, shape = RoundedCornerShape(12.dp),
                     color = if (settings.torBridge == id) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface,
@@ -169,18 +170,21 @@ fun TorSettingsCard(settings: Settings, set: ((Settings) -> Settings) -> Unit) {
             if (settings.torBridge !in TorCard.EMBEDDED_BRIDGES) Text("Выберите obfs4 или WebTunnel. Tor без мостов не запускается; прежние настройки будут обновлены при подключении.", color = MaterialTheme.colorScheme.error)
             if (settings.torBridge != "none") {
                 Text("$parsed корректных мостов ${settings.torBridge} · максимум 12", fontWeight = FontWeight.Medium)
-                TorOption("Автообновление мостов", "Список igareck TOP100: раз в 6 часов при работе Tor (сначала через VPN), повтор ошибки не чаще 15 минут. Если мосты перестали отвечать, Tor сам переподключится: рабочие мосты оставит, остальные заменит другими из сохранённого списка, а когда их не останется — встроенными мостами Tor Project (obfs4). Источник увидит запрос; старые мосты сохранятся при сбое.", auto) { value ->
+                TorOption("Автообновление мостов", "Свежие мосты Tor Project для России (только через VPN) и список igareck TOP100: раз в 6 часов при работе Tor, повтор ошибки не чаще 15 минут. Мосты Tor Project идут первыми. Если мосты перестали отвечать, Tor сам переподключится: рабочие мосты оставит, остальные заменит другими из сохранённого списка, а когда их не останется — встроенными мостами Tor Project (obfs4). Источники увидят запрос; старые мосты сохранятся при сбое.", auto) { value ->
                     auto = value; TorBridgeUpdates.setEnabled(ctx, value)
                     if (value) scope.launch { TorBridgeUpdates.refresh(ctx) }
                 }
-                Text("Источник: igareck TOP100 · raw.githack.com", style = MaterialTheme.typography.bodyMedium)
+                Text("Источники: Tor Project · bridges.torproject.org (через VPN); igareck TOP100 · raw.githack.com", style = MaterialTheme.typography.bodyMedium)
+                bridgeHealth?.takeIf { it.transport == settings.torBridge && torEnabled && vpn.state == Tunnel.State.CONNECTED }?.let {
+                    Text(it.text(), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+                }
                 val updated = remember(updateStatus, settings.torBridge) { TorBridgeUpdates.lastUpdated(ctx, settings.torBridge) }
                 if (updated > 0) Text("Обновлено: " + java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.SHORT, java.text.DateFormat.SHORT).format(java.util.Date(updated)), style = MaterialTheme.typography.bodyMedium)
                 Text(updateStatus, style = MaterialTheme.typography.bodyMedium)
                 Button(onClick = { refresh() }, enabled = !loading, modifier = Modifier.fillMaxWidth()) {
                     Text(if (loading) "Обновляю список…" else "Обновить мосты сейчас")
                 }
-                Text("Новый список применяется при следующем подключении — рабочая цепочка не обрывается. Пропала связь через мосты — сначала Tor переподключается сам, потом меняет только неработающие мосты (не чаще 3 раз за 30 минут). Мосты, которые работали и перестали отвечать, 6 часов не берутся. TOP100 не гарантирует доступность или скорость.", style = MaterialTheme.typography.bodyMedium)
+                Text("Новый список применяется при следующем подключении — рабочая цепочка не обрывается. Пропала связь через мосты — сначала Tor переподключается сам, потом меняет только неработающие мосты (не чаще 3 раз за 30 минут). Если Tor сообщил, что не подключился ни к одному мосту, замена идёт через 20 секунд, а не через минуту. Мосты, которые работали и перестали отвечать, 6 часов не берутся. Источники не гарантируют доступность или скорость.", style = MaterialTheme.typography.bodyMedium)
                 TextButton(onClick = { editing = !editing }) { Text(if (editing) "Скрыть ручной ввод" else "Вставить свои мосты") }
                 if (editing) {
                     OutlinedTextField(value = settings.torBridgeLines, onValueChange = { v -> set { it.copy(torBridgeLines = v) } },

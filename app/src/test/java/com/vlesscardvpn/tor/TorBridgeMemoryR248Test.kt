@@ -11,7 +11,7 @@ import java.io.InputStreamReader
 import java.net.ServerSocket
 import java.util.Base64
 
-/** 1.2.136: Tor's own verdict per bridge drives the rotation; built-in bridges; slow downloads are not stalls. */
+/** 1.2.135: Tor's own verdict per bridge drives the rotation; built-in bridges; slow downloads are not stalls. */
 class TorBridgeMemoryR248Test {
     private fun fp(i: Int) = "%040X".format(i)
     private fun line(i: Int, transport: String = "obfs4") = if (transport == "obfs4")

@@ -19,6 +19,11 @@ object TorBridgeRefreshPolicy {
 
     /** Saved catalog lines per transport: a failing list is swapped from here without asking the source again. */
     const val POOL_MAX = 200
+    /**
+     * A regular refresh keeps at most this many bridges Tor already connected through ([TorBridgeMemory.State.good])
+     * at the front: the next start finds a proven bridge at once, and at least half of the list is still new.
+     */
+    const val KEEP_GOOD = 6
 
     /**
      * Next list from the saved catalog. Bridges Tor still reports working ([keep]) stay; then never-tried bridges —
@@ -39,6 +44,16 @@ object TorBridgeRefreshPolicy {
         return (kept + fresh.filter { it in known } + fresh.filter { it !in known } + all.filter { it in tried }).distinct().take(size)
     }
 
+    /** «: уже работавших 2, Tor Project 2, igareck 8» — where the saved lines came from; empty when nothing is known. */
+    fun sources(saved: List<String>, kept: List<String>, official: List<String>): String {
+        val keptSet = kept.toSet(); val officialSet = official.toSet()
+        val k = saved.count { it in keptSet }
+        val o = saved.count { it !in keptSet && it in officialSet }
+        val rest = saved.size - k - o
+        if (k == 0 && o == 0) return ""
+        return ": " + listOfNotNull("уже работавших $k".takeIf { k > 0 }, "Tor Project $o".takeIf { o > 0 }, "igareck $rest".takeIf { rest > 0 }).joinToString(", ")
+    }
+
     fun replacement(catalog: TorBridgeCatalog.Parsed, transport: String, before: String,
                     currentTransport: String, currentLines: String, enabled: Boolean,
                     generation: Long, currentGeneration: Long, avoid: Set<String> = emptySet(),
@@ -47,7 +62,7 @@ object TorBridgeRefreshPolicy {
         // Recently failed bridges go to the end like the stalled ones; bridges Tor still reports working stay first.
         val fresh = catalog.forTransport(transport, avoid + catalog.lines.filter { TorBridgeMemory.fingerprint(it) in bad })
         if (fresh.isEmpty()) return null
-        val kept = keep.filter { it.startsWith("Bridge $transport ") }.distinct().take(11)
-        return (kept + fresh).distinct().take(12).joinToString("\n")
+        val kept = keep.filter { it.startsWith("Bridge $transport ") && TorBridgeMemory.fingerprint(it) !in bad }.distinct().take(11)
+        return (kept + fresh).distinctBy { TorBridgeMemory.fingerprint(it) ?: it }.take(12).joinToString("\n")
     }
 }

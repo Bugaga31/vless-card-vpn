@@ -3,6 +3,8 @@ package com.vlesscardvpn.tor
 import android.content.Context
 import com.vlesscardvpn.core.Store
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -11,7 +13,8 @@ import kotlinx.coroutines.sync.withLock
 import java.util.concurrent.atomic.AtomicLong
 
 /**
- * User-consented bounded igareck source refresh for mandatory-bridge Tor. A catalog update alone never restarts a
+ * User-consented bounded refresh of mandatory-bridge Tor from two sources: Tor Project's own distribution ([TorMoat],
+ * through the VPN only) and the igareck list. A catalog update alone never restarts a
  * working Tor; only a start or a route that stopped working takes other bridges (see [replacementFor]).
  */
 object TorBridgeUpdates {
@@ -21,6 +24,9 @@ object TorBridgeUpdates {
     /** Bridges this process already swapped away from, per transport: a rotation walks the whole saved catalog. */
     private val tried = java.util.concurrent.ConcurrentHashMap<String, MutableSet<String>>()
     val status = MutableStateFlow("Список ещё не обновлялся в этой сессии")
+    /** What Tor last said about the running bridges; null until it answered for the current daemon. */
+    val health = MutableStateFlow<TorBridgeMemory.Health?>(null)
+    fun resetHealth() { health.value = null }
     private fun prefs(ctx: Context) = ctx.applicationContext.getSharedPreferences("tor_bridge_updates", Context.MODE_PRIVATE)
     // No guard lock here: Store.wipe owns Store's lock, while refresh locks guard before Store.update.
     fun consentCleared() { generation.incrementAndGet(); tried.clear(); status.value = "Автообновление выключено · согласие сброшено" }
@@ -34,6 +40,11 @@ object TorBridgeUpdates {
             .mapNotNull { TorBridgeCatalog.normalize(it) }.filter { it.startsWith("Bridge $transport ") }
             .distinct().take(TorBridgeRefreshPolicy.POOL_MAX).toList() + TorBuiltinBridges.lines(transport)).distinct()
 
+    /** Tor Project bridges kept from earlier answers ([TorMoat.merge]); re-validated like the pool. */
+    private fun officialKept(p: android.content.SharedPreferences, transport: String): List<String> =
+        p.getString("official:$transport", null).orEmpty().lineSequence().mapNotNull { TorBridgeCatalog.normalize(it) }
+            .filter { it.startsWith("Bridge $transport ") }.take(TorMoat.KEEP_MAX).toList()
+
     /** Tor's remembered verdicts for [transport] ([TorBridgeMemory]); cleared with the app data. */
     fun memory(ctx: Context, transport: String): TorBridgeMemory.State {
         val p = prefs(ctx)
@@ -43,6 +54,7 @@ object TorBridgeUpdates {
     /** Records what Tor said about the running [lines]; written only when something changed. */
     fun noteHealth(ctx: Context, transport: String, lines: List<String>, guards: Map<String, String>?, now: Long = System.currentTimeMillis()) {
         if (guards.isNullOrEmpty() || transport !in setOf("obfs4", "webtunnel")) return
+        health.value = TorBridgeMemory.health(transport, lines, guards)
         val app = ctx.applicationContext
         synchronized(guard) {
             val ticket = generation.get()
@@ -156,21 +168,39 @@ object TorBridgeUpdates {
             !(stalled && TorBridgeRefreshPolicy.dueWhenStalled(enabled(app), transport, now, success, attempted))) return@withLock false
         val ticket = generation.get()
         p.edit().putLong("attempt:$transport", now).apply()
-        status.value = "Загружаю список $transport…"
+        status.value = "Загружаю мосты $transport: Tor Project и igareck…"
         try {
-            // Through the running tunnel first: the source is often unreachable on the bare network.
-            val via = com.vlesscardvpn.core.Tunnel.socks?.port
-            val catalog = via?.let { port ->
-                try { TorBridgeCatalog.fetch(port, timeoutSec = 6) } catch (e: Exception) { if (e is CancellationException) throw e; null }
-            } ?: TorBridgeCatalog.fetch()
+            // Through the running tunnel first: the source is often unreachable on the bare network. Tor's own uplink
+            // goes straight to VLESS; the main SOCKS may send all TCP into Tor, which cannot answer before bridges work.
+            val via = com.vlesscardvpn.core.Tunnel.torUplink ?: com.vlesscardvpn.core.Tunnel.socks?.port
+            val (moat, igareck) = coroutineScope {
+                // Tor Project's own bridges only through the VPN: the request must not be seen on the bare network.
+                val official = via?.let { port -> async { try { TorMoat.fetch(port) } catch (e: Exception) { if (e is CancellationException) throw e; null } } }
+                val list = try {
+                    via?.let { port ->
+                        try { TorBridgeCatalog.fetch(port, timeoutSec = 6) } catch (e: Exception) { if (e is CancellationException) throw e; null }
+                    } ?: TorBridgeCatalog.fetch()
+                } catch (e: Exception) { if (e is CancellationException) throw e; null }
+                official?.await() to list
+            }
+            if (moat?.lines.isNullOrEmpty() && igareck == null) error("No bridge source answered")
+            // Tor Project's bridges first (tested by the source, handed out a couple at a time), then the igareck list.
+            val official = TorMoat.merge(moat?.lines.orEmpty(), listOf("obfs4", "webtunnel").flatMap { officialKept(p, it) })
+            // One line per bridge: the same fingerprint in both lists stays in its Tor Project form.
+            val catalog = TorBridgeCatalog.Parsed((official + igareck?.lines.orEmpty()).distinctBy { TorBridgeMemory.fingerprint(it) ?: it },
+                (moat?.rejected ?: 0) + (igareck?.rejected ?: 0))
             currentCoroutineContext().ensureActive()
+            val remembered = memory(app, transport)
+            val kept = if (stalled && !manual) keep else remembered.good.take(TorBridgeRefreshPolicy.KEEP_GOOD)
             var applied = false
+            var saved = emptyList<String>()
             synchronized(guard) {
                 if (ticket == generation.get() && (manual || enabled(app))) {
                     val edit = p.edit()
                     for (t in listOf("obfs4", "webtunnel")) {
                         val lines = catalog.lines.filter { it.startsWith("Bridge $t ") }.take(TorBridgeRefreshPolicy.POOL_MAX)
                         if (lines.isNotEmpty()) edit.putString("pool:$t", lines.joinToString("\n"))
+                        edit.putString("official:$t", official.filter { it.startsWith("Bridge $t ") }.joinToString("\n"))
                     }
                     edit.apply()
                 }
@@ -179,17 +209,20 @@ object TorBridgeUpdates {
                     // A stalled start asks for bridges other than the ones that just failed, when the source has more.
                     val avoid = if (stalled && !manual) runCatching { TorBridgeCatalog.selected(settings.torBridgeLines, transport).toSet() }
                         .getOrDefault(emptySet()) else emptySet()
+                    // A stalled start keeps what Tor reports working now; a regular refresh keeps bridges that worked before.
                     val replacement = TorBridgeRefreshPolicy.replacement(catalog, transport, settings.torBridgeLines,
                         active.torBridge, active.torBridgeLines, manual || enabled(app), ticket, generation.get(), avoid,
-                        keep = if (stalled && !manual) keep else emptyList(), bad = TorBridgeMemory.bad(memory(app, transport), now))
+                        keep = kept, bad = TorBridgeMemory.bad(remembered, now))
                     if (replacement == null) state else {
                         applied = true
+                        saved = replacement.lines()
                         state.copy(settings = active.copy(torBridgeLines = replacement))
                     }
                 }
                 if (applied) {
                     p.edit().putLong("success:$transport", System.currentTimeMillis()).apply()
-                    status.value = "Сохранено ${catalog.forTransport(transport).size} мостов $transport · Tor возьмёт их при следующем запуске или если текущие перестанут отвечать. Доступность ещё не проверена."
+                    status.value = "Сохранено ${saved.size} мостов $transport" + TorBridgeRefreshPolicy.sources(saved, kept, official) +
+                        " · Tor возьмёт их при следующем запуске или если текущие перестанут отвечать. Доступность новых ещё не проверена."
                 } else if (ticket == generation.get()) {
                     status.value = "Нет подходящих мостов или настройки изменены. Прежний список сохранён."
                 }

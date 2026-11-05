@@ -17,6 +17,9 @@ object XrayConfigBuilder {
     const val WARP_CHAIN = "warp-chain"
     const val TOR_TAG = "tor"
     const val TOR_UPLINK_INBOUND = "tor-uplink"
+    /** A VPN config built from [settings0] carries Tor's outbound and both uplinks (HTTP for the daemon, SOCKS for its bridges). */
+    fun torUplinks(settings0: Settings): Boolean = torOn(com.vlesscardvpn.core.ServerOnlyPolicy.normalize(settings0))
+    private fun torOn(settings: Settings): Boolean = com.vlesscardvpn.tor.TorRoutePolicy.active(settings) || settings.torRotation
     const val TOR_PT_UPLINK_INBOUND = "tor-pt-uplink"
     const val RU_DNS = "77.88.8.8"
     val DNS_FALLBACKS = listOf("https://8.8.8.8/dns-query", "https://9.9.9.9/dns-query", "8.8.8.8", "1.1.1.1")
@@ -226,7 +229,7 @@ object XrayConfigBuilder {
         require(servers.all { com.vlesscardvpn.core.ServerOnlyPolicy.userRoute(it.first) }) { "Только удалённые VLESS/Xray-серверы могут передавать пользовательский трафик" }
         require(settings.mode in setOf(Mode.AUTO, Mode.SERVERS)) { "Режим без VLESS-сервера недоступен" }
         require(serverViaTor.isEmpty()) { "Tor must not dial a server through itself" }
-        val torOn = com.vlesscardvpn.tor.TorRoutePolicy.active(settings) || settings.torRotation
+        val torOn = torOn(settings)
         if (torOn) {
             val reserved = setOf(socks.port, settings.socksPort, settings.httpPort, com.vlesscardvpn.tor.TorCard.DEFAULT_SOCKS_PORT, com.vlesscardvpn.tor.TorCard.DEFAULT_CONTROL_PORT)
             require(torUpstreamPort in 1024..65535 && torUpstreamPort !in reserved) { "Invalid Tor HTTP upstream port" }

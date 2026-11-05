@@ -51,6 +51,15 @@ object TorBridgeMemory {
         return State(good, bad.entries.sortedByDescending { it.value }.take(BAD_MAX).associate { it.key to it.value })
     }
 
+    /** Tor's live view of the bridges of one start, for the settings screen (counts only, never addresses). */
+    data class Health(val transport: String, val up: Int, val down: Int, val total: Int) {
+        fun text(): String = (if (up > 0) "Мосты сейчас: работают $up из $total" else "Мосты сейчас: Tor ещё не подключился ни к одному из $total") +
+            (if (down > 0) " · не отвечают: $down" else "")
+    }
+
+    fun health(transport: String, lines: List<String>, guards: Map<String, String>): Health =
+        Health(transport, working(lines, guards).size, failing(lines, guards).size, lines.size)
+
     /** Fingerprints to skip now. */
     fun bad(state: State, now: Long): Set<String> = state.bad.filterValues { fresh(it, now) }.keys
 
