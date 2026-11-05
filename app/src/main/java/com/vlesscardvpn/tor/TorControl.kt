@@ -9,7 +9,7 @@ import java.net.Socket
 
 /**
  * Minimal Tor ControlPort client (tor-rotator-vless parity): AUTHENTICATE cookie,
- * SIGNAL NEWNYM, SETCONF ExitNodes, GETINFO status/circuit-established.
+ * SIGNAL NEWNYM, SETCONF ExitNodes, GETINFO status/circuit-established and status/bootstrap-phase.
  * Speaks the raw line protocol — no dependencies beyond a TCP socket.
  */
 open class TorControl(private val host: String = "127.0.0.1", private val port: Int = DEFAULT_CONTROL_PORT, private val timeoutMs: Int = 5000) {
@@ -71,12 +71,23 @@ open class TorControl(private val host: String = "127.0.0.1", private val port: 
         false
     }
 
+    /** Start progress (`status/bootstrap-phase`); null when the daemon does not report a usable phase. */
+    open fun bootstrap(): TorBootstrap.Phase? {
+        val r = command("GETINFO", "status/bootstrap-phase")
+        if (!r.startsWith("250")) throw IOException("GETINFO bootstrap failed")
+        return TorBootstrap.parse(r)
+    }
+
     open fun close() {
         runCatching { socket?.close() }
         socket = null; reader = null; out = null
     }
 
-    /** Sends a command, returns the joined multi-line reply (last-data line prefixed by '250 '). */
+    /**
+     * Sends a command and returns its whole reply: «250-» middle lines, «250+» data blocks up to the lone «.»
+     * and the final «250 »/«5xx » line. Asynchronous «650» events are skipped, so the next command never reads
+     * the tail of an earlier reply (GETINFO data blocks used to desynchronise the control connection).
+     */
     @Throws(IOException::class)
     fun command(vararg parts: String): String {
         require(parts.isNotEmpty() && parts.all { part -> part.all { it.code in 32..126 } }) { "Invalid control command" }
@@ -85,17 +96,36 @@ open class TorControl(private val host: String = "127.0.0.1", private val port: 
         out!!.write((line + "\r\n").toByteArray(Charsets.US_ASCII))
         out!!.flush()
         val sb = StringBuilder()
+        var lines = 0
+        fun next(): String {
+            if (++lines > MAX_REPLY_LINES) throw IOException("Tor reply too long")
+            return reader!!.readLine() ?: throw IOException("EOF from control port")
+        }
+        fun data(keep: Boolean) {
+            while (true) {
+                val d = next()
+                if (d == ".") return
+                if (keep) sb.append(if (d.startsWith("..")) d.substring(1) else d).append('\n')
+            }
+        }
         while (true) {
-            val resp = reader!!.readLine() ?: throw IOException("EOF from control port")
+            val resp = next()
+            val kind = if (resp.length >= 4) resp[3] else ' '
+            if (resp.startsWith("650")) { if (kind == '+') data(keep = false); continue }
             sb.append(resp).append('\n')
-            // mid lines "250-...", terminal "250 ..." / "5xx ..."
-            if (resp.length < 4 || resp[3] != '-') break
+            when (kind) {
+                '-' -> continue
+                '+' -> data(keep = true)
+                else -> break
+            }
         }
         return sb.toString().trim()
     }
 
     companion object {
         const val DEFAULT_CONTROL_PORT = 9051
+        /** One reply never needs more: bounds a misbehaving listener on the control port. */
+        const val MAX_REPLY_LINES = 4096
 
         /** Reads the Tor control auth cookie file and returns its hex (Termux path by default). */
         fun readCookieHex(path: String = TERMUX_COOKIE_PATH): String =

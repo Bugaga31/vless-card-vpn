@@ -27,8 +27,12 @@ class TorRotator(
     private var pinnedByRotation = false
     private var lastAttemptAt: Long? = null
     private var lastError: String? = null
+    private var failures = 0
 
     val lastErrorOr: String? get() = lastError
+
+    /** Not connected, or the control socket failed twice in a row (e.g. the daemon was restarted). */
+    val needsReconnect: Boolean get() = !connected || failures >= 2
 
     fun connect(): Boolean {
         connected = false
@@ -38,6 +42,7 @@ class TorRotator(
             else if (clearInheritedCountries) control.clearExitCountries()
             pinnedByRotation = false
             lastAttemptAt = null
+            failures = 0
             // Seed the cadence clock at connect: the first rotation lands after the
             // interval, not instantly — the freshly started Tor already has a circuit.
             rotation.markRotated()
@@ -81,9 +86,11 @@ class TorRotator(
             }
             control.signalNewNym()
             rotation.markRotated(nowMs)
+            failures = 0
             true
         } catch (e: IOException) {
             lastError = e.message
+            failures++
             false
         }
     }
@@ -93,5 +100,10 @@ class TorRotator(
     fun close() {
         connected = false
         control.close()
+    }
+
+    companion object {
+        /** Spacing between control reconnect attempts of the session loop. */
+        const val RECONNECT_MS = 15_000L
     }
 }

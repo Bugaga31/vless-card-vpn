@@ -27,15 +27,20 @@ object TorBridgeUpdates {
         status.value = if (value) "Автообновление включено · раз в 6 часов при работе Tor" else "Автообновление выключено · мосты сохранены"
     }
 
-    suspend fun refresh(ctx: Context, manual: Boolean = false) = mutex.withLock {
+    /**
+     * [stalled]: the running start made no progress on the saved bridges; the source may be asked earlier than the
+     * 6-hour cadence (see [TorBridgeRefreshPolicy.dueWhenStalled]). Returns true when a new list was saved.
+     */
+    suspend fun refresh(ctx: Context, manual: Boolean = false, stalled: Boolean = false): Boolean = mutex.withLock {
         val app = ctx.applicationContext
         val settings = Store.state.value.settings
         val transport = settings.torBridge
-        if (transport !in setOf("obfs4", "webtunnel")) return@withLock
+        if (transport !in setOf("obfs4", "webtunnel")) return@withLock false
         val p = prefs(app)
         val now = System.currentTimeMillis()
-        if (!manual && !TorBridgeRefreshPolicy.due(enabled(app), transport, now,
-                p.getLong("success:$transport", 0), p.getLong("attempt:$transport", 0))) return@withLock
+        val success = p.getLong("success:$transport", 0); val attempted = p.getLong("attempt:$transport", 0)
+        if (!manual && !TorBridgeRefreshPolicy.due(enabled(app), transport, now, success, attempted) &&
+            !(stalled && TorBridgeRefreshPolicy.dueWhenStalled(enabled(app), transport, now, success, attempted))) return@withLock false
         val ticket = generation.get()
         p.edit().putLong("attempt:$transport", now).apply()
         status.value = "Загружаю список $transport…"
@@ -46,8 +51,11 @@ object TorBridgeUpdates {
             synchronized(guard) {
                 Store.update { state ->
                     val active = state.settings
+                    // A stalled start asks for bridges other than the ones that just failed, when the source has more.
+                    val avoid = if (stalled && !manual) runCatching { TorBridgeCatalog.selected(settings.torBridgeLines, transport).toSet() }
+                        .getOrDefault(emptySet()) else emptySet()
                     val replacement = TorBridgeRefreshPolicy.replacement(catalog, transport, settings.torBridgeLines,
-                        active.torBridge, active.torBridgeLines, manual || enabled(app), ticket, generation.get())
+                        active.torBridge, active.torBridgeLines, manual || enabled(app), ticket, generation.get(), avoid)
                     if (replacement == null) state else {
                         applied = true
                         state.copy(settings = active.copy(torBridgeLines = replacement))
@@ -60,9 +68,11 @@ object TorBridgeUpdates {
                     status.value = "Нет подходящих мостов или настройки изменены. Прежний список сохранён."
                 }
             }
+            applied
         } catch (e: Exception) {
             if (e is CancellationException) throw e
             if (ticket == generation.get()) status.value = "Источник недоступен или список некорректен. Прежние мосты сохранены."
+            false
         }
     }
 }

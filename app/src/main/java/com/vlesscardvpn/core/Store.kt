@@ -36,6 +36,27 @@ data class AppState(
 data class MaskStat(val ok: Int = 0, val fail: Int = 0) {
     /** Laplace-smoothed success rate: unknown masks sit in the middle (0.5). */
     val score: Double get() = (ok + 1.0) / (ok + fail + 2.0)
+
+    /**
+     * One more result with a sliding memory: past [WINDOW] results both counters are halved, so what the DPI does
+     * now outweighs a success from months ago (an old pass no longer keeps a mask «proven» forever).
+     */
+    fun record(success: Boolean): MaskStat {
+        val next = if (success) copy(ok = ok + 1) else copy(fail = fail + 1)
+        return if (next.ok + next.fail <= WINDOW) next else MaskStat((next.ok + 1) / 2, (next.fail + 1) / 2)
+    }
+
+    /**
+     * Search order bucket on one network: 0 = works here (successes are not outweighed by failures),
+     * 1 = unknown or mixed, 2 = keeps failing here (at least 4 failures and under one success per four failures).
+     */
+    val bucket: Int get() = when {
+        ok > 0 && ok * 3 >= fail -> 0
+        fail >= 4 && ok * 4 < fail -> 2
+        else -> 1
+    }
+
+    companion object { const val WINDOW = 24 }
 }
 
 /** App state persisted as one JSON file (servers, test results, settings). */
@@ -153,7 +174,7 @@ object Store {
         if (results.isEmpty()) return
         update { st ->
             val m = HashMap(st.maskStats[network].orEmpty())
-            results.forEach { (id, ok) -> val c = m[id] ?: MaskStat(); m[id] = if (ok) c.copy(ok = c.ok + 1) else c.copy(fail = c.fail + 1) }
+            results.forEach { (id, ok) -> m[id] = (m[id] ?: MaskStat()).record(ok) }
             st.copy(maskStats = st.maskStats + (network to m))
         }
     }

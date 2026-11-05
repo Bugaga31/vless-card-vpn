@@ -106,9 +106,22 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
         ConnectionOverview(status, cfg.hideServerNames, if(cfg.torAll) "Tor через VLESS" else if(cfg.mode==Mode.AUTO) "Авто" else "Выбранные серверы") {
             val action=com.vlesscardvpn.core.HomePresentation.action(on,busy)
             val connect=action==com.vlesscardvpn.core.HomePresentation.Action.CONNECT
+            val tapGuard=remember { com.vlesscardvpn.core.TapGuard() }
+            val toggleView=androidx.compose.ui.platform.LocalView.current
             // One large target: filled while disconnected, calm tonal with a status outline once a route is running.
-            Button(onClick={if(connect) onConnect() else onDisconnect()},
-                modifier=Modifier.fillMaxWidth().heightIn(min=60.dp),shape=RoundedCornerShape(20.dp),
+            // The second half of an accidental double tap must not turn «Подключить» into «Отменить».
+            Button(onClick={
+                    if(tapGuard.accept(android.os.SystemClock.uptimeMillis())) {
+                        toggleView.performHapticFeedback(if(android.os.Build.VERSION.SDK_INT>=30) android.view.HapticFeedbackConstants.CONFIRM
+                            else android.view.HapticFeedbackConstants.VIRTUAL_KEY)
+                        if(connect) onConnect() else onDisconnect()
+                    }
+                },
+                modifier=Modifier.fillMaxWidth().heightIn(min=60.dp).semantics {
+                    stateDescription=when(action) {com.vlesscardvpn.core.HomePresentation.Action.CONNECT->"Отключено"
+                        com.vlesscardvpn.core.HomePresentation.Action.CANCEL->"Подключение"
+                        com.vlesscardvpn.core.HomePresentation.Action.DISCONNECT->"Подключено"}
+                },shape=RoundedCornerShape(20.dp),
                 contentPadding=PaddingValues(horizontal=20.dp,vertical=16.dp),
                 border=if(connect) null else androidx.compose.foundation.BorderStroke(1.5.dp,color),
                 colors=if(connect) ButtonDefaults.buttonColors() else ButtonDefaults.buttonColors(
@@ -149,7 +162,8 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
         FoundRoutesCard(onConnectFound)
         WatsonEntry(openWatson)
         val torExit by com.vlesscardvpn.core.TorExitStatus.state.collectAsState()
-        if(on && torExit.active) TorExitCountryCard(torExit)
+        val torBoot by com.vlesscardvpn.core.TorBootstrapStatus.state.collectAsState()
+        if(on && (torExit.active || torBoot.starting)) TorExitCountryCard(torExit,torBoot)
         val backgroundStatus by com.vlesscardvpn.core.BackgroundOptimization.status.collectAsState()
         if (on && backgroundStatus.isNotBlank()) Text(backgroundStatus,style=MaterialTheme.typography.bodyMedium,
             color=MaterialTheme.colorScheme.onSurfaceVariant,modifier=Modifier.fillMaxWidth().padding(top=8.dp))
@@ -232,7 +246,7 @@ fun HomeScreen(onConnect: () -> Unit, onDisconnect: () -> Unit, openServers: () 
         }
         Spacer(Modifier.height(12.dp))
         // A sibling card, not nested inside «Как подключаться» (the same colour made both look like one block).
-        Card(Modifier.fillMaxWidth().clickable { openServers() }, shape = RoundedCornerShape(20.dp),
+        Card(Modifier.fillMaxWidth().clickable(role = Role.Button, onClickLabel = "Открыть серверы") { openServers() }, shape = RoundedCornerShape(20.dp),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
                 Column(Modifier.padding(14.dp)) {
                     Text(when {
@@ -318,7 +332,8 @@ private fun SiteCard() {
             if (pop.summary.isNotEmpty()) Text(pop.summary, fontSize = 14.sp, color = when { pop.running -> MaterialTheme.colorScheme.onSurfaceVariant; pop.rows.all { it.second.good } -> Good; else -> Warn })
             pop.rows.forEach { (title, c) ->
                 Text((if (c.good) "✓ " else "✗ ") + title + " — " + c.verdict, fontSize = 14.sp, color = if (c.good) MaterialTheme.colorScheme.onSurfaceVariant else Warn,
-                    modifier = Modifier.clickable { Actions.siteCheck.value = c })
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable(role = Role.Button, onClickLabel = "Подробнее о проверке") { Actions.siteCheck.value = c }
+                        .wrapContentHeight(Alignment.CenterVertically))
             }
         }
     }
@@ -421,13 +436,24 @@ private fun SessionStats(min: Long, rx: Long, tx: Long, turbo: Boolean) {
 }
 
 @Composable
-fun TorExitCountryCard(info:com.vlesscardvpn.core.TorExitStatus.Info) {
-    if(!info.active) return
+fun TorExitCountryCard(info:com.vlesscardvpn.core.TorExitStatus.Info,
+                       boot:com.vlesscardvpn.core.TorBootstrapStatus.Info=com.vlesscardvpn.core.TorBootstrapStatus.Info()) {
+    if(!info.active && !boot.starting) return
     OutlinedCard(Modifier.fillMaxWidth().padding(top=12.dp)) {
         Column(Modifier.padding(16.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
-            Text(com.vlesscardvpn.core.TorExitStatus.label(info),style=MaterialTheme.typography.titleMedium)
-            Text("По проверке через Tor. У разных сайтов выходные узлы могут отличаться.",
-                style=MaterialTheme.typography.bodyMedium,color=MaterialTheme.colorScheme.onSurfaceVariant)
+            if(boot.starting) {
+                // Start progress of the app's own Tor: percent and phase instead of a silent «страна не определена».
+                Text(com.vlesscardvpn.core.TorBootstrapStatus.label(boot),style=MaterialTheme.typography.titleMedium,
+                    modifier=Modifier.semantics { liveRegion=LiveRegionMode.Polite })
+                LinearProgressIndicator(progress={boot.progress.coerceIn(0,100)/100f},modifier=Modifier.fillMaxWidth())
+                val detail=com.vlesscardvpn.core.TorBootstrapStatus.detail(boot)
+                if(detail.isNotEmpty()) Text(detail,style=MaterialTheme.typography.bodyMedium,
+                    color=if(boot.stalled) Warn else MaterialTheme.colorScheme.onSurfaceVariant)
+            } else {
+                Text(com.vlesscardvpn.core.TorExitStatus.label(info),style=MaterialTheme.typography.titleMedium)
+                Text("По проверке через Tor. У разных сайтов выходные узлы могут отличаться.",
+                    style=MaterialTheme.typography.bodyMedium,color=MaterialTheme.colorScheme.onSurfaceVariant)
+            }
         }
     }
 }

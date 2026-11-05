@@ -5,6 +5,8 @@ import android.os.Build
 import android.provider.Settings as AndroidSettings
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.clickable
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import kotlinx.coroutines.launch
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
@@ -236,7 +238,7 @@ fun SettingsScreen(openAssistant: () -> Unit = {}) {
         Group("Несколько серверов одновременно") {
         Hint("Запросы распределяются между отмеченными серверами; неработающие исключаются автоматически (проверка раз в минуту).")
         Balance.values().forEach { b ->
-            Row(verticalAlignment = Alignment.CenterVertically) { RadioButton(selected = s.balance == b, onClick = { set { it.copy(balance = b) } }); Text(b.title) }
+            RadioRow(s.balance == b, { set { it.copy(balance = b) } }) { Text(b.title) }
         }
         Toggle("Мультиплексирование (mux)", "Меньше новых соединений — меньше рукопожатий, которые видит DPI. Проверки серверов идут с тем же mux. Не для Vision, XHTTP и SOCKS", s.mux) { v -> set { it.copy(mux = v) } }
         Toggle("Менять маскировку при каждом подключении", "Случайная из рабочих, найденных «Подобрать маскировку», — у трафика нет постоянного отпечатка", s.rotateMasks) { v -> set { it.copy(rotateMasks = v) } }
@@ -266,9 +268,7 @@ fun SettingsScreen(openAssistant: () -> Unit = {}) {
         Group("Через VPN только эти сервисы") {
         Hint("Ничего не отмечено — через VPN весь трафик. Отмечено — только эти сервисы, остальное напрямую (быстрее, банки и Госуслуги видят обычный IP).")
         com.vlesscardvpn.core.Services.ALL.forEach { sv ->
-            Row(Modifier.fillMaxWidth().clickable { set { it.copy(services = if (sv.id in it.services) it.services - sv.id else it.services + sv.id) } },
-                verticalAlignment = Alignment.CenterVertically) {
-                Checkbox(sv.id in s.services, { v -> set { it.copy(services = if (v) (it.services + sv.id).distinct() else it.services - sv.id) } })
+            CheckRow(sv.id in s.services, { v -> set { it.copy(services = if (v) (it.services + sv.id).distinct() else it.services - sv.id) } }) {
                 Text(sv.title, fontSize = 14.sp)
             }
         }
@@ -312,9 +312,7 @@ fun SettingsScreen(openAssistant: () -> Unit = {}) {
         Group("Подбор маскировки: что перебирать") {
         Hint("Ничего не отмечено — все виды. Меньше видов — быстрее подбор. Сервер перестаёт перебираться после 3 рабочих масок.")
         com.vlesscardvpn.xray.Masks.FAMILIES.forEach { (id, title) ->
-            Row(Modifier.fillMaxWidth().clickable { set { it.copy(maskFamilies = if (id in it.maskFamilies) it.maskFamilies - id else it.maskFamilies + id) } },
-                verticalAlignment = Alignment.CenterVertically) {
-                Checkbox(id in s.maskFamilies, { v -> set { it.copy(maskFamilies = if (v) (it.maskFamilies + id).distinct() else it.maskFamilies - id) } })
+            CheckRow(id in s.maskFamilies, { v -> set { it.copy(maskFamilies = if (v) (it.maskFamilies + id).distinct() else it.maskFamilies - id) } }) {
                 Text(title, fontSize = 14.sp)
             }
         }
@@ -339,10 +337,7 @@ fun SettingsScreen(openAssistant: () -> Unit = {}) {
         com.vlesscardvpn.model.Subs.CATALOG.groupBy { it.group }.forEach { (group, items) ->
             Text(group, fontSize = 13.sp, fontWeight = FontWeight.Medium)
             items.forEach { src ->
-                Row(Modifier.fillMaxWidth().clickable {
-                    set { it.copy(subscriptions = if (src.url in it.subscriptions) it.subscriptions - src.url else it.subscriptions + src.url) }
-                }, verticalAlignment = Alignment.CenterVertically) {
-                    Checkbox(src.url in s.subscriptions, { v -> set { it.copy(subscriptions = if (v) (it.subscriptions + src.url).distinct() else it.subscriptions - src.url) } })
+                CheckRow(src.url in s.subscriptions, { v -> set { it.copy(subscriptions = if (v) (it.subscriptions + src.url).distinct() else it.subscriptions - src.url) } }) {
                     Text(src.title, fontSize = 13.sp)
                 }
             }
@@ -393,9 +388,7 @@ fun AppsDialog(s: Settings, onDismiss: () -> Unit, onSave: (List<String>, Boolea
                 OutlinedTextField(q, { q = it }, label = { Text("Поиск") }, singleLine = true, modifier = Modifier.fillMaxWidth())
                 LazyColumn(Modifier.heightIn(max = 360.dp)) {
                     items(all.filter { q.isBlank() || it.label.contains(q, true) || it.pkg.contains(q, true) }, key = { it.pkg }) { a ->
-                        Row(Modifier.fillMaxWidth().clickable { chosen = if (a.pkg in chosen) chosen - a.pkg else chosen + a.pkg },
-                            verticalAlignment = Alignment.CenterVertically) {
-                            Checkbox(a.pkg in chosen, { chosen = if (it) chosen + a.pkg else chosen - a.pkg })
+                        CheckRow(a.pkg in chosen, { chosen = if (it) chosen + a.pkg else chosen - a.pkg }) {
                             Column { Text(a.label, fontSize = 14.sp); Text(a.pkg, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) }
                         }
                     }
@@ -408,8 +401,7 @@ fun AppsDialog(s: Settings, onDismiss: () -> Unit, onSave: (List<String>, Boolea
 
 @Composable
 private fun StrategyRow(label: String, selected: Boolean, r: Actions.DpiResult?, onClick: () -> Unit) {
-    Row(Modifier.fillMaxWidth().clickable(onClick = onClick), verticalAlignment = Alignment.CenterVertically) {
-        RadioButton(selected = selected, onClick = onClick)
+    RadioRow(selected, onClick) {
         Text(label, Modifier.weight(1f), fontSize = 13.sp)
         if (r != null) Text(if (!r.ok) "✗" else if (r.score >= 0) "✓ ${r.score}/${Tester.DPI_SITES.size * 2} · ${r.ms} мс" else "✓ ${r.ms} мс", color = if (r.ok) Good else Bad, fontSize = 12.sp)
     }
@@ -422,7 +414,9 @@ private val folded = androidx.compose.runtime.mutableStateMapOf<String, Boolean>
     androidx.compose.material3.Surface(shape = androidx.compose.foundation.shape.RoundedCornerShape(24.dp), color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
         modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp).animateContentSize(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Row(Modifier.fillMaxWidth().clickable { folded[t] = open }, verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.fillMaxWidth().heightIn(min = 48.dp)
+                .clickable(role = androidx.compose.ui.semantics.Role.Button, onClickLabel = if (open) "Свернуть" else "Развернуть") { folded[t] = open }
+                .semantics { stateDescription = if (open) "Развёрнуто" else "Свёрнуто" }, verticalAlignment = Alignment.CenterVertically) {
                 Text(t, fontWeight = FontWeight.SemiBold, fontSize = 16.sp, color = MaterialTheme.colorScheme.primary, modifier = Modifier.weight(1f))
                 Text(if (open) "▴" else "▾", fontSize = 18.sp, color = MaterialTheme.colorScheme.primary)
             }
@@ -434,7 +428,6 @@ private val folded = androidx.compose.runtime.mutableStateMapOf<String, Boolean>
 @Composable private fun Hint(t: String) = Text(t, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
 
 @Composable private fun Toggle(t: String, hint: String?, v: Boolean, on: (Boolean) -> Unit) =
-    Row(verticalAlignment = Alignment.CenterVertically) {
+    SwitchRow(v, on) {
         Column(Modifier.weight(1f)) { Text(t, fontSize = 14.sp); if (hint != null) Text(hint, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-        Switch(v, on)
     }

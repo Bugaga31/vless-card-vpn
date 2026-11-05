@@ -207,12 +207,11 @@ private suspend fun torCircuitReady(ctx: android.content.Context): Boolean = wit
 
 @Composable
 private fun TorOption(title: String, description: String, value: Boolean, onChange: (Boolean) -> Unit) {
-    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+    SwitchRow(value, onChange, verticalAlignment = Alignment.Top, switchModifier = Modifier.padding(top = 2.dp)) {
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(title, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
             Text(description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        Switch(checked = value, onCheckedChange = onChange, modifier = Modifier.padding(top = 2.dp))
     }
 }
 
