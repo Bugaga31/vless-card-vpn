@@ -64,6 +64,58 @@ open class TorControl(private val host: String = "127.0.0.1", private val port: 
         if (!r.startsWith("250 ")) throw IOException("RESETCONF failed: $r")
     }
 
+    /**
+     * Orbot-style network kick: DisableNetwork=1 closes every non-control connection, DisableNetwork=0 reconnects
+     * at once through the current upstream (a restarted VLESS core, a new physical network). Always ends enabled.
+     */
+    open fun kickNetwork() {
+        try {
+            val off = command("SETCONF", "DisableNetwork=1")
+            if (!off.startsWith("250")) throw IOException("SETCONF DisableNetwork=1 failed")
+        } finally {
+            val on = command("SETCONF", "DisableNetwork=0")
+            if (!on.startsWith("250")) throw IOException("SETCONF DisableNetwork=0 failed")
+        }
+    }
+
+    /** A daemon left with DisableNetwork=1 (an interrupted kick) is switched back on; true when it was off. */
+    open fun ensureNetworkEnabled(): Boolean {
+        if (getConf("DisableNetwork") != "1") return false
+        val on = command("SETCONF", "DisableNetwork=0")
+        if (!on.startsWith("250")) throw IOException("SETCONF DisableNetwork=0 failed")
+        return true
+    }
+
+    /** null when the daemon cannot answer (not «no circuit»): the caller must not judge bridges on it. */
+    open fun circuitState(): Boolean? = try {
+        val r = command("GETINFO", "status/circuit-established")
+        when {
+            r.contains("status/circuit-established=1") -> true
+            r.contains("status/circuit-established=0") -> false
+            else -> null
+        }
+    } catch (e: IOException) {
+        null
+    }
+
+    /** `GETINFO network-liveness`: false once circuits time out with no cell received; null when unknown. */
+    open fun networkLive(): Boolean? = try {
+        val r = command("GETINFO", "network-liveness")
+        when {
+            r.contains("network-liveness=up") -> true
+            r.contains("network-liveness=down") -> false
+            else -> null
+        }
+    } catch (e: IOException) {
+        null
+    }
+
+    /** Leaves dormant mode at once (an idle daemon otherwise builds no circuit after a kick). */
+    open fun signalActive() {
+        val r = command("SIGNAL", "ACTIVE")
+        if (!r.startsWith("250")) throw IOException("SIGNAL ACTIVE failed")
+    }
+
     /** true when at least one circuit is established. */
     fun circuitEstablished(): Boolean = try {
         command("GETINFO", "status/circuit-established").contains("status/circuit-established=1")

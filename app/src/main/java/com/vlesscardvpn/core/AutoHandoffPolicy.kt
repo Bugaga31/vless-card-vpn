@@ -5,9 +5,15 @@ import com.vlesscardvpn.model.ServerState
 
 /** Prior endpoints and per-network history are hints. Handoff requires new body probes. */
 object AutoHandoffPolicy {
-    const val TOTAL_MS = 6500L
-    const val PROBE_WINDOW_MS = 4500L
+    /** 1.2.135: a 4.5 s window with four probes at a time often expired on a fresh cellular link
+     * (Telegram series + Discord + UDP gates), and every miss restarted the whole discovery. */
+    const val TOTAL_MS = 9000L
+    const val PROBE_WINDOW_MS = 7000L
+    /** One isolated attempt must fit inside the window, leaving the rest of [TOTAL_MS] for selection. */
+    const val PROBE_BUDGET_MS = 6500L
     const val MAX_CANDIDATES = 8
+    /** The whole bounded wave at once: a slow head of the queue can no longer hide a working route behind it. */
+    const val PARALLEL = MAX_CANDIDATES
     /** Exact-network remembered routes get first probe slots, never automatic success. */
     fun prioritize(candidates:List<Server>,remembered:Set<String>):List<Server> =
         candidates.distinctBy {it.id}.sortedBy {if(it.id in remembered) 0 else 1}.take(MAX_CANDIDATES)

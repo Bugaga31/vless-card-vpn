@@ -1489,15 +1489,19 @@ object Actions {
      * Network changed (Auto): compare up to eight remembered/cloud/diverse routes outside the tunnel,
      * then sequentially sample downloads on up to three finalists. Results are guarded by physical network identity.
      */
-    suspend fun quickRecheck(previousCandidates: List<Server> = emptyList()): Boolean {
+    suspend fun quickRecheck(previousCandidates: List<Server> = emptyList(), live: (suspend (String) -> Server?)? = null): Boolean {
         val result = kotlinx.coroutines.withTimeoutOrNull(AutoHandoffPolicy.TOTAL_MS) {
-            quickRecheckWithinDeadline(previousCandidates)
+            quickRecheckWithinDeadline(previousCandidates, live)
         }
         if (result != true) deepPending = true
         return result == true
     }
 
-    private suspend fun quickRecheckWithinDeadline(previousCandidates: List<Server>): Boolean {
+    /**
+     * [live]: the running route probed through its own core on the new network ([LiveHandoffProbe]); it races
+     * the isolated wave after the runtime reset, and whichever proves a route first ends the other lane.
+     */
+    private suspend fun quickRecheckWithinDeadline(previousCandidates: List<Server>, live: (suspend (String) -> Server?)?): Boolean {
         val observed = Net.observation(app) ?: return false
         val net = observed.profile
         Store.update { state -> state.copy(states = state.states.mapValues { (_, value) -> AutoHandoffPolicy.resetRuntime(value,net) }) }
@@ -1510,18 +1514,33 @@ object Actions {
         }.thenByDescending { CloudSpeed.prior(it) ?: .5 })
         val candidates = AutoHandoffPolicy.prioritize(AutoHandoffPolicy.candidates(preferred(st,previousCandidates),st.servers,
             remembered + st.selected + CloudSpeed.pick(ranked, emptyList(), n = 2) + ranked),local)
-        if (candidates.isEmpty()) return false
+        if (candidates.isEmpty() && live == null) return false
         val passed = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+        val liveWinner = java.util.concurrent.atomic.AtomicReference<Server?>(null)
         val prev = progress.value
         try {
             kotlinx.coroutines.withTimeoutOrNull(AutoHandoffPolicy.PROBE_WINDOW_MS) {
-                realTest(candidates, "Новая сеть: HTTPS и Telegram MTProto", big = false, youtube = false,
-                    telegram = true, foreground = true, stopAfter = 1,
-                    attempts = 1, parallel = 4, budgetMs = 6500L, onSuccess = { passed.add(it.id) })
+                kotlinx.coroutines.coroutineScope {
+                    val liveLane = live?.let { probe -> launch {
+                        val won = try { probe(net) } catch (e: Exception) {
+                            if (e is kotlinx.coroutines.CancellationException) throw e
+                            null
+                        }
+                        if (won != null && valid()) { liveWinner.set(won); passed.add(won.id) }
+                    } }
+                    val wave = if (candidates.isEmpty()) null else launch {
+                        realTest(candidates, "Новая сеть: HTTPS и Telegram MTProto", big = false, youtube = false,
+                            telegram = true, foreground = true, stopAfter = 1,
+                            attempts = 1, parallel = AutoHandoffPolicy.PARALLEL, budgetMs = AutoHandoffPolicy.PROBE_BUDGET_MS, onSuccess = { passed.add(it.id) })
+                        if (passed.isNotEmpty()) liveLane?.cancel()
+                    }
+                    liveLane?.invokeOnCompletion { if (liveWinner.get() != null) wave?.cancel() }
+                }
             }
             if (!valid()) return false
             val snapshot=Store.state.value
-            val ok = AutoEligibility.servicePool(candidates.filter { it.id in passed && snapshot.state(it).works },
+            val pool = (listOfNotNull(liveWinner.get()) + candidates).distinctBy { it.id }
+            val ok = AutoEligibility.servicePool(pool.filter { it.id in passed && snapshot.state(it).works },
                 {snapshot.state(it)},net,System.currentTimeMillis())
             if (ok.isEmpty()) { deepPending = true; return false }
             deepPending = true

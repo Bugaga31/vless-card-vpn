@@ -12,7 +12,7 @@ import java.util.concurrent.TimeUnit
 
 class DnsTransportTest {
     /** Actual TCP SOCKS negotiation + UDP health query, all on loopback. */
-    private fun fixture(auth: Boolean = false, transform: (ByteArray) -> ByteArray): Boolean {
+    private fun fixture(auth: Boolean = false, drop: Int = 0, budgetMs: Int = 1500, transform: (ByteArray) -> ByteArray): Boolean {
         val loop = InetAddress.getByName("127.0.0.1")
         ServerSocket(0, 1, loop).use { tcp -> DatagramSocket(0, loop).use { udp ->
             tcp.soTimeout = 3000; udp.soTimeout = 3000
@@ -34,6 +34,8 @@ class DnsTransportTest {
                     val associate = ByteArray(10); i.readFully(associate)
                     check(associate.take(4) == listOf<Byte>(5, 3, 0, 1))
                     o.write(byteArrayOf(5, 0, 0, 1, 127, 0, 0, 1, (udp.localPort shr 8).toByte(), udp.localPort.toByte())); o.flush()
+                    // [drop]: datagrams lost on the way (a fresh cellular link), never answered
+                    repeat(drop) { udp.receive(DatagramPacket(ByteArray(1500), 1500)) }
                     val packet = DatagramPacket(ByteArray(1500), 1500); udp.receive(packet)
                     val q = DnsWire.payload(packet.data, packet.length) ?: error("invalid health query")
                     val response = q.copyOf().apply { this[2] = 0x81.toByte(); this[3] = 0x80.toByte(); this[7] = 1 } +
@@ -46,7 +48,7 @@ class DnsTransportTest {
                 }
             }
             try {
-                val result = Tester.dnsViaSocks(tcp.localPort, if (auth) "u" else "", if (auth) "p" else "", budgetMs = 1500)
+                val result = Tester.dnsViaSocks(tcp.localPort, if (auth) "u" else "", if (auth) "p" else "", budgetMs = budgetMs)
                 server.get(3, TimeUnit.SECONDS)
                 return result
             } finally { executor.shutdownNow(); executor.awaitTermination(3, TimeUnit.SECONDS) }
@@ -56,6 +58,9 @@ class DnsTransportTest {
     @Test fun passwordProtectedSocksUdpAnswerAccepted() { assertTrue(fixture(auth = true) { it }) }
     @Test fun realSocksWrongIdNotPass() { assertFalse(fixture { it.apply { this[0] = (this[0].toInt() xor 1).toByte() } }) }
     @Test fun realSocksTruncatedResponseNotPass() { assertFalse(fixture { it.copyOf(8) }) }
+    /** 1.2.135: one lost datagram is resent with a new ID and its answer still has to match a sent query. */
+    @Test fun lostFirstDatagramIsResent() { assertTrue(fixture(drop = 1, budgetMs = 4000) { it }) }
+    @Test fun resentQueryStillRejectsWrongId() { assertFalse(fixture(drop = 1, budgetMs = 2500) { it.apply { this[0] = (this[0].toInt() xor 1).toByte() } }) }
     @Test fun cancelledSocketDoesNotContinue() {
         ServerSocket(0, 1, InetAddress.getByName("127.0.0.1")).use { server ->
             assertFalse(Tester.dnsViaSocks(server.localPort, budgetMs = 1500, onCancel = { close -> close() }))
