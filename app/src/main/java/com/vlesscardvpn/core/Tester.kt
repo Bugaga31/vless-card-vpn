@@ -144,6 +144,63 @@ object Tester {
         ((System.nanoTime() - t0) / 1_000_000).toInt().coerceAtLeast(1)
     }.getOrDefault(0)
 
+    /**
+     * 1.2.136 [RouteLiveness]: is the running route alive at all? Every URL at once through its SOCKS, ANY HTTP
+     * answer within [budgetMs] counts (no service checks, no redirects followed, private dispatcher and pool, so
+     * cancelling it never touches another probe). A slow but working route is not a lost route.
+     */
+    fun alive(port: Int, urls: List<String>, budgetMs: Long = RouteLiveness.CONFIRM_MS, onCancel: ((() -> Unit) -> Unit)? = null): Boolean {
+        if (urls.isEmpty() || port !in 1..65535) return false
+        val budget = budgetMs.coerceIn(500L, 15_000L)
+        val client = fast.newBuilder().callTimeout(budget, TimeUnit.MILLISECONDS)
+            .connectTimeout(minOf(budget, 3000L), TimeUnit.MILLISECONDS).readTimeout(budget, TimeUnit.MILLISECONDS)
+            .followRedirects(false).followSslRedirects(false)
+            .dispatcher(okhttp3.Dispatcher()).connectionPool(okhttp3.ConnectionPool(2, 10, TimeUnit.SECONDS))
+            .proxy(Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", port))).build()
+        val done = java.util.concurrent.CountDownLatch(1)
+        val answered = java.util.concurrent.atomic.AtomicBoolean(false)
+        val pending = java.util.concurrent.atomic.AtomicInteger(urls.size)
+        val calls = urls.mapNotNull { url -> runCatching { client.newCall(Request.Builder().url(url).header("User-Agent", UA).build()) }.getOrNull() }
+        if (calls.size < urls.size) repeat(urls.size - calls.size) { pending.decrementAndGet() }
+        if (calls.isEmpty()) return false
+        onCancel?.invoke { calls.forEach { it.cancel() }; done.countDown() }
+        try {
+            for (call in calls) call.enqueue(object : okhttp3.Callback {
+                override fun onFailure(call: okhttp3.Call, e: java.io.IOException) { if (pending.decrementAndGet() <= 0) done.countDown() }
+                override fun onResponse(call: okhttp3.Call, response: okhttp3.Response) {
+                    response.use { if (RouteLiveness.answered(it.code)) answered.set(true) }
+                    if (answered.get() || pending.decrementAndGet() <= 0) done.countDown()
+                }
+            })
+            done.await(budget + 250L, TimeUnit.MILLISECONDS)
+        } catch (e: InterruptedException) {
+            Thread.currentThread().interrupt()
+        } finally {
+            calls.forEach { it.cancel() }
+            client.dispatcher.cancelAll(); client.connectionPool.evictAll(); client.dispatcher.executorService.shutdown()
+        }
+        return answered.get()
+    }
+
+    /**
+     * 1.2.136 [RouteLiveness]: does the phone's own network reach the internet? A direct TCP handshake (the app is
+     * outside its own VPN) to every target at once; the first success answers. Bounded: never longer than
+     * [timeoutMs] plus a short name-resolution allowance, daemon threads only.
+     */
+    fun physicalInternet(targets: List<Pair<String, Int>>, timeoutMs: Int = RouteLiveness.PHYSICAL_MS): Boolean {
+        if (targets.isEmpty()) return false
+        val done = java.util.concurrent.CountDownLatch(1)
+        val reached = java.util.concurrent.atomic.AtomicBoolean(false)
+        val left = java.util.concurrent.atomic.AtomicInteger(targets.size)
+        for ((host, port) in targets) Thread({
+            if (tcpOne(host, port, timeoutMs) > 0) { reached.set(true); done.countDown() }
+            else if (left.decrementAndGet() <= 0) done.countDown()
+        }, "physical-check").apply { isDaemon = true }.start()
+        try { done.await(timeoutMs + 1500L, TimeUnit.MILLISECONDS) }
+        catch (e: InterruptedException) { Thread.currentThread().interrupt() }
+        return reached.get()
+    }
+
     private fun resolves(host: String): Int = if (runCatching { InetAddress.getByName(host) }.isSuccess) 1 else 0
 
     private fun freePorts(n: Int): List<Int> {

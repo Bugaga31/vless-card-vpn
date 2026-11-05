@@ -54,7 +54,7 @@ class ConfigTest {
     }
 
     @Test fun maskCatalog() {
-        assertEquals(754, Masks.ALL.size) // Includes 7 fingerprints × 3 explicit tpws Hello profiles; 1.2.135: +4 fragment shapes ×14, +3 WG noises, +4 hop combos, +16 signature masks.
+        assertEquals(804, Masks.ALL.size) // Includes 7 fingerprints × 3 explicit tpws Hello profiles; 1.2.135: +4 fragment shapes ×14, +3 WG noises, +4 hop combos, +16 signature masks; 1.2.136: +3 record shapes ×14, +4 cover names ×2.
         Masks.FINGERPRINTS.forEach { fp -> listOf("balanced","coarse","mobile").forEach { profile ->
             assertNotNull(Masks.byId("$fp.hello.$profile")); assertNotNull(Masks.byId("$fp.hello.$profile.b"))
         } }

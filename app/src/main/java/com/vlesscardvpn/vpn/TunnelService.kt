@@ -41,6 +41,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -594,6 +595,17 @@ class TunnelService : VpnService() {
                     Net.underlying(this@TunnelService)?.toString() != sampledHandle) return@launch
                 p = Tester.probeSocks(port, st.testUrl, big = false, youtube = Tunnel.ytViaDpi, telegram = checkServices, attempts = 1, budgetMs = 6500L, autoChecks=profile,user=auth.user,pass=auth.pass)
             }
+            // 1.2.136: one failed sample of another selected service (a lost UDP voice train, one slow Discord or
+            // YouTube answer) is measured once more on the same route before recovery switches servers.
+            if (profile != null && st.autoHeal && usedChain == null && !usedTorRoute &&
+                com.vlesscardvpn.core.RequiredServiceRecovery.needsConfirmation(profile, p)) {
+                delay(2000)
+                if (core !== sampledCore || Tunnel.socks != auth || Net.key(this@TunnelService) != sampledNet ||
+                    Net.underlying(this@TunnelService)?.toString() != sampledHandle) return@launch
+                val again = Tester.probeSocks(port, st.testUrl, big = false, youtube = Tunnel.ytViaDpi, telegram = checkServices, attempts = 1, budgetMs = 6500L, autoChecks=profile,user=auth.user,pass=auth.pass)
+                if (BuildConfig.DEBUG) Log.i("E2E", "service recheck works=${again.works} failed=${com.vlesscardvpn.core.RequiredServiceRecovery.failed(profile, again)}")
+                if (again.works) p = again
+            }
             // A SOCKS HTTPS success uses remote name resolution and does not prove
             // Android apps' UDP DNS path. Never show a healthy VPN on that evidence alone.
             val measuredBeforeDns = p
@@ -705,7 +717,7 @@ class TunnelService : VpnService() {
                 if (sinceNet < 90_000L && !netHardDone) { netHardDone = true; hardRestart("новая сеть, а интернет не пошёл", force = true); return@launch }
                 if (System.currentTimeMillis() - lastHard > 5 * 60_000L) { hardRestart("после переподключения интернет не пошёл"); return@launch }
             }
-            if (p.works) { healStep = 0; dpiHeals = 0; connectFails = 0; scheduleOptimize(60_000); if(st.mode!=Mode.AUTO) com.vlesscardvpn.core.AppWatch.start(this@TunnelService, reconnect = { scope.launch { lock.withLock { connect(soft = true, reason = SoftReason.APP_REPAIR) } } }, maintenanceReconnect = { scheduleMaintenanceReconnect() }, connectedAt = { connectedElapsed }); watchdog(); standbyScout(); coverTraffic(); torLoop(); serviceRoutes(); if(st.mode!=Mode.AUTO) autoChainScout() } else heal()
+            if (p.works) { healStep = 0; dpiHeals = 0; connectFails = 0; scheduleOptimize(60_000); if(st.mode!=Mode.AUTO) com.vlesscardvpn.core.AppWatch.start(this@TunnelService, reconnect = { scope.launch { lock.withLock { connect(soft = true, reason = SoftReason.APP_REPAIR) } } }, maintenanceReconnect = { scheduleMaintenanceReconnect() }, connectedAt = { connectedElapsed }); watchdog(); standbyScout(); coverTraffic(); torLoop(); serviceRoutes(); if(st.mode!=Mode.AUTO) autoChainScout() } else { heal(); watchdog() } // the detector outlives a failed check
         }
     }
 
@@ -1340,7 +1352,12 @@ class TunnelService : VpnService() {
                 val port = auth.port
                 val vpnMode = true
                 // the TUN engine stopped: nothing in the phone works, though the proxy itself is fine — rebuild like the big button
-                if (vpnMode && runCatching { !TProxyService.TProxyIsRunning() }.getOrDefault(false)) { hardRestart("движок VPN остановился"); break }
+                // 1.2.136: a stopped engine is rebuilt even soon after another restart (once a minute at most), and
+                // the detector survives when the restart is diverted to healing instead of being launched.
+                if (vpnMode && runCatching { !TProxyService.TProxyIsRunning() }.getOrDefault(false)) {
+                    if (hardRestart("движок VPN остановился", force = System.currentTimeMillis() - lastHard >= 60_000L)) break
+                    continue
+                }
                 val settings = Store.state.value.settings
                 val sampledCore = core
                 val sampledUiRuntime=com.vlesscardvpn.core.MaskRuntimeEvidence.state.value
@@ -1376,7 +1393,28 @@ class TunnelService : VpnService() {
                     Tunnel.socks != auth || Net.key(this@TunnelService) != network ||
                     Net.underlying(this@TunnelService)?.toString() != handle) { telegramMiss = 0; telegramSlow = 0; com.vlesscardvpn.core.TelegramStability.clear(); continue }
                 if(profile!=null && (com.vlesscardvpn.core.AutoChecks.current!=profile || com.vlesscardvpn.core.AutoLatencyPolicy.MAX_MS!=configuredLimit)) continue
-                val ok = live.works
+                var ok = live.works
+                var confirmedDead = false
+                if (!ok && Actions.online()) {
+                    // 1.2.136: a slow answer, or an outage of the phone's own network, is not a dead server.
+                    // Ask the route (two URLs, any HTTP answer, a calmer window) and the network at once.
+                    val verdict = recoveryCpuLease { confirmLoss(port, settings.testUrl) }
+                    if (core !== sampledCore || chainEpoch.get()!=sampledEpoch || usedTorRoute!=sampledTorRoute ||
+                        Tunnel.socks != auth || Net.key(this@TunnelService) != network ||
+                        Net.underlying(this@TunnelService)?.toString() != handle) continue
+                    when (verdict) {
+                        com.vlesscardvpn.core.RouteLiveness.Verdict.ALIVE -> ok = true
+                        com.vlesscardvpn.core.RouteLiveness.Verdict.OFFLINE -> {
+                            miss = 0
+                            val cur = Tunnel.status.value
+                            if (cur.state == Tunnel.State.CONNECTED) Tunnel.status.value = cur.copy(
+                                check = "Сеть подключена, но интернета у неё нет — VPN ждёт и восстановится сам; серверы не помечаются нерабочими", checkOk = null)
+                            offline = true
+                            continue
+                        }
+                        com.vlesscardvpn.core.RouteLiveness.Verdict.DEAD -> confirmedDead = true
+                    }
+                }
                 if(profile!=null) {
                     if(com.vlesscardvpn.core.NetworkObservation.accepts(sampledUiNetwork,Net.observation(this@TunnelService)))
                         com.vlesscardvpn.core.AutoCheckEvidence.publish(profile,configuredLimit,live,sampledUiNetwork,sampledUiRuntime)
@@ -1449,8 +1487,11 @@ class TunnelService : VpnService() {
                     offline = true
                     continue
                 }
-                if (ok && offline) { verifySoon(0); break } // internet is back: full check (WARP, YouTube…)
-                miss = if (ok) 0 else miss + 1
+                // Internet is back: a full check (WARP, YouTube…), and this detector keeps running — it used to
+                // stop here, and when that check was not due nothing watched the route until the screen turned on.
+                if (ok && offline) { offline = false; miss = 0; verifySoon(0, suspectedFailure = true); continue }
+                // A confirmed loss (no answer in the calm window while the network itself works) needs no second miss.
+                miss = if (ok) 0 else if (confirmedDead) maxOf(miss + 1, 2) else miss + 1
                 if (miss >= 2) {
                     val callActive = com.vlesscardvpn.core.PhonePower.isVoiceCallActive(this@TunnelService)
                     if (com.vlesscardvpn.core.VoiceCallPolicy.deferRepair(callActive, miss)) {
@@ -1468,8 +1509,9 @@ class TunnelService : VpnService() {
                         recoverServerRoute()
                         continue
                     }
-                    hardRestart("сервер перестал отвечать")
-                    break
+                    if (hardRestart("сервер перестал отвечать")) break
+                    miss = 0
+                    continue
                 }
                 if (ok && vpnMode) {
                     // the proxy works, but do apps? DNS the way apps ask it, and traffic through the TUN in both directions
@@ -1493,8 +1535,8 @@ class TunnelService : VpnService() {
                         Tunnel.status.value = cur.copy(check = "Идёт звонок — подтверждаю сбой перед перезапуском", checkOk = false)
                         continue
                     }
-                    if (dnsMiss >= 2) { hardRestart("DNS перестал отвечать"); break }
-                    if (stall >= 3) { hardRestart("трафик приложений завис"); break }
+                    if (dnsMiss >= 2) { if (hardRestart("DNS перестал отвечать")) break; dnsMiss = 0; continue }
+                    if (stall >= 3) { if (hardRestart("трафик приложений завис")) break; stall = 0; continue }
                 }
                 } catch(e:kotlinx.coroutines.CancellationException) { throw e }
                   catch(e:Exception) {
@@ -1576,10 +1618,11 @@ class TunnelService : VpnService() {
     @Volatile private var netHardDone = true
     /** The network the tunnel was built on; kept across reconnects so a change during a reconnect is not missed. */
     @Volatile private var curNet: Network? = null
-    private fun hardRestart(why: String, force: Boolean = false) {
+    /** true when a reconnect was actually launched; false when it was diverted to healing (the caller keeps watching). */
+    private fun hardRestart(why: String, force: Boolean = false): Boolean {
         // A restart can be caused by DNS/TUN/app stalls; it is not a failed probe of every server.
         val now = System.currentTimeMillis()
-        if (!force && now - lastHard < 5 * 60_000L) { heal(); return } // twice in 5 min: restarting doesn't help — heal (masks, servers)
+        if (!force && now - lastHard < 5 * 60_000L) { heal(); return false } // twice in 5 min: restarting doesn't help — heal (masks, servers)
         lastHard = now
         recoveryStarted()
         Log.i("E2E", "watchdog: hard restart — $why")
@@ -1587,6 +1630,7 @@ class TunnelService : VpnService() {
         if (cur.state == Tunnel.State.CONNECTED) Tunnel.status.value = cur.copy(check = "Сам переподключаюсь: $why", checkOk = null)
         com.vlesscardvpn.core.AppWatch.note("Связь: $why — переподключился сам, нажимать кнопку не нужно")
         scope.launch { lock.withLock { connect(soft = false) } }
+        return true
     }
 
     private var telegramRepairAt = -60_000L
@@ -1636,6 +1680,41 @@ class TunnelService : VpnService() {
     private var recoveryJob: Job? = null
     private fun healStatus(text: String) { val cur = Tunnel.status.value; if (cur.state == Tunnel.State.CONNECTED) Tunnel.status.value = cur.copy(check = text, checkOk = null) }
 
+    /** [com.vlesscardvpn.core.RouteLiveness] witnesses: anycast resolvers + a few TCP VLESS endpoints (running first). */
+    private fun physicalTargets(): List<Pair<String, Int>> {
+        val st = Store.state.value
+        val endpoints = (usedServers + st.servers.filter { st.state(it).works } + st.servers)
+            .filter { it.protocol in com.vlesscardvpn.core.RouteLiveness.TCP_PROTOCOLS }
+            .map { it.address to it.port }
+        return com.vlesscardvpn.core.RouteLiveness.targets(endpoints)
+    }
+
+    /** The phone's own network reaches the internet (direct TCP, never through the tunnel). */
+    private suspend fun physicalOk(): Boolean {
+        val targets = physicalTargets()
+        return kotlinx.coroutines.withContext(Dispatchers.IO) { kotlinx.coroutines.runInterruptible { Tester.physicalInternet(targets) } }
+    }
+
+    /**
+     * 1.2.136: one missed light probe is confirmed before anything is blamed. The running route (two URLs, any HTTP
+     * answer, [com.vlesscardvpn.core.RouteLiveness.CONFIRM_MS]) and the physical network are asked at the same time.
+     */
+    private suspend fun confirmLoss(port: Int, testUrl: String): com.vlesscardvpn.core.RouteLiveness.Verdict = kotlinx.coroutines.coroutineScope {
+        val targets = physicalTargets()
+        val physical = async(Dispatchers.IO) { kotlinx.coroutines.runInterruptible { Tester.physicalInternet(targets) } }
+        val alive = try {
+            com.vlesscardvpn.core.CancellableProbe.run { bind ->
+                Tester.alive(port, com.vlesscardvpn.core.RouteLiveness.urls(testUrl), com.vlesscardvpn.core.RouteLiveness.CONFIRM_MS, bind)
+            }
+        } catch (e: kotlinx.coroutines.CancellationException) { physical.cancel(); throw e }
+          catch (e: Exception) { false }
+        val verdict = if (alive) com.vlesscardvpn.core.RouteLiveness.Verdict.ALIVE
+            else com.vlesscardvpn.core.RouteLiveness.verdict(false, runCatching { physical.await() }.getOrDefault(true))
+        physical.cancel()
+        if (BuildConfig.DEBUG) Log.i("E2E", "watchdog confirm verdict=$verdict")
+        verdict
+    }
+
     private fun recoverServerRoute() {
         standbyJob?.cancel(); standbyJob=null
         if (recoveryJob?.isActive == true || tun == null || Tunnel.socks == null) return
@@ -1645,13 +1724,41 @@ class TunnelService : VpnService() {
             val attempted=mutableSetOf<String>()
             var identity=Net.key(this@TunnelService) to Net.underlying(this@TunnelService)?.toString()
             var resetAt=android.os.SystemClock.elapsedRealtime()
+            var waitedOffline=false
             while (tun != null && Tunnel.socks != null && Tunnel.status.value.state == Tunnel.State.CONNECTED) {
                 // Reached only after confirmed failure (VoiceCallPolicy already protects uncertain calls).
                 // A broken route must not wait forever merely because AudioManager still reports a call.
                 if (!Actions.online()) {
                     healStatus("Сеть недоступна — VPN оставляет трафик заблокированным и повторит поиск")
+                    waitedOffline=true
                     delay(com.vlesscardvpn.core.VpnRecoveryPolicy.RETRY_MS)
                     continue
+                }
+                // 1.2.136: Android still reports INTERNET while the network itself is silent (lift, tunnel, an
+                // exhausted mobile balance). Rescue would mark the running server dead and hop between servers
+                // that cannot work either; wait instead, blaming nobody.
+                if (!physicalOk()) {
+                    healStatus("Сеть подключена, но интернета у неё нет — жду; серверы не помечаю нерабочими")
+                    waitedOffline=true
+                    delay(2000)
+                    continue
+                }
+                if (waitedOffline) {
+                    waitedOffline=false
+                    val current=Tunnel.socks
+                    val answers=current!=null && runCatching {
+                        com.vlesscardvpn.core.CancellableProbe.run { bind ->
+                            Tester.alive(current.port,com.vlesscardvpn.core.RouteLiveness.urls(Store.state.value.settings.testUrl),
+                                com.vlesscardvpn.core.RouteLiveness.CONFIRM_MS,bind)
+                        }
+                    }.onFailure { if (it is kotlinx.coroutines.CancellationException) throw it }.getOrDefault(false)
+                    if (answers && Tunnel.socks==current && Tunnel.status.value.state==Tunnel.State.CONNECTED) {
+                        // The outage was the network, not the route: keep it, re-verify, let the watchdog continue.
+                        if (BuildConfig.DEBUG) Log.i("E2E", "recovery network_back route_kept=true")
+                        healStatus("Интернет вернулся — маршрут отвечает, перепроверяю…")
+                        verifySoon(0,suspectedFailure=true)
+                        break
+                    }
                 }
                 healStatus(if (attempt == 0) "Сервер не отвечает — ищу рабочий VLESS-маршрут; прямого обхода нет" else "VLESS-маршрут не найден — повторяю поиск")
                 val physical=Net.key(this@TunnelService) to Net.underlying(this@TunnelService)?.toString()
@@ -1698,10 +1805,13 @@ class TunnelService : VpnService() {
         val servers = usedServers.filter(com.vlesscardvpn.core.AutoEligibility::vlessServer)
         if (servers.isEmpty()) return
         healJob = scope.launch {
-            if (!Actions.online()) {
+            if (!Actions.online() || !physicalOk()) {
                 healStatus("Нет интернета у самой сети — маршрут через VLESS оставлен без прямого обхода")
                 delay(20_000)
-                verifySoon(0)
+                // 1.2.136: a plain verifySoon(0) was usually not due yet (the failed check ran <30 s ago), and with
+                // no watchdog running nothing looked at the route again until the screen turned on.
+                verifySoon(0, suspectedFailure = true)
+                watchdog()
                 return@launch
             }
             val reachable = healStep == 0 && servers.take(5).any { Tester.tcpOne(it.address, it.port, 1500) > 0 }
@@ -1752,6 +1862,9 @@ class TunnelService : VpnService() {
             val network = Net.underlying(this@TunnelService)
             val profile = network?.let { Net.key(this@TunnelService, it) }
             val snapshot = network?.let { NetworkHandoff.Snapshot(it.toString(), profile!!, Net.pathRevision(this@TunnelService,it)) }
+            // 1.2.136: the same network merely gained a path element (an IPv6 prefix after IPv4, a second address):
+            // established connections are untouched — nothing is cancelled, reset or reconnected.
+            if (handoff.adopt(snapshot)) { if (BuildConfig.DEBUG) Log.i("E2E", "handoff adopted=extension"); return@launch }
             val change = handoff.update(snapshot) ?: return@launch
             if (BuildConfig.DEBUG) Log.i("E2E", "handoff delta handle=${change.handleChanged} profile=${change.profileChanged} path=${change.pathChanged} presence=${change.presenceChanged} state=${Tunnel.status.value.state}")
             // Carry endpoints only as unverified candidate hints, never their old-network samples.

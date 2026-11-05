@@ -75,6 +75,8 @@ object Masks {
         "kinopoisk.ru", "dzen.ru", "max.ru", "tbank.ru", "ok.ru", "vkvideo.ru", "x5.ru")
     /** 1.2.135: more cover names for pinned TLS (the same open whitelist as [WHITE_POOL]). */
     val EXTRA_SNI = listOf("mail.ru", "rutube.ru", "dzen.ru", "max.ru")
+    /** 1.2.136: four more cover names from the same open whitelist (marketplaces, video, a social network). */
+    val MORE_SNI = listOf("wildberries.ru", "avito.ru", "kinopoisk.ru", "ok.ru")
     val ALPNS = listOf("h2,http/1.1", "http/1.1")
     val MSS_VALUES = listOf(536, 300, 120, 88)
 
@@ -165,6 +167,12 @@ object Masks {
         listOf("hello.wave", "Hello волной 16→96→400 байт", "tlshello", "", "", "4", "16-24,96-160,400-800", "0-1,0-1,0-0"),
         listOf("l8", "всплеск у SNI: 2 крупных + 3 по 2–4 байта", "tlshello", "", "", "0", "40-60,40-60,2-4,2-4,2-4,500-900", "0-1,0-1,1-2,1-2,1-2,0-1"),
         listOf("p8", "дробление 1-го пакета 40-80 байт без паузы", "1-1", "40-80", "0-1", "4"),
+        // 1.2.136: Hello cut into TLS records with NO pause at all (Xray sends the records in one write, so they cost
+        // nothing): the first record ends before the SNI, three records with the SNI on its own, and a cut through
+        // the host name itself where Firefox/Safari place it.
+        listOf("hello.duo", "Hello на 2 записи без паузы: 40–60 байт + остальное", "tlshello", "", "", "3", "40-60,1200-2000", "0-0,0-0"),
+        listOf("hello.tri", "Hello на 3 записи без паузы: 33–48 → 100–160 → остальное", "tlshello", "", "", "4", "33-48,100-160,1200-2000", "0-0,0-0,0-0"),
+        listOf("hello.sni", "Hello: разрез внутри имени SNI · 3 записи без паузы", "tlshello", "", "", "4", "110-130,10-16,1200-2000", "0-0,0-0,0-0"),
     )
 
     /** (id, title, noise items as JSON) — sent before the first UDP datagram; servers drop them. */
@@ -264,7 +272,7 @@ object Masks {
         add(Mask("vc.alpn.br.tfo", "Фирменная: ALPN браузера + быстрый старт", "chrome", alpn = "h2,http/1.1", tfo = true))
         add(Mask("vc.alpn.11.tfo", "Фирменная: Safari, ALPN HTTP/1.1 + быстрый старт", "safari", alpn = "http/1.1", tfo = true))
         add(Mask("vc.turbo.alpn.v6", "Турбо: ALPN браузера + IPv6", "chrome", alpn = "h2,http/1.1", ipv6 = true))
-        for (d in EXTRA_SNI) {
+        for (d in EXTRA_SNI + MORE_SNI) {
             add(Mask("vc.sni.$d", "Фирменная: белый SNI $d", "chrome", sni = d))
             add(Mask("vc.sni.$d.fast", "SNI $d · лёгкое Hello", "chrome", packets = "tlshello", length = "100-200", delay = "0-1", sni = d))
         }
@@ -367,7 +375,11 @@ object Masks {
             "vc.tfo.fast", "vc.turbo.sni.ya.tfo", "vc.alpn.br.tfo", "chrome.hello.split", "vc.sni.mail.ru.fast", "vc.sni.rutube.ru.fast",
             "vc.v6.fast", "vc.turbo.alpn.v6", "vc.alpn.11.tfo", "vc.sni.dzen.ru.fast", "vc.sni.max.ru.fast", "vc.sni.mail.ru", "vc.sni.rutube.ru",
             "vc.sni.dzen.ru", "vc.sni.max.ru", "firefox.hello.split", "safari.hello.wave", "chrome.p8", "vc.mux.tfo", "vc.mss536.fast",
-            "chrome.z17", "chrome.z18", "chrome.z19", "chrome.z17.hw", "chrome.z18.hl", "chrome.l8")
+            "chrome.z17", "chrome.z18", "chrome.z19", "chrome.z17.hw", "chrome.z18.hl", "chrome.l8",
+            // 1.2.136: zero-pause record cuts and four more cover names, ahead of the untried bulk of the same weight
+            "chrome.hello.duo", "firefox.hello.sni", "safari.hello.tri", "vc.sni.wildberries.ru.fast", "vc.sni.ok.ru.fast",
+            "vc.sni.avito.ru.fast", "vc.sni.kinopoisk.ru.fast", "edge.hello.tri", "ios.hello.duo", "safari.hello.sni", "chrome.hello.tri",
+            "firefox.hello.duo", "vc.sni.wildberries.ru", "vc.sni.ok.ru", "vc.sni.avito.ru", "vc.sni.kinopoisk.ru")
         // own masks right after the plain baseline: the user made them for this network
         // light masks first (stable: the curated order stays inside each weight); own masks keep their place up front
         val ordered = (listOfNotNull(byId["chrome.n"]) + custom + cloudById.values + (first.mapNotNull { byId[it] } + ALL).distinct().filter { !it.custom }.sortedBy { cost(it) }).distinct()
