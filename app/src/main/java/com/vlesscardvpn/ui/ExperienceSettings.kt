@@ -3,6 +3,7 @@ package com.vlesscardvpn.ui
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.vlesscardvpn.core.Store
@@ -15,9 +16,8 @@ fun ExperienceSettings() {
     var reset by remember { mutableStateOf(false) }
     fun update(f:(Settings)->Settings) { Store.update { it.copy(settings=f(it.settings)) } }
     @Composable fun Option(title:String, detail:String, checked:Boolean, onChange:(Boolean)->Unit) {
-        Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(12.dp)) {
+        SwitchRow(checked,onChange,verticalAlignment=Alignment.Top) {
             Column(Modifier.weight(1f)) { Text(title,style=MaterialTheme.typography.titleSmall);Text(detail,style=MaterialTheme.typography.bodySmall) }
-            Switch(checked=checked,onCheckedChange=onChange)
         }
     }
     Column(verticalArrangement=Arrangement.spacedBy(12.dp)) {

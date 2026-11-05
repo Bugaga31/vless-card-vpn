@@ -14,10 +14,8 @@ import com.vlesscardvpn.model.Settings
 fun RuWhitelistCard(settings: Settings, onGeoChange: (Boolean) -> Unit = {}, onChange: (Boolean) -> Unit) {
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            SwitchRow(settings.ruWhitelist, onChange) {
                 Text("RU-сервисы напрямую", Modifier.weight(1f), fontSize = 18.sp, fontWeight = FontWeight.Bold)
-                Switch(checked = settings.ruWhitelist, onCheckedChange = onChange,
-                    modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp))
             }
             Text(when {
                 settings.torAll -> "В режиме «Всё через Tor» исключения выключены."
@@ -27,10 +25,8 @@ fun RuWhitelistCard(settings: Settings, onGeoChange: (Boolean) -> Unit = {}, onC
             Text("При включении трафик и DNS этих доменов видны провайдеру. Короткий список не охватывает все .ru и российские IP. «Всегда через VPN» имеет приоритет. Применится после переподключения.", fontSize = 14.sp)
             Text(com.vlesscardvpn.core.RuWhitelistPolicy.SERVICES.joinToString(" · "), fontSize = 14.sp)
             HorizontalDivider()
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            SwitchRow(settings.ruAllDirect, onGeoChange) {
                 Text("RU-домены и IP напрямую", Modifier.weight(1f), fontSize = 18.sp, fontWeight = FontWeight.Bold)
-                Switch(checked = settings.ruAllDirect, onCheckedChange = onGeoChange,
-                    modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp))
             }
             Text(when { settings.torAll -> "Выключено режимом «Всё через Tor»."; !settings.ruAllDirect -> "Расширение выключено. Короткий список выше действует отдельно."; else ->
                 "Отдельное расширение Karing: российские домены и IPv4-подсети — без VPN. IPv6 остаётся заблокированным." }, fontSize = 14.sp)

@@ -571,10 +571,12 @@ class TunnelService : VpnService() {
                 if(core !== sampledCore || Tunnel.socks!=auth || chainEpoch.get()!=sampledChainEpoch) return@launch
                 com.vlesscardvpn.core.ConnectionPassport.torPending()
                 val elapsed=android.os.SystemClock.elapsedRealtime()-connectedElapsed
-                val pending=elapsed in 0..45_000L
+                val boot=com.vlesscardvpn.core.TorBootstrapStatus.state.value
+                // A daemon that still moves forward is «building», not «failed»: slow bridges need more than 45 s.
+                val pending=elapsed in 0..45_000L || com.vlesscardvpn.core.TorBootstrapStatus.progressing(boot,elapsed)
                 val cur=Tunnel.status.value
-                Tunnel.status.value=cur.copy(check=if(pending) "Tor строит цепочку через обязательные мосты и VLESS. Telegram пока не подтверждён…"
-                    else "Tor-цепочка не подтвердилась. Проверьте мосты igareck; работа Telegram через Tor не подтверждена. Прямого обхода нет.",
+                Tunnel.status.value=cur.copy(check=if(pending) "Tor строит цепочку через обязательные мосты и VLESS"+com.vlesscardvpn.core.TorBootstrapStatus.suffix(boot)+". Telegram пока не подтверждён…"
+                    else "Tor-цепочка не подтвердилась"+com.vlesscardvpn.core.TorBootstrapStatus.suffix(boot)+". Проверьте мосты igareck; работа Telegram через Tor не подтверждена. Прямого обхода нет.",
                     checkOk=if(pending) null else false)
                 watchdog() // Circuit readiness must be revisited even before the first full probe succeeds.
                 return@launch
@@ -817,6 +819,76 @@ class TunnelService : VpnService() {
             } finally { com.vlesscardvpn.core.TorExitStatus.publish(ticket,null) }
         }
     }
+    /**
+     * Start progress of Tor for Home and the route check (GETINFO status/bootstrap-phase once a second).
+     * When the start stalls on the saved bridges, one earlier catalog refresh is allowed (consent and cadence still
+     * apply); a different list replaces the stalled daemon once. There is never a direct fallback: the route stays Tor.
+     */
+    private suspend fun watchTorBootstrap(ticket: Long, bridge: String, startedLines: List<String>) {
+        val began = android.os.SystemClock.elapsedRealtime()
+        var lines = startedLines
+        var watch = com.vlesscardvpn.tor.TorBootstrap.Watch()
+        var refreshed = false
+        var restarted = false
+        var control: com.vlesscardvpn.tor.TorControl? = null
+        fun reachable(): com.vlesscardvpn.tor.TorControl? = com.vlesscardvpn.tor.TorCard.controlEndpoints(this@TunnelService).firstNotNullOfOrNull { e ->
+            val candidate = com.vlesscardvpn.tor.TorControl("127.0.0.1", e.port, 1500)
+            try { candidate.connect(e.cookieHex); candidate } catch (_: Exception) { candidate.close(); null }
+        }
+        try {
+            while (Tunnel.status.value.state == Tunnel.State.CONNECTED &&
+                android.os.SystemClock.elapsedRealtime() - began < com.vlesscardvpn.tor.TorBootstrap.WATCH_MAX_MS) {
+                val phase = try {
+                    (control ?: reachable().also { control = it })?.bootstrap()
+                } catch (_: java.io.IOException) { control?.close(); control = null; null }
+                val verdict = watch.observe(phase, android.os.SystemClock.elapsedRealtime())
+                if (verdict == com.vlesscardvpn.tor.TorBootstrap.Verdict.DONE) {
+                    com.vlesscardvpn.core.TorBootstrapStatus.publish(ticket, phase, stalled = false)
+                    // The circuit exists now: confirm the route at once instead of waiting for the next watchdog pass.
+                    if (Tunnel.status.value.checkOk != true) verifySoon(0)
+                    return
+                }
+                val stalled = verdict == com.vlesscardvpn.tor.TorBootstrap.Verdict.STALLED
+                if (stalled && !refreshed && com.vlesscardvpn.tor.TorCard.ownsRunningEmbedded()) {
+                    refreshed = true
+                    com.vlesscardvpn.core.TorBootstrapStatus.publish(ticket, phase, true, com.vlesscardvpn.core.TorBootstrapStatus.Hint.REFRESHING)
+                    com.vlesscardvpn.tor.TorBridgeUpdates.refresh(this@TunnelService, stalled = true)
+                    kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                    val current = Store.state.value.settings
+                    val fresh = runCatching { com.vlesscardvpn.tor.TorBridgeCatalog.selected(current.torBridgeLines, current.torBridge) }.getOrNull()
+                    if (current.torBridge == bridge && fresh != null && fresh.toSet() != lines.toSet() &&
+                        Tunnel.status.value.state == Tunnel.State.CONNECTED) {
+                        control?.close(); control = null
+                        var replaced = false
+                        // The stalled daemon gets one second to exit; a slow exit is retried once instead of leaving no Tor.
+                        for (attempt in 0..1) {
+                            try {
+                                com.vlesscardvpn.tor.TorCard.ensureStarted(this@TunnelService, bridge, bridgeLines = fresh); replaced = true; break
+                            } catch (e: Exception) {
+                                if (e is kotlinx.coroutines.CancellationException) throw e
+                                Log.w("TOR", "stalled Tor restart failed (attempt ${attempt + 1})")
+                                if (attempt == 0) delay(2_000L)
+                            }
+                        }
+                        if (replaced) {
+                            Log.i("TOR", "stalled start: restarted with a fresh bridge list")
+                            lines = fresh; watch = com.vlesscardvpn.tor.TorBootstrap.Watch(); restarted = true
+                            com.vlesscardvpn.core.TorBootstrapStatus.publish(ticket, null, false, com.vlesscardvpn.core.TorBootstrapStatus.Hint.RESTARTED)
+                            delay(1_000L)
+                            continue
+                        }
+                    }
+                }
+                com.vlesscardvpn.core.TorBootstrapStatus.publish(ticket, phase, stalled, when {
+                    stalled -> com.vlesscardvpn.core.TorBootstrapStatus.Hint.TRY_OTHER
+                    restarted -> com.vlesscardvpn.core.TorBootstrapStatus.Hint.RESTARTED
+                    else -> com.vlesscardvpn.core.TorBootstrapStatus.Hint.NONE
+                })
+                delay(1_000L)
+            }
+        } finally { control?.close() }
+    }
+
     private var torJob: Job? = null
     private var torBridgeRefreshJob: Job? = null
     /**
@@ -839,8 +911,10 @@ class TunnelService : VpnService() {
                 kotlinx.coroutines.currentCoroutineContext().ensureActive()
                 val active = Store.state.value.settings
                 if (active.torBridge != st.torBridge || (!active.torRotation && !active.torRouting && !active.torAll && !(active.mode==Mode.AUTO && active.autoChainSearch && active.torAuto))) return@launch
-                com.vlesscardvpn.tor.TorCard.ensureStarted(this@TunnelService, active.torBridge,
-                    bridgeLines = com.vlesscardvpn.tor.TorBridgeCatalog.selected(active.torBridgeLines, active.torBridge))
+                val startedLines = com.vlesscardvpn.tor.TorBridgeCatalog.selected(active.torBridgeLines, active.torBridge)
+                com.vlesscardvpn.tor.TorCard.ensureStarted(this@TunnelService, active.torBridge, bridgeLines = startedLines)
+                val bootTicket = com.vlesscardvpn.core.TorBootstrapStatus.begin(active.torBridge)
+                launch { watchTorBootstrap(bootTicket, active.torBridge, startedLines) }
                 observeTorCountry()
                 if (torBridgeRefreshJob?.isActive != true) {
                     torBridgeRefreshJob = scope.launch(Dispatchers.IO) {
@@ -877,13 +951,18 @@ class TunnelService : VpnService() {
             }
             if (endpoint == null) { Log.i("TOR", "control endpoint unavailable; rotator idle"); return@launch }
             if (!st.torRotation) return@launch
-            val rotator = com.vlesscardvpn.tor.TorRotator(
-                com.vlesscardvpn.tor.TorControl("127.0.0.1", endpoint.port),
-                rotation = com.vlesscardvpn.tor.TorConnectionPolicy.rotation(st, android.os.SystemClock::elapsedRealtime),
+            // One policy for the whole session: a control reconnect (daemon restarted with fresh bridges, socket
+            // dropped) keeps the measured exit history instead of starting the rotation brain from scratch.
+            val rotation = com.vlesscardvpn.tor.TorConnectionPolicy.rotation(st, android.os.SystemClock::elapsedRealtime)
+            fun rotatorFor(e: com.vlesscardvpn.tor.TorCard.ControlEndpoint) = com.vlesscardvpn.tor.TorRotator(
+                com.vlesscardvpn.tor.TorControl("127.0.0.1", e.port),
+                rotation = rotation,
                 countries = com.vlesscardvpn.tor.TorCountryPolicy.parse(st.torExitCountries).map {it.lowercase()},
-                cookieHex = endpoint.cookieHex,
+                cookieHex = e.cookieHex,
                 clearInheritedCountries = st.torExitCountries.isBlank(),
             )
+            var rotator = rotatorFor(endpoint)
+            var lastReconnect = 0L
             try {
                 val ready = kotlinx.coroutines.withTimeoutOrNull(30_000L) {
                     while (!rotator.connect()) delay(200)
@@ -901,6 +980,17 @@ class TunnelService : VpnService() {
                     val power = com.vlesscardvpn.core.PhonePower.refresh(this@TunnelService)
                     // Metered/mobile is not an exclusion for this small, user-enabled control loop.
                     if (!power.allowLight) continue
+                    if (rotator.needsReconnect) {
+                        if (nowMs - lastReconnect < com.vlesscardvpn.tor.TorRotator.RECONNECT_MS) continue
+                        lastReconnect = nowMs
+                        runCatching { rotator.close() }
+                        // A restarted daemon writes a new cookie: read the endpoint again.
+                        val fresh = com.vlesscardvpn.tor.TorCard.controlEndpoints(this@TunnelService).firstOrNull { it.port == endpoint.port }
+                            ?: com.vlesscardvpn.tor.TorCard.controlEndpoints(this@TunnelService).firstOrNull() ?: continue
+                        rotator = rotatorFor(fresh)
+                        if (!rotator.connect()) continue
+                        Log.i("TOR", "rotator reconnected")
+                    }
                     // tor-rotator algorithm: measure the real exit through the tunnel (Cloudflare trace, loc=)
                     // and feed the policy — the history learns which countries are actually fast right now.
                     if (nowMs - lastMeasure >= 30_000L) {
@@ -1573,7 +1663,7 @@ class TunnelService : VpnService() {
             netJob?.cancel(); checkJob?.cancel(); healJob?.cancel(); recoveryJob?.cancel(); optJob?.cancel(); scoutJob?.cancel(); standbyJob?.cancel()
             watchJob?.cancel(); coverJob?.cancel(); serviceJob?.cancel(); liveJob?.cancel(); torJob?.cancel(); torJob = null
             torBridgeRefreshJob?.cancel(); torBridgeRefreshJob = null
-            clearTorCountry()
+            clearTorCountry(); com.vlesscardvpn.core.TorBootstrapStatus.clear()
             com.vlesscardvpn.tor.TorCard.invalidateStartup()
             Actions.cancelForNetworkChange()
             if (!change.online) {
@@ -1631,7 +1721,7 @@ class TunnelService : VpnService() {
         if(error != null || !keepTun) { chainReserves.clear();chainChoice=null;chainEpoch.incrementAndGet() }
         torJob?.cancel(); torJob = null
         torBridgeRefreshJob?.cancel(); torBridgeRefreshJob = null
-        clearTorCountry()
+        clearTorCountry(); com.vlesscardvpn.core.TorBootstrapStatus.clear()
         com.vlesscardvpn.tor.TorCard.invalidateStartup()
         if (error != null) com.vlesscardvpn.tor.TorCard.stopEmbedded()
         if (!keepTun) runCatching { com.vlesscardvpn.core.Traffic.tick() }

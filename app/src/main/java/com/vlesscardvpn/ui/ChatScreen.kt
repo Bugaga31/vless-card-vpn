@@ -4,6 +4,9 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -152,9 +155,11 @@ fun ChatScreen() {
                 placeholder = { Text("Напишите, что сделать…") }, singleLine = true,
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send), keyboardActions = KeyboardActions(onSend = { if (input.isNotBlank()) send() }))
             Spacer(Modifier.width(8.dp))
+            // A real button for TalkBack («Отправить», disabled while the field is empty), not an unlabeled arrow glyph.
             Box(Modifier.size(48.dp).clip(CircleShape).background(if (input.isNotBlank()) Glow else Brush.linearGradient(listOf(Bubble, Bubble)))
-                .then(if (input.isNotBlank()) Modifier.clickableNoRipple { send() } else Modifier), contentAlignment = Alignment.Center) {
-                Text("➤", color = Color.White, fontSize = 18.sp)
+                .clickable(enabled = input.isNotBlank(), role = androidx.compose.ui.semantics.Role.Button, onClickLabel = "Отправить") { send() }
+                .semantics(mergeDescendants = true) { contentDescription = "Отправить сообщение" }, contentAlignment = Alignment.Center) {
+                Text("➤", color = Color.White, fontSize = 18.sp, modifier = Modifier.clearAndSetSemantics { })
             }
         }
     }
@@ -168,4 +173,3 @@ private fun Tile(title: String, value: String, color: Color, modifier: Modifier)
     }
 }
 
-private fun Modifier.clickableNoRipple(onClick: () -> Unit) = this.then(Modifier.clickable(onClick = onClick))

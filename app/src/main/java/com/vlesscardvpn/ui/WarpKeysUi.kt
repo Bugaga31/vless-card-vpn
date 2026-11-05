@@ -61,9 +61,7 @@ fun WarpKeysDialog(onDismiss: () -> Unit) {
                 LazyColumn(Modifier.heightIn(max = 380.dp)) {
                     items(shown, key = { it }) { k ->
                         val on = k !in s.warpKeyOff
-                        Row(Modifier.fillMaxWidth().clickable { set { it.copy(warpKeyOff = if (on) it.warpKeyOff + k else it.warpKeyOff - k) } },
-                            verticalAlignment = Alignment.CenterVertically) {
-                            Checkbox(on, { v -> set { it.copy(warpKeyOff = if (v) it.warpKeyOff - k else (it.warpKeyOff + k).distinct()) } })
+                        CheckRow(on, { v -> set { it.copy(warpKeyOff = if (v) it.warpKeyOff - k else (it.warpKeyOff + k).distinct()) } }) {
                             Column(Modifier.weight(1f)) {
                                 Text(k, fontFamily = FontFamily.Monospace, fontSize = 12.sp)
                                 val (txt, col) = when (st(k)) {

@@ -72,10 +72,11 @@ object Actions {
     fun cancel() { job?.cancel(); progress.value = progress.value.copy(running = false, message = "Остановлено") }
 
     /** One in-flight public refresh; never block the connect button on mirror timeouts. */
-    fun refreshPublicCloud(foreground: Boolean = false) {
+    fun refreshPublicCloud(foreground: Boolean = false, after: kotlinx.coroutines.Job? = null) {
         if (!Report.enabled(app) || !cloudRefreshing.compareAndSet(false,true)) return
         scope.launch(Bg.io) {
-            try { CloudControl.refresh(app, foreground); CloudSpeed.refresh(app, foreground) }
+            // The startup cache load runs first, so a fresh download is never overwritten by older saved ratings.
+            try { after?.join(); CloudControl.refresh(app, foreground); CloudSpeed.refresh(app, foreground) }
             finally { cloudRefreshing.set(false) }
         }
     }
@@ -520,13 +521,14 @@ object Actions {
         val net0 = Net.key(app)
         val maskNetwork = Net.underlying(app)?.toString()
         val stats = Store.state.value.maskStats.let { it[net0] ?: it[Net.family(net0)] }.orEmpty()
-        // Learned order: masks that passed on this network (on any server) first, untested next, proven failures last.
-        fun bucket(m: Mask): Int { val st = stats[m.id] ?: return 1; return if (st.ok > 0) 0 else if (st.fail >= 4) 2 else 1 }
+        // Learned order: masks that pass on this network (on any server) first, untested or mixed next, masks that keep
+        // failing here last. Successes must not be outweighed by later failures (MaskStat.bucket, sliding memory).
+        fun bucket(m: Mask): Int = stats[m.id]?.bucket ?: 1
         // «Эволюция масок»: kept auto masks + fresh mutants of what passed here; a few slots per server right after the proven masks.
         val evo = cfg.maskEvolution && (cfg.maskFamilies.isEmpty() || "auto" in cfg.maskFamilies)
         val kept = if (evo) Masks.auto else emptyList()
         val st0 = Store.state.value
-        val parents = if (!evo) emptyList() else (stats.entries.filter { it.value.ok > 0 }.sortedByDescending { it.value.score }.mapNotNull { Masks.byId(it.key) } +
+        val parents = if (!evo) emptyList() else (stats.entries.filter { it.value.ok > 0 && it.value.bucket != 2 }.sortedByDescending { it.value.score }.mapNotNull { Masks.byId(it.key) } +
             servers.mapNotNull { Masks.byId(st0.state(it).maskFor(net0)) }).filter { it.id != Masks.DEFAULT.id || stats.isEmpty() }.distinctBy { it.id }.take(12)
         val slots = if (evo) (perServer / 5).coerceAtLeast(1) else 0
         val pool = if (evo) MaskLab.breed(parents, (slots * 4).coerceIn(6, 40), known = kept.map { it.id }.toSet()) else emptyList()
@@ -717,12 +719,15 @@ object Actions {
      * masks for the reachable ones that don't open sites. Lighter on mobile data (fewer servers, no 256 KB download).
      */
     fun warmup() {
-        runCatching { Report.prime(app); CloudSpeed.loadCached(app) }
-        refreshPublicCloud()
+        // Saved cloud ratings and the report schedule are disk + JSON work: off the main thread, so the first frame
+        // and the launch intro are not delayed by them. Everything that ranks servers waits for this load.
+        val primed = scope.launch(Bg.io) { runCatching { Report.prime(app); CloudSpeed.loadCached(app) } }
+        refreshPublicCloud(after = primed)
         val st = Store.state.value
         if (!PhonePower.refresh(app).allowLight || !st.settings.autoOptimize || job?.isActive == true || Tunnel.status.value.state != Tunnel.State.IDLE) return
         if (st.servers.any { st.state(it).works }) return
         launch("Фоновая подготовка") {
+            primed.join()
             if (Store.state.value.servers.isEmpty()) doRefresh(firstReady = { list -> quickTest(list) })
             else quickTest(Store.state.value.servers)
             "Короткая подготовка завершена. Полный каталог и скорость проверяются после подключения"

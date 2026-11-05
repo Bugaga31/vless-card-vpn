@@ -13,7 +13,11 @@ object TorBridgeCatalog {
     const val SOURCE = "https://raw.githack.com/igareck/vpn-configs-for-russia/main/TOR-BRIDGES/TOR_BRIDGES_TOP100.txt"
     const val MAX_BYTES = 262144
     data class Parsed(val lines: List<String>, val rejected: Int) {
-        fun forTransport(transport: String) = lines.filter { it.startsWith("Bridge $transport ") }.take(12)
+        /** First 12 of the transport; bridges in [avoid] (they just failed to start Tor) go after untried ones. */
+        fun forTransport(transport: String, avoid: Set<String> = emptySet()): List<String> {
+            val all = lines.filter { it.startsWith("Bridge $transport ") }
+            return (all.filter { it !in avoid } + all.filter { it in avoid }).take(12)
+        }
     }
     private val fingerprint=Regex("[A-Fa-f0-9]{40}")
     fun normalize(raw: String): String? {
