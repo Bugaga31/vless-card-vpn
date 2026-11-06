@@ -144,6 +144,56 @@ object Tester {
         ((System.nanoTime() - t0) / 1_000_000).toInt().coerceAtLeast(1)
     }.getOrDefault(0)
 
+    /**
+     * 1.2.136 [RouteLiveness]: is the running route alive at all? Every URL at once through its SOCKS, ANY HTTP
+     * answer within [budgetMs] counts (no service checks, no redirects followed, private dispatcher and pool, so
+     * cancelling it never touches another probe). A slow but working route is not a lost route.
+     */
+    fun alive(port: Int, urls: List<String>, budgetMs: Long = RouteLiveness.CONFIRM_MS, onCancel: ((() -> Unit) -> Unit)? = null): Boolean {
+        if (urls.isEmpty() || port !in 1..65535) return false
+        val budget = budgetMs.coerceIn(500L, 15_000L)
+        val client = fast.newBuilder().callTimeout(budget, TimeUnit.MILLISECONDS)
+            .connectTimeout(minOf(budget, 3000L), TimeUnit.MILLISECONDS).readTimeout(budget, TimeUnit.MILLISECONDS)
+            .followRedirects(false).followSslRedirects(false)
+            .dispatcher(okhttp3.Dispatcher()).connectionPool(okhttp3.ConnectionPool(2, 10, TimeUnit.SECONDS))
+            .proxy(Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", port))).build()
+        val done = java.util.concurrent.CountDownLatch(1)
+        val answered = java.util.concurrent.atomic.AtomicBoolean(false)
+        val pending = java.util.concurrent.atomic.AtomicInteger(urls.size)
+        val calls = urls.mapNotNull { url -> runCatching { client.newCall(Request.Builder().url(url).header("User-Agent", UA).build()) }.getOrNull() }
+        if (calls.size < urls.size) repeat(urls.size - calls.size) { pending.decrementAndGet() }
+        if (calls.isEmpty()) return false
+        onCancel?.invoke { calls.forEach { it.cancel() }; done.countDown() }
+        try {
+            for (call in calls) call.enqueue(object : okhttp3.Callback {
+                override fun onFailure(call: okhttp3.Call, e: java.io.IOException) { if (pending.decrementAndGet() <= 0) done.countDown() }
+                override fun onResponse(call: okhttp3.Call, response: okhttp3.Response) {
+                    response.use { if (RouteLiveness.answered(it.code)) answered.set(true) }
+                    if (answered.get() || pending.decrementAndGet() <= 0) done.countDown()
+                }
+            })
+            done.await(budget + 250L, TimeUnit.MILLISECONDS)
+        } catch (e: InterruptedException) {
+            Thread.currentThread().interrupt()
+        } finally {
+            calls.forEach { it.cancel() }
+            client.dispatcher.cancelAll(); client.connectionPool.evictAll(); client.dispatcher.executorService.shutdown()
+        }
+        return answered.get()
+    }
+
+    /**
+     * 1.2.136 [RouteLiveness]: does the phone's own network reach the internet? A direct TCP handshake (the app is
+     * outside its own VPN) in parallel; the first success answers. Waiting is bounded by [timeoutMs] plus a
+     * short name-resolution allowance. Worker counts are bounded even if DNS never returns; fixed IP witnesses
+     * have separate workers so stuck server names cannot starve them.
+     */
+    private val physicalReachability = PhysicalReachability(RouteLiveness.PHYSICAL_TARGETS.toSet()) { host, port, timeout ->
+        tcpOne(host, port, timeout) > 0
+    }
+    fun physicalInternet(targets: List<Pair<String, Int>>, timeoutMs: Int = RouteLiveness.PHYSICAL_MS): Boolean =
+        physicalReachability.check(targets, timeoutMs, timeoutMs.toLong() + 1500L)
+
     private fun resolves(host: String): Int = if (runCatching { InetAddress.getByName(host) }.isSuccess) 1 else 0
 
     private fun freePorts(n: Int): List<Int> {
@@ -305,6 +355,9 @@ object Tester {
 
     /** DNS query (A record) in wire format, id = [id]. */
     fun dnsQuery(host: String, id: Int = 0x5a5a): ByteArray = DnsWire.query(host, id)
+    /** UDP health query: up to three sends, one every 1.2 s, inside the caller's budget. */
+    const val DNS_HEALTH_QUERIES = 3
+    const val DNS_HEALTH_RESEND_MS = 1200L
 
     /**
      * The phone's DNS path as apps use it: SOCKS5 UDP ASSOCIATE → 1.1.1.1:53 → Xray's DNS. HTTP checks go via socks5h
@@ -337,13 +390,30 @@ object Tester {
             java.net.DatagramSocket().use { u ->
                 onCancel?.invoke { u.close(); s.close() }
                 u.connect(relay, rport)
-                u.soTimeout = remaining()
-                val q = dnsQuery(host, (System.nanoTime() and 0xffff).toInt())
-                val pkt = byteArrayOf(0, 0, 0, 1, 1, 1, 1, 1, 0, 53) + q
-                u.send(java.net.DatagramPacket(pkt, pkt.size, relay, rport))
-                val buf = ByteArray(1500); val dp = java.net.DatagramPacket(buf, buf.size); u.receive(dp)
-                val response = DnsWire.payload(buf, dp.length)
-                response != null && DnsWire.hasAnswer(response, q)
+                // One lost datagram on a fresh cellular link is not a dead DNS path: resend with a new ID while the
+                // budget lasts and accept an answer to any query that was sent (each answer is still fully validated).
+                val sent = ArrayList<ByteArray>(DNS_HEALTH_QUERIES)
+                val firstId = (System.nanoTime() and 0xffff).toInt()
+                val buf = ByteArray(1500)
+                var nextSend = System.nanoTime()
+                var answered = false
+                // Ends with an answer or with remaining() throwing at the deadline (runCatching → false).
+                while (!answered) {
+                    if (sent.size < DNS_HEALTH_QUERIES && System.nanoTime() - nextSend >= 0) {
+                        val q = dnsQuery(host, (firstId + sent.size * 0x3d1) and 0xffff)
+                        val pkt = byteArrayOf(0, 0, 0, 1, 1, 1, 1, 1, 0, 53) + q
+                        u.send(java.net.DatagramPacket(pkt, pkt.size, relay, rport))
+                        sent += q
+                        nextSend = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(DNS_HEALTH_RESEND_MS)
+                    }
+                    val untilResend = TimeUnit.NANOSECONDS.toMillis(nextSend - System.nanoTime()).coerceAtLeast(1)
+                    u.soTimeout = if (sent.size < DNS_HEALTH_QUERIES) minOf(remaining().toLong(), untilResend).toInt() else remaining()
+                    val dp = java.net.DatagramPacket(buf, buf.size)
+                    val got = try { u.receive(dp); true } catch (_: java.net.SocketTimeoutException) { remaining(); false }
+                    val response = if (got) DnsWire.payload(buf, dp.length) else null
+                    answered = response != null && sent.any { DnsWire.hasAnswer(response, it) }
+                }
+                answered
             }
         }
     }.getOrDefault(false)

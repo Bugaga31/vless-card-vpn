@@ -41,6 +41,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -382,6 +383,9 @@ class TunnelService : VpnService() {
             usedTorRoute = com.vlesscardvpn.tor.TorRoutePolicy.active(settings) || measuredChain?.choice?.chain?.layout?.tor == true
             appliedAutoWeights = com.vlesscardvpn.core.SpeedBalance.fingerprint(downloadSpeeds,downloadLatencies)
             Tunnel.socks = socks
+            // The app's own bridge-list requests take Tor's uplink (straight to VLESS): with all TCP through Tor the
+            // main SOCKS would send them into the very Tor that is waiting for bridges.
+            Tunnel.torUplink = if (XrayConfigBuilder.torUplinks(settings)) com.vlesscardvpn.tor.TorCard.DEFAULT_PT_UPSTREAM_PORT else null
             if (BuildConfig.DEBUG) Log.i("E2E", "pool size=${used.size} ids=${used.map { it.first.id }}")
             if (BuildConfig.DEBUG) Log.i("E2E", "runtime primary-port=${used.firstOrNull()?.first?.port ?: 0}")
             Log.i("E2E", "socks port=${socks.port} auth=${socks.auth} dpi=${dpiLabel.ifEmpty { "-" }} fixed=${set.ports.keys} mode=${settings.mode} services=${settings.services} proxy=$proxy")
@@ -571,10 +575,12 @@ class TunnelService : VpnService() {
                 if(core !== sampledCore || Tunnel.socks!=auth || chainEpoch.get()!=sampledChainEpoch) return@launch
                 com.vlesscardvpn.core.ConnectionPassport.torPending()
                 val elapsed=android.os.SystemClock.elapsedRealtime()-connectedElapsed
-                val pending=elapsed in 0..45_000L
+                val boot=com.vlesscardvpn.core.TorBootstrapStatus.state.value
+                // A daemon that still moves forward is «building», not «failed»: slow bridges need more than 45 s.
+                val pending=elapsed in 0..45_000L || com.vlesscardvpn.core.TorBootstrapStatus.progressing(boot,elapsed)
                 val cur=Tunnel.status.value
-                Tunnel.status.value=cur.copy(check=if(pending) "Tor строит цепочку через обязательные мосты и VLESS. Telegram пока не подтверждён…"
-                    else "Tor-цепочка не подтвердилась. Проверьте мосты igareck; работа Telegram через Tor не подтверждена. Прямого обхода нет.",
+                Tunnel.status.value=cur.copy(check=if(pending) "Tor строит цепочку через обязательные мосты и VLESS"+com.vlesscardvpn.core.TorBootstrapStatus.suffix(boot)+". Telegram пока не подтверждён…"
+                    else "Tor-цепочка не подтвердилась"+com.vlesscardvpn.core.TorBootstrapStatus.suffix(boot)+". Проверьте мосты igareck; работа Telegram через Tor не подтверждена. Прямого обхода нет.",
                     checkOk=if(pending) null else false)
                 watchdog() // Circuit readiness must be revisited even before the first full probe succeeds.
                 return@launch
@@ -589,12 +595,23 @@ class TunnelService : VpnService() {
                     Net.underlying(this@TunnelService)?.toString() != sampledHandle) return@launch
                 p = Tester.probeSocks(port, st.testUrl, big = false, youtube = Tunnel.ytViaDpi, telegram = checkServices, attempts = 1, budgetMs = 6500L, autoChecks=profile,user=auth.user,pass=auth.pass)
             }
+            // 1.2.136: one failed sample of another selected service (a lost UDP voice train, one slow Discord or
+            // YouTube answer) is measured once more on the same route before recovery switches servers.
+            if (profile != null && st.autoHeal && usedChain == null && !usedTorRoute &&
+                com.vlesscardvpn.core.RequiredServiceRecovery.needsConfirmation(profile, p)) {
+                delay(2000)
+                if (core !== sampledCore || Tunnel.socks != auth || Net.key(this@TunnelService) != sampledNet ||
+                    Net.underlying(this@TunnelService)?.toString() != sampledHandle) return@launch
+                val again = Tester.probeSocks(port, st.testUrl, big = false, youtube = Tunnel.ytViaDpi, telegram = checkServices, attempts = 1, budgetMs = 6500L, autoChecks=profile,user=auth.user,pass=auth.pass)
+                if (BuildConfig.DEBUG) Log.i("E2E", "service recheck works=${again.works} failed=${com.vlesscardvpn.core.RequiredServiceRecovery.failed(profile, again)}")
+                if (again.works) p = again
+            }
             // A SOCKS HTTPS success uses remote name resolution and does not prove
             // Android apps' UDP DNS path. Never show a healthy VPN on that evidence alone.
             val measuredBeforeDns = p
             val httpsReachable = p.works
             val dnsOk = if (p.works && !st.proxyOnly) com.vlesscardvpn.core.CancellableProbe.run { bind ->
-                Tester.dnsViaSocks(port, auth.user, auth.pass, budgetMs = 3000, onCancel = bind)
+                Tester.dnsViaSocks(port, auth.user, auth.pass, budgetMs = 4500, onCancel = bind)
             } else st.proxyOnly
             if (p.works && !dnsOk) p = p.copy(realMs = 0, error = "DNS через туннель не отвечает")
             val chainExitRejected = if(usedChain?.chain?.layout?.tor == true) {
@@ -700,7 +717,7 @@ class TunnelService : VpnService() {
                 if (sinceNet < 90_000L && !netHardDone) { netHardDone = true; hardRestart("новая сеть, а интернет не пошёл", force = true); return@launch }
                 if (System.currentTimeMillis() - lastHard > 5 * 60_000L) { hardRestart("после переподключения интернет не пошёл"); return@launch }
             }
-            if (p.works) { healStep = 0; dpiHeals = 0; connectFails = 0; scheduleOptimize(60_000); if(st.mode!=Mode.AUTO) com.vlesscardvpn.core.AppWatch.start(this@TunnelService, reconnect = { scope.launch { lock.withLock { connect(soft = true, reason = SoftReason.APP_REPAIR) } } }, maintenanceReconnect = { scheduleMaintenanceReconnect() }, connectedAt = { connectedElapsed }); watchdog(); standbyScout(); coverTraffic(); torLoop(); serviceRoutes(); if(st.mode!=Mode.AUTO) autoChainScout() } else heal()
+            if (p.works) { healStep = 0; dpiHeals = 0; connectFails = 0; scheduleOptimize(60_000); if(st.mode!=Mode.AUTO) com.vlesscardvpn.core.AppWatch.start(this@TunnelService, reconnect = { scope.launch { lock.withLock { connect(soft = true, reason = SoftReason.APP_REPAIR) } } }, maintenanceReconnect = { scheduleMaintenanceReconnect() }, connectedAt = { connectedElapsed }); watchdog(); standbyScout(); coverTraffic(); torLoop(); serviceRoutes(); if(st.mode!=Mode.AUTO) autoChainScout() } else { heal(); watchdog() } // the detector outlives a failed check
         }
     }
 
@@ -817,6 +834,165 @@ class TunnelService : VpnService() {
             } finally { com.vlesscardvpn.core.TorExitStatus.publish(ticket,null) }
         }
     }
+    /** Restarts of one Tor session (a stalled start, a route lost after DONE) share one bounded budget. */
+    @Volatile private var torHealth = com.vlesscardvpn.tor.TorBridgeHealth()
+    /** The core whose upstream listeners the running daemon last (re)connected through. */
+    @Volatile private var torUpstreamCore: XrayCore.Instance? = null
+
+    /**
+     * Start progress of Tor for Home and the route check (GETINFO status/bootstrap-phase once a second), then the
+     * route itself while connected ([superviseTor]). A stalled start or a lost route takes other bridges — a fresh
+     * source list when one is due, otherwise untried ones from the saved catalog — within the shared restart budget.
+     * [kickFirst]: a reused daemon whose upstream core was just restarted reconnects at once instead of waiting for
+     * dead sockets to time out. There is never a direct fallback: the route stays Tor.
+     */
+    private suspend fun watchTorBootstrap(startTicket: Long, bridge: String, startedLines: List<String>, kickFirst: Boolean = false) {
+        var ticket = startTicket
+        var began = android.os.SystemClock.elapsedRealtime()
+        var lines = startedLines
+        var watch = com.vlesscardvpn.tor.TorBootstrap.Watch(bridges = startedLines.size)
+        var stallHandled = false
+        var restarted = false
+        var pendingKick = kickFirst
+        var control: com.vlesscardvpn.tor.TorControl? = null
+        fun reachable(): com.vlesscardvpn.tor.TorControl? = com.vlesscardvpn.tor.TorCard.controlEndpoints(this@TunnelService).firstNotNullOfOrNull { e ->
+            val candidate = com.vlesscardvpn.tor.TorControl("127.0.0.1", e.port, 1500)
+            try { candidate.connect(e.cookieHex); candidate } catch (_: Exception) { candidate.close(); null }
+        }
+        fun kick(why: String) {
+            val c = control ?: reachable().also { control = it } ?: return
+            try { c.kickNetwork(); runCatching { c.signalActive() }; Log.i("TOR", "network kick: $why") }
+            catch (_: java.io.IOException) { c.close(); control = null }
+        }
+        suspend fun restart(fresh: List<String>): Boolean {
+            control?.close(); control = null
+            // The old daemon gets one second to exit; a slow exit is retried once instead of leaving no Tor.
+            for (attempt in 0..1) {
+                try {
+                    com.vlesscardvpn.tor.TorCard.ensureStarted(this@TunnelService, bridge, bridgeLines = fresh)
+                    torUpstreamCore = core
+                    com.vlesscardvpn.tor.TorBridgeUpdates.resetHealth()
+                    return true
+                } catch (e: Exception) {
+                    if (e is kotlinx.coroutines.CancellationException) throw e
+                    Log.w("TOR", "Tor restart failed (attempt ${attempt + 1})")
+                    if (attempt == 0) delay(2_000L)
+                }
+            }
+            return false
+        }
+        try {
+            while (Tunnel.status.value.state == Tunnel.State.CONNECTED) {
+                if (pendingKick && com.vlesscardvpn.tor.TorCard.ownsRunningEmbedded()) { pendingKick = false; kick("upstream core restarted") }
+                val phase = try {
+                    (control ?: reachable().also { control = it })?.bootstrap()
+                } catch (_: java.io.IOException) { control?.close(); control = null; null }
+                // Bytes still arriving (a slow consensus download) are progress too, not a reason to swap bridges.
+                val verdict = watch.observe(phase, android.os.SystemClock.elapsedRealtime(), control?.trafficRead())
+                val expired = android.os.SystemClock.elapsedRealtime() - began >= com.vlesscardvpn.tor.TorBootstrap.WATCH_MAX_MS
+                if (verdict == com.vlesscardvpn.tor.TorBootstrap.Verdict.DONE || expired) {
+                    if (verdict == com.vlesscardvpn.tor.TorBootstrap.Verdict.DONE) {
+                        com.vlesscardvpn.core.TorBootstrapStatus.publish(ticket, phase, stalled = false)
+                        torHealth.recovered()
+                        // Tor's own verdict per bridge: the next rotation keeps these and skips the dead ones.
+                        com.vlesscardvpn.tor.TorBridgeUpdates.noteHealth(this@TunnelService, bridge, lines, control?.entryGuards())
+                        // The circuit exists now: confirm the route at once instead of waiting for the next watchdog pass.
+                        if (Tunnel.status.value.checkOk != true) verifySoon(0)
+                    }
+                    control?.close(); control = null
+                    val fresh = superviseTor(bridge, lines, ::reachable) ?: return
+                    if (!restart(fresh)) return
+                    Log.i("TOR", "lost route: restarted with other bridges")
+                    lines = fresh; watch = com.vlesscardvpn.tor.TorBootstrap.Watch(bridges = fresh.size); stallHandled = false; restarted = true
+                    began = android.os.SystemClock.elapsedRealtime()
+                    ticket = com.vlesscardvpn.core.TorBootstrapStatus.begin(bridge)
+                    com.vlesscardvpn.core.TorBootstrapStatus.publish(ticket, null, false, com.vlesscardvpn.core.TorBootstrapStatus.Hint.RESTARTED)
+                    delay(1_000L)
+                    continue
+                }
+                val stalled = verdict == com.vlesscardvpn.tor.TorBootstrap.Verdict.STALLED
+                // Progress after a kick re-arms the stall handling: a later stall is a new one (restarts stay budgeted).
+                if (!stalled) stallHandled = false
+                if (stalled && !stallHandled && com.vlesscardvpn.tor.TorCard.ownsRunningEmbedded()) {
+                    stallHandled = true
+                    if (torHealth.canRestart(android.os.SystemClock.elapsedRealtime())) {
+                        com.vlesscardvpn.core.TorBootstrapStatus.publish(ticket, phase, true, com.vlesscardvpn.core.TorBootstrapStatus.Hint.REFRESHING)
+                        val fresh = com.vlesscardvpn.tor.TorBridgeUpdates.replacementFor(this@TunnelService, bridge, lines, control?.entryGuards())
+                        kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                        if (fresh != null && Store.state.value.settings.torBridge == bridge && Tunnel.status.value.state == Tunnel.State.CONNECTED &&
+                            torHealth.allowRestart(android.os.SystemClock.elapsedRealtime()) && restart(fresh)) {
+                            Log.i("TOR", "stalled start: restarted with other bridges")
+                            lines = fresh; watch = com.vlesscardvpn.tor.TorBootstrap.Watch(bridges = fresh.size); stallHandled = false; restarted = true
+                            began = android.os.SystemClock.elapsedRealtime()
+                            com.vlesscardvpn.core.TorBootstrapStatus.publish(ticket, null, false, com.vlesscardvpn.core.TorBootstrapStatus.Hint.RESTARTED)
+                            delay(1_000L)
+                            continue
+                        }
+                    }
+                    // Nothing different to take, or the budget is spent: the daemon's own connections start over once.
+                    kick("stalled start")
+                }
+                com.vlesscardvpn.core.TorBootstrapStatus.publish(ticket, phase, stalled, when {
+                    stalled -> com.vlesscardvpn.core.TorBootstrapStatus.Hint.TRY_OTHER
+                    restarted -> com.vlesscardvpn.core.TorBootstrapStatus.Hint.RESTARTED
+                    else -> com.vlesscardvpn.core.TorBootstrapStatus.Hint.NONE
+                })
+                delay(1_000L)
+            }
+        } finally { control?.close() }
+    }
+
+    /**
+     * After the start: Tor's circuit and liveness flags every [com.vlesscardvpn.tor.TorBridgeHealth.POLL_MS] (one loopback
+     * exchange; slower while the phone saves power). A suspected loss is confirmed by one real request through Tor
+     * before anything happens: first a network kick, then other bridges within the restart budget.
+     * Returns the lines to restart with, or null when the session ends or the daemon is not this app's.
+     */
+    private suspend fun superviseTor(bridge: String, lines: List<String>, reachable: () -> com.vlesscardvpn.tor.TorControl?): List<String>? {
+        var control: com.vlesscardvpn.tor.TorControl? = null
+        var noted: Map<String, String>? = null
+        fun kick(why: String) {
+            val c = control ?: reachable().also { control = it } ?: return
+            try { c.kickNetwork(); runCatching { c.signalActive() }; Log.i("TOR", "network kick: $why") }
+            catch (_: java.io.IOException) { c.close(); control = null }
+        }
+        try {
+            while (Tunnel.status.value.state == Tunnel.State.CONNECTED) {
+                val light = com.vlesscardvpn.core.PhonePower.refresh(this@TunnelService).allowLight
+                delay(if (light) com.vlesscardvpn.tor.TorBridgeHealth.POLL_MS else com.vlesscardvpn.tor.TorBridgeHealth.IDLE_POLL_MS)
+                if (Tunnel.status.value.state != Tunnel.State.CONNECTED || !com.vlesscardvpn.tor.TorCard.ownsRunningEmbedded()) return null
+                if (Store.state.value.settings.torBridge != bridge) return null
+                val c = control ?: reachable().also { control = it }
+                val healthy = c?.let {
+                    try {
+                        // An interrupted kick must never leave the daemon offline.
+                        if (it.ensureNetworkEnabled()) Log.i("TOR", "network was left disabled; enabled again")
+                        val circuit = it.circuitState()
+                        if (circuit == null) { it.close(); control = null; null }
+                        else com.vlesscardvpn.tor.TorBridgeHealth.state(circuit, it.networkLive())
+                    } catch (_: java.io.IOException) { it.close(); control = null; null }
+                }
+                if (healthy == true) c?.entryGuards()?.takeIf { it != noted }?.let { guards ->
+                    noted = guards; com.vlesscardvpn.tor.TorBridgeUpdates.noteHealth(this@TunnelService, bridge, lines, guards)
+                }
+                val action = torHealth.observe(healthy, Net.underlying(this@TunnelService) != null, android.os.SystemClock.elapsedRealtime())
+                if (action == com.vlesscardvpn.tor.TorBridgeHealth.Action.NONE) continue
+                // Tor's flags lag behind and an idle daemon has no circuit to show: one real request decides.
+                if (com.vlesscardvpn.tor.TorProbes.reachable()) { torHealth.recovered(); continue }
+                if (Tunnel.status.value.state != Tunnel.State.CONNECTED) return null
+                if (action == com.vlesscardvpn.tor.TorBridgeHealth.Action.KICK ||
+                    !torHealth.canRestart(android.os.SystemClock.elapsedRealtime())) { kick("route lost"); continue }
+                val guards = (control ?: reachable().also { control = it })?.entryGuards()
+                val fresh = com.vlesscardvpn.tor.TorBridgeUpdates.replacementFor(this@TunnelService, bridge, lines, guards)
+                kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                if (fresh == null || Store.state.value.settings.torBridge != bridge ||
+                    !torHealth.allowRestart(android.os.SystemClock.elapsedRealtime())) { kick("route lost, nothing new to take"); continue }
+                return fresh
+            }
+            return null
+        } finally { control?.close() }
+    }
+
     private var torJob: Job? = null
     private var torBridgeRefreshJob: Job? = null
     /**
@@ -839,8 +1015,17 @@ class TunnelService : VpnService() {
                 kotlinx.coroutines.currentCoroutineContext().ensureActive()
                 val active = Store.state.value.settings
                 if (active.torBridge != st.torBridge || (!active.torRotation && !active.torRouting && !active.torAll && !(active.mode==Mode.AUTO && active.autoChainSearch && active.torAuto))) return@launch
-                com.vlesscardvpn.tor.TorCard.ensureStarted(this@TunnelService, active.torBridge,
-                    bridgeLines = com.vlesscardvpn.tor.TorBridgeCatalog.selected(active.torBridgeLines, active.torBridge))
+                // Still nothing usable after asking the source: Tor Project's built-in bridges instead of no Tor at all.
+                val startedLines = runCatching { com.vlesscardvpn.tor.TorBridgeCatalog.selected(active.torBridgeLines, active.torBridge) }.getOrNull()
+                    ?: com.vlesscardvpn.tor.TorBridgeUpdates.adoptBuiltins(this@TunnelService, active.torBridge)
+                    ?: com.vlesscardvpn.tor.TorBridgeCatalog.selected(Store.state.value.settings.torBridgeLines, active.torBridge)
+                val started = com.vlesscardvpn.tor.TorCard.ensureStarted(this@TunnelService, active.torBridge, bridgeLines = startedLines)
+                // A reused daemon still holds connections through the previous core's upstream listeners.
+                val upstreamChanged = started == null && torUpstreamCore !== core
+                if (started != null) { torHealth = com.vlesscardvpn.tor.TorBridgeHealth(); com.vlesscardvpn.tor.TorBridgeUpdates.resetHealth() }
+                torUpstreamCore = core
+                val bootTicket = com.vlesscardvpn.core.TorBootstrapStatus.begin(active.torBridge)
+                launch { watchTorBootstrap(bootTicket, active.torBridge, startedLines, kickFirst = upstreamChanged) }
                 observeTorCountry()
                 if (torBridgeRefreshJob?.isActive != true) {
                     torBridgeRefreshJob = scope.launch(Dispatchers.IO) {
@@ -877,13 +1062,18 @@ class TunnelService : VpnService() {
             }
             if (endpoint == null) { Log.i("TOR", "control endpoint unavailable; rotator idle"); return@launch }
             if (!st.torRotation) return@launch
-            val rotator = com.vlesscardvpn.tor.TorRotator(
-                com.vlesscardvpn.tor.TorControl("127.0.0.1", endpoint.port),
-                rotation = com.vlesscardvpn.tor.TorConnectionPolicy.rotation(st, android.os.SystemClock::elapsedRealtime),
+            // One policy for the whole session: a control reconnect (daemon restarted with fresh bridges, socket
+            // dropped) keeps the measured exit history instead of starting the rotation brain from scratch.
+            val rotation = com.vlesscardvpn.tor.TorConnectionPolicy.rotation(st, android.os.SystemClock::elapsedRealtime)
+            fun rotatorFor(e: com.vlesscardvpn.tor.TorCard.ControlEndpoint) = com.vlesscardvpn.tor.TorRotator(
+                com.vlesscardvpn.tor.TorControl("127.0.0.1", e.port),
+                rotation = rotation,
                 countries = com.vlesscardvpn.tor.TorCountryPolicy.parse(st.torExitCountries).map {it.lowercase()},
-                cookieHex = endpoint.cookieHex,
+                cookieHex = e.cookieHex,
                 clearInheritedCountries = st.torExitCountries.isBlank(),
             )
+            var rotator = rotatorFor(endpoint)
+            var lastReconnect = 0L
             try {
                 val ready = kotlinx.coroutines.withTimeoutOrNull(30_000L) {
                     while (!rotator.connect()) delay(200)
@@ -901,6 +1091,17 @@ class TunnelService : VpnService() {
                     val power = com.vlesscardvpn.core.PhonePower.refresh(this@TunnelService)
                     // Metered/mobile is not an exclusion for this small, user-enabled control loop.
                     if (!power.allowLight) continue
+                    if (rotator.needsReconnect) {
+                        if (nowMs - lastReconnect < com.vlesscardvpn.tor.TorRotator.RECONNECT_MS) continue
+                        lastReconnect = nowMs
+                        runCatching { rotator.close() }
+                        // A restarted daemon writes a new cookie: read the endpoint again.
+                        val fresh = com.vlesscardvpn.tor.TorCard.controlEndpoints(this@TunnelService).firstOrNull { it.port == endpoint.port }
+                            ?: com.vlesscardvpn.tor.TorCard.controlEndpoints(this@TunnelService).firstOrNull() ?: continue
+                        rotator = rotatorFor(fresh)
+                        if (!rotator.connect()) continue
+                        Log.i("TOR", "rotator reconnected")
+                    }
                     // tor-rotator algorithm: measure the real exit through the tunnel (Cloudflare trace, loc=)
                     // and feed the policy — the history learns which countries are actually fast right now.
                     if (nowMs - lastMeasure >= 30_000L) {
@@ -1151,7 +1352,12 @@ class TunnelService : VpnService() {
                 val port = auth.port
                 val vpnMode = true
                 // the TUN engine stopped: nothing in the phone works, though the proxy itself is fine — rebuild like the big button
-                if (vpnMode && runCatching { !TProxyService.TProxyIsRunning() }.getOrDefault(false)) { hardRestart("движок VPN остановился"); break }
+                // 1.2.136: a stopped engine is rebuilt even soon after another restart (once a minute at most), and
+                // the detector survives when the restart is diverted to healing instead of being launched.
+                if (vpnMode && runCatching { !TProxyService.TProxyIsRunning() }.getOrDefault(false)) {
+                    if (hardRestart("движок VPN остановился", force = System.currentTimeMillis() - lastHard >= 60_000L)) break
+                    continue
+                }
                 val settings = Store.state.value.settings
                 val sampledCore = core
                 val sampledUiRuntime=com.vlesscardvpn.core.MaskRuntimeEvidence.state.value
@@ -1187,7 +1393,29 @@ class TunnelService : VpnService() {
                     Tunnel.socks != auth || Net.key(this@TunnelService) != network ||
                     Net.underlying(this@TunnelService)?.toString() != handle) { telegramMiss = 0; telegramSlow = 0; com.vlesscardvpn.core.TelegramStability.clear(); continue }
                 if(profile!=null && (com.vlesscardvpn.core.AutoChecks.current!=profile || com.vlesscardvpn.core.AutoLatencyPolicy.MAX_MS!=configuredLimit)) continue
-                val ok = live.works
+                var ok = live.works
+                var confirmedDead = false
+                if (!ok && Actions.online()) {
+                    // 1.2.136: a slow answer, or an outage of the phone's own network, is not a dead server.
+                    // Ask the route (two URLs, any HTTP answer, a calmer window) and the network at once.
+                    val verdict = recoveryCpuLease { confirmLoss(port, settings.testUrl) }
+                    if (core !== sampledCore || chainEpoch.get()!=sampledEpoch || usedTorRoute!=sampledTorRoute ||
+                        Tunnel.socks != auth || Net.key(this@TunnelService) != network ||
+                        Net.underlying(this@TunnelService)?.toString() != handle ||
+                        !Net.matches(this@TunnelService, sampledUiNetwork)) continue
+                    when (verdict) {
+                        com.vlesscardvpn.core.RouteLiveness.Verdict.ALIVE -> ok = true
+                        com.vlesscardvpn.core.RouteLiveness.Verdict.OFFLINE -> {
+                            miss = 0
+                            val cur = Tunnel.status.value
+                            if (cur.state == Tunnel.State.CONNECTED) Tunnel.status.value = cur.copy(
+                                check = "Сеть подключена, но интернета у неё нет — VPN ждёт и восстановится сам; серверы не помечаются нерабочими", checkOk = null)
+                            offline = true
+                            continue
+                        }
+                        com.vlesscardvpn.core.RouteLiveness.Verdict.DEAD -> confirmedDead = true
+                    }
+                }
                 if(profile!=null) {
                     if(com.vlesscardvpn.core.NetworkObservation.accepts(sampledUiNetwork,Net.observation(this@TunnelService)))
                         com.vlesscardvpn.core.AutoCheckEvidence.publish(profile,configuredLimit,live,sampledUiNetwork,sampledUiRuntime)
@@ -1260,8 +1488,11 @@ class TunnelService : VpnService() {
                     offline = true
                     continue
                 }
-                if (ok && offline) { verifySoon(0); break } // internet is back: full check (WARP, YouTube…)
-                miss = if (ok) 0 else miss + 1
+                // Internet is back: a full check (WARP, YouTube…), and this detector keeps running — it used to
+                // stop here, and when that check was not due nothing watched the route until the screen turned on.
+                if (ok && offline) { offline = false; miss = 0; verifySoon(0, suspectedFailure = true); continue }
+                // A confirmed loss (no answer in the calm window while the network itself works) needs no second miss.
+                miss = if (ok) 0 else if (confirmedDead) maxOf(miss + 1, 2) else miss + 1
                 if (miss >= 2) {
                     val callActive = com.vlesscardvpn.core.PhonePower.isVoiceCallActive(this@TunnelService)
                     if (com.vlesscardvpn.core.VoiceCallPolicy.deferRepair(callActive, miss)) {
@@ -1279,8 +1510,9 @@ class TunnelService : VpnService() {
                         recoverServerRoute()
                         continue
                     }
-                    hardRestart("сервер перестал отвечать")
-                    break
+                    if (hardRestart("сервер перестал отвечать")) break
+                    miss = 0
+                    continue
                 }
                 if (ok && vpnMode) {
                     // the proxy works, but do apps? DNS the way apps ask it, and traffic through the TUN in both directions
@@ -1304,8 +1536,8 @@ class TunnelService : VpnService() {
                         Tunnel.status.value = cur.copy(check = "Идёт звонок — подтверждаю сбой перед перезапуском", checkOk = false)
                         continue
                     }
-                    if (dnsMiss >= 2) { hardRestart("DNS перестал отвечать"); break }
-                    if (stall >= 3) { hardRestart("трафик приложений завис"); break }
+                    if (dnsMiss >= 2) { if (hardRestart("DNS перестал отвечать")) break; dnsMiss = 0; continue }
+                    if (stall >= 3) { if (hardRestart("трафик приложений завис")) break; stall = 0; continue }
                 }
                 } catch(e:kotlinx.coroutines.CancellationException) { throw e }
                   catch(e:Exception) {
@@ -1387,10 +1619,11 @@ class TunnelService : VpnService() {
     @Volatile private var netHardDone = true
     /** The network the tunnel was built on; kept across reconnects so a change during a reconnect is not missed. */
     @Volatile private var curNet: Network? = null
-    private fun hardRestart(why: String, force: Boolean = false) {
+    /** true when a reconnect was actually launched; false when it was diverted to healing (the caller keeps watching). */
+    private fun hardRestart(why: String, force: Boolean = false): Boolean {
         // A restart can be caused by DNS/TUN/app stalls; it is not a failed probe of every server.
         val now = System.currentTimeMillis()
-        if (!force && now - lastHard < 5 * 60_000L) { heal(); return } // twice in 5 min: restarting doesn't help — heal (masks, servers)
+        if (!force && now - lastHard < 5 * 60_000L) { heal(); return false } // twice in 5 min: restarting doesn't help — heal (masks, servers)
         lastHard = now
         recoveryStarted()
         Log.i("E2E", "watchdog: hard restart — $why")
@@ -1398,6 +1631,7 @@ class TunnelService : VpnService() {
         if (cur.state == Tunnel.State.CONNECTED) Tunnel.status.value = cur.copy(check = "Сам переподключаюсь: $why", checkOk = null)
         com.vlesscardvpn.core.AppWatch.note("Связь: $why — переподключился сам, нажимать кнопку не нужно")
         scope.launch { lock.withLock { connect(soft = false) } }
+        return true
     }
 
     private var telegramRepairAt = -60_000L
@@ -1447,6 +1681,43 @@ class TunnelService : VpnService() {
     private var recoveryJob: Job? = null
     private fun healStatus(text: String) { val cur = Tunnel.status.value; if (cur.state == Tunnel.State.CONNECTED) Tunnel.status.value = cur.copy(check = text, checkOk = null) }
 
+    /** [com.vlesscardvpn.core.RouteLiveness] witnesses: anycast resolvers + a few TCP VLESS endpoints (running first). */
+    private fun physicalTargets(): List<Pair<String, Int>> {
+        val st = Store.state.value
+        val endpoints = (usedServers + st.servers.filter { st.state(it).works } + st.servers)
+            .filter { it.protocol in com.vlesscardvpn.core.RouteLiveness.TCP_PROTOCOLS }
+            .map { it.address to it.port }
+        return com.vlesscardvpn.core.RouteLiveness.targets(endpoints)
+    }
+
+    /** The phone's own network reaches the internet (direct TCP, never through the tunnel). */
+    private suspend fun physicalOk(): Boolean {
+        val targets = physicalTargets()
+        return kotlinx.coroutines.withContext(Dispatchers.IO) { kotlinx.coroutines.runInterruptible { Tester.physicalInternet(targets) } }
+    }
+
+    /**
+     * 1.2.136: one missed light probe is confirmed before anything is blamed. The running route (two URLs, any HTTP
+     * answer, [com.vlesscardvpn.core.RouteLiveness.CONFIRM_MS]) and the physical network are asked at the same time.
+     */
+    private suspend fun confirmLoss(port: Int, testUrl: String): com.vlesscardvpn.core.RouteLiveness.Verdict = kotlinx.coroutines.coroutineScope {
+        val targets = physicalTargets()
+        val physical = async(Dispatchers.IO) { kotlinx.coroutines.runInterruptible { Tester.physicalInternet(targets) } }
+        val alive = try {
+            com.vlesscardvpn.core.CancellableProbe.run { bind ->
+                Tester.alive(port, com.vlesscardvpn.core.RouteLiveness.urls(testUrl), com.vlesscardvpn.core.RouteLiveness.CONFIRM_MS, bind)
+            }
+        } catch (e: kotlinx.coroutines.CancellationException) { physical.cancel(); throw e }
+          catch (e: Exception) { false }
+        val verdict = if (alive) com.vlesscardvpn.core.RouteLiveness.Verdict.ALIVE
+            else com.vlesscardvpn.core.RouteLiveness.verdict(false, try { physical.await() }
+                catch (e: kotlinx.coroutines.CancellationException) { throw e }
+                catch (e: Exception) { true })
+        physical.cancel()
+        if (BuildConfig.DEBUG) Log.i("E2E", "watchdog confirm verdict=$verdict")
+        verdict
+    }
+
     private fun recoverServerRoute() {
         standbyJob?.cancel(); standbyJob=null
         if (recoveryJob?.isActive == true || tun == null || Tunnel.socks == null) return
@@ -1456,13 +1727,51 @@ class TunnelService : VpnService() {
             val attempted=mutableSetOf<String>()
             var identity=Net.key(this@TunnelService) to Net.underlying(this@TunnelService)?.toString()
             var resetAt=android.os.SystemClock.elapsedRealtime()
+            var waitedOffline=false
             while (tun != null && Tunnel.socks != null && Tunnel.status.value.state == Tunnel.State.CONNECTED) {
                 // Reached only after confirmed failure (VoiceCallPolicy already protects uncertain calls).
                 // A broken route must not wait forever merely because AudioManager still reports a call.
                 if (!Actions.online()) {
                     healStatus("Сеть недоступна — VPN оставляет трафик заблокированным и повторит поиск")
+                    waitedOffline=true
                     delay(com.vlesscardvpn.core.VpnRecoveryPolicy.RETRY_MS)
                     continue
+                }
+                // 1.2.136: Android still reports INTERNET while the network itself is silent (lift, tunnel, an
+                // exhausted mobile balance). Rescue would mark the running server dead and hop between servers
+                // that cannot work either; wait instead, blaming nobody.
+                val observedPath = Net.observation(this@TunnelService)
+                val observedCore = core; val observedSocks = Tunnel.socks
+                val reachable = physicalOk()
+                kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                if (!Net.matches(this@TunnelService, observedPath) || core !== observedCore || Tunnel.socks != observedSocks) {
+                    delay(500); continue
+                }
+                if (!reachable) {
+                    healStatus("Сеть подключена, но интернета у неё нет — жду; серверы не помечаю нерабочими")
+                    waitedOffline=true
+                    delay(2000)
+                    continue
+                }
+                if (waitedOffline) {
+                    val current=Tunnel.socks
+                    val answers=current!=null && runCatching {
+                        com.vlesscardvpn.core.CancellableProbe.run { bind ->
+                            Tester.alive(current.port,com.vlesscardvpn.core.RouteLiveness.urls(Store.state.value.settings.testUrl),
+                                com.vlesscardvpn.core.RouteLiveness.CONFIRM_MS,bind)
+                        }
+                    }.onFailure { if (it is kotlinx.coroutines.CancellationException) throw it }.getOrDefault(false)
+                    if (!Net.matches(this@TunnelService, observedPath) || core !== observedCore || Tunnel.socks != observedSocks) {
+                        delay(500); continue
+                    }
+                    waitedOffline=false
+                    if (answers && Tunnel.socks==current && Tunnel.status.value.state==Tunnel.State.CONNECTED) {
+                        // The outage was the network, not the route: keep it, re-verify, let the watchdog continue.
+                        if (BuildConfig.DEBUG) Log.i("E2E", "recovery network_back route_kept=true")
+                        healStatus("Интернет вернулся — маршрут отвечает, перепроверяю…")
+                        verifySoon(0,suspectedFailure=true)
+                        break
+                    }
                 }
                 healStatus(if (attempt == 0) "Сервер не отвечает — ищу рабочий VLESS-маршрут; прямого обхода нет" else "VLESS-маршрут не найден — повторяю поиск")
                 val physical=Net.key(this@TunnelService) to Net.underlying(this@TunnelService)?.toString()
@@ -1509,10 +1818,13 @@ class TunnelService : VpnService() {
         val servers = usedServers.filter(com.vlesscardvpn.core.AutoEligibility::vlessServer)
         if (servers.isEmpty()) return
         healJob = scope.launch {
-            if (!Actions.online()) {
+            if (!Actions.online() || !physicalOk()) {
                 healStatus("Нет интернета у самой сети — маршрут через VLESS оставлен без прямого обхода")
                 delay(20_000)
-                verifySoon(0)
+                // 1.2.136: a plain verifySoon(0) was usually not due yet (the failed check ran <30 s ago), and with
+                // no watchdog running nothing looked at the route again until the screen turned on.
+                verifySoon(0, suspectedFailure = true)
+                watchdog()
                 return@launch
             }
             val reachable = healStep == 0 && servers.take(5).any { Tester.tcpOne(it.address, it.port, 1500) > 0 }
@@ -1563,6 +1875,9 @@ class TunnelService : VpnService() {
             val network = Net.underlying(this@TunnelService)
             val profile = network?.let { Net.key(this@TunnelService, it) }
             val snapshot = network?.let { NetworkHandoff.Snapshot(it.toString(), profile!!, Net.pathRevision(this@TunnelService,it)) }
+            // 1.2.136: the same network merely gained a path element (an IPv6 prefix after IPv4, a second address):
+            // established connections are untouched — nothing is cancelled, reset or reconnected.
+            if (handoff.adopt(snapshot)) { if (BuildConfig.DEBUG) Log.i("E2E", "handoff adopted=extension"); return@launch }
             val change = handoff.update(snapshot) ?: return@launch
             if (BuildConfig.DEBUG) Log.i("E2E", "handoff delta handle=${change.handleChanged} profile=${change.profileChanged} path=${change.pathChanged} presence=${change.presenceChanged} state=${Tunnel.status.value.state}")
             // Carry endpoints only as unverified candidate hints, never their old-network samples.
@@ -1573,7 +1888,7 @@ class TunnelService : VpnService() {
             netJob?.cancel(); checkJob?.cancel(); healJob?.cancel(); recoveryJob?.cancel(); optJob?.cancel(); scoutJob?.cancel(); standbyJob?.cancel()
             watchJob?.cancel(); coverJob?.cancel(); serviceJob?.cancel(); liveJob?.cancel(); torJob?.cancel(); torJob = null
             torBridgeRefreshJob?.cancel(); torBridgeRefreshJob = null
-            clearTorCountry()
+            clearTorCountry(); com.vlesscardvpn.core.TorBootstrapStatus.clear()
             com.vlesscardvpn.tor.TorCard.invalidateStartup()
             Actions.cancelForNetworkChange()
             if (!change.online) {
@@ -1600,7 +1915,9 @@ class TunnelService : VpnService() {
                 var recheckPassed=false
                 if (automatic) {
                     Actions.recallNet(profile!!)
-                    recheckPassed=runCatching { Actions.quickRecheck(previousCandidates) }.onFailure { if (it is kotlinx.coroutines.CancellationException) throw it }.getOrDefault(false)
+                    // The running route races the isolated wave: when it already works here, no discovery restart.
+                    val live: suspend (String) -> com.vlesscardvpn.model.Server? = { net -> liveHandoffProbe(net, change.revision) }
+                    recheckPassed=runCatching { Actions.quickRecheck(previousCandidates, live) }.onFailure { if (it is kotlinx.coroutines.CancellationException) throw it }.getOrDefault(false)
                 }
                 if (!handoff.valid(change.revision)) return@reconnect
                 if (com.vlesscardvpn.core.NetworkRecoveryPolicy.restartDiscovery(automatic,tun != null,recheckPassed)) {
@@ -1621,6 +1938,38 @@ class TunnelService : VpnService() {
         }
     }
 
+    /**
+     * [com.vlesscardvpn.core.LiveHandoffProbe]: one bounded HTTPS+services probe through the running single route
+     * after a physical handoff. Its fresh result for the new network lets the soft reconnect keep the route at once.
+     */
+    private suspend fun liveHandoffProbe(net: String, revision: Long): com.vlesscardvpn.model.Server? {
+        val st = Store.state.value
+        val auth = Tunnel.socks ?: return null
+        val sampledCore = core ?: return null
+        val variant = usedVariants.singleOrNull() ?: return null
+        val server = variant.first
+        val mask = variant.second?.id.orEmpty()
+        if (!com.vlesscardvpn.core.LiveHandoffProbe.eligible(st.settings.mode == Mode.AUTO, usedServers.size, usedChain != null,
+                usedTorRoute, warpChained, st.settings.mux || variant.second?.mux == true)) return null
+        if (st.servers.none { it.toJson().toString() == server.toJson().toString() } || !com.vlesscardvpn.core.AutoEligibility.vlessServer(server)) return null
+        if (!com.vlesscardvpn.core.LiveHandoffProbe.maskAllowed(st.state(server), net, mask)) return null
+        val profile = com.vlesscardvpn.core.AutoCheckProfile.of(st.settings.autoChecks)
+        val limit = com.vlesscardvpn.core.AutoLatencyPolicy.MAX_MS
+        val started = System.currentTimeMillis()
+        val p = com.vlesscardvpn.core.CancellableProbe.run { bind ->
+            Tester.probeSocks(auth.port, st.settings.testUrl, big = false, youtube = false, telegram = true, attempts = 1,
+                budgetMs = com.vlesscardvpn.core.LiveHandoffProbe.BUDGET_MS, autoChecks = profile, user = auth.user, pass = auth.pass, onCancel = bind)
+        }
+        if (core !== sampledCore || Tunnel.socks != auth || !handoff.valid(revision) || Net.key(this) != net) return null
+        if (com.vlesscardvpn.core.AutoChecks.current != profile || com.vlesscardvpn.core.AutoLatencyPolicy.MAX_MS != limit) return null
+        val accepted = com.vlesscardvpn.core.LiveHandoffProbe.accepted(p, profile, limit)
+        if (BuildConfig.DEBUG) Log.i("E2E", "handoff live_probe accepted=$accepted ms=${p.realMs} tg=${p.tgOk}")
+        if (!accepted) return null
+        var committed = false
+        Store.setState(server.id) { old -> com.vlesscardvpn.core.LiveHandoffProbe.commit(old, p, profile, net, mask, started, System.currentTimeMillis()).also { committed = it !== old } }
+        return server.takeIf { committed }
+    }
+
     private fun teardown(error: String?, keepTun: Boolean = false) {
         maintenanceJob?.cancel(); maintenanceJob = null
         com.vlesscardvpn.core.ConnectionPassport.clear()
@@ -1631,7 +1980,7 @@ class TunnelService : VpnService() {
         if(error != null || !keepTun) { chainReserves.clear();chainChoice=null;chainEpoch.incrementAndGet() }
         torJob?.cancel(); torJob = null
         torBridgeRefreshJob?.cancel(); torBridgeRefreshJob = null
-        clearTorCountry()
+        clearTorCountry(); com.vlesscardvpn.core.TorBootstrapStatus.clear()
         com.vlesscardvpn.tor.TorCard.invalidateStartup()
         if (error != null) com.vlesscardvpn.tor.TorCard.stopEmbedded()
         if (!keepTun) runCatching { com.vlesscardvpn.core.Traffic.tick() }
@@ -1651,7 +2000,7 @@ class TunnelService : VpnService() {
         // stop() joins the native worker; only the VpnService owns/closes the retained TUN fd.
         TProxyService.stop()
         com.vlesscardvpn.core.MaskRuntimeEvidence.stop(keepTun,error?.isNotEmpty()==true)
-        core?.stop(); core = null; Tunnel.wireguardKeys = emptySet()
+        core?.stop(); core = null; Tunnel.wireguardKeys = emptySet(); Tunnel.torUplink = null
         dpi?.close(); dpi = null; Tunnel.byeDpiPort = null
         if (!keepTun) { Tunnel.socks = null; runCatching { tun?.close() }; tun = null }
         if (error != null) {

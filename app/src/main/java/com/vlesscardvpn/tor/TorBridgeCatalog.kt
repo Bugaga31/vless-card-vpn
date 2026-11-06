@@ -13,7 +13,11 @@ object TorBridgeCatalog {
     const val SOURCE = "https://raw.githack.com/igareck/vpn-configs-for-russia/main/TOR-BRIDGES/TOR_BRIDGES_TOP100.txt"
     const val MAX_BYTES = 262144
     data class Parsed(val lines: List<String>, val rejected: Int) {
-        fun forTransport(transport: String) = lines.filter { it.startsWith("Bridge $transport ") }.take(12)
+        /** First 12 of the transport; bridges in [avoid] (they just failed to start Tor) go after untried ones. */
+        fun forTransport(transport: String, avoid: Set<String> = emptySet()): List<String> {
+            val all = lines.filter { it.startsWith("Bridge $transport ") }
+            return (all.filter { it !in avoid } + all.filter { it in avoid }).take(12)
+        }
     }
     private val fingerprint=Regex("[A-Fa-f0-9]{40}")
     fun normalize(raw: String): String? {
@@ -73,9 +77,18 @@ object TorBridgeCatalog {
         require(result.isNotEmpty()) { "No valid bridges for selected transport" }
         return result
     }
-    suspend fun fetch(): Parsed = withContext(Dispatchers.IO) {
-        val client=OkHttpClient.Builder().callTimeout(8,TimeUnit.SECONDS).connectTimeout(4,TimeUnit.SECONDS)
-            .followRedirects(false).followSslRedirects(false).build()
+    /**
+     * [socksPort]: the running tunnel's own loopback SOCKS — the source is often unreachable on the bare Russian
+     * network while the VPN works. null = direct. Redirects stay off on both paths; the body is bounded the same way.
+     */
+    suspend fun fetch(socksPort: Int? = null, timeoutSec: Long = 8): Parsed = withContext(Dispatchers.IO) {
+        val builder=OkHttpClient.Builder().callTimeout(timeoutSec,TimeUnit.SECONDS).connectTimeout(minOf(4,timeoutSec),TimeUnit.SECONDS)
+            .followRedirects(false).followSslRedirects(false)
+        if(socksPort!=null) {
+            require(socksPort in 1..65535)
+            builder.proxy(java.net.Proxy(java.net.Proxy.Type.SOCKS,java.net.InetSocketAddress("127.0.0.1",socksPort)))
+        }
+        val client=builder.build()
         try {
             client.newCall(Request.Builder().url(SOURCE).header("Accept","text/plain").build()).execute().use { r ->
                 check(r.code==200) { "Bridge source HTTP ${r.code}" }

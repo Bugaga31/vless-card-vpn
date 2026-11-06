@@ -17,6 +17,8 @@ object Tunnel {
     @Volatile var byeDpiPort: Int? = null
     /** Running VPN's local SOCKS listener (random port + login in stealth mode); null when disconnected. */
     @Volatile var socks: com.vlesscardvpn.xray.SocksAuth? = null
+    /** Running core's SOCKS uplink for Tor's bridges (routed to VLESS, never into Tor); null without Tor in the config. */
+    @Volatile var torUplink: Int? = null
     /** Keys only in process memory; never logged or persisted here. Avoid probe peer-roaming. */
     @Volatile var wireguardKeys: Set<String> = emptySet()
     @Volatile var dpiLabel: String = ""

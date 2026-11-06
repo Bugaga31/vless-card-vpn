@@ -184,13 +184,12 @@ fun DeviceScreen(openWatson:()->Unit = {}) {
         }
 
         DeviceSection("Игровая сессия", "До 60 минут. Текущая VPN-связь не разрывается.") {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Switch(checked = gaming, onCheckedChange = { enabled ->
-                    GameSession.set(enabled)
-                    PhonePower.refresh(ctx)
-                    message = if (enabled) "Фоновое обслуживание приостановлено. Новые автоматические подключения учитывают задержку и джиттер." else "Обычная политика восстановлена"
-                })
-                Text(if (gaming) "Включена" else "Выключена", style = MaterialTheme.typography.bodyMedium)
+            LeadingSwitchRow(gaming, { enabled ->
+                GameSession.set(enabled)
+                PhonePower.refresh(ctx)
+                message = if (enabled) "Фоновое обслуживание приостановлено. Новые автоматические подключения учитывают задержку и джиттер." else "Обычная политика восстановлена"
+            }) {
+                Text(if (gaming) "Игровая сессия включена" else "Игровая сессия выключена", style = MaterialTheme.typography.bodyMedium)
             }
             DetailDisclosure("Что меняется", "Временно откладываются облачные обновления, резервные проверки и фоновое наблюдение. Выбор учитывает EMA задержки/джиттера HTTPS, а не предполагаемые потери UDP. Приоритет процессов других приложений и частоты CPU не меняются; режим сбрасывается при завершении процесса.")
         }
@@ -238,11 +237,10 @@ fun DeviceScreen(openWatson:()->Unit = {}) {
         }
 
         DeviceSection("Локальное обучение", "Не отправляет сырые показания и не управляет другими приложениями.") {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Switch(checked = settings.phoneLearning, onCheckedChange = { enabled ->
-                    Store.update { it.copy(settings = it.settings.copy(phoneLearning = enabled)) }
-                    if (!enabled) scope.launch { withContext(Dispatchers.IO) { runCatching { PhoneBrain.reset(ctx) } } }
-                })
+            LeadingSwitchRow(settings.phoneLearning, { enabled ->
+                Store.update { it.copy(settings = it.settings.copy(phoneLearning = enabled)) }
+                if (!enabled) scope.launch { withContext(Dispatchers.IO) { runCatching { PhoneBrain.reset(ctx) } } }
+            }) {
                 Text(if (settings.phoneLearning) "Обучение включено" else "Обучение выключено", style = MaterialTheme.typography.bodyMedium)
             }
             Text(brain, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -257,12 +255,11 @@ fun DeviceScreen(openWatson:()->Unit = {}) {
         }
 
         DeviceSection("Фоновое наблюдение", "Редкая системная задача; Android может задерживать её.") {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Switch(checked = background, onCheckedChange = { on ->
-                    background = on && DeviceCoach.background(ctx, true)
-                    if (!on) DeviceCoach.background(ctx, false)
-                    if (on && !background) message = "Android не разрешил запланировать наблюдение"
-                })
+            LeadingSwitchRow(background, { on ->
+                background = on && DeviceCoach.background(ctx, true)
+                if (!on) DeviceCoach.background(ctx, false)
+                if (on && !background) message = "Android не разрешил запланировать наблюдение"
+            }) {
                 Text("Разрешить наблюдение раз в ~15 минут", style = MaterialTheme.typography.bodyMedium)
             }
             DetailDisclosure("Ограничения", "VPN не нужен. Наблюдение обновляет диагностику, но длинные промежутки не используются как минутные обучающие примеры. Оно не работает после принудительной остановки приложения и возобновляется при следующем открытии после перезагрузки.")
