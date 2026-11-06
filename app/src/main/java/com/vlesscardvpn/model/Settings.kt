@@ -21,6 +21,7 @@ data class Settings(
     val autoChecks: Set<String> = com.vlesscardvpn.core.AutoCheckProfile.defaults,
     val customCheckDomains: List<String> = emptyList(),
     val probeParallel: Int = com.vlesscardvpn.core.ProbeConcurrencyPolicy.DEFAULT,
+    val bulkTcpParallel: Int = com.vlesscardvpn.core.BulkTcpCapacity.DEFAULT,
     val autoLatencyMinMs: Int = 100,
     val autoLatencyMaxMs: Int = com.vlesscardvpn.core.AutoLatencyRange.DEFAULT_MAX,
     val ruDirect: Boolean = false,
@@ -187,6 +188,7 @@ data class Settings(
         .put("autoChecks", JSONArray(autoChecks.sorted()))
         .put("customCheckDomains", JSONArray(customCheckDomains))
         .put("probeParallel", com.vlesscardvpn.core.ProbeConcurrencyPolicy.normalize(probeParallel))
+        .put("bulkTcpParallel", com.vlesscardvpn.core.BulkTcpCapacity.normalize(bulkTcpParallel))
         .put("autoLatencyMinMs", autoLatencyMinMs).put("autoLatencyMaxMs", autoLatencyMaxMs).put("autoLatencyPresetVersion", com.vlesscardvpn.core.AutoLatencyRange.PRESET_VERSION)
         .put("ruAllDirect", ruAllDirect).put("ruWhitelist", ruWhitelist).put("ruDirect", ruDirect).put("blockAds", blockAds).put("blockTrackers", blockTrackers).put("byeDpiArgs", byeDpiArgs).put("byeDpiSni", byeDpiSni)
         .put("hybridDomains", JSONArray(hybridDomains)).put("testUrl", testUrl).put("dnsUrl", dnsUrl).put("dnsAuto", dnsAuto)
@@ -259,6 +261,7 @@ data class Settings(
                     else com.vlesscardvpn.core.AutoCheckProfile.defaults,
                 customCheckDomains = list("customCheckDomains", emptyList()).mapNotNull(com.vlesscardvpn.core.SiteCheckCatalog::domain).distinct().take(100),
                 probeParallel = com.vlesscardvpn.core.ProbeConcurrencyPolicy.normalize(o.optInt("probeParallel", com.vlesscardvpn.core.ProbeConcurrencyPolicy.DEFAULT)),
+                bulkTcpParallel = com.vlesscardvpn.core.BulkTcpCapacity.normalize(o.optInt("bulkTcpParallel", com.vlesscardvpn.core.BulkTcpCapacity.DEFAULT)),
                 autoLatencyMinMs = latency.min,
                 autoLatencyMaxMs = latency.max,
                 ruAllDirect = o.optBoolean("ruAllDirect", d.ruAllDirect), ruWhitelist = o.optBoolean("ruWhitelist", d.ruWhitelist), ruDirect = o.optBoolean("ruDirect", d.ruDirect), blockAds = o.optBoolean("blockAds", d.blockAds), blockTrackers = o.optBoolean("blockTrackers", d.blockTrackers),

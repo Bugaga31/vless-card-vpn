@@ -22,6 +22,20 @@ class DiscoveryAdmissionR202Test {
  @Test fun backgroundOrderIsUnchanged(){val q=listOf(pending("p"),ready("r"));assertEquals(listOf(q),ForegroundProbePlan.cohorts(q,false))}
  @Test fun admittedQuotaAndEndpointSetAreUnchanged(){val q=(1..8).map {if(it%2==0) ready("r$it") else pending("p$it")};val out=ForegroundProbePlan.cohorts(q,true).flatten();assertEquals(8,out.size);assertEquals(q.toSet(),out.toSet());assertEquals(q.groupingBy{it.source}.eachCount(),out.groupingBy{it.source}.eachCount())}
  @Test fun readyWinnerNeverWaitsForAcquisition()=runBlocking {val calls=mutableListOf<List<Server>>();val r=ready("r");assertEquals(1,ForegroundProbePlan.run(listOf(pending("p"),r),true,{true}) {calls+=it;assertFalse(it.any(ForegroundProbePlan::needsCertificate));1});assertEquals(listOf(listOf(r)),calls)}
+ @Test fun positiveProbeWithoutCommittedHandoffStillTriesPending()=runBlocking {
+  val p=pending("p"); val r=ready("r"); val calls=mutableListOf<List<Server>>(); var committed=false
+  val n=ForegroundProbePlan.run(listOf(p,r),true,{true},stopOnSuccess={committed}) { cohort ->
+   calls+=cohort
+   if(cohort==listOf(p)) committed=true
+   1 // Both passed measurement; only the second was actually committed.
+  }
+  assertEquals(2,n); assertTrue(committed); assertEquals(listOf(listOf(r),listOf(p)),calls)
+ }
+ @Test fun committedHandoffStillStopsBeforeSlowCertificate()=runBlocking {
+  val p=pending("p"); val r=ready("r"); var calls=0; var committed=false
+  ForegroundProbePlan.run(listOf(p,r),true,{true},stopOnSuccess={committed}) { calls++; committed=true; 1 }
+  assertEquals(1,calls)
+ }
  @Test fun readyFailureContinuesToPending()=runBlocking {val p=pending("p");val r=ready("r");val calls=mutableListOf<List<Server>>();assertEquals(1,ForegroundProbePlan.run(listOf(p,r),true,{true}) {calls+=it;if(it==listOf(p))1 else 0});assertEquals(listOf(listOf(r),listOf(p)),calls)}
  @Test fun noSuccessIsInvented()=runBlocking {assertEquals(0,ForegroundProbePlan.run(listOf(pending("p"),ready("r")),true,{true}) {0})}
  @Test fun staleNetworkPreventsEveryCohort()=runBlocking {assertEquals(0,ForegroundProbePlan.run(listOf(pending("p"),ready("r")),true,{false}) {error("stale probe")})}

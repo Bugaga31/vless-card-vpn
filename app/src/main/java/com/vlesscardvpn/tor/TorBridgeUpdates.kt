@@ -87,7 +87,7 @@ object TorBridgeUpdates {
                 if (ticket != generation.get() || !enabled(app) || active.torBridge != transport || active.torBridgeLines != before.torBridgeLines) state
                 else { applied = true; state.copy(settings = active.copy(torBridgeLines = text)) }
             }
-            if (applied) status.value = "Своих мостов $transport нет, список не загрузился · Tor запущен со встроенными мостами Tor Project"
+            if (applied) status.value = "Своих мостов $transport нет · используются встроенные мосты Tor Project; список обновится в фоне"
             builtins.takeIf { applied }
         }
     }

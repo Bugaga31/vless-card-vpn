@@ -368,8 +368,9 @@ object Actions {
         val targets = if (onlySelected) snapshot.selected else snapshot.servers
         if (targets.isEmpty()) return@launch if (onlySelected) "Сначала выберите серверы для проверки" else "Нет серверов — добавьте ссылку или обновите подписки"
         val chosen=ProbeConcurrencyPolicy.normalize(Store.state.value.settings.probeParallel)
-        val limits = ManualServerCheckPolicy.Limits(chosen,chosen,chosen)
-        doTestAll(targets, realLimit, tcpParallel = limits.tcpParallel, realParallel = limits.realParallel, realBatch = limits.batch)
+        val tcpSlots=BulkTcpCapacity.current(app,snapshot.settings.bulkTcpParallel)
+        if (tcpSlots <= 0) return@launch "Не хватает свободных системных файлов для TCP-проверки. Освободите ресурсы и повторите."
+        doTestAll(targets, realLimit.coerceIn(1,1000), tcpParallel = tcpSlots, realParallel = chosen, realBatch = chosen)
     }
 
     private suspend fun doTestAll(
@@ -381,25 +382,62 @@ object Actions {
         realBatch: Int = 64,
     ): String {
         if (list.isEmpty()) return "Нет серверов — добавьте ссылку или обновите подписки"
-        progress.value = progress.value.copy(title = "TCP-пинг")
+        val observed = Net.observation(app) ?: return "Нет доступной сети для проверки"
+        fun valid() = Net.matches(app,observed)
+        progress.value = progress.value.copy(title = "TCP-пинг", message = "До $tcpParallel лёгких соединений одновременно; это ещё не проверка VPN")
         val done = AtomicInteger()
         val tcp = java.util.concurrent.ConcurrentHashMap<String, Int>()
         val batch = StateBatch()
-        Tester.tcp(list, parallel = tcpParallel, timeoutMs = 2000) { s, ms ->
-            tcp[s.id] = ms
-            batch.put(s.id) { it.copy(tcpMs = ms, realMs = if (ms == 0) 0 else it.realMs, checkedAt = System.currentTimeMillis()) }
-            step(done.incrementAndGet(), list.size)
+        Tester.bulkTcp(list, window = tcpParallel, timeoutMs = 2000) { s, ms ->
+            if (valid()) {
+                tcp[s.id] = ms
+                // Only positive evidence is written immediately. One failed TCP attempt is not a verdict.
+                if (ms > 0) batch.put(s.id) { if (valid()) it.copy(tcpMs = ms, checkedAt = System.currentTimeMillis()) else it }
+                step(done.incrementAndGet(), list.size)
+            }
         }
+        if (!valid()) return "Сеть изменилась — проверка остановлена; ранее сохранённые результаты относятся к прошлой сети"
         batch.flush()
+        val failed = list.filter { tcp[it.id] == 0 }
+        if (failed.isNotEmpty()) {
+            progress.value = progress.value.copy(title = "Повтор TCP", done = 0, total = failed.size,
+                message = "Перепроверяю неответившие серверы и сеть, прежде чем отмечать сбой")
+            val repeated = java.util.concurrent.ConcurrentHashMap<String, Int>()
+            val retryDone = AtomicInteger()
+            Tester.bulkTcp(failed, window = tcpParallel, timeoutMs = 3000) { s, ms ->
+                if (valid()) { repeated[s.id] = ms; step(retryDone.incrementAndGet(), failed.size) }
+            }
+            if (!valid()) return "Сеть изменилась — проверка остановлена; ранее сохранённые результаты относятся к прошлой сети"
+            val stillFailed = failed.any { repeated[it.id] == 0 }
+            val physicalOnline = if (stillFailed) kotlinx.coroutines.withContext(Bg.io) {
+                Tester.physicalInternet(RouteLiveness.targets(list.filter { it.isTcpBased }.map { it.address to it.port }))
+            } else false
+            if (!valid()) return "Сеть изменилась — проверка остановлена; ранее сохранённые результаты относятся к прошлой сети"
+            for (s in failed) {
+                val ms = ManualServerCheckPolicy.finalTcp(0, repeated[s.id], physicalOnline)
+                tcp[s.id] = ms
+                if (ms >= 0) batch.put(s.id) { if (valid()) it.copy(tcpMs = ms, realMs = if (ms == 0) 0 else it.realMs, checkedAt = System.currentTimeMillis()) else it }
+            }
+            batch.flush()
+        }
         // which of the TCP-reachable ones get the (slower) real check: the mini model's favourites first, then by ping
         val alive = list.filter { (tcp[it.id] ?: 0) > 0 }.let { l -> runCatching { Brain.load(app) }; val now = Store.state.value
             if (Brain.seen >= 50 && l.size > realLimit) Brain.order(Net.key(app), l) { now.state(it) } else l.sortedBy { tcp[it.id] } }
             .let { ServerChoice.diverse(it, realLimit) }
         // one attempt for all (fast), a second one only for those that failed although TCP answers
-        var working = realTest(alive, "Проверка через Xray", big, attempts = 1, parallel = realParallel, batch = realBatch)
+        var working = 0
+        // Resolve/pin and start proving routes in bounded waves, instead of waiting for every certificate first.
+        val waves = alive.chunked(50)
+        for ((index, wave) in waves.withIndex()) {
+            kotlinx.coroutines.currentCoroutineContext().ensureActive()
+            if (!valid()) return "Сеть изменилась — проверка остановлена"
+            working += realTest(wave, "Проверка через Xray · волна ${index+1}/${waves.size}", big, attempts = 1, parallel = realParallel, batch = realBatch)
+        }
         val again = Store.state.value.let { s -> alive.filter { !s.state(it).works } }
         if (again.isNotEmpty() && again.size <= 6) working += realTest(again, "Повторная проверка", big, attempts = 2, parallel = realParallel, batch = realBatch)
-        return "Работают: $working из ${alive.size} доступных по TCP (всего ${list.size})"
+        val unknown = tcp.values.count { it < 0 }
+        return "Работают: $working из ${alive.size} доступных по TCP (всего ${list.size}); работоспособность проверена через Xray" +
+            if (unknown > 0) "; TCP не определён: $unknown — они не помечены нерабочими" else ""
     }
 
     private suspend fun realTest(servers: List<Server>, title: String, big: Boolean = true, attempts: Int = 2, parallel: Int = 32, youtube: Boolean = true,
@@ -1687,9 +1725,9 @@ object Actions {
         val net = Net.key(app)
         val handle = Net.underlying(app)?.toString()
         fun sameNetwork() = Net.key(app) == net && Net.underlying(app)?.toString() == handle
-        val firstReady: (Server) -> Unit = first@ { server ->
-            if (!sameNetwork()) return@first
-            if (started.claimSelected {
+        val firstReady: (Server) -> Boolean = first@ { server ->
+            if (!sameNetwork()) return@first false
+            val accepted = started.claimSelected {
                 val n = selectBest(1, close = false, among = listOf(server))
                 val snapshot = Store.state.value
                 val net = Net.key(app)
@@ -1698,11 +1736,13 @@ object Actions {
                 if (com.vlesscardvpn.BuildConfig.DEBUG) android.util.Log.i("E2E",
                     "auto handoff selected=$n committed=$committed working=${snapshot.servers.count { snapshot.state(it).works }}")
                 n > 0 && committed
-            }) {
+            }
+            if (accepted) {
                 deepPending = true
                 onSelected()
                 scope.launch(Dispatchers.Main) { if (sameNetwork()) onReady() }
             }
+            accepted
         }
         fun fresh(): List<Server> = Store.state.value.let { st ->
             AutoEligibility.servicePool(preferred(st, st.servers.filter {
@@ -1796,7 +1836,7 @@ object Actions {
     }
 
     /** Cached cloud/network candidates first; no whole-catalog TCP scan or video downloads before first connect. */
-    suspend fun quickTest(list: List<Server>, onFirst: ((Server) -> Unit)? = null, attempted: MutableSet<String> = mutableSetOf(), firstWaveOnly: Boolean = false, allowMaskRescue: Boolean = true, statistics: AutoSearchStatistics? = null): String {
+    suspend fun quickTest(list: List<Server>, onFirst: ((Server) -> Boolean)? = null, attempted: MutableSet<String> = mutableSetOf(), firstWaveOnly: Boolean = false, allowMaskRescue: Boolean = true, statistics: AutoSearchStatistics? = null): String {
         CloudSpeed.loadCached(app)
         val st = Store.state.value
         val untried = list.filter { it.id !in attempted }
@@ -1864,13 +1904,16 @@ object Actions {
         val passed = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
         val firstFired = java.util.concurrent.atomic.AtomicBoolean(false)
         val firstCallback: ((Server) -> Unit)? = onFirst?.let { callback -> { server ->
-            if (firstFired.compareAndSet(false, true)) callback(server)
+            // A measured success is not a successful handoff until the route is actually selected.
+            // If selection was fenced or lost to a concurrent update, the next candidate may try.
+            if (!firstFired.get() && callback(server)) firstFired.set(true)
         } }
         val fast = ConnectPolicy.fastStart()
         // A certificate fetch for one self-signed endpoint must not block every ready route.
         // Keep every admitted candidate and the source quotas; only split preparation.
         val fastOk = ForegroundProbePlan.run(shortlist, firstWaveOnly,
-            valid = { Net.key(app) == net && Net.underlying(app)?.toString() == network }) { cohort ->
+            valid = { Net.key(app) == net && Net.underlying(app)?.toString() == network },
+            stopOnSuccess = { onFirst == null || firstFired.get() }) { cohort ->
         realTest(cohort, "Авто: проверяю первый быстрый маршрут", big = ConnectPolicy.requiresBodyProof(earlyHandoff), youtube = false, telegram = st.settings.mode == Mode.AUTO,
             attempts = 1, parallel = if(firstWaveOnly) st.settings.probeParallel else fast.parallel, foreground = firstWaveOnly, stopAfter = if (onFirst != null || firstWaveOnly) fast.stopAfter else Int.MAX_VALUE,
             budgetMs = if (st.settings.mode == Mode.AUTO && firstWaveOnly) ConnectPolicy.FIRST_PROBE_MS else if (st.settings.mode == Mode.AUTO) 6500L else fast.budgetMs, onFirst = firstCallback, onSuccess = { passed.add(it.id) },
@@ -1887,8 +1930,10 @@ object Actions {
             return "Первая волна: проверено ${shortlist.size}, HTTPS+MTProto маршрутов $fastOk"
         }
         if (fastOk > 0) {
-            chooseCompared(shortlist.filter { it.id in passed }, onFirst, eligible.filter { s -> shortlist.none { it.id == s.id } })
-            deepPending = true; return "Выбран лучший из проверенных VLESS-маршрутов"
+            chooseCompared(shortlist.filter { it.id in passed }, firstCallback, eligible.filter { s -> shortlist.none { it.id == s.id } })
+            if (onFirst == null || firstFired.get()) {
+                deepPending = true; return "Выбран лучший из проверенных VLESS-маршрутов"
+            }
         }
         attempted.addAll(first.map { it.id });passed.clear()
         val ok = realTest(ordered, "Авто: проверяю резервные VLESS-маршруты", big = true,
@@ -1896,7 +1941,10 @@ object Actions {
             budgetMs = if (st.settings.mode == Mode.AUTO) 6500L else fast.budgetMs, onFirst = firstCallback, onSuccess = { passed.add(it.id) })
         if (Net.key(app) != net || Net.underlying(app)?.toString() != network) return selectionNetworkChanged()
         if (onFirst != null && firstFired.get()) return "Найден рабочий VLESS-маршрут — подключаюсь"
-        if (ok > 0) { chooseCompared(ordered.filter { it.id in passed }, onFirst, eligible.filter { it.id !in attempted }); deepPending = true; return "Проверенные VLESS-маршруты готовы" }
+        if (ok > 0) {
+            chooseCompared(ordered.filter { it.id in passed }, firstCallback, eligible.filter { it.id !in attempted })
+            if (onFirst == null || firstFired.get()) { deepPending = true; return "Проверенные VLESS-маршруты готовы" }
+        }
         // Only if the first wave failed: bound DNS/TCP work to a small diverse wave, not thousands of subscriptions.
         val rest = ServerChoice.diverse(eligible.filter { it.id !in attempted }, ConnectPolicy.NEXT)
         attempted.addAll(rest.map { it.id })
@@ -1908,7 +1956,7 @@ object Actions {
         val second = realTest(candidates, "Авто: запасные ${candidates.size} маршрутов", big = true, youtube = false, telegram = st.settings.mode == Mode.AUTO,
             attempts = 1, stopAfter = Int.MAX_VALUE, budgetMs = ConnectPolicy.QUICK_BUDGET_MS,onSuccess={ passed.add(it.id) })
         if (Net.key(app) != net || Net.underlying(app)?.toString() != network) return selectionNetworkChanged()
-        if (second > 0) { chooseCompared(candidates.filter { it.id in passed },onFirst, eligible.filter { it.id !in attempted }); deepPending = true }
+        if (second > 0) { chooseCompared(candidates.filter { it.id in passed },firstCallback, eligible.filter { it.id !in attempted }); deepPending = true }
         return "Короткая проверка: работают ${ok + second}; остальные серверы не задерживают первый успех"
     }
 
