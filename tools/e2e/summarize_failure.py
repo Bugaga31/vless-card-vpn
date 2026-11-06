@@ -60,7 +60,15 @@ else:
     standby_passes=re.findall(r'standby wave=([0-9]{1,15}) pass=([1-3]) before=([0-9]{1,3}) after=([0-9]{1,3}) start=([0-9]{1,15}) end=([0-9]{1,15})(?=\s|$)',text)[-12:]
     required_failures=re.findall(r'recovery request=required_service telegram=(true|false) stability=(true|false) voice=(true|false) discord=(true|false) youtube=(true|false) instagram=(true|false)(?=\s|$)',text)[-8:]
     stability_reasons=re.findall(r'stability_reason=(STABILITY_RESPONSE_FAILED|STABILITY_SPREAD|STABILITY_LATENCY|STABILITY_INCOMPLETE|OTHER)(?=\s|$)',text)[-8:]
+    # Fixed-shape optimizer outcomes only: enough to distinguish an unproven pool from
+    # a skipped or failed pass without exposing server names or exception messages.
+    optimize_results=re.findall(r'optimize result=(true|false|error [A-Za-z]{1,50}) dead_selected=(true|false) good_selected=([0-9]{1,3})(?=\s|$)',text)[-3:]
+    safe_optimize_errors={'BusyTimeout','IllegalStateException','IllegalArgumentException','IOException','CancellationException','TimeoutCancellationException','RuntimeException','Exception'}
+    optimize_results=[[v if not v.startswith('error ') else ('error '+v[6:] if v[6:] in safe_optimize_errors else 'error Other'),dead,int(good)] for v,dead,good in optimize_results]
+    optimize_exits=re.findall(r'optimize exit=(context_or_policy|network_unknown|optional_power_or_empty|repair_or_upgrade_applied|deep_power_changed|completed) changed=(true|false)(?=\s|$)',text)[-3:]
+    optimize_samples=re.findall(r'optimize sampled candidates=([0-9]{1,3}) working=([0-9]{1,3}) selected_working=([0-9]{1,3}) deep=(true|false)(?=\s|$)',text)[-3:]
     result={'standby_passes':[[int(v) for v in row] for row in standby_passes],'stability_deferred_count':min(text.count('stability recovery=deferred'),100000),'stability_reasons':stability_reasons,'recovery_requests':recovery_requests,'recovery_applied':recovery_applied,'required_failures':required_failures,'soft_reconnect_origins':soft_origins,'restored_count':min(text.count('fixture activity restored'),100000),'handoff_deltas':handoff_deltas,'core_events':core_events,'probe_events':probe_events,'failures':failures,'service_events':service_events,'teardown_events':teardown_events,
+            'optimize_results':optimize_results,'optimize_exits':optimize_exits,'optimize_samples':optimize_samples,
             'optimize_skips':re.findall(r'optimize skipped=(power|foreground_busy|disabled)\b',text)[-3:],
             'optimize_power_categories':re.findall(r'optimize skipped=power category=(thermal|call|charging|eco|memory|gaming|saver|battery|prediction|pause|data_saver|metered|screen|charge_only|traffic|lag|other)(?=\s|$)',text)[-3:],
             'auto_ready_blocked':re.findall(r'auto ready_blocked=(network_changed|cancelled)\b',text)[-3:],

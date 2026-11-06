@@ -88,6 +88,18 @@ class BoundedDiagnosticsTest(unittest.TestCase):
         self.assertEqual(13,len(calls))
         self.assertTrue(all(re.fullmatch(r'connect\(soft\s*=\s*true, reason = SoftReason\.[A-Z0-9_]+\)',c) for c in calls))
 
+    def test_optimizer_diagnostics_are_bounded_and_redacted(self):
+        good = ('optimize sampled candidates=4 working=3 selected_working=3 deep=false\n'
+                'optimize exit=repair_or_upgrade_applied changed=true\n'
+                'optimize result=true dead_selected=false good_selected=3\n')
+        bad = 'optimize result=error SecretToken dead_selected=true good_selected=0 private\n'
+        output,d=self.summarize(good*5+bad)
+        self.assertEqual(3,len(d['optimize_results']))
+        self.assertEqual(['error Other','true',0],d['optimize_results'][-1])
+        self.assertEqual(['repair_or_upgrade_applied','true'],d['optimize_exits'][-1])
+        self.assertEqual(['4','3','3','false'],d['optimize_samples'][-1])
+        self.assertNotIn('SecretToken',output);self.assertNotIn('private',output)
+
     def test_power_diagnostics_only_emit_allowed_categories(self):
         s,d=self.summarize('optimize skipped=power category=screen\n'*8+'optimize skipped=power category=SECRET token=private\n')
         self.assertEqual(['screen']*3,d['optimize_power_categories'])
