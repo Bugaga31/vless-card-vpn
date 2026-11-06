@@ -96,6 +96,8 @@ class TunnelService : VpnService() {
     private var networkRefreshJob: Job? = null
     private val networkSignal = java.util.concurrent.atomic.AtomicLong()
     private val networkRefreshWindow = com.vlesscardvpn.core.NetworkRefreshWindow()
+    private val validationWake = com.vlesscardvpn.core.NetworkValidationWake()
+    private val networkWakeSignals = kotlinx.coroutines.channels.Channel<Unit>(kotlinx.coroutines.channels.Channel.CONFLATED)
 
     /** Self-healing step after failed checks (0 = healthy); reset by a successful check or a user (re)connect. */
     private var healStep = 0
@@ -1342,9 +1344,9 @@ class TunnelService : VpnService() {
                     do { screenSignals.receive() } while (com.vlesscardvpn.core.VpnRecoveryPolicy.pauseWatchdog(asleep(),Store.state.value.settings.mode==Mode.AUTO))
                     delay(1500)
                 } else {
-                    val screenEvent = kotlinx.coroutines.withTimeoutOrNull(period) { screenSignals.receive(); true } == true
+                    val wake = com.vlesscardvpn.core.WatchdogSignals.wait(screenSignals, networkWakeSignals, offline, period)
                     if (com.vlesscardvpn.core.VpnRecoveryPolicy.pauseWatchdog(asleep(),autoWatch)) continue
-                    if (screenEvent) delay(1500)
+                    if (wake == com.vlesscardvpn.core.WatchdogSignals.Wake.SCREEN) delay(1500)
                 }
                 com.vlesscardvpn.core.Traffic.tick()
                 if (healJob?.isActive == true || recoveryJob?.isActive == true || com.vlesscardvpn.core.VpnRecoveryPolicy.pauseWatchdog(asleep(),autoWatch)) continue
@@ -1850,12 +1852,20 @@ class TunnelService : VpnService() {
         if (netCallback != null) return
         val cm = getSystemService(ConnectivityManager::class.java) ?: return
         val initial = Net.underlying(this)
+        validationWake.reset()
+        initial?.let { validationWake.observe(it.toString(), it.toString(),
+            cm.getNetworkCapabilities(it)?.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED) == true) }
         curNet = initial
         handoff.seed(initial?.let { NetworkHandoff.Snapshot(it.toString(), Net.key(this, it), Net.pathRevision(this,it)) })
         val cb = object : ConnectivityManager.NetworkCallback() {
             override fun onAvailable(network: Network) = queueNetworkRefresh()
             override fun onLost(network: Network) = queueNetworkRefresh()
-            override fun onCapabilitiesChanged(network: Network, caps: NetworkCapabilities) = queueNetworkRefresh()
+            override fun onCapabilitiesChanged(network: Network, caps: NetworkCapabilities) {
+                val selected = Net.underlying(this@TunnelService)?.toString()
+                if (validationWake.observe(network.toString(), selected, caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)))
+                    networkWakeSignals.trySend(Unit) // hint only: the normal SOCKS and physical probes still decide
+                queueNetworkRefresh()
+            }
             override fun onLinkPropertiesChanged(network: Network, links: LinkProperties) = queueNetworkRefresh()
         }
         val request = NetworkRequest.Builder().addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
@@ -1995,6 +2005,7 @@ class TunnelService : VpnService() {
             netCallback?.let { cb -> runCatching { getSystemService(ConnectivityManager::class.java)?.unregisterNetworkCallback(cb) } }
             netCallback = null; curNet = null
             networkRefreshJob?.cancel(); networkSignal.incrementAndGet(); networkRefreshWindow.reset(); handoff.reset()
+            validationWake.reset(); networkWakeSignals.tryReceive()
         }
         // Always dispose sessions tied to the old SOCKS core, including soft recovery.
         // stop() joins the native worker; only the VpnService owns/closes the retained TUN fd.
