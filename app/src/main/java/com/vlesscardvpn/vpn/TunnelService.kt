@@ -1009,10 +1009,15 @@ class TunnelService : VpnService() {
         torJob = scope.launch(Dispatchers.IO) {
             // Embedded daemon (no Termux needed); Termux instance wins when its cookie is readable.
             try {
-                // A first opt-in import may wait at most the catalog call timeout; cached bridges start immediately.
+                // Cached/user bridges start immediately. With no list, try the bundled obfs4 bridges first;
+                // the regular refresh below runs in the background and never replaces a working daemon.
+                // WebTunnel has no bundled bridges, so it still needs the consented source fetch.
                 if (st.torBridge != "none" && com.vlesscardvpn.tor.TorBridgeUpdates.enabled(this@TunnelService) &&
                     runCatching { com.vlesscardvpn.tor.TorBridgeCatalog.selected(st.torBridgeLines, st.torBridge) }.isFailure) {
-                    com.vlesscardvpn.tor.TorBridgeUpdates.refresh(this@TunnelService)
+                    val bundled = com.vlesscardvpn.tor.TorBridgeUpdates.adoptBuiltins(this@TunnelService, st.torBridge)
+                    if (bundled == null && runCatching {
+                        com.vlesscardvpn.tor.TorBridgeCatalog.selected(Store.state.value.settings.torBridgeLines, st.torBridge)
+                    }.isFailure) com.vlesscardvpn.tor.TorBridgeUpdates.refresh(this@TunnelService)
                 }
                 kotlinx.coroutines.currentCoroutineContext().ensureActive()
                 val active = Store.state.value.settings
