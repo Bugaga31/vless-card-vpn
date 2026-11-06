@@ -36,6 +36,9 @@ fun DeviceScreen(openWatson:()->Unit = {}) {
     val settings by Store.settings.collectAsState()
     val power by PhonePower.state.collectAsState()
     val reserveStatus by Actions.reserveStatus.collectAsState()
+    val lastExit by produceState<String?>(initialValue = null, ctx) {
+        value = withContext(Dispatchers.IO) { AppExitHint.last(ctx) }
+    }
     var previousPreset by remember { mutableStateOf<com.vlesscardvpn.model.Settings?>(null) }
     var apps by remember { mutableStateOf<List<DeviceCoach.AppUse>>(emptyList()) }
     var showAllApps by rememberSaveable { mutableStateOf(false) }
@@ -102,6 +105,12 @@ fun DeviceScreen(openWatson:()->Unit = {}) {
 
         WatsonEntry(openWatson)
         MaintenanceCard()
+        lastExit?.let { hint ->
+            DeviceSection("Почему приложение закрылось", "Последняя доступная причина от Android за 7 дней; это подсказка, не полный диагноз.") {
+                Text(hint, style = MaterialTheme.typography.bodyMedium)
+                Text("Данные остаются на телефоне и не отправляются автоматически. Если закрытие повторится, передайте эту строку разработчику.", style = MaterialTheme.typography.bodySmall)
+            }
+        }
 
         DeviceSection("Состояние устройства", "Только показатели, которые Android разрешает прочитать.") {
             snapshot?.let { s ->

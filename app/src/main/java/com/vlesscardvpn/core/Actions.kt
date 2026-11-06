@@ -368,8 +368,9 @@ object Actions {
         val targets = if (onlySelected) snapshot.selected else snapshot.servers
         if (targets.isEmpty()) return@launch if (onlySelected) "Сначала выберите серверы для проверки" else "Нет серверов — добавьте ссылку или обновите подписки"
         val chosen=ProbeConcurrencyPolicy.normalize(Store.state.value.settings.probeParallel)
-        val limits = ManualServerCheckPolicy.Limits(chosen,chosen,chosen)
-        doTestAll(targets, realLimit, tcpParallel = limits.tcpParallel, realParallel = limits.realParallel, realBatch = limits.batch)
+        val tcpSlots=BulkTcpCapacity.current(app,snapshot.settings.bulkTcpParallel)
+        if (tcpSlots <= 0) return@launch "Не хватает свободных системных файлов для TCP-проверки. Освободите ресурсы и повторите."
+        doTestAll(targets, realLimit.coerceIn(1,1000), tcpParallel = tcpSlots, realParallel = chosen, realBatch = chosen)
     }
 
     private suspend fun doTestAll(
@@ -381,25 +382,39 @@ object Actions {
         realBatch: Int = 64,
     ): String {
         if (list.isEmpty()) return "Нет серверов — добавьте ссылку или обновите подписки"
-        progress.value = progress.value.copy(title = "TCP-пинг")
+        val observed = Net.observation(app) ?: return "Нет доступной сети для проверки"
+        fun valid() = Net.matches(app,observed)
+        progress.value = progress.value.copy(title = "TCP-пинг", message = "До $tcpParallel лёгких соединений одновременно; это ещё не проверка VPN")
         val done = AtomicInteger()
         val tcp = java.util.concurrent.ConcurrentHashMap<String, Int>()
         val batch = StateBatch()
-        Tester.tcp(list, parallel = tcpParallel, timeoutMs = 2000) { s, ms ->
-            tcp[s.id] = ms
-            batch.put(s.id) { it.copy(tcpMs = ms, realMs = if (ms == 0) 0 else it.realMs, checkedAt = System.currentTimeMillis()) }
-            step(done.incrementAndGet(), list.size)
+        Tester.bulkTcp(list, window = tcpParallel, timeoutMs = 2000) { s, ms ->
+            if (valid()) {
+                tcp[s.id] = ms
+                if (ms >= 0) batch.put(s.id) { if (valid()) it.copy(tcpMs = ms, realMs = if (ms == 0) 0 else it.realMs, checkedAt = System.currentTimeMillis()) else it }
+                step(done.incrementAndGet(), list.size)
+            }
         }
+        if (!valid()) return "Сеть изменилась — результаты старой проверки отброшены"
         batch.flush()
         // which of the TCP-reachable ones get the (slower) real check: the mini model's favourites first, then by ping
         val alive = list.filter { (tcp[it.id] ?: 0) > 0 }.let { l -> runCatching { Brain.load(app) }; val now = Store.state.value
             if (Brain.seen >= 50 && l.size > realLimit) Brain.order(Net.key(app), l) { now.state(it) } else l.sortedBy { tcp[it.id] } }
             .let { ServerChoice.diverse(it, realLimit) }
         // one attempt for all (fast), a second one only for those that failed although TCP answers
-        var working = realTest(alive, "Проверка через Xray", big, attempts = 1, parallel = realParallel, batch = realBatch)
+        var working = 0
+        // Resolve/pin and start proving routes in bounded waves, instead of waiting for every certificate first.
+        val waves = alive.chunked(50)
+        for ((index, wave) in waves.withIndex()) {
+            kotlinx.coroutines.currentCoroutineContext().ensureActive()
+            if (!valid()) return "Сеть изменилась — проверка остановлена"
+            working += realTest(wave, "Проверка через Xray · волна ${index+1}/${waves.size}", big, attempts = 1, parallel = realParallel, batch = realBatch)
+        }
         val again = Store.state.value.let { s -> alive.filter { !s.state(it).works } }
         if (again.isNotEmpty() && again.size <= 6) working += realTest(again, "Повторная проверка", big, attempts = 2, parallel = realParallel, batch = realBatch)
-        return "Работают: $working из ${alive.size} доступных по TCP (всего ${list.size})"
+        val unknown = tcp.values.count { it < 0 }
+        return "Работают: $working из ${alive.size} проверенных через Xray (всего ${list.size})" +
+            if (unknown > 0) "; TCP не определён: $unknown — они не помечены нерабочими" else ""
     }
 
     private suspend fun realTest(servers: List<Server>, title: String, big: Boolean = true, attempts: Int = 2, parallel: Int = 32, youtube: Boolean = true,

@@ -162,7 +162,7 @@ class TunnelService : VpnService() {
         if (intent?.action != ACTION_PAUSE) { pauseJob?.cancel(); Tunnel.pausedUntil.value = 0 }
         when (intent?.action) {
             ACTION_PAUSE -> scope.launch { lock.withLock { pause() } }
-            ACTION_STOP -> { scope.launch { lock.withLock { teardown("") } ; stopSelf() } }
+            ACTION_STOP -> { hardRestartJob?.cancel(); scope.launch { lock.withLock { teardown("") } ; stopSelf() } }
             else -> { // ACTION_START or always-on restart (null intent)
                 foreground("Подключение…")
                 healStep = 0; dpiHeals = 0; connectFails = 0; safeMasks = false
@@ -172,7 +172,7 @@ class TunnelService : VpnService() {
         return START_STICKY
     }
 
-    override fun onRevoke() { cancelChainSearch(); scope.launch { lock.withLock { teardown("VPN отключён системой или другим VPN") }; stopSelf() } }
+    override fun onRevoke() { hardRestartJob?.cancel(); cancelChainSearch(); scope.launch { lock.withLock { teardown("VPN отключён системой или другим VPN") }; stopSelf() } }
 
     private var pauseJob: Job? = null
     /** «Пауза 5 минут» (for a bank or a game that hates VPNs): VPN off, the service waits and switches it back on by itself. */
@@ -715,9 +715,9 @@ class TunnelService : VpnService() {
                 if (!Actions.online()) { heal(); return@launch }
                 // after an internal reconnect (network change, switching servers) the internet didn't come back: do what the
                 // big button does (stop + start, the TUN rebuilt) before the longer healing — once per network change
-                val sinceNet = System.currentTimeMillis() - netChangedAt
-                if (sinceNet < 90_000L && !netHardDone) { netHardDone = true; hardRestart("новая сеть, а интернет не пошёл", force = true); return@launch }
-                if (System.currentTimeMillis() - lastHard > 5 * 60_000L) { hardRestart("после переподключения интернет не пошёл"); return@launch }
+                val now = android.os.SystemClock.elapsedRealtime()
+                if (com.vlesscardvpn.core.RestartCooldown.recentNetwork(now, netChangedAt) && !netHardDone) { netHardDone = true; hardRestart("новая сеть, а интернет не пошёл", force = true); return@launch }
+                if (com.vlesscardvpn.core.RestartCooldown.hardDue(now, lastHard)) { hardRestart("после переподключения интернет не пошёл"); return@launch }
             }
             if (p.works) { healStep = 0; dpiHeals = 0; connectFails = 0; scheduleOptimize(60_000); if(st.mode!=Mode.AUTO) com.vlesscardvpn.core.AppWatch.start(this@TunnelService, reconnect = { scope.launch { lock.withLock { connect(soft = true, reason = SoftReason.APP_REPAIR) } } }, maintenanceReconnect = { scheduleMaintenanceReconnect() }, connectedAt = { connectedElapsed }); watchdog(); standbyScout(); coverTraffic(); torLoop(); serviceRoutes(); if(st.mode!=Mode.AUTO) autoChainScout() } else { heal(); watchdog() } // the detector outlives a failed check
         }
@@ -1357,7 +1357,7 @@ class TunnelService : VpnService() {
                 // 1.2.136: a stopped engine is rebuilt even soon after another restart (once a minute at most), and
                 // the detector survives when the restart is diverted to healing instead of being launched.
                 if (vpnMode && runCatching { !TProxyService.TProxyIsRunning() }.getOrDefault(false)) {
-                    if (hardRestart("движок VPN остановился", force = System.currentTimeMillis() - lastHard >= 60_000L)) break
+                    if (hardRestart("движок VPN остановился", force = com.vlesscardvpn.core.RestartCooldown.engineDue(android.os.SystemClock.elapsedRealtime(), lastHard))) break
                     continue
                 }
                 val settings = Store.state.value.settings
@@ -1615,24 +1615,27 @@ class TunnelService : VpnService() {
         }
     }
 
-    private var lastHard = 0L
+    @Volatile private var lastHard = -1L
+    @Volatile private var hardRestartJob: Job? = null
     @Volatile private var lastSoft = false
-    @Volatile private var netChangedAt = 0L
+    @Volatile private var netChangedAt = -1L
     @Volatile private var netHardDone = true
     /** The network the tunnel was built on; kept across reconnects so a change during a reconnect is not missed. */
     @Volatile private var curNet: Network? = null
     /** true when a reconnect was actually launched; false when it was diverted to healing (the caller keeps watching). */
-    private fun hardRestart(why: String, force: Boolean = false): Boolean {
+    @Synchronized private fun hardRestart(why: String, force: Boolean = false): Boolean {
+        // Do not queue duplicate rebuilds while another caller is already rebuilding the same tunnel.
+        if (hardRestartJob?.isActive == true) return false
         // A restart can be caused by DNS/TUN/app stalls; it is not a failed probe of every server.
-        val now = System.currentTimeMillis()
-        if (!force && now - lastHard < 5 * 60_000L) { heal(); return false } // twice in 5 min: restarting doesn't help — heal (masks, servers)
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (!force && !com.vlesscardvpn.core.RestartCooldown.hardDue(now, lastHard)) { heal(); return false } // twice in 5 min: restarting doesn't help — heal (masks, servers)
         lastHard = now
         recoveryStarted()
         Log.i("E2E", "watchdog: hard restart — $why")
         val cur = Tunnel.status.value
         if (cur.state == Tunnel.State.CONNECTED) Tunnel.status.value = cur.copy(check = "Сам переподключаюсь: $why", checkOk = null)
         com.vlesscardvpn.core.AppWatch.note("Связь: $why — переподключился сам, нажимать кнопку не нужно")
-        scope.launch { lock.withLock { connect(soft = false) } }
+        hardRestartJob = scope.launch { lock.withLock { connect(soft = false) } }
         return true
     }
 
@@ -1913,7 +1916,7 @@ class TunnelService : VpnService() {
             healStatus(recoveryText)
             com.vlesscardvpn.core.BackgroundOptimization.show(com.vlesscardvpn.core.BackgroundOptimization.Stage.NETWORK)
             runCatching { foreground(recoveryText) }
-            netChangedAt = System.currentTimeMillis(); netHardDone = false
+            netChangedAt = android.os.SystemClock.elapsedRealtime(); netHardDone = false
             netJob = scope.launch reconnect@ {
                 // The callback window already coalesced link setup; no second fixed sleep.
                 if (!handoff.valid(change.revision)) return@reconnect
@@ -1999,7 +2002,7 @@ class TunnelService : VpnService() {
         standbyJob?.cancel(); standbyJob=null; standbyAttemptAt=null
         qualityVerifyJob?.cancel(); qualityVerifyJob=null
         checkJob?.cancel(); watchJob?.cancel(); coverJob?.cancel(); serviceJob?.cancel(); if (error != null) netJob?.cancel()
-        if (error != null) { healJob?.cancel(); recoveryJob?.cancel() }
+        if (error != null) { hardRestartJob?.cancel(); healJob?.cancel(); recoveryJob?.cancel() }
         if (error != null) optJob?.cancel()
         if (error != null) {
             netCallback?.let { cb -> runCatching { getSystemService(ConnectivityManager::class.java)?.unregisterNetworkCallback(cb) } }
