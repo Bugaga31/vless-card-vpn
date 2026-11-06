@@ -184,22 +184,15 @@ object Tester {
 
     /**
      * 1.2.136 [RouteLiveness]: does the phone's own network reach the internet? A direct TCP handshake (the app is
-     * outside its own VPN) to every target at once; the first success answers. Bounded: never longer than
-     * [timeoutMs] plus a short name-resolution allowance, daemon threads only.
+     * outside its own VPN) in parallel; the first success answers. Waiting is bounded by [timeoutMs] plus a
+     * short name-resolution allowance. Worker counts are bounded even if DNS never returns; fixed IP witnesses
+     * have separate workers so stuck server names cannot starve them.
      */
-    fun physicalInternet(targets: List<Pair<String, Int>>, timeoutMs: Int = RouteLiveness.PHYSICAL_MS): Boolean {
-        if (targets.isEmpty()) return false
-        val done = java.util.concurrent.CountDownLatch(1)
-        val reached = java.util.concurrent.atomic.AtomicBoolean(false)
-        val left = java.util.concurrent.atomic.AtomicInteger(targets.size)
-        for ((host, port) in targets) Thread({
-            if (tcpOne(host, port, timeoutMs) > 0) { reached.set(true); done.countDown() }
-            else if (left.decrementAndGet() <= 0) done.countDown()
-        }, "physical-check").apply { isDaemon = true }.start()
-        try { done.await(timeoutMs + 1500L, TimeUnit.MILLISECONDS) }
-        catch (e: InterruptedException) { Thread.currentThread().interrupt() }
-        return reached.get()
+    private val physicalReachability = PhysicalReachability(RouteLiveness.PHYSICAL_TARGETS.toSet()) { host, port, timeout ->
+        tcpOne(host, port, timeout) > 0
     }
+    fun physicalInternet(targets: List<Pair<String, Int>>, timeoutMs: Int = RouteLiveness.PHYSICAL_MS): Boolean =
+        physicalReachability.check(targets, timeoutMs, timeoutMs.toLong() + 1500L)
 
     private fun resolves(host: String): Int = if (runCatching { InetAddress.getByName(host) }.isSuccess) 1 else 0
 

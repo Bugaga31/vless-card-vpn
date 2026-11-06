@@ -128,7 +128,7 @@ class ReconnectR250Test {
         val all = source("vpn/TunnelService.kt")
         assertTrue(all.contains("private fun hardRestart(why: String, force: Boolean = false): Boolean"))
         val rescue = all.substringAfter("private fun recoverServerRoute()").substringBefore("private fun heal()")
-        assertTrue(rescue.indexOf("if (!physicalOk())") in 0 until rescue.indexOf("Actions.autoRescue("))
+        assertTrue(rescue.indexOf("if (!reachable)") in 0 until rescue.indexOf("Actions.autoRescue("))
         assertTrue(rescue.contains("verifySoon(0,suspectedFailure=true)"))
     }
     @Test fun networkRefreshAdoptsAdditionsBeforeCancellingWork() {

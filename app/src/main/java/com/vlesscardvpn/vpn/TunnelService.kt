@@ -1401,7 +1401,8 @@ class TunnelService : VpnService() {
                     val verdict = recoveryCpuLease { confirmLoss(port, settings.testUrl) }
                     if (core !== sampledCore || chainEpoch.get()!=sampledEpoch || usedTorRoute!=sampledTorRoute ||
                         Tunnel.socks != auth || Net.key(this@TunnelService) != network ||
-                        Net.underlying(this@TunnelService)?.toString() != handle) continue
+                        Net.underlying(this@TunnelService)?.toString() != handle ||
+                        !Net.matches(this@TunnelService, sampledUiNetwork)) continue
                     when (verdict) {
                         com.vlesscardvpn.core.RouteLiveness.Verdict.ALIVE -> ok = true
                         com.vlesscardvpn.core.RouteLiveness.Verdict.OFFLINE -> {
@@ -1709,7 +1710,9 @@ class TunnelService : VpnService() {
         } catch (e: kotlinx.coroutines.CancellationException) { physical.cancel(); throw e }
           catch (e: Exception) { false }
         val verdict = if (alive) com.vlesscardvpn.core.RouteLiveness.Verdict.ALIVE
-            else com.vlesscardvpn.core.RouteLiveness.verdict(false, runCatching { physical.await() }.getOrDefault(true))
+            else com.vlesscardvpn.core.RouteLiveness.verdict(false, try { physical.await() }
+                catch (e: kotlinx.coroutines.CancellationException) { throw e }
+                catch (e: Exception) { true })
         physical.cancel()
         if (BuildConfig.DEBUG) Log.i("E2E", "watchdog confirm verdict=$verdict")
         verdict
@@ -1737,14 +1740,20 @@ class TunnelService : VpnService() {
                 // 1.2.136: Android still reports INTERNET while the network itself is silent (lift, tunnel, an
                 // exhausted mobile balance). Rescue would mark the running server dead and hop between servers
                 // that cannot work either; wait instead, blaming nobody.
-                if (!physicalOk()) {
+                val observedPath = Net.observation(this@TunnelService)
+                val observedCore = core; val observedSocks = Tunnel.socks
+                val reachable = physicalOk()
+                kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                if (!Net.matches(this@TunnelService, observedPath) || core !== observedCore || Tunnel.socks != observedSocks) {
+                    delay(500); continue
+                }
+                if (!reachable) {
                     healStatus("Сеть подключена, но интернета у неё нет — жду; серверы не помечаю нерабочими")
                     waitedOffline=true
                     delay(2000)
                     continue
                 }
                 if (waitedOffline) {
-                    waitedOffline=false
                     val current=Tunnel.socks
                     val answers=current!=null && runCatching {
                         com.vlesscardvpn.core.CancellableProbe.run { bind ->
@@ -1752,6 +1761,10 @@ class TunnelService : VpnService() {
                                 com.vlesscardvpn.core.RouteLiveness.CONFIRM_MS,bind)
                         }
                     }.onFailure { if (it is kotlinx.coroutines.CancellationException) throw it }.getOrDefault(false)
+                    if (!Net.matches(this@TunnelService, observedPath) || core !== observedCore || Tunnel.socks != observedSocks) {
+                        delay(500); continue
+                    }
+                    waitedOffline=false
                     if (answers && Tunnel.socks==current && Tunnel.status.value.state==Tunnel.State.CONNECTED) {
                         // The outage was the network, not the route: keep it, re-verify, let the watchdog continue.
                         if (BuildConfig.DEBUG) Log.i("E2E", "recovery network_back route_kept=true")
