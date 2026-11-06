@@ -71,6 +71,30 @@ class BulkCheckStabilityTest {
         }
     }
 
+    @Test fun tcpFailuresNeedRetryAndPhysicalNetworkBeforeBeingRecorded() {
+        assertEquals(42, ManualServerCheckPolicy.finalTcp(42, null, false))
+        assertEquals(-1, ManualServerCheckPolicy.finalTcp(-1, null, true))
+        assertEquals(31, ManualServerCheckPolicy.finalTcp(0, 31, false))
+        assertEquals(-1, ManualServerCheckPolicy.finalTcp(0, null, true))
+        assertEquals(-1, ManualServerCheckPolicy.finalTcp(0, -1, true))
+        assertEquals(-1, ManualServerCheckPolicy.finalTcp(0, 0, false))
+        assertEquals(0, ManualServerCheckPolicy.finalTcp(0, 0, true))
+    }
+
+    @Test fun tcpRetryCanRecoverATemporarilyClosedLocalEndpoint() = runBlocking {
+        val port = ServerSocket(0).use { it.localPort }
+        val entry = Server("temporary", "vless", "127.0.0.1", port, "secret")
+        var first = -2
+        Tester.bulkTcp(listOf(entry), 50, 1000) { _, ms -> first = ms }
+        assertEquals(0, first)
+        ServerSocket(port).use {
+            var retry = -2
+            Tester.bulkTcp(listOf(entry), 50, 1000) { _, ms -> retry = ms }
+            assertTrue(retry > 0)
+            assertTrue(ManualServerCheckPolicy.finalTcp(first, retry, false) > 0)
+        }
+    }
+
     @Test fun stoppedScanDoesNotLeaveSelectorSocketsOpen() {
         val interrupted=Thread.currentThread().isInterrupted
         try {

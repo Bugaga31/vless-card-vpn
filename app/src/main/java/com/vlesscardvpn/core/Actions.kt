@@ -391,12 +391,35 @@ object Actions {
         Tester.bulkTcp(list, window = tcpParallel, timeoutMs = 2000) { s, ms ->
             if (valid()) {
                 tcp[s.id] = ms
-                if (ms >= 0) batch.put(s.id) { if (valid()) it.copy(tcpMs = ms, realMs = if (ms == 0) 0 else it.realMs, checkedAt = System.currentTimeMillis()) else it }
+                // Only positive evidence is written immediately. One failed TCP attempt is not a verdict.
+                if (ms > 0) batch.put(s.id) { if (valid()) it.copy(tcpMs = ms, checkedAt = System.currentTimeMillis()) else it }
                 step(done.incrementAndGet(), list.size)
             }
         }
-        if (!valid()) return "Сеть изменилась — результаты старой проверки отброшены"
+        if (!valid()) return "Сеть изменилась — проверка остановлена; ранее сохранённые результаты относятся к прошлой сети"
         batch.flush()
+        val failed = list.filter { tcp[it.id] == 0 }
+        if (failed.isNotEmpty()) {
+            progress.value = progress.value.copy(title = "Повтор TCP", done = 0, total = failed.size,
+                message = "Перепроверяю неответившие серверы и сеть, прежде чем отмечать сбой")
+            val repeated = java.util.concurrent.ConcurrentHashMap<String, Int>()
+            val retryDone = AtomicInteger()
+            Tester.bulkTcp(failed, window = tcpParallel, timeoutMs = 3000) { s, ms ->
+                if (valid()) { repeated[s.id] = ms; step(retryDone.incrementAndGet(), failed.size) }
+            }
+            if (!valid()) return "Сеть изменилась — проверка остановлена; ранее сохранённые результаты относятся к прошлой сети"
+            val stillFailed = failed.any { repeated[it.id] == 0 }
+            val physicalOnline = if (stillFailed) kotlinx.coroutines.withContext(Bg.io) {
+                Tester.physicalInternet(RouteLiveness.targets(list.filter { it.isTcpBased }.map { it.address to it.port }))
+            } else false
+            if (!valid()) return "Сеть изменилась — проверка остановлена; ранее сохранённые результаты относятся к прошлой сети"
+            for (s in failed) {
+                val ms = ManualServerCheckPolicy.finalTcp(0, repeated[s.id], physicalOnline)
+                tcp[s.id] = ms
+                if (ms >= 0) batch.put(s.id) { if (valid()) it.copy(tcpMs = ms, realMs = if (ms == 0) 0 else it.realMs, checkedAt = System.currentTimeMillis()) else it }
+            }
+            batch.flush()
+        }
         // which of the TCP-reachable ones get the (slower) real check: the mini model's favourites first, then by ping
         val alive = list.filter { (tcp[it.id] ?: 0) > 0 }.let { l -> runCatching { Brain.load(app) }; val now = Store.state.value
             if (Brain.seen >= 50 && l.size > realLimit) Brain.order(Net.key(app), l) { now.state(it) } else l.sortedBy { tcp[it.id] } }
