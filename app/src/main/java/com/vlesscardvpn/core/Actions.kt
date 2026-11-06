@@ -413,7 +413,7 @@ object Actions {
         val again = Store.state.value.let { s -> alive.filter { !s.state(it).works } }
         if (again.isNotEmpty() && again.size <= 6) working += realTest(again, "Повторная проверка", big, attempts = 2, parallel = realParallel, batch = realBatch)
         val unknown = tcp.values.count { it < 0 }
-        return "Работают: $working из ${alive.size} проверенных через Xray (всего ${list.size})" +
+        return "Работают: $working из ${alive.size} доступных по TCP (всего ${list.size}); работоспособность проверена через Xray" +
             if (unknown > 0) "; TCP не определён: $unknown — они не помечены нерабочими" else ""
     }
 
