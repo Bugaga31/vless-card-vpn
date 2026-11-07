@@ -1,0 +1,1 @@
+{"at": "2026-11-07 11:28 UTC", "unique": 106065, "alive": 79615, "real_candidates": 79615, "real_unchecked": 12331, "coverage": "all-reachable-xray-supported", "real_checked": 67284, "real_ok": 10129, "real_s": 23, "remembered": 50920, "stable": 13388, "speed_checked": 24, "speed_ok": 24, "speed_best_kbps": 195984, "speed_median_kbps": 57298}
