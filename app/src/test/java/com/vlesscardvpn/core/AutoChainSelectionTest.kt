@@ -259,5 +259,40 @@ class AutoChainSelectionTest {
         }
         assertEquals(b,r.selected);assertEquals(2,r.attempted)
     }
+    @Test fun `probe receives only time remaining after adapter startup`() = runBlocking {
+        var clock=1000L
+        var budget=-1L
+        val r=A.select(listOf(chain()),caps,Purpose.DOWNLOAD,{clock},{1}) {
+            clock+=1200
+            object:Session {
+                override suspend fun measure(remainingMs:Long):Sample {
+                    budget=remainingMs
+                    return sample(it,at=clock)
+                }
+                override fun close() {}
+            }
+        }
+        assertEquals(1800L,budget);assertEquals(State.CONFIRMED,r.state)
+    }
+    @Test fun `expired startup closes adapter and continues to next chain`() = runBlocking {
+        var clock=1000L
+        var closed=0
+        var measuredExpired=false
+        val a=chain("slow-start");val b=chain("next")
+        val r=A.select(listOf(a,b),caps,Purpose.DOWNLOAD,{clock},{1}) {
+            if(it==a) {
+                clock+=A.PROBE_MS
+                object:Session {
+                    override suspend fun measure(remainingMs:Long):Sample {
+                        measuredExpired=true
+                        return sample(a,at=clock)
+                    }
+                    override fun close() {closed++}
+                }
+            } else session(sample(b,at=clock))
+        }
+        assertFalse(measuredExpired);assertEquals(1,closed)
+        assertEquals(b,r.selected);assertEquals(2,r.attempted)
+    }
 
 }

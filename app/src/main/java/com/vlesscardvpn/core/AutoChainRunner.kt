@@ -97,6 +97,8 @@ object AutoChainRunner {
                     } catch(e:Throwable) {core.stop();throw e}
                 }
                 currentCoroutineContext().ensureActive()
+                if (com.vlesscardvpn.BuildConfig.DEBUG) android.util.Log.i("E2E",
+                    "chain outcome state=${result.state} attempted=${result.attempted} diagnostics=${result.diagnostics.joinToString(",").ifEmpty { "none" }}")
                 val winner=result.selected?.let { index[it.id] } ?: return@exclusiveProbe null
                 val sample=result.sample ?: return@exclusiveProbe null
                 val current=AutoChainSwitchPolicy.currentEvidence(

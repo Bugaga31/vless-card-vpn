@@ -67,7 +67,13 @@ else:
     optimize_results=[[v if not v.startswith('error ') else ('error '+v[6:] if v[6:] in safe_optimize_errors else 'error Other'),dead,int(good)] for v,dead,good in optimize_results]
     optimize_exits=re.findall(r'optimize exit=(context_or_policy|network_unknown|optional_power_or_empty|repair_or_upgrade_applied|deep_power_changed|completed) changed=(true|false)(?=\s|$)',text)[-3:]
     optimize_samples=re.findall(r'optimize sampled candidates=([0-9]{1,3}) working=([0-9]{1,3}) selected_working=([0-9]{1,3}) deep=(true|false)(?=\s|$)',text)[-3:]
+    chain_outcomes=[]
+    allowed_chain_diagnostics={'deadline','probe-error','cleanup-error','timeout-or-error','ineligible-or-late'}
+    for state,attempted,raw in re.findall(r'chain outcome state=(CONFIRMED|FALLBACK|NO_ROUTE|NETWORK_CHANGED) attempted=([0-8]) diagnostics=(\S{1,256})(?=\s|$)',text)[-3:]:
+        diagnostics=[] if raw=='none' else [v if v in allowed_chain_diagnostics else 'other' for v in raw.split(',')[:8]]
+        chain_outcomes.append({'state':state,'attempted':int(attempted),'diagnostics':diagnostics})
     result={'standby_passes':[[int(v) for v in row] for row in standby_passes],'stability_deferred_count':min(text.count('stability recovery=deferred'),100000),'stability_reasons':stability_reasons,'recovery_requests':recovery_requests,'recovery_applied':recovery_applied,'required_failures':required_failures,'soft_reconnect_origins':soft_origins,'restored_count':min(text.count('fixture activity restored'),100000),'handoff_deltas':handoff_deltas,'core_events':core_events,'probe_events':probe_events,'failures':failures,'service_events':service_events,'teardown_events':teardown_events,
+            'chain_outcomes':chain_outcomes,
             'optimize_results':optimize_results,'optimize_exits':optimize_exits,'optimize_samples':optimize_samples,
             'optimize_skips':re.findall(r'optimize skipped=(power|foreground_busy|disabled)\b',text)[-3:],
             'optimize_power_categories':re.findall(r'optimize skipped=power category=(thermal|call|charging|eco|memory|gaming|saver|battery|prediction|pause|data_saver|metered|screen|charge_only|traffic|lag|other)(?=\s|$)',text)[-3:],

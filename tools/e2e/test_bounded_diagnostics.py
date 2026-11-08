@@ -100,6 +100,17 @@ class BoundedDiagnosticsTest(unittest.TestCase):
         self.assertEqual(['4','3','3','false'],d['optimize_samples'][-1])
         self.assertNotIn('SecretToken',output);self.assertNotIn('private',output)
 
+    def test_chain_outcomes_are_bounded_and_private(self):
+        good='chain outcome state=NO_ROUTE attempted=2 diagnostics=timeout-or-error,ineligible-or-late\n'
+        forged='chain outcome state=CONFIRMED attempted=1 diagnostics=SECRET_TOKEN\n'
+        output,d=self.summarize(good*6+forged)
+        self.assertEqual(3,len(d['chain_outcomes']))
+        self.assertEqual({'state':'NO_ROUTE','attempted':2,'diagnostics':['timeout-or-error','ineligible-or-late']},d['chain_outcomes'][0])
+        self.assertEqual(['other'],d['chain_outcomes'][-1]['diagnostics'])
+        self.assertNotIn('SECRET_TOKEN',output)
+        _,d=self.summarize('chain outcome state=FALLBACK attempted=1 diagnostics=none\n')
+        self.assertEqual([],d['chain_outcomes'][0]['diagnostics'])
+
     def test_power_diagnostics_only_emit_allowed_categories(self):
         s,d=self.summarize('optimize skipped=power category=screen\n'*8+'optimize skipped=power category=SECRET token=private\n')
         self.assertEqual(['screen']*3,d['optimize_power_categories'])
