@@ -13,6 +13,15 @@ object ManualServerCheckPolicy {
         return Limits(tcp, real, if (restricted) 4 else 16)
     }
 
+    /** A single TCP failure is inconclusive. Retry it; only persist a repeated failure when the physical network answers. */
+    fun finalTcp(first: Int, retry: Int?, physicalOnline: Boolean): Int = when {
+        first != 0 -> first
+        retry == null || retry < 0 -> -1
+        retry > 0 -> retry
+        physicalOnline -> 0
+        else -> -1
+    }
+
     fun confirmedTcpFailure(server: Server, state: ServerState, now: Long, freshnessMs: Long = 86_400_000L): Boolean {
         val checkedAt = state.checkedAt
         return server.isTcpBased && state.tcpMs == 0 && checkedAt > 0 && now >= checkedAt && now - checkedAt <= freshnessMs

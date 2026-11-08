@@ -19,11 +19,11 @@ object ForegroundProbePlan {
     @Suppress("UNUSED_PARAMETER")
     fun staggerMs(foreground:Boolean,stopAfter:Int):Long = 0L
     suspend fun run(candidates:List<Server>,foreground:Boolean,valid:()->Boolean,
-        probe:suspend (List<Server>)->Int):Int {
+        stopOnSuccess:()->Boolean = { true }, probe:suspend (List<Server>)->Int):Int {
         var passed=0
         for(cohort in cohorts(candidates,foreground)) {
             currentCoroutineContext().ensureActive()
-            if(!valid() || (foreground && passed>0)) break
+            if(!valid() || (foreground && passed>0 && stopOnSuccess())) break
             passed+=probe(cohort)
         }
         return passed

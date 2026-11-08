@@ -147,10 +147,16 @@ object AutoChainSelection {
             if (remaining < MIN_START_MS) { diagnostics.add("deadline"); break }
             attempted++
             var closeFailed = false
+            val trialDeadline = now + minOf(PROBE_MS, remaining)
             val sample = try {
                 withTimeoutOrNull(minOf(PROBE_MS, remaining)) {
                     val session = open(chain)
-                    try { session.measure((deadline - elapsed()).coerceAtMost(PROBE_MS).coerceAtLeast(0)) }
+                    try {
+                        // Starting the adapter consumes this trial's budget too. Pass only the
+                        // time that really remains, not a fresh PROBE_MS after a slow startup.
+                        val budget = trialDeadline - elapsed()
+                        if (budget > 0) session.measure(budget) else null
+                    }
                     finally {
                         // Do not replace parent cancellation with a cleanup exception.
                         try { session.close() } catch (_: Exception) { closeFailed = true }

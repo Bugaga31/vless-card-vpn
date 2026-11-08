@@ -57,6 +57,7 @@ fun ServersScreen(onConnectFound:()->Unit = {}) {
     var query by rememberSaveable { mutableStateOf("") }
     var moreOpen by remember { mutableStateOf(false) }
     var pendingDelete by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var confirmBulkCheck by remember { mutableStateOf(false) }
     val search = query.trim()
     var order by rememberSaveable { mutableStateOf("auto") }
     var protocol by rememberSaveable { mutableStateOf("") }
@@ -93,6 +94,13 @@ fun ServersScreen(onConnectFound:()->Unit = {}) {
         value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { Actions.countries(app) }
     }
 
+    if (confirmBulkCheck) AlertDialog(
+        onDismissRequest = { confirmBulkCheck = false },
+        title = { Text("Массовая проверка серверов") },
+        text = { Text("До 1000 серверов будут проверены через Xray, включая загрузку и выбранные сервисы. Это может занять много времени и израсходовать сотни мегабайт или больше, особенно в мобильной сети. Проверку можно остановить.") },
+        confirmButton = { TextButton(onClick = { confirmBulkCheck = false; Actions.testAll(onlySelected = filter == Filter.SELECTED, realLimit = 1000) }) { Text("Начать") } },
+        dismissButton = { TextButton(onClick = { confirmBulkCheck = false }) { Text("Отмена") } }
+    )
     LazyColumn(Modifier.fillMaxSize(), state=scroll, contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         item {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -105,11 +113,15 @@ fun ServersScreen(onConnectFound:()->Unit = {}) {
         }
         item { FoundRoutesCard(onConnectFound) }
         item {
-            Button(onClick = { Actions.testAll(onlySelected = filter == Filter.SELECTED) }, enabled = !busy,
+            Button(onClick = {
+                val selectedOnly = filter == Filter.SELECTED
+                if ((if (selectedOnly) app.selected.size else app.servers.size) > 150) confirmBulkCheck = true
+                else Actions.testAll(onlySelected = selectedOnly, realLimit = 1000)
+            }, enabled = !busy,
                 modifier = Modifier.fillMaxWidth(), shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp)) {
                 Text(if (filter == Filter.SELECTED) "Проверить выбранные" else "Проверить все серверы")
             }
-            Text("Проверю доступность всего списка и до 150 лучших через Xray. Подбор маскировки запускается отдельно.",
+            Text("Проверю доступность всего списка и до 1000 лучших через Xray. TCP — только предварительный тест; полноценные проверки ограничены настройкой и идут волнами. Подбор маскировки запускается отдельно.",
                 modifier = Modifier.padding(top = 4.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         item {

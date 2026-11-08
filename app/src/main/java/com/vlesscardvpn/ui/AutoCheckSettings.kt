@@ -6,18 +6,26 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.unit.dp
 import com.vlesscardvpn.core.*
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 @Composable
 fun AutoCheckSettings() {
+    val ctx=LocalContext.current
     val settings by Store.settings.collectAsState()
     val selected=AutoCheckProfile.of(settings.autoChecks).selected
     val parallel=ProbeConcurrencyPolicy.normalize(settings.probeParallel)
     val power by PhonePower.state.collectAsState()
     val slots=ProbeConcurrencyPolicy.limit(parallel,parallel,power,true)
+    val tcpParallel=BulkTcpCapacity.normalize(settings.bulkTcpParallel)
+    val tcpNow by produceState<Int?>(initialValue = null, tcpParallel, power) {
+        value = withContext(Dispatchers.IO) { BulkTcpCapacity.current(ctx,tcpParallel) }
+    }
     Column(verticalArrangement=Arrangement.spacedBy(8.dp)) {
         Text("Одновременные проверки серверов",style=MaterialTheme.typography.titleMedium)
         Row(Modifier.horizontalScroll(rememberScrollState()),horizontalArrangement=Arrangement.spacedBy(8.dp)) {
@@ -28,6 +36,14 @@ fun AutoCheckSettings() {
         }
         Text("По умолчанию 5. Сейчас до $slots одновременно; выбранный предел $parallel. Новый лимит действует со следующей волны. Внутренняя оптимизация, нагрев и звонки больше не урезают выбранное число; системные ограничения Android остаются.",style=MaterialTheme.typography.bodyMedium)
         Text("В одном тестовом ядре создаются только проверяемые маршруты. Первый подходящий сервер останавливает ненужные пробы; это снижает лишнюю нагрузку, но не гарантирует отсутствие нагрева.",style=MaterialTheme.typography.bodyMedium)
+        Text("Быстрая массовая проверка TCP",style=MaterialTheme.typography.titleMedium)
+        Row(Modifier.horizontalScroll(rememberScrollState()),horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+            BulkTcpCapacity.choices.forEach { n ->
+                FilterChip(selected=tcpParallel==n,onClick={Store.update {state->state.copy(settings=state.settings.copy(bulkTcpParallel=n))}},
+                    modifier=Modifier.semantics {contentDescription="TCP-проверка до $n серверов одновременно"},label={Text(n.toString())})
+            }
+        }
+        Text("Для кнопки «Проверить все»: выбрано до $tcpParallel TCP-соединений; сейчас ${tcpNow?.let { "доступно до $it" } ?: "подсчитываю доступный предел"}. При нехватке памяти или файлов Android предел снижается. TCP не подтверждает работу VPN: полная проверка через Xray идёт отдельно, с лимитом выше.",style=MaterialTheme.typography.bodyMedium)
         Text("Что проверять в Авто",style=MaterialTheme.typography.titleMedium)
         Text("ROKI · эксперимент на подграфе FlyWire. Учится на завершённых проверках этой сессии и меняет только порядок кандидатов после 8 результатов. Не целый мозг мухи; неизвестные проверки не разрешает.",style=MaterialTheme.typography.bodyMedium)
         Text("HTTPS проверяется всегда. Выбранные проверки обязательны для нового сервера и резервов.",style=MaterialTheme.typography.bodyMedium)

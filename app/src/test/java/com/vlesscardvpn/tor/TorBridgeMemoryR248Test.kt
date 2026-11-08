@@ -170,4 +170,17 @@ class TorBridgeMemoryR248Test {
         assertTrue(updates.contains("TorBuiltinBridges.lines(transport)).distinct()"))
         assertTrue(updates.contains("attempt(bad) ?: run { seen.clear(); seen += failing; attempt(bad) } ?: attempt(emptySet())"))
     }
+    @Test fun builtinBridgesAreAttemptedBeforeFirstRemoteRefresh() {
+        val f = listOf(File("app/src/main/java/com/vlesscardvpn/vpn/TunnelService.kt"), File("src/main/java/com/vlesscardvpn/vpn/TunnelService.kt")).first { it.exists() }
+        val loop = f.readText().substringAfter("private fun torLoop() {").substringBefore("private var torCountryJob")
+        val bundled = loop.indexOf("TorBridgeUpdates.adoptBuiltins(this@TunnelService, st.torBridge)")
+        val refresh = loop.indexOf("TorBridgeUpdates.refresh(this@TunnelService)")
+        val started = loop.indexOf("TorCard.ensureStarted(this@TunnelService")
+        assertTrue(bundled >= 0 && bundled < refresh && refresh < started)
+        assertTrue(loop.contains("if (bundled == null && runCatching"))
+        assertTrue(loop.contains("if (!current.torRotation && !current.torRouting"))
+        assertTrue(TorBuiltinBridges.lines("obfs4").isNotEmpty())
+        assertTrue(TorBuiltinBridges.lines("webtunnel").isEmpty())
+    }
+
 }

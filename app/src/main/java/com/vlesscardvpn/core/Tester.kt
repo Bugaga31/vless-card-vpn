@@ -69,7 +69,45 @@ object Tester {
         val tcpList = servers.filter { it.isTcpBased }
         tcpList.filter { ips[it.address] == null }.forEach { onEach(it, 0) }
         val ok = tcpList.filter { ips[it.address] != null }
-        kotlinx.coroutines.withContext(Bg.io) { nioPing(ok.map { InetSocketAddress(ips.getValue(it.address), it.port) }, timeoutMs, limit) { i, ms -> onEach(ok[i], ms) } }
+        kotlinx.coroutines.runInterruptible(Bg.io) { nioPing(ok.map { InetSocketAddress(ips.getValue(it.address), it.port) }, timeoutMs, limit) { i, ms -> onEach(ok[i], ms) } }
+    }
+
+    /** Manual bulk preflight: numeric addresses first, bounded DNS, and up to [window] non-blocking sockets.
+     * -1 means resource/DNS uncertainty, never a failed server. This does not prove an Xray route works. */
+    suspend fun bulkTcp(servers: List<Server>, window: Int, timeoutMs: Int = 2000, onEach: (Server, Int) -> Unit) = coroutineScope {
+        if (window <= 0) { servers.forEach { onEach(it, -1) }; return@coroutineScope }
+        val names = servers.map { it.address }.distinct()
+        val numeric = names.mapNotNull { name -> NumericProbeAddress.parse(RuntimeProbeAddress.host(name))?.let { name to it } }.toMap()
+        suspend fun emit(group: List<Server>, addresses: Map<String, InetAddress>) {
+            group.filter { !it.isTcpBased }.forEach { onEach(it, if (addresses[it.address] != null) 1 else -1) }
+            val tcp = group.filter { it.isTcpBased }
+            tcp.filter { addresses[it.address] == null || it.port !in 1..65535 }.forEach { onEach(it, -1) }
+            val known = tcp.filter { addresses[it.address] != null && it.port in 1..65535 }
+            if (known.isEmpty()) return
+            val reported = BooleanArray(known.size)
+            try {
+                kotlinx.coroutines.runInterruptible(Bg.io) {
+                    nioPing(known.map { InetSocketAddress(addresses.getValue(it.address), it.port) }, timeoutMs, window, localFailureUnknown = true) { i, ms ->
+                        reported[i] = true; onEach(known[i], ms)
+                    }
+                }
+            } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+              catch (_: java.io.IOException) { known.forEachIndexed { i, server -> if (!reported[i]) onEach(server, -1) } }
+        }
+        val numericServers = servers.filter { it.address in numeric }
+        emit(numericServers, numeric)
+        val domains = names.filterNot { it in numeric }
+        val resolved = java.util.concurrent.ConcurrentHashMap<String, InetAddress>()
+        val sem = Semaphore(16)
+        // Total bound even if libc DNS never returns; unfinished names are unknown, not dead.
+        kotlinx.coroutines.withTimeoutOrNull(30_000L) {
+            for (chunk in domains.chunked(64)) {
+                chunk.map { name -> async { sem.withPermit {
+                    ProbeDns.resolve(RuntimeProbeAddress.host(name), 2500L)?.firstOrNull()?.let { resolved[name] = it }
+                } } }.awaitAll()
+            }
+        }
+        emit(servers.filter { it.address !in numeric }, resolved)
     }
 
     /** Bounded TCP hint, never an authenticated Reality/TLS verdict. Timeout is unknown, not a blacklist. */
@@ -101,25 +139,31 @@ object Tester {
         } } }.awaitAll().toMap()
     }
 
-    /** Connects to all [targets] with up to [window] sockets open at once; [onEach] (index, ms or 0). Blocking. */
-    fun nioPing(targets: List<InetSocketAddress>, timeoutMs: Int, window: Int = 512, onEach: (Int, Int) -> Unit) {
+    /** Up to [window] non-blocking sockets; callback: ms, 0 failure, -1 local resource uncertainty. Blocking. */
+    fun nioPing(targets: List<InetSocketAddress>, timeoutMs: Int, window: Int = 512, localFailureUnknown: Boolean = false, onEach: (Int, Int) -> Unit) {
         if (targets.isEmpty()) return
         val sel = java.nio.channels.Selector.open()
         val start = LongArray(targets.size); val open = HashMap<Int, java.nio.channels.SocketChannel>()
         var next = 0
         fun finish(i: Int, ms: Int) { open.remove(i)?.let { ch -> runCatching { ch.close() } }; runCatching { onEach(i, ms) } }
+        fun failure(e: Throwable?): Int = if (localFailureUnknown && BulkTcpCapacity.resourceFailure(e)) -1 else 0
         try {
             while (next < targets.size || open.isNotEmpty()) {
-                while (next < targets.size && open.size < window) {
+                if (Thread.currentThread().isInterrupted) throw InterruptedException("TCP scan cancelled")
+                while (next < targets.size && open.size < window.coerceAtLeast(1)) {
+                    if (Thread.currentThread().isInterrupted) throw InterruptedException("TCP scan cancelled")
                     val i = next++
-                    val ch = runCatching { java.nio.channels.SocketChannel.open().apply { configureBlocking(false) } }.getOrNull()
-                    if (ch == null) { onEach(i, 0); continue }
+                    val ch = try {
+                        val socket = java.nio.channels.SocketChannel.open()
+                        try { socket.configureBlocking(false); socket } catch (e: Exception) { runCatching { socket.close() }; throw e }
+                    } catch (_: Exception) { null }
+                    if (ch == null) { onEach(i, -1); continue } // descriptor/resource pressure is unknown, not a dead server
                     start[i] = System.nanoTime(); open[i] = ch
                     val now = runCatching { ch.connect(targets[i]) }
                     when {
-                        now.isFailure -> finish(i, 0)
+                        now.isFailure -> finish(i, failure(now.exceptionOrNull()))
                         now.getOrDefault(false) -> finish(i, 1)
-                        else -> ch.register(sel, java.nio.channels.SelectionKey.OP_CONNECT, i)
+                        else -> if (runCatching { ch.register(sel, java.nio.channels.SelectionKey.OP_CONNECT, i) }.isFailure) finish(i, -1)
                     }
                 }
                 sel.select(20)
@@ -127,8 +171,8 @@ object Tester {
                 while (it.hasNext()) {
                     val k = it.next(); it.remove()
                     val i = k.attachment() as Int; k.cancel()
-                    val done = runCatching { (k.channel() as java.nio.channels.SocketChannel).finishConnect() }.getOrDefault(false)
-                    finish(i, if (done) ((System.nanoTime() - start[i]) / 1_000_000).toInt().coerceAtLeast(1) else 0)
+                    val done = runCatching { (k.channel() as java.nio.channels.SocketChannel).finishConnect() }
+                    finish(i, if (done.getOrDefault(false)) ((System.nanoTime() - start[i]) / 1_000_000).toInt().coerceAtLeast(1) else failure(done.exceptionOrNull()))
                 }
                 val limit = System.nanoTime() - timeoutMs * 1_000_000L
                 open.keys.filter { start[it] < limit }.forEach { finish(it, 0) }
